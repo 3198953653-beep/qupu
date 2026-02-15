@@ -45,6 +45,8 @@ type ImportFeedback = {
 type NoteLayout = {
   id: string
   staff: StaffKind
+  pairIndex: number
+  noteIndex: number
   x: number
   y: number
   pitchYMap: Record<Pitch, number>
@@ -58,10 +60,28 @@ type Selection = {
 type DragState = {
   noteId: string
   staff: StaffKind
+  pairIndex: number
+  noteIndex: number
   pointerId: number
   pitch: Pitch
   grabOffsetY: number
   pitchYMap: Record<Pitch, number>
+}
+
+type MeasureLayout = {
+  pairIndex: number
+  measureX: number
+  measureWidth: number
+  trebleY: number
+  bassY: number
+  systemTop: number
+  isSystemStart: boolean
+  overlayRect: {
+    x: number
+    y: number
+    width: number
+    height: number
+  }
 }
 
 type MeasurePair = {
@@ -701,6 +721,27 @@ function getVisibleSystemRange(scrollTop: number, viewportHeight: number, system
   return { start, end }
 }
 
+function buildMeasureOverlayRect(
+  measureX: number,
+  measureWidth: number,
+  systemTop: number,
+  scoreWidth: number,
+  scoreHeight: number,
+  isSystemStart: boolean,
+): MeasureLayout['overlayRect'] {
+  const leftPad = isSystemStart ? 20 : 4
+  const rightPad = 6
+  const topPad = 34
+  const bottomPad = 42
+  const x = clamp(measureX - leftPad, 0, scoreWidth)
+  const y = clamp(systemTop - topPad, 0, scoreHeight)
+  const maxWidth = scoreWidth - x
+  const maxHeight = scoreHeight - y
+  const width = clamp(measureWidth + leftPad + rightPad, 0, maxWidth)
+  const height = clamp(SYSTEM_HEIGHT + topPad + bottomPad, 0, maxHeight)
+  return { x, y, width, height }
+}
+
 function buildImportedNoteLookup(pairs: MeasurePair[]): Map<string, ImportedNoteLocation> {
   const lookup = new Map<string, ImportedNoteLocation>()
   pairs.forEach((pair, pairIndex) => {
@@ -761,16 +802,21 @@ function App() {
   const [visibleSystemRange, setVisibleSystemRange] = useState<{ start: number; end: number }>({ start: 0, end: 0 })
 
   const scoreRef = useRef<HTMLCanvasElement | null>(null)
+  const scoreOverlayRef = useRef<HTMLCanvasElement | null>(null)
   const scoreScrollRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const synthRef = useRef<Tone.PolySynth | null>(null)
 
   const noteLayoutsRef = useRef<NoteLayout[]>([])
+  const measureLayoutsRef = useRef<Map<number, MeasureLayout>>(new Map())
+  const measurePairsRef = useRef<MeasurePair[]>([])
   const dragRef = useRef<DragState | null>(null)
   const dragRafRef = useRef<number | null>(null)
   const dragPendingRef = useRef<{ drag: DragState; pitch: Pitch } | null>(null)
   const rendererRef = useRef<Renderer | null>(null)
   const rendererSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 })
+  const overlayRendererRef = useRef<Renderer | null>(null)
+  const overlayRendererSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 })
   const stopPlayTimerRef = useRef<number | null>(null)
   const measurePairsFromImportRef = useRef<MeasurePair[] | null>(null)
   const importedNoteLookupRef = useRef<Map<string, ImportedNoteLocation>>(new Map())
@@ -783,9 +829,170 @@ function App() {
   const systemCount = Math.max(1, Math.ceil(measurePairs.length / measuresPerLine))
   const scoreHeight = SCORE_TOP_PADDING * 2 + systemCount * SYSTEM_HEIGHT + Math.max(0, systemCount - 1) * SYSTEM_GAP_Y
 
+  const drawMeasureToContext = (params: {
+    context: ReturnType<Renderer['getContext']>
+    measure: MeasurePair
+    pairIndex: number
+    measureX: number
+    measureWidth: number
+    trebleY: number
+    bassY: number
+    isSystemStart: boolean
+    activeSelection: Selection | null
+    draggingSelection: Selection | null
+    previewNote?: { noteId: string; staff: StaffKind; pitch: Pitch } | null
+    collectLayouts?: boolean
+  }): NoteLayout[] => {
+    const {
+      context,
+      measure,
+      pairIndex,
+      measureX,
+      measureWidth,
+      trebleY,
+      bassY,
+      isSystemStart,
+      activeSelection: selection,
+      draggingSelection: dragging,
+      previewNote = null,
+      collectLayouts = true,
+    } = params
+    const noteLayouts: NoteLayout[] = []
+
+    const resolvePitch = (note: ScoreNote, staff: StaffKind): Pitch => {
+      if (!previewNote) return note.pitch
+      if (previewNote.noteId !== note.id || previewNote.staff !== staff) return note.pitch
+      return previewNote.pitch
+    }
+
+    const trebleStave = new Stave(measureX, trebleY, measureWidth)
+    const bassStave = new Stave(measureX, bassY, measureWidth)
+
+    if (isSystemStart) {
+      trebleStave.addClef('treble').addTimeSignature('4/4')
+      bassStave.addClef('bass').addTimeSignature('4/4')
+    } else {
+      trebleStave.setBegBarType(BarlineType.NONE)
+      bassStave.setBegBarType(BarlineType.NONE)
+    }
+
+    trebleStave.setContext(context).draw()
+    bassStave.setContext(context).draw()
+
+    if (isSystemStart) {
+      new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.BRACE).setContext(context).draw()
+      new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.SINGLE_LEFT).setContext(context).draw()
+    }
+    new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.SINGLE_RIGHT).setContext(context).draw()
+
+    const trebleVexNotes = measure.treble.map((note) => {
+      const renderedPitch = resolvePitch(note, 'treble')
+      const dots = getDurationDots(note.duration)
+      const vexNote = new StaveNote({
+        keys: [renderedPitch],
+        duration: toVexDuration(note.duration),
+        dots,
+        clef: 'treble',
+        stemDirection: getStrictStemDirection(renderedPitch),
+      })
+      if (renderedPitch.includes('#')) vexNote.addModifier(new Accidental('#'), 0)
+      if (dots > 0) {
+        Dot.buildAndAttach([vexNote], { all: true })
+      }
+      return vexNote
+    })
+
+    const bassVexNotes = measure.bass.map((note) => {
+      const renderedPitch = resolvePitch(note, 'bass')
+      const dots = getDurationDots(note.duration)
+      const vexNote = new StaveNote({
+        keys: [renderedPitch],
+        duration: toVexDuration(note.duration),
+        dots,
+        clef: 'bass',
+        autoStem: true,
+      })
+      if (renderedPitch.includes('#')) vexNote.addModifier(new Accidental('#'), 0)
+      if (dots > 0) {
+        Dot.buildAndAttach([vexNote], { all: true })
+      }
+      return vexNote
+    })
+
+    trebleVexNotes.forEach((vexNote, noteIndex) => {
+      const noteId = measure.treble[noteIndex].id
+      if (dragging?.staff === 'treble' && dragging.noteId === noteId) {
+        vexNote.setKeyStyle(0, { fillStyle: '#0e9ac7', strokeStyle: '#0e9ac7' })
+      } else if (selection && selection.staff === 'treble' && selection.noteId === noteId) {
+        vexNote.setKeyStyle(0, { fillStyle: '#145f84', strokeStyle: '#145f84' })
+      }
+    })
+
+    bassVexNotes.forEach((vexNote, noteIndex) => {
+      const noteId = measure.bass[noteIndex].id
+      if (dragging?.staff === 'bass' && dragging.noteId === noteId) {
+        vexNote.setKeyStyle(0, { fillStyle: '#0e9ac7', strokeStyle: '#0e9ac7' })
+      } else if (selection && selection.staff === 'bass' && selection.noteId === noteId) {
+        vexNote.setKeyStyle(0, { fillStyle: '#145f84', strokeStyle: '#145f84' })
+      }
+    })
+
+    const trebleVoice = new Voice({ numBeats: 4, beatValue: 4 }).addTickables(trebleVexNotes)
+    const bassVoice = new Voice({ numBeats: 4, beatValue: 4 }).addTickables(bassVexNotes)
+    const formatWidth = Math.max(80, trebleStave.getNoteEndX() - trebleStave.getNoteStartX() - 8)
+
+    new Formatter().joinVoices([trebleVoice]).joinVoices([bassVoice]).format([trebleVoice, bassVoice], formatWidth)
+
+    const trebleBeams = Beam.generateBeams(trebleVexNotes, { groups: [new Fraction(1, 4)] })
+    const bassBeams = Beam.generateBeams(bassVexNotes, { groups: [new Fraction(1, 4)] })
+
+    trebleVoice.draw(context, trebleStave)
+    bassVoice.draw(context, bassStave)
+    trebleBeams.forEach((beam) => beam.setContext(context).draw())
+    bassBeams.forEach((beam) => beam.setContext(context).draw())
+
+    if (!collectLayouts) return noteLayouts
+
+    const treblePitchYMap = {} as Record<Pitch, number>
+    const bassPitchYMap = {} as Record<Pitch, number>
+    for (const pitch of PITCHES) {
+      treblePitchYMap[pitch] = trebleStave.getYForNote(PITCH_LINE_MAP.treble[pitch])
+      bassPitchYMap[pitch] = bassStave.getYForNote(PITCH_LINE_MAP.bass[pitch])
+    }
+
+    noteLayouts.push(
+      ...trebleVexNotes.map((vexNote, noteIndex) => ({
+        id: measure.treble[noteIndex].id,
+        staff: 'treble' as const,
+        pairIndex,
+        noteIndex,
+        x: vexNote.getAbsoluteX(),
+        y: vexNote.getYs()[0],
+        pitchYMap: treblePitchYMap,
+      })),
+    )
+    noteLayouts.push(
+      ...bassVexNotes.map((vexNote, noteIndex) => ({
+        id: measure.bass[noteIndex].id,
+        staff: 'bass' as const,
+        pairIndex,
+        noteIndex,
+        x: vexNote.getAbsoluteX(),
+        y: vexNote.getYs()[0],
+        pitchYMap: bassPitchYMap,
+      })),
+    )
+
+    return noteLayouts
+  }
+
   useEffect(() => {
     measurePairsFromImportRef.current = measurePairsFromImport
   }, [measurePairsFromImport])
+
+  useEffect(() => {
+    measurePairsRef.current = measurePairs
+  }, [measurePairs])
 
   useEffect(() => {
     if (!isRhythmLinked) return
@@ -851,6 +1058,7 @@ function App() {
     context.clear()
 
     const nextLayouts: NoteLayout[] = []
+    const nextMeasureLayouts = new Map<number, MeasureLayout>()
     const maxSystemIndex = Math.max(0, systemCount - 1)
     const startSystem = clamp(visibleSystemRange.start, 0, maxSystemIndex)
     const endSystem = clamp(visibleSystemRange.end, startSystem, maxSystemIndex)
@@ -867,128 +1075,53 @@ function App() {
       const measureWidth = Math.floor(systemUsableWidth / systemMeasures.length)
 
       systemMeasures.forEach((measure, indexInSystem) => {
+        const pairIndex = start + indexInSystem
         const measureX = STAFF_X + indexInSystem * measureWidth
-        const trebleStave = new Stave(measureX, trebleY, measureWidth)
-        const bassStave = new Stave(measureX, bassY, measureWidth)
-
-        if (indexInSystem === 0) {
-          trebleStave.addClef('treble').addTimeSignature('4/4')
-          bassStave.addClef('bass').addTimeSignature('4/4')
-        } else {
-          trebleStave.setBegBarType(BarlineType.NONE)
-          bassStave.setBegBarType(BarlineType.NONE)
-        }
-
-        trebleStave.setContext(context).draw()
-        bassStave.setContext(context).draw()
-
-        if (indexInSystem === 0) {
-          new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.BRACE).setContext(context).draw()
-          new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.SINGLE_LEFT).setContext(context).draw()
-        }
-        new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.SINGLE_RIGHT).setContext(context).draw()
-
-        const trebleVexNotes = measure.treble.map((note) => {
-          const dots = getDurationDots(note.duration)
-          const vexNote = new StaveNote({
-            keys: [note.pitch],
-            duration: toVexDuration(note.duration),
-            dots,
-            clef: 'treble',
-            stemDirection: getStrictStemDirection(note.pitch),
-          })
-          if (note.pitch.includes('#')) vexNote.addModifier(new Accidental('#'), 0)
-          if (dots > 0) {
-            Dot.buildAndAttach([vexNote], { all: true })
-          }
-          return vexNote
-        })
-
-        const bassVexNotes = measure.bass.map((note) => {
-          const dots = getDurationDots(note.duration)
-          const vexNote = new StaveNote({
-            keys: [note.pitch],
-            duration: toVexDuration(note.duration),
-            dots,
-            clef: 'bass',
-            autoStem: true,
-          })
-          if (note.pitch.includes('#')) vexNote.addModifier(new Accidental('#'), 0)
-          if (dots > 0) {
-            Dot.buildAndAttach([vexNote], { all: true })
-          }
-          return vexNote
-        })
-
-        trebleVexNotes.forEach((vexNote, index) => {
-          const noteId = measure.treble[index].id
-          if (draggingSelection?.staff === 'treble' && draggingSelection.noteId === noteId) {
-            vexNote.setKeyStyle(0, { fillStyle: '#0e9ac7', strokeStyle: '#0e9ac7' })
-          } else if (activeSelection.staff === 'treble' && activeSelection.noteId === noteId) {
-            vexNote.setKeyStyle(0, { fillStyle: '#145f84', strokeStyle: '#145f84' })
-          }
-        })
-
-        bassVexNotes.forEach((vexNote, index) => {
-          const noteId = measure.bass[index].id
-          if (draggingSelection?.staff === 'bass' && draggingSelection.noteId === noteId) {
-            vexNote.setKeyStyle(0, { fillStyle: '#0e9ac7', strokeStyle: '#0e9ac7' })
-          } else if (activeSelection.staff === 'bass' && activeSelection.noteId === noteId) {
-            vexNote.setKeyStyle(0, { fillStyle: '#145f84', strokeStyle: '#145f84' })
-          }
-        })
-
-        const trebleVoice = new Voice({ numBeats: 4, beatValue: 4 }).addTickables(trebleVexNotes)
-        const bassVoice = new Voice({ numBeats: 4, beatValue: 4 }).addTickables(bassVexNotes)
-        const formatWidth = Math.max(80, trebleStave.getNoteEndX() - trebleStave.getNoteStartX() - 8)
-
-        new Formatter().joinVoices([trebleVoice]).joinVoices([bassVoice]).format([trebleVoice, bassVoice], formatWidth)
-
-        const trebleBeams = Beam.generateBeams(trebleVexNotes, { groups: [new Fraction(1, 4)] })
-        const bassBeams = Beam.generateBeams(bassVexNotes, { groups: [new Fraction(1, 4)] })
-
-        trebleVoice.draw(context, trebleStave)
-        bassVoice.draw(context, bassStave)
-        trebleBeams.forEach((beam) => beam.setContext(context).draw())
-        bassBeams.forEach((beam) => beam.setContext(context).draw())
-
-        const treblePitchYMap = {} as Record<Pitch, number>
-        const bassPitchYMap = {} as Record<Pitch, number>
-        for (const pitch of PITCHES) {
-          treblePitchYMap[pitch] = trebleStave.getYForNote(PITCH_LINE_MAP.treble[pitch])
-          bassPitchYMap[pitch] = bassStave.getYForNote(PITCH_LINE_MAP.bass[pitch])
-        }
-
-        nextLayouts.push(
-          ...trebleVexNotes.map((vexNote, index) => ({
-            id: measure.treble[index].id,
-            staff: 'treble' as const,
-            x: vexNote.getAbsoluteX(),
-            y: vexNote.getYs()[0],
-            pitchYMap: treblePitchYMap,
-          })),
+        const isSystemStart = indexInSystem === 0
+        const overlayRect = buildMeasureOverlayRect(
+          measureX,
+          measureWidth,
+          systemTop,
+          scoreWidth,
+          scoreHeight,
+          isSystemStart,
         )
+        nextMeasureLayouts.set(pairIndex, {
+          pairIndex,
+          measureX,
+          measureWidth,
+          trebleY,
+          bassY,
+          systemTop,
+          isSystemStart,
+          overlayRect,
+        })
+
         nextLayouts.push(
-          ...bassVexNotes.map((vexNote, index) => ({
-            id: measure.bass[index].id,
-            staff: 'bass' as const,
-            x: vexNote.getAbsoluteX(),
-            y: vexNote.getYs()[0],
-            pitchYMap: bassPitchYMap,
-          })),
+          ...drawMeasureToContext({
+            context,
+            measure,
+            pairIndex,
+            measureX,
+            measureWidth,
+            trebleY,
+            bassY,
+            isSystemStart,
+            activeSelection: null,
+            draggingSelection: null,
+          }),
         )
       })
     }
 
     noteLayoutsRef.current = nextLayouts
+    measureLayoutsRef.current = nextMeasureLayouts
   }, [
     measurePairs,
     scoreWidth,
     scoreHeight,
     systemCount,
     measuresPerLine,
-    activeSelection,
-    draggingSelection,
     visibleSystemRange.start,
     visibleSystemRange.end,
   ])
@@ -1009,15 +1142,118 @@ function App() {
       dragPendingRef.current = null
       rendererRef.current = null
       rendererSizeRef.current = { width: 0, height: 0 }
+      overlayRendererRef.current = null
+      overlayRendererSizeRef.current = { width: 0, height: 0 }
     }
   }, [])
+
+  useEffect(() => {
+    drawSelectionOverlay(activeSelection)
+  }, [activeSelection, draggingSelection, measurePairs, visibleSystemRange.start, visibleSystemRange.end])
+
+  const clearDragOverlay = () => {
+    const overlay = scoreOverlayRef.current
+    if (!overlay) return
+    const overlay2d = overlay.getContext('2d')
+    if (!overlay2d) return
+    overlay2d.save()
+    overlay2d.globalCompositeOperation = 'source-over'
+    overlay2d.clearRect(0, 0, overlay.width, overlay.height)
+    overlay2d.fillStyle = '#000000'
+    overlay2d.strokeStyle = '#000000'
+    overlay2d.restore()
+  }
+
+  const drawOverlayNoteHead = (x: number, y: number, color: string) => {
+    const overlay = scoreOverlayRef.current
+    if (!overlay) return
+    const ctx = overlay.getContext('2d')
+    if (!ctx) return
+
+    ctx.save()
+    ctx.translate(x, y)
+    ctx.rotate(-0.32)
+    ctx.fillStyle = color
+    ctx.strokeStyle = color
+    ctx.lineWidth = 1.2
+    ctx.beginPath()
+    ctx.ellipse(0, 0, 8.5, 6, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+    ctx.restore()
+  }
+
+  const drawSelectionOverlay = (selection: Selection) => {
+    if (draggingSelection) return
+
+    const layout = noteLayoutsRef.current.find((item) => item.id === selection.noteId && item.staff === selection.staff)
+    clearDragOverlay()
+    if (!layout) return
+    drawOverlayNoteHead(layout.x, layout.y, '#145f84')
+  }
+
+  const getOverlayContext = () => {
+    const overlay = scoreOverlayRef.current
+    if (!overlay) return null
+
+    let renderer = overlayRendererRef.current
+    if (!renderer) {
+      renderer = new Renderer(overlay, SCORE_RENDER_BACKEND)
+      overlayRendererRef.current = renderer
+    }
+    const currentSize = overlayRendererSizeRef.current
+    if (currentSize.width !== scoreWidth || currentSize.height !== scoreHeight) {
+      renderer.resize(scoreWidth, scoreHeight)
+      overlayRendererSizeRef.current = { width: scoreWidth, height: scoreHeight }
+    }
+
+    return renderer.getContext()
+  }
+
+  const drawDragMeasurePreview = (drag: DragState) => {
+    const measureLayout = measureLayoutsRef.current.get(drag.pairIndex)
+    const measure = measurePairsRef.current[drag.pairIndex]
+    const overlay = scoreOverlayRef.current
+    if (!measureLayout || !measure || !overlay) return
+
+    const overlayContext = getOverlayContext()
+    if (!overlayContext) return
+
+    clearDragOverlay()
+    overlayContext.save()
+    overlayContext.setFillStyle('#ffffff')
+    overlayContext.fillRect(
+      measureLayout.overlayRect.x,
+      measureLayout.overlayRect.y,
+      measureLayout.overlayRect.width,
+      measureLayout.overlayRect.height,
+    )
+    overlayContext.restore()
+    overlayContext.setFillStyle('#000000')
+    overlayContext.setStrokeStyle('#000000')
+
+    drawMeasureToContext({
+      context: overlayContext,
+      measure,
+      pairIndex: measureLayout.pairIndex,
+      measureX: measureLayout.measureX,
+      measureWidth: measureLayout.measureWidth,
+      trebleY: measureLayout.trebleY,
+      bassY: measureLayout.bassY,
+      isSystemStart: measureLayout.isSystemStart,
+      activeSelection,
+      draggingSelection: { noteId: drag.noteId, staff: drag.staff },
+      previewNote: { noteId: drag.noteId, staff: drag.staff, pitch: drag.pitch },
+      collectLayouts: false,
+    })
+  }
 
   const applyDragPreview = (drag: DragState, pitch: Pitch) => {
     if (pitch === drag.pitch) return
 
     const nextDrag = { ...drag, pitch }
     dragRef.current = nextDrag
-    commitDragPitchToScore(nextDrag, pitch)
+    drawDragMeasurePreview(nextDrag)
   }
 
   const commitDragPitchToScore = (drag: DragState, pitch: Pitch) => {
@@ -1104,6 +1340,7 @@ function App() {
     }
 
     dragRef.current = null
+    clearDragOverlay()
     setDraggingSelection(null)
     event.currentTarget.releasePointerCapture(event.pointerId)
   }
@@ -1143,6 +1380,7 @@ function App() {
     measurePairsFromImportRef.current = result.measurePairs
     importedNoteLookupRef.current = buildImportedNoteLookup(result.measurePairs)
     dragRef.current = null
+    clearDragOverlay()
     setDraggingSelection(null)
 
     if (result.trebleNotes[0]) {
@@ -1210,6 +1448,7 @@ function App() {
     measurePairsFromImportRef.current = null
     importedNoteLookupRef.current.clear()
     dragRef.current = null
+    clearDragOverlay()
     setActiveSelection({ noteId: INITIAL_NOTES[0].id, staff: 'treble' })
     setDraggingSelection(null)
     setRhythmPreset('quarter')
@@ -1222,6 +1461,7 @@ function App() {
     measurePairsFromImportRef.current = null
     importedNoteLookupRef.current.clear()
     dragRef.current = null
+    clearDragOverlay()
     setNotes((current) => createAiVariation(current))
   }
 
@@ -1234,6 +1474,7 @@ function App() {
     measurePairsFromImportRef.current = null
     importedNoteLookupRef.current.clear()
     dragRef.current = null
+    clearDragOverlay()
 
     let nextActive = ''
     setNotes((current) => {
@@ -1269,6 +1510,8 @@ function App() {
     const dragState: DragState = {
       noteId: hitNote.id,
       staff: hitNote.staff,
+      pairIndex: hitNote.pairIndex,
+      noteIndex: hitNote.noteIndex,
       pointerId: event.pointerId,
       pitch,
       grabOffsetY,
@@ -1276,6 +1519,8 @@ function App() {
     }
 
     dragRef.current = dragState
+    clearDragOverlay()
+    drawOverlayNoteHead(hitNote.x, hitNote.y, '#0e9ac7')
     setActiveSelection({ noteId: hitNote.id, staff: hitNote.staff })
     setDraggingSelection({ noteId: hitNote.id, staff: hitNote.staff })
     event.currentTarget.setPointerCapture(event.pointerId)
@@ -1366,6 +1611,7 @@ function App() {
               onPointerUp={endDrag}
               onPointerCancel={endDrag}
             />
+            <canvas className="score-overlay" ref={scoreOverlayRef} width={scoreWidth} height={scoreHeight} />
           </div>
         </div>
 

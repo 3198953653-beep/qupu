@@ -209,6 +209,13 @@
   cursor: grabbing;
 }
 
+.score-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
 .inspector {
   border-top: 1px solid #d6e0e5;
   padding: 0.85rem 1rem 1rem;
