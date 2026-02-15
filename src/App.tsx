@@ -29,6 +29,9 @@ type ScoreNote = {
   id: string
   pitch: Pitch
   duration: NoteDuration
+  accidental?: string | null
+  chordPitches?: Pitch[]
+  chordAccidentals?: Array<string | null>
 }
 
 type ImportResult = {
@@ -269,6 +272,10 @@ const STEP_TO_SEMITONE: Record<string, number> = {
   A: 9,
   B: 11,
 }
+const KEY_SHARP_ORDER = ['F', 'C', 'G', 'D', 'A', 'E', 'B'] as const
+const KEY_FLAT_ORDER = ['B', 'E', 'A', 'D', 'G', 'C', 'F'] as const
+
+const pitchLineCache = new Map<string, number>()
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -295,15 +302,85 @@ function parsePitch(pitch: Pitch): { note: string; octave: number } {
   return { note, octave: Number(octaveText) }
 }
 
+function formatPitchName(note: string): string {
+  if (!note) return note
+  return `${note[0].toUpperCase()}${note.slice(1)}`
+}
+
+function getPitchLine(clef: StaffKind, pitch: Pitch): number {
+  const key = `${clef}|${pitch}`
+  const cached = pitchLineCache.get(key)
+  if (cached !== undefined) return cached
+
+  const probe = new StaveNote({
+    keys: [pitch],
+    duration: 'q',
+    clef,
+  })
+  const line = probe.getKeyLine(0)
+  pitchLineCache.set(key, line)
+  return line
+}
+
+function getAccidentalFromPitch(pitch: Pitch): string | null {
+  const { note } = parsePitch(pitch)
+  const accidental = note.slice(1)
+  return accidental.length > 0 ? accidental : null
+}
+
+function getRenderedAccidental(note: ScoreNote, renderedPitch: Pitch, forceFromPitch = false): string | null {
+  if (!forceFromPitch && note.accidental !== undefined) return note.accidental
+  return getAccidentalFromPitch(renderedPitch)
+}
+
+function toPitchFromStepAlter(step: string, alter: number, octave: number): Pitch {
+  if (Number.isInteger(alter) && alter >= -2 && alter <= 2) {
+    const accidental = alter > 0 ? '#'.repeat(alter) : alter < 0 ? 'b'.repeat(-alter) : ''
+    return `${step.toLowerCase()}${accidental}/${octave}`
+  }
+  const midi = clamp((octave + 1) * 12 + STEP_TO_SEMITONE[step] + alter, PIANO_MIN_MIDI, PIANO_MAX_MIDI)
+  return midiToPitch(midi)
+}
+
+function getKeySignatureAlterForStep(step: string, fifths: number): number {
+  if (fifths > 0) {
+    const sharpSteps = KEY_SHARP_ORDER.slice(0, Math.min(fifths, KEY_SHARP_ORDER.length))
+    return sharpSteps.includes(step as (typeof KEY_SHARP_ORDER)[number]) ? 1 : 0
+  }
+  if (fifths < 0) {
+    const flatSteps = KEY_FLAT_ORDER.slice(0, Math.min(-fifths, KEY_FLAT_ORDER.length))
+    return flatSteps.includes(step as (typeof KEY_FLAT_ORDER)[number]) ? -1 : 0
+  }
+  return 0
+}
+
+function buildRenderedNoteKeys(
+  note: ScoreNote,
+  staff: StaffKind,
+  renderedPitch: Pitch,
+  forceRootAccidentalFromPitch: boolean,
+): Array<{ pitch: Pitch; accidental: string | null }> {
+  const keys: Array<{ pitch: Pitch; accidental: string | null }> = [
+    {
+      pitch: renderedPitch,
+      accidental: getRenderedAccidental(note, renderedPitch, forceRootAccidentalFromPitch),
+    },
+  ]
+
+  note.chordPitches?.forEach((pitch, index) => {
+    const chordAccidental = note.chordAccidentals?.[index]
+    const accidental = chordAccidental !== undefined ? chordAccidental : getAccidentalFromPitch(pitch)
+    keys.push({ pitch, accidental })
+  })
+
+  keys.sort((left, right) => getPitchLine(staff, left.pitch) - getPitchLine(staff, right.pitch))
+  return keys
+}
+
 function buildPitchLineMap(clef: StaffKind): Record<Pitch, number> {
   const map = {} as Record<Pitch, number>
   for (const pitch of PITCHES) {
-    const probe = new StaveNote({
-      keys: [pitch],
-      duration: 'q',
-      clef,
-    })
-    map[pitch] = probe.getKeyLine(0)
+    map[pitch] = getPitchLine(clef, pitch)
   }
   return map
 }
@@ -315,12 +392,12 @@ const PITCH_LINE_MAP: Record<StaffKind, Record<Pitch, number>> = {
 
 function toDisplayPitch(pitch: Pitch): string {
   const { note, octave } = parsePitch(pitch)
-  return `${note.toUpperCase()}${octave}`
+  return `${formatPitchName(note)}${octave}`
 }
 
 function toTonePitch(pitch: Pitch): string {
   const { note, octave } = parsePitch(pitch)
-  return `${note.toUpperCase()}${octave}`
+  return `${formatPitchName(note)}${octave}`
 }
 
 function toDisplayDuration(duration: NoteDuration): string {
@@ -359,7 +436,7 @@ function splitTicksToDurations(ticks: number): NoteDuration[] {
   return pattern
 }
 
-function parseMusicXmlPitch(noteEl: Element): Pitch | null {
+function parseMusicXmlPitchParts(noteEl: Element): { step: string; octave: number; alter?: number } | null {
   const pitchEl = noteEl.querySelector('pitch')
   if (!pitchEl) return null
 
@@ -368,12 +445,47 @@ function parseMusicXmlPitch(noteEl: Element): Pitch | null {
   const octaveText = pitchEl.querySelector('octave')?.textContent?.trim()
   if (!step || !octaveText || STEP_TO_SEMITONE[step] === undefined) return null
 
-  const alter = alterText ? Number(alterText) : 0
   const octave = Number(octaveText)
-  if (!Number.isFinite(alter) || !Number.isFinite(octave)) return null
+  if (!Number.isFinite(octave)) return null
+  if (!alterText) return { step, octave }
 
-  const midi = clamp((octave + 1) * 12 + STEP_TO_SEMITONE[step] + alter, PIANO_MIN_MIDI, PIANO_MAX_MIDI)
-  return midiToPitch(midi)
+  const alter = Number(alterText)
+  if (!Number.isFinite(alter)) return null
+  return { step, octave, alter }
+}
+
+function parseMusicXmlAccidental(noteEl: Element): string | undefined {
+  const accidentalText = noteEl.querySelector('accidental')?.textContent?.trim().toLowerCase()
+  if (!accidentalText) return undefined
+
+  const ACCIDENTAL_MAP: Record<string, string> = {
+    sharp: '#',
+    flat: 'b',
+    natural: 'n',
+    'double-sharp': '##',
+    'flat-flat': 'bb',
+    'natural-sharp': '#',
+    'natural-flat': 'b',
+  }
+
+  return ACCIDENTAL_MAP[accidentalText]
+}
+
+function parseMusicXmlAccidentalAlter(noteEl: Element): number | undefined {
+  const accidentalText = noteEl.querySelector('accidental')?.textContent?.trim().toLowerCase()
+  if (!accidentalText) return undefined
+
+  const ACCIDENTAL_ALTER_MAP: Record<string, number> = {
+    sharp: 1,
+    flat: -1,
+    natural: 0,
+    'double-sharp': 2,
+    'flat-flat': -2,
+    'natural-sharp': 1,
+    'natural-flat': -1,
+  }
+
+  return ACCIDENTAL_ALTER_MAP[accidentalText]
 }
 
 function parseMusicXmlBeats(noteEl: Element, divisions: number): number | null {
@@ -530,6 +642,7 @@ function parseMusicXml(xml: string): ImportResult {
     if (measureEls.length === 0) return
 
     let divisions = 1
+    let currentFifths = 0
     measureEls.forEach((measureEl, measureIndex) => {
       const slot = ensureMeasureSlot(measureIndex)
       const divisionsText = measureEl.querySelector('attributes > divisions')?.textContent?.trim()
@@ -537,15 +650,57 @@ function parseMusicXml(xml: string): ImportResult {
       if (Number.isFinite(maybeDivisions) && maybeDivisions > 0) {
         divisions = maybeDivisions
       }
+      const fifthsText = measureEl.querySelector('attributes > key > fifths')?.textContent?.trim()
+      const maybeFifths = fifthsText ? Number(fifthsText) : Number.NaN
+      if (Number.isFinite(maybeFifths)) {
+        currentFifths = Math.trunc(maybeFifths)
+      }
+
+      const measureAlterState: Record<StaffKind, Map<string, number>> = {
+        treble: new Map(),
+        bass: new Map(),
+      }
 
       const noteEls = Array.from(measureEl.getElementsByTagName('note'))
       noteEls.forEach((noteEl) => {
         if (noteEl.querySelector('grace')) return
-        if (noteEl.querySelector('chord')) return
 
         const staffText = noteEl.querySelector('staff')?.textContent?.trim()
         const staff: StaffKind =
           staffText === '2' ? 'bass' : staffText === '1' ? 'treble' : partNodes.length > 1 && partIndex === 1 ? 'bass' : 'treble'
+
+        const isChordTone = Boolean(noteEl.querySelector('chord'))
+        if (isChordTone) {
+          const isRest = Boolean(noteEl.querySelector('rest'))
+          const chordPitchParts = isRest ? null : parseMusicXmlPitchParts(noteEl)
+          if (!chordPitchParts) return
+
+          const pitchKey = `${chordPitchParts.step}${chordPitchParts.octave}`
+          const carriedAlter = measureAlterState[staff].get(pitchKey)
+          const accidentalAlter = parseMusicXmlAccidentalAlter(noteEl)
+          const resolvedAlter =
+            chordPitchParts.alter ??
+            accidentalAlter ??
+            (carriedAlter !== undefined ? carriedAlter : getKeySignatureAlterForStep(chordPitchParts.step, currentFifths))
+          const chordPitch = toPitchFromStepAlter(chordPitchParts.step, resolvedAlter, chordPitchParts.octave)
+          measureAlterState[staff].set(pitchKey, resolvedAlter)
+
+          const previous = slot.notes[staff][slot.notes[staff].length - 1]
+          if (!previous) return
+
+          const nextChordPitches = previous.chordPitches ? [...previous.chordPitches, chordPitch] : [chordPitch]
+          const chordAccidental = parseMusicXmlAccidental(noteEl) ?? null
+          const nextChordAccidentals = previous.chordAccidentals
+            ? [...previous.chordAccidentals, chordAccidental]
+            : [chordAccidental]
+
+          slot.notes[staff][slot.notes[staff].length - 1] = {
+            ...previous,
+            chordPitches: nextChordPitches,
+            chordAccidentals: nextChordAccidentals,
+          }
+          return
+        }
 
         if (slot.ticksUsed[staff] >= MEASURE_TICKS) return
 
@@ -553,18 +708,34 @@ function parseMusicXml(xml: string): ImportResult {
         if (!beats) return
 
         const isRest = Boolean(noteEl.querySelector('rest'))
-        const parsedPitch = isRest ? null : parseMusicXmlPitch(noteEl)
-        const pitch = parsedPitch ?? lastPitch[staff]
+        let pitch = lastPitch[staff]
+        if (!isRest) {
+          const parsedPitch = parseMusicXmlPitchParts(noteEl)
+          if (parsedPitch) {
+            const pitchKey = `${parsedPitch.step}${parsedPitch.octave}`
+            const carriedAlter = measureAlterState[staff].get(pitchKey)
+            const accidentalAlter = parseMusicXmlAccidentalAlter(noteEl)
+            const resolvedAlter =
+              parsedPitch.alter ??
+              accidentalAlter ??
+              (carriedAlter !== undefined ? carriedAlter : getKeySignatureAlterForStep(parsedPitch.step, currentFifths))
+            pitch = toPitchFromStepAlter(parsedPitch.step, resolvedAlter, parsedPitch.octave)
+            measureAlterState[staff].set(pitchKey, resolvedAlter)
+          }
+        }
+        const explicitAccidental = isRest ? undefined : parseMusicXmlAccidental(noteEl) ?? null
         const notePattern = splitTicksToDurations(beatsToTicks(beats))
 
         slot.touched[staff] = true
-        for (const duration of notePattern) {
+        for (let patternIndex = 0; patternIndex < notePattern.length; patternIndex += 1) {
+          const duration = notePattern[patternIndex]
           const durationTicks = DURATION_TICKS[duration]
           if (slot.ticksUsed[staff] + durationTicks > MEASURE_TICKS) break
           slot.notes[staff].push({
             id: createImportedNoteId(staff),
             pitch,
             duration,
+            accidental: patternIndex === 0 ? explicitAccidental : null,
           })
           slot.ticksUsed[staff] += durationTicks
         }
@@ -641,7 +812,7 @@ function syncBassNotesToTreble(trebleNotes: ScoreNote[], currentBass: ScoreNote[
 const INITIAL_BASS_NOTES: ScoreNote[] = buildBassMockNotes(INITIAL_NOTES)
 
 function getStrictStemDirection(pitch: Pitch): StemDirection {
-  const line = PITCH_LINE_MAP.treble[pitch]
+  const line = getPitchLine('treble', pitch)
   return line < 3 ? 1 : -1
 }
 
@@ -686,7 +857,8 @@ function updateNotePitch(notes: ScoreNote[], noteId: string, pitch: Pitch): Scor
   if (source.pitch === pitch) return notes
 
   const next = notes.slice()
-  next[noteIndex] = { ...source, pitch }
+  const { accidental: _accidental, ...rest } = source
+  next[noteIndex] = { ...rest, pitch }
   return next
 }
 
@@ -786,7 +958,8 @@ function updateMeasurePairPitchAt(pairs: MeasurePair[], location: ImportedNoteLo
   const nextPairs = pairs.slice()
   const nextPair: MeasurePair = { treble: pair.treble, bass: pair.bass }
   const nextList = sourceList.slice()
-  nextList[location.noteIndex] = { ...sourceNote, pitch }
+  const { accidental: _accidental, ...rest } = sourceNote
+  nextList[location.noteIndex] = { ...rest, pitch }
 
   if (location.staff === 'treble') {
     nextPair.treble = nextList
@@ -804,7 +977,8 @@ function createAiVariation(notes: ScoreNote[]): ScoreNote[] {
     const deltaOptions = [-2, -1, 0, 1, 2]
     const delta = deltaOptions[Math.floor(Math.random() * deltaOptions.length)]
     cursor = clamp(cursor + delta, 0, PITCHES.length - 1)
-    return { ...note, pitch: PITCHES[cursor] }
+    const { accidental: _accidental, ...rest } = note
+    return { ...rest, pitch: PITCHES[cursor] }
   })
 }
 
@@ -921,15 +1095,20 @@ function App() {
 
     const trebleVexNotes = measure.treble.map((note) => {
       const renderedPitch = resolvePitch(note, 'treble')
+      const isPreviewed = Boolean(previewNote && previewNote.staff === 'treble' && previewNote.noteId === note.id)
+      const renderedKeys = buildRenderedNoteKeys(note, 'treble', renderedPitch, isPreviewed)
       const dots = getDurationDots(note.duration)
       const vexNote = new StaveNote({
-        keys: [renderedPitch],
+        keys: renderedKeys.map((entry) => entry.pitch),
         duration: toVexDuration(note.duration),
         dots,
         clef: 'treble',
         stemDirection: getStrictStemDirection(renderedPitch),
       })
-      if (renderedPitch.includes('#')) vexNote.addModifier(new Accidental('#'), 0)
+      renderedKeys.forEach((entry, keyIndex) => {
+        if (!entry.accidental) return
+        vexNote.addModifier(new Accidental(entry.accidental), keyIndex)
+      })
       if (dots > 0) {
         Dot.buildAndAttach([vexNote], { all: true })
       }
@@ -938,15 +1117,20 @@ function App() {
 
     const bassVexNotes = measure.bass.map((note) => {
       const renderedPitch = resolvePitch(note, 'bass')
+      const isPreviewed = Boolean(previewNote && previewNote.staff === 'bass' && previewNote.noteId === note.id)
+      const renderedKeys = buildRenderedNoteKeys(note, 'bass', renderedPitch, isPreviewed)
       const dots = getDurationDots(note.duration)
       const vexNote = new StaveNote({
-        keys: [renderedPitch],
+        keys: renderedKeys.map((entry) => entry.pitch),
         duration: toVexDuration(note.duration),
         dots,
         clef: 'bass',
         autoStem: true,
       })
-      if (renderedPitch.includes('#')) vexNote.addModifier(new Accidental('#'), 0)
+      renderedKeys.forEach((entry, keyIndex) => {
+        if (!entry.accidental) return
+        vexNote.addModifier(new Accidental(entry.accidental), keyIndex)
+      })
       if (dots > 0) {
         Dot.buildAndAttach([vexNote], { all: true })
       }
@@ -993,6 +1177,22 @@ function App() {
       treblePitchYMap[pitch] = trebleStave.getYForNote(PITCH_LINE_MAP.treble[pitch])
       bassPitchYMap[pitch] = bassStave.getYForNote(PITCH_LINE_MAP.bass[pitch])
     }
+
+    const trebleExtraPitches = new Set<Pitch>(measure.treble.map((note) => resolvePitch(note, 'treble')))
+    const bassExtraPitches = new Set<Pitch>(measure.bass.map((note) => resolvePitch(note, 'bass')))
+    measure.treble.forEach((note) => note.chordPitches?.forEach((pitch) => trebleExtraPitches.add(pitch)))
+    measure.bass.forEach((note) => note.chordPitches?.forEach((pitch) => bassExtraPitches.add(pitch)))
+    if (previewNote?.staff === 'treble') trebleExtraPitches.add(previewNote.pitch)
+    if (previewNote?.staff === 'bass') bassExtraPitches.add(previewNote.pitch)
+
+    trebleExtraPitches.forEach((pitch) => {
+      if (treblePitchYMap[pitch] !== undefined) return
+      treblePitchYMap[pitch] = trebleStave.getYForNote(getPitchLine('treble', pitch))
+    })
+    bassExtraPitches.forEach((pitch) => {
+      if (bassPitchYMap[pitch] !== undefined) return
+      bassPitchYMap[pitch] = bassStave.getYForNote(getPitchLine('bass', pitch))
+    })
 
     noteLayouts.push(
       ...trebleVexNotes.map((vexNote, noteIndex) => ({
