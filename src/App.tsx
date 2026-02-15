@@ -63,6 +63,7 @@ type DragState = {
   pairIndex: number
   noteIndex: number
   pointerId: number
+  surfaceTop: number
   pitch: Pitch
   previewStarted: boolean
   grabOffsetY: number
@@ -1184,35 +1185,40 @@ function App() {
     }
   }, [])
 
-  const clearOverlayRect = (ctx: CanvasRenderingContext2D, rect: MeasureLayout['overlayRect']) => {
-    const overlay = scoreOverlayRef.current
-    if (!overlay) return
-
-    const pad = 6
-    const x = clamp(Math.floor(rect.x) - pad, 0, overlay.width)
-    const y = clamp(Math.floor(rect.y) - pad, 0, overlay.height)
-    const maxWidth = overlay.width - x
-    const maxHeight = overlay.height - y
-    const width = clamp(Math.ceil(rect.width) + pad * 2, 0, maxWidth)
-    const height = clamp(Math.ceil(rect.height) + pad * 2, 0, maxHeight)
-    ctx.clearRect(x, y, width, height)
-  }
-
   const clearDragOverlay = () => {
     const overlay = scoreOverlayRef.current
     if (!overlay) return
     const overlay2d = overlay.getContext('2d')
     if (!overlay2d) return
-    overlay2d.save()
-    overlay2d.globalCompositeOperation = 'source-over'
-    const previousRect = overlayLastRectRef.current
-    if (previousRect) {
-      clearOverlayRect(overlay2d, previousRect)
-      overlayLastRectRef.current = null
-    } else {
-      overlay2d.clearRect(0, 0, overlay.width, overlay.height)
+    overlay2d.clearRect(0, 0, overlay.width, overlay.height)
+    overlay.style.display = 'none'
+    overlayLastRectRef.current = null
+  }
+
+  const ensureOverlayCanvasForRect = (rect: MeasureLayout['overlayRect']) => {
+    const overlay = scoreOverlayRef.current
+    if (!overlay) return null
+
+    const nextWidth = Math.max(1, Math.ceil(rect.width))
+    const nextHeight = Math.max(1, Math.ceil(rect.height))
+    const nextLeft = Math.floor(rect.x)
+    const nextTop = Math.floor(rect.y)
+
+    if (overlay.width !== nextWidth || overlay.height !== nextHeight) {
+      overlay.width = nextWidth
+      overlay.height = nextHeight
+      overlayRendererRef.current = null
+      overlayRendererSizeRef.current = { width: 0, height: 0 }
     }
-    overlay2d.restore()
+
+    overlay.style.left = `${nextLeft}px`
+    overlay.style.top = `${nextTop}px`
+    overlay.style.width = `${nextWidth}px`
+    overlay.style.height = `${nextHeight}px`
+    overlay.style.display = 'block'
+    overlayLastRectRef.current = rect
+
+    return { x: nextLeft, y: nextTop, width: nextWidth, height: nextHeight }
   }
 
   const getOverlayContext = () => {
@@ -1225,9 +1231,11 @@ function App() {
       overlayRendererRef.current = renderer
     }
     const currentSize = overlayRendererSizeRef.current
-    if (currentSize.width !== scoreWidth || currentSize.height !== scoreHeight) {
-      renderer.resize(scoreWidth, scoreHeight)
-      overlayRendererSizeRef.current = { width: scoreWidth, height: scoreHeight }
+    const overlayWidth = overlay.width || 1
+    const overlayHeight = overlay.height || 1
+    if (currentSize.width !== overlayWidth || currentSize.height !== overlayHeight) {
+      renderer.resize(overlayWidth, overlayHeight)
+      overlayRendererSizeRef.current = { width: overlayWidth, height: overlayHeight }
     }
 
     return renderer.getContext()
@@ -1236,38 +1244,17 @@ function App() {
   const drawDragMeasurePreview = (drag: DragState) => {
     const measureLayout = measureLayoutsRef.current.get(drag.pairIndex)
     const measure = measurePairsRef.current[drag.pairIndex]
-    const overlay = scoreOverlayRef.current
-    if (!measureLayout || !measure || !overlay) return
+    if (!measureLayout || !measure) return
 
-    const overlay2d = overlay.getContext('2d')
-    if (!overlay2d) return
+    const overlayFrame = ensureOverlayCanvasForRect(measureLayout.overlayRect)
+    if (!overlayFrame) return
 
     const overlayContext = getOverlayContext()
     if (!overlayContext) return
 
-    const previousRect = overlayLastRectRef.current
-    if (previousRect) {
-      clearOverlayRect(overlay2d, previousRect)
-    }
-
-    overlay2d.save()
-    overlay2d.beginPath()
-    overlay2d.rect(
-      measureLayout.overlayRect.x,
-      measureLayout.overlayRect.y,
-      measureLayout.overlayRect.width,
-      measureLayout.overlayRect.height,
-    )
-    overlay2d.clip()
-
     overlayContext.save()
     overlayContext.setFillStyle('#ffffff')
-    overlayContext.fillRect(
-      measureLayout.overlayRect.x,
-      measureLayout.overlayRect.y,
-      measureLayout.overlayRect.width,
-      measureLayout.overlayRect.height,
-    )
+    overlayContext.fillRect(0, 0, overlayFrame.width, overlayFrame.height)
     overlayContext.restore()
     overlayContext.setFillStyle('#000000')
     overlayContext.setStrokeStyle('#000000')
@@ -1276,21 +1263,18 @@ function App() {
       context: overlayContext,
       measure,
       pairIndex: measureLayout.pairIndex,
-      measureX: measureLayout.measureX,
+      measureX: measureLayout.measureX - overlayFrame.x,
       measureWidth: measureLayout.measureWidth,
-      trebleY: measureLayout.trebleY,
-      bassY: measureLayout.bassY,
+      trebleY: measureLayout.trebleY - overlayFrame.y,
+      bassY: measureLayout.bassY - overlayFrame.y,
       isSystemStart: measureLayout.isSystemStart,
       activeSelection: null,
       draggingSelection: null,
       previewNote: { noteId: drag.noteId, staff: drag.staff, pitch: drag.pitch },
       collectLayouts: false,
       suppressSystemDecorations: true,
-      noteStartXOverride: measureLayout.noteStartX,
+      noteStartXOverride: measureLayout.noteStartX - overlayFrame.x,
     })
-
-    overlay2d.restore()
-    overlayLastRectRef.current = measureLayout.overlayRect
   }
 
   const applyDragPreview = (drag: DragState, pitch: Pitch) => {
@@ -1358,11 +1342,7 @@ function App() {
       drawDragMeasurePreview(nextDrag)
     }
 
-    const surface = scoreRef.current
-    if (!surface) return
-
-    const rect = surface.getBoundingClientRect()
-    const y = event.clientY - rect.top
+    const y = event.clientY - drag.surfaceTop
     const targetY = y - drag.grabOffsetY
     const pitch = getNearestPitchByY(targetY, drag.pitchYMap, drag.pitch)
     scheduleDragCommit(drag, pitch)
@@ -1564,6 +1544,7 @@ function App() {
       pairIndex: hitNote.pairIndex,
       noteIndex: hitNote.noteIndex,
       pointerId: event.pointerId,
+      surfaceTop: rect.top,
       pitch,
       previewStarted: false,
       grabOffsetY,
@@ -1661,7 +1642,7 @@ function App() {
               onPointerUp={endDrag}
               onPointerCancel={endDrag}
             />
-            <canvas className="score-overlay" ref={scoreOverlayRef} width={scoreWidth} height={scoreHeight} />
+            <canvas className="score-overlay" ref={scoreOverlayRef} width={1} height={1} />
           </div>
         </div>
 

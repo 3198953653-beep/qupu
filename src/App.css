@@ -194,6 +194,7 @@
   border-radius: 12px;
   background: #ffffff;
   box-shadow: 0 15px 38px -30px rgba(8, 30, 50, 0.9);
+  contain: layout paint;
 }
 
 .score-surface {
@@ -211,9 +212,11 @@
 
 .score-overlay {
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: 0;
   pointer-events: none;
   z-index: 3;
+  display: none;
 }
 
 .inspector {
