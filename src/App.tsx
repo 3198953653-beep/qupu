@@ -11,6 +11,7 @@ const SYSTEM_BASS_OFFSET_Y = 108
 const SYSTEM_GAP_Y = 44
 const SYSTEM_HEIGHT = 208
 const STAFF_X = SCORE_PAGE_PADDING_X
+const SCORE_RENDER_BACKEND = Renderer.Backends.CANVAS
 const QUARTER_NOTE_SECONDS = 0.5
 
 const PIANO_MIN_MIDI = 21 // A0
@@ -66,6 +67,12 @@ type DragState = {
 type MeasurePair = {
   treble: ScoreNote[]
   bass: ScoreNote[]
+}
+
+type ImportedNoteLocation = {
+  pairIndex: number
+  noteIndex: number
+  staff: StaffKind
 }
 
 const INITIAL_NOTES: ScoreNote[] = [
@@ -652,11 +659,54 @@ function updateNotePitch(notes: ScoreNote[], noteId: string, pitch: Pitch): Scor
   return notes.map((note) => (note.id === noteId ? { ...note, pitch } : note))
 }
 
+function flattenTrebleFromPairs(pairs: MeasurePair[]): ScoreNote[] {
+  return pairs.flatMap((pair) => pair.treble)
+}
+
+function flattenBassFromPairs(pairs: MeasurePair[]): ScoreNote[] {
+  return pairs.flatMap((pair) => pair.bass)
+}
+
 function updateMeasurePairsPitch(pairs: MeasurePair[], noteId: string, pitch: Pitch): MeasurePair[] {
   return pairs.map((pair) => ({
     treble: updateNotePitch(pair.treble, noteId, pitch),
     bass: updateNotePitch(pair.bass, noteId, pitch),
   }))
+}
+
+function buildImportedNoteLookup(pairs: MeasurePair[]): Map<string, ImportedNoteLocation> {
+  const lookup = new Map<string, ImportedNoteLocation>()
+  pairs.forEach((pair, pairIndex) => {
+    pair.treble.forEach((note, noteIndex) => {
+      lookup.set(note.id, { pairIndex, noteIndex, staff: 'treble' })
+    })
+    pair.bass.forEach((note, noteIndex) => {
+      lookup.set(note.id, { pairIndex, noteIndex, staff: 'bass' })
+    })
+  })
+  return lookup
+}
+
+function updateMeasurePairPitchAt(pairs: MeasurePair[], location: ImportedNoteLocation, pitch: Pitch): MeasurePair[] {
+  const pair = pairs[location.pairIndex]
+  if (!pair) return pairs
+
+  const sourceList = location.staff === 'treble' ? pair.treble : pair.bass
+  const sourceNote = sourceList[location.noteIndex]
+  if (!sourceNote || sourceNote.pitch === pitch) return pairs
+
+  const nextPairs = pairs.slice()
+  const nextPair: MeasurePair = { treble: pair.treble, bass: pair.bass }
+  const nextList = sourceList.slice()
+  nextList[location.noteIndex] = { ...sourceNote, pitch }
+
+  if (location.staff === 'treble') {
+    nextPair.treble = nextList
+  } else {
+    nextPair.bass = nextList
+  }
+  nextPairs[location.pairIndex] = nextPair
+  return nextPairs
 }
 
 function createAiVariation(notes: ScoreNote[]): ScoreNote[] {
@@ -682,7 +732,7 @@ function App() {
   const [isRhythmLinked, setIsRhythmLinked] = useState(true)
   const [measurePairsFromImport, setMeasurePairsFromImport] = useState<MeasurePair[] | null>(null)
 
-  const scoreRef = useRef<HTMLDivElement | null>(null)
+  const scoreRef = useRef<HTMLCanvasElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const synthRef = useRef<Tone.PolySynth | null>(null)
 
@@ -691,6 +741,8 @@ function App() {
   const dragRafRef = useRef<number | null>(null)
   const dragPendingRef = useRef<{ drag: DragState; pitch: Pitch } | null>(null)
   const stopPlayTimerRef = useRef<number | null>(null)
+  const measurePairsFromImportRef = useRef<MeasurePair[] | null>(null)
+  const importedNoteLookupRef = useRef<Map<string, ImportedNoteLocation>>(new Map())
   const scoreWidth = A4_PAGE_WIDTH
   const measurePairs = useMemo(
     () => measurePairsFromImport ?? buildMeasurePairs(notes, bassNotes),
@@ -699,6 +751,10 @@ function App() {
   const measuresPerLine = 2
   const systemCount = Math.max(1, Math.ceil(measurePairs.length / measuresPerLine))
   const scoreHeight = SCORE_TOP_PADDING * 2 + systemCount * SYSTEM_HEIGHT + Math.max(0, systemCount - 1) * SYSTEM_GAP_Y
+
+  useEffect(() => {
+    measurePairsFromImportRef.current = measurePairsFromImport
+  }, [measurePairsFromImport])
 
   useEffect(() => {
     if (!isRhythmLinked) return
@@ -715,9 +771,7 @@ function App() {
     const root = scoreRef.current
     if (!root) return
 
-    root.innerHTML = ''
-
-    const renderer = new Renderer(root, Renderer.Backends.SVG)
+    const renderer = new Renderer(root, SCORE_RENDER_BACKEND)
     renderer.resize(scoreWidth, scoreHeight)
     const context = renderer.getContext()
 
@@ -873,12 +927,33 @@ function App() {
 
     const nextDrag = { ...drag, pitch }
     dragRef.current = nextDrag
+
+    if (measurePairsFromImportRef.current) {
+      const location = importedNoteLookupRef.current.get(nextDrag.noteId)
+      if (location) {
+        setMeasurePairsFromImport((current) => {
+          if (!current) return current
+          const next = updateMeasurePairPitchAt(current, location, nextDrag.pitch)
+          measurePairsFromImportRef.current = next
+          return next
+        })
+        return
+      }
+
+      setMeasurePairsFromImport((current) => {
+        if (!current) return current
+        const next = updateMeasurePairsPitch(current, nextDrag.noteId, nextDrag.pitch)
+        measurePairsFromImportRef.current = next
+        return next
+      })
+      return
+    }
+
     if (nextDrag.staff === 'treble') {
       setNotes((current) => updateNotePitch(current, nextDrag.noteId, nextDrag.pitch))
     } else {
       setBassNotes((current) => updateNotePitch(current, nextDrag.noteId, nextDrag.pitch))
     }
-    setMeasurePairsFromImport((current) => (current ? updateMeasurePairsPitch(current, nextDrag.noteId, nextDrag.pitch) : current))
   }
 
   const flushPendingDrag = () => {
@@ -899,7 +974,7 @@ function App() {
     dragRafRef.current = window.requestAnimationFrame(flushPendingDrag)
   }
 
-  const onSurfacePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+  const onSurfacePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const drag = dragRef.current
     if (!drag || event.pointerId !== drag.pointerId) return
 
@@ -913,7 +988,7 @@ function App() {
     scheduleDragCommit(drag, pitch)
   }
 
-  const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+  const endDrag = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const drag = dragRef.current
     if (!drag || event.pointerId !== drag.pointerId) return
 
@@ -925,6 +1000,12 @@ function App() {
     dragPendingRef.current = null
     if (pending && pending.drag.pointerId === drag.pointerId) {
       commitDrag(pending.drag, pending.pitch)
+    }
+
+    const importedPairs = measurePairsFromImportRef.current
+    if (importedPairs) {
+      setNotes(flattenTrebleFromPairs(importedPairs))
+      setBassNotes(flattenBassFromPairs(importedPairs))
     }
 
     dragRef.current = null
@@ -964,6 +1045,8 @@ function App() {
     setNotes(result.trebleNotes)
     setBassNotes(result.bassNotes)
     setMeasurePairsFromImport(result.measurePairs)
+    measurePairsFromImportRef.current = result.measurePairs
+    importedNoteLookupRef.current = buildImportedNoteLookup(result.measurePairs)
     setDraggingSelection(null)
 
     if (result.trebleNotes[0]) {
@@ -1028,6 +1111,8 @@ function App() {
     setNotes(INITIAL_NOTES)
     setBassNotes(INITIAL_BASS_NOTES)
     setMeasurePairsFromImport(null)
+    measurePairsFromImportRef.current = null
+    importedNoteLookupRef.current.clear()
     setActiveSelection({ noteId: INITIAL_NOTES[0].id, staff: 'treble' })
     setDraggingSelection(null)
     setRhythmPreset('quarter')
@@ -1037,6 +1122,8 @@ function App() {
 
   const runAiDraft = () => {
     setMeasurePairsFromImport(null)
+    measurePairsFromImportRef.current = null
+    importedNoteLookupRef.current.clear()
     setNotes((current) => createAiVariation(current))
   }
 
@@ -1046,6 +1133,8 @@ function App() {
 
     setIsRhythmLinked(true)
     setMeasurePairsFromImport(null)
+    measurePairsFromImportRef.current = null
+    importedNoteLookupRef.current.clear()
 
     let nextActive = ''
     setNotes((current) => {
@@ -1059,7 +1148,7 @@ function App() {
     setRhythmPreset(presetId)
   }
 
-  const beginDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+  const beginDrag = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const surface = scoreRef.current
     if (!surface) return
 
@@ -1168,7 +1257,7 @@ function App() {
       <section className="board">
         <div className="score-scroll">
           <div className="score-stage" style={{ width: `${scoreWidth}px`, height: `${scoreHeight}px` }}>
-            <div
+            <canvas
               className={`score-surface ${draggingSelection ? 'is-dragging' : ''}`}
               ref={scoreRef}
               onPointerDown={beginDrag}
