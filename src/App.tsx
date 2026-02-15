@@ -38,6 +38,7 @@ type ImportResult = {
   trebleNotes: ScoreNote[]
   bassNotes: ScoreNote[]
   measurePairs: MeasurePair[]
+  measureKeyFifths: number[]
 }
 
 type ImportFeedback = {
@@ -342,6 +343,25 @@ function toPitchFromStepAlter(step: string, alter: number, octave: number): Pitc
   return midiToPitch(midi)
 }
 
+function getAlterFromAccidentalSymbol(accidental: string): number | undefined {
+  const ACCIDENTAL_ALTER_MAP: Record<string, number> = {
+    '#': 1,
+    b: -1,
+    n: 0,
+    '##': 2,
+    bb: -2,
+  }
+  return ACCIDENTAL_ALTER_MAP[accidental]
+}
+
+function getStepOctaveAlterFromPitch(pitch: Pitch): { step: string; octave: number; alter: number } {
+  const { note, octave } = parsePitch(pitch)
+  const step = note[0]?.toUpperCase() ?? 'C'
+  const accidental = note.slice(1)
+  const alter = getAlterFromAccidentalSymbol(accidental) ?? 0
+  return { step, octave, alter }
+}
+
 function getKeySignatureAlterForStep(step: string, fifths: number): number {
   if (fifths > 0) {
     const sharpSteps = KEY_SHARP_ORDER.slice(0, Math.min(fifths, KEY_SHARP_ORDER.length))
@@ -352,6 +372,68 @@ function getKeySignatureAlterForStep(step: string, fifths: number): number {
     return flatSteps.includes(step as (typeof KEY_FLAT_ORDER)[number]) ? -1 : 0
   }
   return 0
+}
+
+function resolvePitchByAccidentalState(
+  pitch: Pitch,
+  accidental: string | null | undefined,
+  state: Map<string, number>,
+  keyFifths: number,
+): Pitch {
+  const { step, octave, alter: pitchAlter } = getStepOctaveAlterFromPitch(pitch)
+  const key = `${step}${octave}`
+
+  let resolvedAlter = pitchAlter
+  if (accidental === null) {
+    const carried = state.get(key)
+    resolvedAlter = carried !== undefined ? carried : getKeySignatureAlterForStep(step, keyFifths)
+  } else if (typeof accidental === 'string') {
+    resolvedAlter = getAlterFromAccidentalSymbol(accidental) ?? pitchAlter
+  }
+
+  state.set(key, resolvedAlter)
+  return toPitchFromStepAlter(step, resolvedAlter, octave)
+}
+
+function normalizeMeasureStaffByAccidentalState(notes: ScoreNote[], keyFifths: number): ScoreNote[] {
+  const state = new Map<string, number>()
+  let changed = false
+
+  const next = notes.map((note) => {
+    const nextPitch = resolvePitchByAccidentalState(note.pitch, note.accidental, state, keyFifths)
+    const hasChord = Boolean(note.chordPitches?.length)
+    let nextChordPitches = note.chordPitches
+    let chordChanged = false
+
+    if (hasChord && note.chordPitches) {
+      const computedChord = note.chordPitches.map((chordPitch, index) => {
+        const chordAccidental = note.chordAccidentals?.[index]
+        return resolvePitchByAccidentalState(chordPitch, chordAccidental, state, keyFifths)
+      })
+      chordChanged = computedChord.some((pitch, index) => pitch !== note.chordPitches?.[index])
+      if (chordChanged) nextChordPitches = computedChord
+    }
+
+    if (nextPitch === note.pitch && !chordChanged) return note
+    changed = true
+    return { ...note, pitch: nextPitch, chordPitches: nextChordPitches }
+  })
+
+  return changed ? next : notes
+}
+
+function normalizeMeasurePairAt(pairs: MeasurePair[], pairIndex: number, keyFifthsByMeasure?: number[] | null): MeasurePair[] {
+  const pair = pairs[pairIndex]
+  if (!pair) return pairs
+
+  const keyFifths = keyFifthsByMeasure?.[pairIndex] ?? 0
+  const nextTreble = normalizeMeasureStaffByAccidentalState(pair.treble, keyFifths)
+  const nextBass = normalizeMeasureStaffByAccidentalState(pair.bass, keyFifths)
+  if (nextTreble === pair.treble && nextBass === pair.bass) return pairs
+
+  const nextPairs = pairs.slice()
+  nextPairs[pairIndex] = { treble: nextTreble, bass: nextBass }
+  return nextPairs
 }
 
 function buildRenderedNoteKeys(
@@ -623,6 +705,7 @@ function parseMusicXml(xml: string): ImportResult {
     ticksUsed: Record<StaffKind, number>
     touched: Record<StaffKind, boolean>
   }[] = []
+  const measureKeyFifths: number[] = []
 
   const ensureMeasureSlot = (index: number) => {
     if (!measureSlots[index]) {
@@ -654,6 +737,9 @@ function parseMusicXml(xml: string): ImportResult {
       const maybeFifths = fifthsText ? Number(fifthsText) : Number.NaN
       if (Number.isFinite(maybeFifths)) {
         currentFifths = Math.trunc(maybeFifths)
+      }
+      if (measureKeyFifths[measureIndex] === undefined) {
+        measureKeyFifths[measureIndex] = currentFifths
       }
 
       const measureAlterState: Record<StaffKind, Map<string, number>> = {
@@ -768,6 +854,7 @@ function parseMusicXml(xml: string): ImportResult {
       trebleNotes: fallbackPairs.flatMap((pair) => pair.treble),
       bassNotes: fallbackPairs.flatMap((pair) => pair.bass),
       measurePairs: fallbackPairs,
+      measureKeyFifths: new Array(fallbackPairs.length).fill(0),
     }
   }
 
@@ -775,6 +862,10 @@ function parseMusicXml(xml: string): ImportResult {
     trebleNotes: importedPairs.flatMap((pair) => pair.treble),
     bassNotes: importedPairs.flatMap((pair) => pair.bass),
     measurePairs: importedPairs,
+    measureKeyFifths:
+      measureKeyFifths.length === importedPairs.length
+        ? measureKeyFifths
+        : importedPairs.map((_, index) => measureKeyFifths[index] ?? 0),
   }
 }
 
@@ -858,7 +949,7 @@ function updateNotePitch(notes: ScoreNote[], noteId: string, pitch: Pitch): Scor
 
   const next = notes.slice()
   const { accidental: _accidental, ...rest } = source
-  next[noteIndex] = { ...rest, pitch }
+  next[noteIndex] = { ...rest, pitch, accidental: null }
   return next
 }
 
@@ -959,7 +1050,7 @@ function updateMeasurePairPitchAt(pairs: MeasurePair[], location: ImportedNoteLo
   const nextPair: MeasurePair = { treble: pair.treble, bass: pair.bass }
   const nextList = sourceList.slice()
   const { accidental: _accidental, ...rest } = sourceNote
-  nextList[location.noteIndex] = { ...rest, pitch }
+  nextList[location.noteIndex] = { ...rest, pitch, accidental: null }
 
   if (location.staff === 'treble') {
     nextPair.treble = nextList
@@ -993,6 +1084,7 @@ function App() {
   const [importFeedback, setImportFeedback] = useState<ImportFeedback>({ kind: 'idle', message: '' })
   const [isRhythmLinked, setIsRhythmLinked] = useState(true)
   const [measurePairsFromImport, setMeasurePairsFromImport] = useState<MeasurePair[] | null>(null)
+  const [measureKeyFifthsFromImport, setMeasureKeyFifthsFromImport] = useState<number[] | null>(null)
   const [visibleSystemRange, setVisibleSystemRange] = useState<{ start: number; end: number }>({ start: 0, end: 0 })
 
   const scoreRef = useRef<HTMLCanvasElement | null>(null)
@@ -1014,6 +1106,7 @@ function App() {
   const overlayLastRectRef = useRef<MeasureLayout['overlayRect'] | null>(null)
   const stopPlayTimerRef = useRef<number | null>(null)
   const measurePairsFromImportRef = useRef<MeasurePair[] | null>(null)
+  const measureKeyFifthsFromImportRef = useRef<number[] | null>(null)
   const importedNoteLookupRef = useRef<Map<string, ImportedNoteLocation>>(new Map())
   const scoreWidth = A4_PAGE_WIDTH
   const measurePairs = useMemo(
@@ -1223,6 +1316,10 @@ function App() {
   useEffect(() => {
     measurePairsFromImportRef.current = measurePairsFromImport
   }, [measurePairsFromImport])
+
+  useEffect(() => {
+    measureKeyFifthsFromImportRef.current = measureKeyFifthsFromImport
+  }, [measureKeyFifthsFromImport])
 
   useEffect(() => {
     measurePairsRef.current = measurePairs
@@ -1500,32 +1597,27 @@ function App() {
   }
 
   const commitDragPitchToScore = (drag: DragState, pitch: Pitch) => {
-    if (measurePairsFromImportRef.current) {
+    const importedPairs = measurePairsFromImportRef.current
+    if (importedPairs) {
       const location = importedNoteLookupRef.current.get(drag.noteId)
-      if (location) {
-        setMeasurePairsFromImport((current) => {
-          if (!current) return current
-          const next = updateMeasurePairPitchAt(current, location, pitch)
-          measurePairsFromImportRef.current = next
-          return next
-        })
-        return
-      }
+      const updated = location
+        ? updateMeasurePairPitchAt(importedPairs, location, pitch)
+        : updateMeasurePairsPitch(importedPairs, drag.noteId, pitch)
+      const normalizeIndex = location?.pairIndex ?? drag.pairIndex
+      const normalized = normalizeMeasurePairAt(updated, normalizeIndex, measureKeyFifthsFromImportRef.current)
 
-      setMeasurePairsFromImport((current) => {
-        if (!current) return current
-        const next = updateMeasurePairsPitch(current, drag.noteId, pitch)
-        measurePairsFromImportRef.current = next
-        return next
-      })
+      measurePairsFromImportRef.current = normalized
+      setMeasurePairsFromImport(normalized)
+      setNotes(flattenTrebleFromPairs(normalized))
+      setBassNotes(flattenBassFromPairs(normalized))
       return
     }
 
-    if (drag.staff === 'treble') {
-      setNotes((current) => updateNotePitch(current, drag.noteId, pitch))
-    } else {
-      setBassNotes((current) => updateNotePitch(current, drag.noteId, pitch))
-    }
+    const currentPairs = measurePairsRef.current
+    const updated = updateMeasurePairsPitch(currentPairs, drag.noteId, pitch)
+    const normalized = normalizeMeasurePairAt(updated, drag.pairIndex, null)
+    setNotes(flattenTrebleFromPairs(normalized))
+    setBassNotes(flattenBassFromPairs(normalized))
   }
 
   const flushPendingDrag = () => {
@@ -1578,12 +1670,6 @@ function App() {
     }
     commitDragPitchToScore(drag, finalPitch)
 
-    const importedPairs = measurePairsFromImportRef.current
-    if (importedPairs) {
-      setNotes(flattenTrebleFromPairs(importedPairs))
-      setBassNotes(flattenBassFromPairs(importedPairs))
-    }
-
     dragRef.current = null
     clearDragOverlay()
     setDraggingSelection(null)
@@ -1623,6 +1709,8 @@ function App() {
     setBassNotes(result.bassNotes)
     setMeasurePairsFromImport(result.measurePairs)
     measurePairsFromImportRef.current = result.measurePairs
+    setMeasureKeyFifthsFromImport(result.measureKeyFifths)
+    measureKeyFifthsFromImportRef.current = result.measureKeyFifths
     importedNoteLookupRef.current = buildImportedNoteLookup(result.measurePairs)
     dragRef.current = null
     clearDragOverlay()
@@ -1691,6 +1779,8 @@ function App() {
     setBassNotes(INITIAL_BASS_NOTES)
     setMeasurePairsFromImport(null)
     measurePairsFromImportRef.current = null
+    setMeasureKeyFifthsFromImport(null)
+    measureKeyFifthsFromImportRef.current = null
     importedNoteLookupRef.current.clear()
     dragRef.current = null
     clearDragOverlay()
@@ -1704,6 +1794,8 @@ function App() {
   const runAiDraft = () => {
     setMeasurePairsFromImport(null)
     measurePairsFromImportRef.current = null
+    setMeasureKeyFifthsFromImport(null)
+    measureKeyFifthsFromImportRef.current = null
     importedNoteLookupRef.current.clear()
     dragRef.current = null
     clearDragOverlay()
@@ -1717,6 +1809,8 @@ function App() {
     setIsRhythmLinked(true)
     setMeasurePairsFromImport(null)
     measurePairsFromImportRef.current = null
+    setMeasureKeyFifthsFromImport(null)
+    measureKeyFifthsFromImportRef.current = null
     importedNoteLookupRef.current.clear()
     dragRef.current = null
     clearDragOverlay()
@@ -1746,8 +1840,23 @@ function App() {
     if (!hitNote) return
 
     event.preventDefault()
-    const sourceNotes = hitNote.staff === 'treble' ? notes : bassNotes
-    const current = sourceNotes.find((note) => note.id === hitNote.id)
+    let current: ScoreNote | undefined
+    const importedPairs = measurePairsFromImportRef.current
+    if (importedPairs) {
+      const located = importedNoteLookupRef.current.get(hitNote.id)
+      if (located) {
+        const pair = importedPairs[located.pairIndex]
+        current = (located.staff === 'treble' ? pair?.treble : pair?.bass)?.[located.noteIndex]
+      }
+      if (!current) {
+        const pair = importedPairs[hitNote.pairIndex]
+        current = (hitNote.staff === 'treble' ? pair?.treble : pair?.bass)?.[hitNote.noteIndex]
+      }
+    }
+    if (!current) {
+      const sourceNotes = hitNote.staff === 'treble' ? notes : bassNotes
+      current = sourceNotes.find((note) => note.id === hitNote.id)
+    }
     const noteCenterY = hitNote.y
     const grabOffsetY = y - noteCenterY
     const pitch = current?.pitch ?? getNearestPitchByY(noteCenterY, hitNote.pitchYMap)
