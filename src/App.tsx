@@ -64,6 +64,7 @@ type DragState = {
   noteIndex: number
   pointerId: number
   pitch: Pitch
+  previewStarted: boolean
   grabOffsetY: number
   pitchYMap: Record<Pitch, number>
 }
@@ -76,6 +77,7 @@ type MeasureLayout = {
   bassY: number
   systemTop: number
   isSystemStart: boolean
+  noteStartX: number
   overlayRect: {
     x: number
     y: number
@@ -722,22 +724,27 @@ function getVisibleSystemRange(scrollTop: number, viewportHeight: number, system
 }
 
 function buildMeasureOverlayRect(
+  noteMinX: number,
+  noteMaxX: number,
   measureX: number,
   measureWidth: number,
   systemTop: number,
   scoreWidth: number,
   scoreHeight: number,
-  isSystemStart: boolean,
 ): MeasureLayout['overlayRect'] {
-  const leftPad = isSystemStart ? 20 : 4
-  const rightPad = 6
+  const leftPad = 20
+  const rightPad = 28
   const topPad = 34
   const bottomPad = 42
-  const x = clamp(measureX - leftPad, 0, scoreWidth)
+  const noteLeft = Number.isFinite(noteMinX) ? noteMinX : measureX + 18
+  const noteRight = Number.isFinite(noteMaxX) ? noteMaxX : measureX + measureWidth - 12
+  const measureRight = measureX + measureWidth
+  const x = clamp(Math.floor(noteLeft - leftPad), 0, scoreWidth)
+  const right = clamp(Math.ceil(noteRight + rightPad), x, Math.min(scoreWidth, measureRight))
   const y = clamp(systemTop - topPad, 0, scoreHeight)
   const maxWidth = scoreWidth - x
   const maxHeight = scoreHeight - y
-  const width = clamp(measureWidth + leftPad + rightPad, 0, maxWidth)
+  const width = clamp(right - x, 0, maxWidth)
   const height = clamp(SYSTEM_HEIGHT + topPad + bottomPad, 0, maxHeight)
   return { x, y, width, height }
 }
@@ -817,6 +824,7 @@ function App() {
   const rendererSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 })
   const overlayRendererRef = useRef<Renderer | null>(null)
   const overlayRendererSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 })
+  const overlayLastRectRef = useRef<MeasureLayout['overlayRect'] | null>(null)
   const stopPlayTimerRef = useRef<number | null>(null)
   const measurePairsFromImportRef = useRef<MeasurePair[] | null>(null)
   const importedNoteLookupRef = useRef<Map<string, ImportedNoteLocation>>(new Map())
@@ -842,6 +850,8 @@ function App() {
     draggingSelection: Selection | null
     previewNote?: { noteId: string; staff: StaffKind; pitch: Pitch } | null
     collectLayouts?: boolean
+    suppressSystemDecorations?: boolean
+    noteStartXOverride?: number
   }): NoteLayout[] => {
     const {
       context,
@@ -856,6 +866,8 @@ function App() {
       draggingSelection: dragging,
       previewNote = null,
       collectLayouts = true,
+      suppressSystemDecorations = false,
+      noteStartXOverride,
     } = params
     const noteLayouts: NoteLayout[] = []
 
@@ -868,7 +880,14 @@ function App() {
     const trebleStave = new Stave(measureX, trebleY, measureWidth)
     const bassStave = new Stave(measureX, bassY, measureWidth)
 
-    if (isSystemStart) {
+    if (suppressSystemDecorations) {
+      trebleStave.setBegBarType(BarlineType.NONE)
+      bassStave.setBegBarType(BarlineType.NONE)
+      if (typeof noteStartXOverride === 'number') {
+        trebleStave.setNoteStartX(noteStartXOverride)
+        bassStave.setNoteStartX(noteStartXOverride)
+      }
+    } else if (isSystemStart) {
       trebleStave.addClef('treble').addTimeSignature('4/4')
       bassStave.addClef('bass').addTimeSignature('4/4')
     } else {
@@ -879,11 +898,13 @@ function App() {
     trebleStave.setContext(context).draw()
     bassStave.setContext(context).draw()
 
-    if (isSystemStart) {
-      new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.BRACE).setContext(context).draw()
-      new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.SINGLE_LEFT).setContext(context).draw()
+    if (!suppressSystemDecorations) {
+      if (isSystemStart) {
+        new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.BRACE).setContext(context).draw()
+        new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.SINGLE_LEFT).setContext(context).draw()
+      }
+      new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.SINGLE_RIGHT).setContext(context).draw()
     }
-    new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.SINGLE_RIGHT).setContext(context).draw()
 
     const trebleVexNotes = measure.treble.map((note) => {
       const renderedPitch = resolvePitch(note, 'treble')
@@ -1078,13 +1099,42 @@ function App() {
         const pairIndex = start + indexInSystem
         const measureX = STAFF_X + indexInSystem * measureWidth
         const isSystemStart = indexInSystem === 0
+        const noteStartProbe = new Stave(measureX, trebleY, measureWidth)
+        if (isSystemStart) {
+          noteStartProbe.addClef('treble').addTimeSignature('4/4')
+        } else {
+          noteStartProbe.setBegBarType(BarlineType.NONE)
+        }
+        const noteStartX = noteStartProbe.getNoteStartX()
+        const measureNoteLayouts = drawMeasureToContext({
+          context,
+          measure,
+          pairIndex,
+          measureX,
+          measureWidth,
+          trebleY,
+          bassY,
+          isSystemStart,
+          activeSelection: null,
+          draggingSelection: null,
+        })
+
+        nextLayouts.push(...measureNoteLayouts)
+
+        let minNoteX = Number.POSITIVE_INFINITY
+        let maxNoteX = Number.NEGATIVE_INFINITY
+        for (const layout of measureNoteLayouts) {
+          if (layout.x < minNoteX) minNoteX = layout.x
+          if (layout.x > maxNoteX) maxNoteX = layout.x
+        }
         const overlayRect = buildMeasureOverlayRect(
+          minNoteX,
+          maxNoteX,
           measureX,
           measureWidth,
           systemTop,
           scoreWidth,
           scoreHeight,
-          isSystemStart,
         )
         nextMeasureLayouts.set(pairIndex, {
           pairIndex,
@@ -1094,23 +1144,9 @@ function App() {
           bassY,
           systemTop,
           isSystemStart,
+          noteStartX,
           overlayRect,
         })
-
-        nextLayouts.push(
-          ...drawMeasureToContext({
-            context,
-            measure,
-            pairIndex,
-            measureX,
-            measureWidth,
-            trebleY,
-            bassY,
-            isSystemStart,
-            activeSelection: null,
-            draggingSelection: null,
-          }),
-        )
       })
     }
 
@@ -1144,12 +1180,23 @@ function App() {
       rendererSizeRef.current = { width: 0, height: 0 }
       overlayRendererRef.current = null
       overlayRendererSizeRef.current = { width: 0, height: 0 }
+      overlayLastRectRef.current = null
     }
   }, [])
 
-  useEffect(() => {
-    drawSelectionOverlay(activeSelection)
-  }, [activeSelection, draggingSelection, measurePairs, visibleSystemRange.start, visibleSystemRange.end])
+  const clearOverlayRect = (ctx: CanvasRenderingContext2D, rect: MeasureLayout['overlayRect']) => {
+    const overlay = scoreOverlayRef.current
+    if (!overlay) return
+
+    const pad = 6
+    const x = clamp(Math.floor(rect.x) - pad, 0, overlay.width)
+    const y = clamp(Math.floor(rect.y) - pad, 0, overlay.height)
+    const maxWidth = overlay.width - x
+    const maxHeight = overlay.height - y
+    const width = clamp(Math.ceil(rect.width) + pad * 2, 0, maxWidth)
+    const height = clamp(Math.ceil(rect.height) + pad * 2, 0, maxHeight)
+    ctx.clearRect(x, y, width, height)
+  }
 
   const clearDragOverlay = () => {
     const overlay = scoreOverlayRef.current
@@ -1158,38 +1205,14 @@ function App() {
     if (!overlay2d) return
     overlay2d.save()
     overlay2d.globalCompositeOperation = 'source-over'
-    overlay2d.clearRect(0, 0, overlay.width, overlay.height)
-    overlay2d.fillStyle = '#000000'
-    overlay2d.strokeStyle = '#000000'
+    const previousRect = overlayLastRectRef.current
+    if (previousRect) {
+      clearOverlayRect(overlay2d, previousRect)
+      overlayLastRectRef.current = null
+    } else {
+      overlay2d.clearRect(0, 0, overlay.width, overlay.height)
+    }
     overlay2d.restore()
-  }
-
-  const drawOverlayNoteHead = (x: number, y: number, color: string) => {
-    const overlay = scoreOverlayRef.current
-    if (!overlay) return
-    const ctx = overlay.getContext('2d')
-    if (!ctx) return
-
-    ctx.save()
-    ctx.translate(x, y)
-    ctx.rotate(-0.32)
-    ctx.fillStyle = color
-    ctx.strokeStyle = color
-    ctx.lineWidth = 1.2
-    ctx.beginPath()
-    ctx.ellipse(0, 0, 8.5, 6, 0, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.stroke()
-    ctx.restore()
-  }
-
-  const drawSelectionOverlay = (selection: Selection) => {
-    if (draggingSelection) return
-
-    const layout = noteLayoutsRef.current.find((item) => item.id === selection.noteId && item.staff === selection.staff)
-    clearDragOverlay()
-    if (!layout) return
-    drawOverlayNoteHead(layout.x, layout.y, '#145f84')
   }
 
   const getOverlayContext = () => {
@@ -1216,10 +1239,27 @@ function App() {
     const overlay = scoreOverlayRef.current
     if (!measureLayout || !measure || !overlay) return
 
+    const overlay2d = overlay.getContext('2d')
+    if (!overlay2d) return
+
     const overlayContext = getOverlayContext()
     if (!overlayContext) return
 
-    clearDragOverlay()
+    const previousRect = overlayLastRectRef.current
+    if (previousRect) {
+      clearOverlayRect(overlay2d, previousRect)
+    }
+
+    overlay2d.save()
+    overlay2d.beginPath()
+    overlay2d.rect(
+      measureLayout.overlayRect.x,
+      measureLayout.overlayRect.y,
+      measureLayout.overlayRect.width,
+      measureLayout.overlayRect.height,
+    )
+    overlay2d.clip()
+
     overlayContext.save()
     overlayContext.setFillStyle('#ffffff')
     overlayContext.fillRect(
@@ -1241,11 +1281,16 @@ function App() {
       trebleY: measureLayout.trebleY,
       bassY: measureLayout.bassY,
       isSystemStart: measureLayout.isSystemStart,
-      activeSelection,
-      draggingSelection: { noteId: drag.noteId, staff: drag.staff },
+      activeSelection: null,
+      draggingSelection: null,
       previewNote: { noteId: drag.noteId, staff: drag.staff, pitch: drag.pitch },
       collectLayouts: false,
+      suppressSystemDecorations: true,
+      noteStartXOverride: measureLayout.noteStartX,
     })
+
+    overlay2d.restore()
+    overlayLastRectRef.current = measureLayout.overlayRect
   }
 
   const applyDragPreview = (drag: DragState, pitch: Pitch) => {
@@ -1306,6 +1351,12 @@ function App() {
   const onSurfacePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const drag = dragRef.current
     if (!drag || event.pointerId !== drag.pointerId) return
+
+    if (!drag.previewStarted) {
+      const nextDrag = { ...drag, previewStarted: true }
+      dragRef.current = nextDrag
+      drawDragMeasurePreview(nextDrag)
+    }
 
     const surface = scoreRef.current
     if (!surface) return
@@ -1514,13 +1565,12 @@ function App() {
       noteIndex: hitNote.noteIndex,
       pointerId: event.pointerId,
       pitch,
+      previewStarted: false,
       grabOffsetY,
       pitchYMap: hitNote.pitchYMap,
     }
 
     dragRef.current = dragState
-    clearDragOverlay()
-    drawOverlayNoteHead(hitNote.x, hitNote.y, '#0e9ac7')
     setActiveSelection({ noteId: hitNote.id, staff: hitNote.staff })
     setDraggingSelection({ noteId: hitNote.id, staff: hitNote.staff })
     event.currentTarget.setPointerCapture(event.pointerId)
