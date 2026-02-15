@@ -727,20 +727,32 @@ function getVisibleSystemRange(scrollTop: number, viewportHeight: number, system
 function buildMeasureOverlayRect(
   noteMinX: number,
   noteMaxX: number,
+  noteStartX: number,
   measureX: number,
   measureWidth: number,
   systemTop: number,
   scoreWidth: number,
   scoreHeight: number,
+  isSystemStart: boolean,
 ): MeasureLayout['overlayRect'] {
   const leftPad = 20
   const rightPad = 28
   const topPad = 34
   const bottomPad = 42
-  const noteLeft = Number.isFinite(noteMinX) ? noteMinX : measureX + 18
+  const systemStartDecorationGuard = 2
+  const interMeasureBarlineGuard = 2
+  const noteLeft = Number.isFinite(noteMinX) ? noteMinX : noteStartX
   const noteRight = Number.isFinite(noteMaxX) ? noteMaxX : measureX + measureWidth - 12
   const measureRight = measureX + measureWidth
-  const x = clamp(Math.floor(noteLeft - leftPad), 0, scoreWidth)
+  let leftEdge = Math.floor(noteLeft - leftPad)
+  if (isSystemStart) {
+    const minSafeLeft = Math.floor(noteStartX + systemStartDecorationGuard)
+    leftEdge = Math.max(leftEdge, minSafeLeft)
+  } else {
+    const minSafeLeft = Math.floor(measureX + interMeasureBarlineGuard)
+    leftEdge = Math.max(leftEdge, minSafeLeft)
+  }
+  const x = clamp(leftEdge, 0, scoreWidth)
   const right = clamp(Math.ceil(noteRight + rightPad), x, Math.min(scoreWidth, measureRight))
   const y = clamp(systemTop - topPad, 0, scoreHeight)
   const maxWidth = scoreWidth - x
@@ -1131,11 +1143,13 @@ function App() {
         const overlayRect = buildMeasureOverlayRect(
           minNoteX,
           maxNoteX,
+          noteStartX,
           measureX,
           measureWidth,
           systemTop,
           scoreWidth,
           scoreHeight,
+          isSystemStart,
         )
         nextMeasureLayouts.set(pairIndex, {
           pairIndex,
