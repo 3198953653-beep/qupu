@@ -201,6 +201,7 @@
   inset: 0;
   touch-action: none;
   cursor: grab;
+  z-index: 2;
 }
 
 .score-surface.is-dragging,

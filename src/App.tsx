@@ -656,7 +656,15 @@ function getHitNote(x: number, y: number, layouts: NoteLayout[], radius = 24): N
 }
 
 function updateNotePitch(notes: ScoreNote[], noteId: string, pitch: Pitch): ScoreNote[] {
-  return notes.map((note) => (note.id === noteId ? { ...note, pitch } : note))
+  const noteIndex = notes.findIndex((note) => note.id === noteId)
+  if (noteIndex < 0) return notes
+
+  const source = notes[noteIndex]
+  if (source.pitch === pitch) return notes
+
+  const next = notes.slice()
+  next[noteIndex] = { ...source, pitch }
+  return next
 }
 
 function flattenTrebleFromPairs(pairs: MeasurePair[]): ScoreNote[] {
@@ -668,10 +676,29 @@ function flattenBassFromPairs(pairs: MeasurePair[]): ScoreNote[] {
 }
 
 function updateMeasurePairsPitch(pairs: MeasurePair[], noteId: string, pitch: Pitch): MeasurePair[] {
-  return pairs.map((pair) => ({
-    treble: updateNotePitch(pair.treble, noteId, pitch),
-    bass: updateNotePitch(pair.bass, noteId, pitch),
-  }))
+  let changed = false
+  const nextPairs = pairs.map((pair) => {
+    const nextTreble = updateNotePitch(pair.treble, noteId, pitch)
+    const nextBass = updateNotePitch(pair.bass, noteId, pitch)
+    if (nextTreble === pair.treble && nextBass === pair.bass) return pair
+    changed = true
+    return { treble: nextTreble, bass: nextBass }
+  })
+
+  return changed ? nextPairs : pairs
+}
+
+function getVisibleSystemRange(scrollTop: number, viewportHeight: number, systemCount: number): { start: number; end: number } {
+  if (systemCount <= 1) return { start: 0, end: 0 }
+
+  const systemStride = SYSTEM_HEIGHT + SYSTEM_GAP_Y
+  const startOffset = Math.max(0, scrollTop - SCORE_TOP_PADDING)
+  const endOffset = Math.max(0, scrollTop + viewportHeight - SCORE_TOP_PADDING)
+  const bufferSystems = 1
+
+  const start = clamp(Math.floor(startOffset / systemStride) - bufferSystems, 0, systemCount - 1)
+  const end = clamp(Math.ceil(endOffset / systemStride) + bufferSystems, 0, systemCount - 1)
+  return { start, end }
 }
 
 function buildImportedNoteLookup(pairs: MeasurePair[]): Map<string, ImportedNoteLocation> {
@@ -731,8 +758,10 @@ function App() {
   const [importFeedback, setImportFeedback] = useState<ImportFeedback>({ kind: 'idle', message: '' })
   const [isRhythmLinked, setIsRhythmLinked] = useState(true)
   const [measurePairsFromImport, setMeasurePairsFromImport] = useState<MeasurePair[] | null>(null)
+  const [visibleSystemRange, setVisibleSystemRange] = useState<{ start: number; end: number }>({ start: 0, end: 0 })
 
   const scoreRef = useRef<HTMLCanvasElement | null>(null)
+  const scoreScrollRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const synthRef = useRef<Tone.PolySynth | null>(null)
 
@@ -740,6 +769,8 @@ function App() {
   const dragRef = useRef<DragState | null>(null)
   const dragRafRef = useRef<number | null>(null)
   const dragPendingRef = useRef<{ drag: DragState; pitch: Pitch } | null>(null)
+  const rendererRef = useRef<Renderer | null>(null)
+  const rendererSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 })
   const stopPlayTimerRef = useRef<number | null>(null)
   const measurePairsFromImportRef = useRef<MeasurePair[] | null>(null)
   const importedNoteLookupRef = useRef<Map<string, ImportedNoteLocation>>(new Map())
@@ -768,16 +799,63 @@ function App() {
   }, [notes, isRhythmLinked])
 
   useEffect(() => {
+    const scrollHost = scoreScrollRef.current
+    if (!scrollHost) return
+
+    let rafId: number | null = null
+
+    const updateVisibleRange = () => {
+      const next = getVisibleSystemRange(scrollHost.scrollTop, scrollHost.clientHeight, systemCount)
+      setVisibleSystemRange((current) => {
+        if (current.start === next.start && current.end === next.end) return current
+        return next
+      })
+    }
+
+    const scheduleVisibleRangeUpdate = () => {
+      if (rafId !== null) return
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null
+        updateVisibleRange()
+      })
+    }
+
+    updateVisibleRange()
+    scrollHost.addEventListener('scroll', scheduleVisibleRangeUpdate, { passive: true })
+    window.addEventListener('resize', scheduleVisibleRangeUpdate)
+
+    return () => {
+      scrollHost.removeEventListener('scroll', scheduleVisibleRangeUpdate)
+      window.removeEventListener('resize', scheduleVisibleRangeUpdate)
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId)
+      }
+    }
+  }, [systemCount])
+
+  useEffect(() => {
     const root = scoreRef.current
     if (!root) return
 
-    const renderer = new Renderer(root, SCORE_RENDER_BACKEND)
-    renderer.resize(scoreWidth, scoreHeight)
+    let renderer = rendererRef.current
+    if (!renderer) {
+      renderer = new Renderer(root, SCORE_RENDER_BACKEND)
+      rendererRef.current = renderer
+    }
+    const currentSize = rendererSizeRef.current
+    if (currentSize.width !== scoreWidth || currentSize.height !== scoreHeight) {
+      renderer.resize(scoreWidth, scoreHeight)
+      rendererSizeRef.current = { width: scoreWidth, height: scoreHeight }
+    }
     const context = renderer.getContext()
+    context.clear()
 
     const nextLayouts: NoteLayout[] = []
+    const maxSystemIndex = Math.max(0, systemCount - 1)
+    const startSystem = clamp(visibleSystemRange.start, 0, maxSystemIndex)
+    const endSystem = clamp(visibleSystemRange.end, startSystem, maxSystemIndex)
 
-    for (let systemIndex = 0; systemIndex < systemCount; systemIndex += 1) {
+    for (let systemIndex = startSystem; systemIndex <= endSystem; systemIndex += 1) {
       const start = systemIndex * measuresPerLine
       const systemMeasures = measurePairs.slice(start, start + measuresPerLine)
       if (systemMeasures.length === 0) continue
@@ -903,7 +981,17 @@ function App() {
     }
 
     noteLayoutsRef.current = nextLayouts
-  }, [measurePairs, scoreWidth, scoreHeight, systemCount, measuresPerLine, activeSelection, draggingSelection])
+  }, [
+    measurePairs,
+    scoreWidth,
+    scoreHeight,
+    systemCount,
+    measuresPerLine,
+    activeSelection,
+    draggingSelection,
+    visibleSystemRange.start,
+    visibleSystemRange.end,
+  ])
 
   useEffect(() => {
     synthRef.current = new Tone.PolySynth(Tone.Synth).toDestination()
@@ -919,21 +1007,26 @@ function App() {
       }
       dragRafRef.current = null
       dragPendingRef.current = null
+      rendererRef.current = null
+      rendererSizeRef.current = { width: 0, height: 0 }
     }
   }, [])
 
-  const commitDrag = (drag: DragState, pitch: Pitch) => {
+  const applyDragPreview = (drag: DragState, pitch: Pitch) => {
     if (pitch === drag.pitch) return
 
     const nextDrag = { ...drag, pitch }
     dragRef.current = nextDrag
+    commitDragPitchToScore(nextDrag, pitch)
+  }
 
+  const commitDragPitchToScore = (drag: DragState, pitch: Pitch) => {
     if (measurePairsFromImportRef.current) {
-      const location = importedNoteLookupRef.current.get(nextDrag.noteId)
+      const location = importedNoteLookupRef.current.get(drag.noteId)
       if (location) {
         setMeasurePairsFromImport((current) => {
           if (!current) return current
-          const next = updateMeasurePairPitchAt(current, location, nextDrag.pitch)
+          const next = updateMeasurePairPitchAt(current, location, pitch)
           measurePairsFromImportRef.current = next
           return next
         })
@@ -942,17 +1035,17 @@ function App() {
 
       setMeasurePairsFromImport((current) => {
         if (!current) return current
-        const next = updateMeasurePairsPitch(current, nextDrag.noteId, nextDrag.pitch)
+        const next = updateMeasurePairsPitch(current, drag.noteId, pitch)
         measurePairsFromImportRef.current = next
         return next
       })
       return
     }
 
-    if (nextDrag.staff === 'treble') {
-      setNotes((current) => updateNotePitch(current, nextDrag.noteId, nextDrag.pitch))
+    if (drag.staff === 'treble') {
+      setNotes((current) => updateNotePitch(current, drag.noteId, pitch))
     } else {
-      setBassNotes((current) => updateNotePitch(current, nextDrag.noteId, nextDrag.pitch))
+      setBassNotes((current) => updateNotePitch(current, drag.noteId, pitch))
     }
   }
 
@@ -962,7 +1055,7 @@ function App() {
     if (!pending) return
 
     dragPendingRef.current = null
-    commitDrag(pending.drag, pending.pitch)
+    applyDragPreview(pending.drag, pending.pitch)
   }
 
   const scheduleDragCommit = (drag: DragState, pitch: Pitch) => {
@@ -998,9 +1091,11 @@ function App() {
     }
     const pending = dragPendingRef.current
     dragPendingRef.current = null
+    let finalPitch = drag.pitch
     if (pending && pending.drag.pointerId === drag.pointerId) {
-      commitDrag(pending.drag, pending.pitch)
+      finalPitch = pending.pitch
     }
+    commitDragPitchToScore(drag, finalPitch)
 
     const importedPairs = measurePairsFromImportRef.current
     if (importedPairs) {
@@ -1047,6 +1142,7 @@ function App() {
     setMeasurePairsFromImport(result.measurePairs)
     measurePairsFromImportRef.current = result.measurePairs
     importedNoteLookupRef.current = buildImportedNoteLookup(result.measurePairs)
+    dragRef.current = null
     setDraggingSelection(null)
 
     if (result.trebleNotes[0]) {
@@ -1113,6 +1209,7 @@ function App() {
     setMeasurePairsFromImport(null)
     measurePairsFromImportRef.current = null
     importedNoteLookupRef.current.clear()
+    dragRef.current = null
     setActiveSelection({ noteId: INITIAL_NOTES[0].id, staff: 'treble' })
     setDraggingSelection(null)
     setRhythmPreset('quarter')
@@ -1124,6 +1221,7 @@ function App() {
     setMeasurePairsFromImport(null)
     measurePairsFromImportRef.current = null
     importedNoteLookupRef.current.clear()
+    dragRef.current = null
     setNotes((current) => createAiVariation(current))
   }
 
@@ -1135,6 +1233,7 @@ function App() {
     setMeasurePairsFromImport(null)
     measurePairsFromImportRef.current = null
     importedNoteLookupRef.current.clear()
+    dragRef.current = null
 
     let nextActive = ''
     setNotes((current) => {
@@ -1184,6 +1283,8 @@ function App() {
 
   const activePool = activeSelection.staff === 'treble' ? notes : bassNotes
   const currentSelection = activePool.find((note) => note.id === activeSelection.noteId) ?? activePool[0] ?? notes[0]
+  const trebleSequenceText = useMemo(() => notes.map((note) => toDisplayPitch(note.pitch)).join('  |  '), [notes])
+  const bassSequenceText = useMemo(() => bassNotes.map((note) => toDisplayPitch(note.pitch)).join('  |  '), [bassNotes])
 
   return (
     <main className="app-shell">
@@ -1255,7 +1356,7 @@ function App() {
       </section>
 
       <section className="board">
-        <div className="score-scroll">
+        <div className="score-scroll" ref={scoreScrollRef}>
           <div className="score-stage" style={{ width: `${scoreWidth}px`, height: `${scoreHeight}px` }}>
             <canvas
               className={`score-surface ${draggingSelection ? 'is-dragging' : ''}`}
@@ -1283,8 +1384,8 @@ function App() {
             Position: <strong>{activePool.findIndex((note) => note.id === currentSelection.id) + 1}</strong> /{' '}
             {activePool.length}
           </p>
-          <p className="sequence">Treble: {notes.map((note) => toDisplayPitch(note.pitch)).join('  |  ')}</p>
-          <p className="sequence">Bass: {bassNotes.map((note) => toDisplayPitch(note.pitch)).join('  |  ')}</p>
+          <p className="sequence">Treble: {trebleSequenceText}</p>
+          <p className="sequence">Bass: {bassSequenceText}</p>
         </div>
       </section>
     </main>
