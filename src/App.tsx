@@ -330,6 +330,23 @@ const STEP_TO_SEMITONE: Record<string, number> = {
 }
 const KEY_SHARP_ORDER = ['F', 'C', 'G', 'D', 'A', 'E', 'B'] as const
 const KEY_FLAT_ORDER = ['B', 'E', 'A', 'D', 'G', 'C', 'F'] as const
+const KEY_FIFTHS_TO_MAJOR: Record<number, string> = {
+  [-7]: 'Cb',
+  [-6]: 'Gb',
+  [-5]: 'Db',
+  [-4]: 'Ab',
+  [-3]: 'Eb',
+  [-2]: 'Bb',
+  [-1]: 'F',
+  0: 'C',
+  1: 'G',
+  2: 'D',
+  3: 'A',
+  4: 'E',
+  5: 'B',
+  6: 'F#',
+  7: 'C#',
+}
 
 const pitchLineCache = new Map<string, number>()
 
@@ -427,6 +444,11 @@ function getKeySignatureAlterForStep(step: string, fifths: number): number {
     return flatSteps.includes(step as (typeof KEY_FLAT_ORDER)[number]) ? -1 : 0
   }
   return 0
+}
+
+function getKeySignatureSpecFromFifths(fifths: number): string {
+  const clamped = clamp(Math.trunc(fifths), -7, 7)
+  return KEY_FIFTHS_TO_MAJOR[clamped] ?? 'C'
 }
 
 function resolvePitchByAccidentalState(
@@ -1643,6 +1665,8 @@ function App() {
     trebleY: number
     bassY: number
     isSystemStart: boolean
+    keyFifths: number
+    showKeySignature: boolean
     activeSelection: Selection | null
     draggingSelection: Selection | null
     previewNote?: { noteId: string; staff: StaffKind; pitch: Pitch; keyIndex: number } | null
@@ -1659,6 +1683,8 @@ function App() {
       trebleY,
       bassY,
       isSystemStart,
+      keyFifths,
+      showKeySignature,
       activeSelection: selection,
       draggingSelection: dragging,
       previewNote = null,
@@ -1702,11 +1728,23 @@ function App() {
         bassStave.setNoteStartX(noteStartXOverride)
       }
     } else if (isSystemStart) {
-      trebleStave.addClef('treble').addTimeSignature('4/4')
-      bassStave.addClef('bass').addTimeSignature('4/4')
+      trebleStave.addClef('treble')
+      bassStave.addClef('bass')
+      if (showKeySignature) {
+        const keySignature = getKeySignatureSpecFromFifths(keyFifths)
+        trebleStave.addKeySignature(keySignature)
+        bassStave.addKeySignature(keySignature)
+      }
+      trebleStave.addTimeSignature('4/4')
+      bassStave.addTimeSignature('4/4')
     } else {
       trebleStave.setBegBarType(BarlineType.NONE)
       bassStave.setBegBarType(BarlineType.NONE)
+      if (showKeySignature) {
+        const keySignature = getKeySignatureSpecFromFifths(keyFifths)
+        trebleStave.addKeySignature(keySignature)
+        bassStave.addKeySignature(keySignature)
+      }
     }
 
     trebleStave.setContext(context).draw()
@@ -1996,11 +2034,21 @@ function App() {
         const pairIndex = start + indexInSystem
         const measureX = STAFF_X + indexInSystem * measureWidth
         const isSystemStart = indexInSystem === 0
+        const keyFifths = measureKeyFifthsFromImport?.[pairIndex] ?? measureKeyFifthsFromImport?.[pairIndex - 1] ?? 0
+        const previousKeyFifths = pairIndex > 0 ? (measureKeyFifthsFromImport?.[pairIndex - 1] ?? 0) : keyFifths
+        const showKeySignature = isSystemStart || keyFifths !== previousKeyFifths
         const noteStartProbe = new Stave(measureX, trebleY, measureWidth)
         if (isSystemStart) {
-          noteStartProbe.addClef('treble').addTimeSignature('4/4')
+          noteStartProbe.addClef('treble')
+          if (showKeySignature) {
+            noteStartProbe.addKeySignature(getKeySignatureSpecFromFifths(keyFifths))
+          }
+          noteStartProbe.addTimeSignature('4/4')
         } else {
           noteStartProbe.setBegBarType(BarlineType.NONE)
+          if (showKeySignature) {
+            noteStartProbe.addKeySignature(getKeySignatureSpecFromFifths(keyFifths))
+          }
         }
         const noteStartX = noteStartProbe.getNoteStartX()
         const measureNoteLayouts = drawMeasureToContext({
@@ -2012,6 +2060,8 @@ function App() {
           trebleY,
           bassY,
           isSystemStart,
+          keyFifths,
+          showKeySignature,
           activeSelection,
           draggingSelection: null,
         })
@@ -2062,6 +2112,7 @@ function App() {
     activeSelection.noteId,
     activeSelection.staff,
     activeSelection.keyIndex,
+    measureKeyFifthsFromImport,
   ])
 
   useEffect(() => {
@@ -2169,6 +2220,8 @@ function App() {
       trebleY: measureLayout.trebleY - overlayFrame.y,
       bassY: measureLayout.bassY - overlayFrame.y,
       isSystemStart: measureLayout.isSystemStart,
+      keyFifths: measureKeyFifthsFromImportRef.current?.[measureLayout.pairIndex] ?? 0,
+      showKeySignature: false,
       activeSelection: null,
       draggingSelection: null,
       previewNote: { noteId: drag.noteId, staff: drag.staff, pitch: drag.pitch, keyIndex: drag.keyIndex },
