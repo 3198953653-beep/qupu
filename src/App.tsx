@@ -1757,11 +1757,18 @@ function App() {
 
     const trebleStave = new Stave(measureX, trebleY, measureWidth)
     const bassStave = new Stave(measureX, bassY, measureWidth)
+    const setImplicitClefContext = (stave: Stave, clefSpec: 'treble' | 'bass') => {
+      // Keep correct clef-dependent modifier placement on mid-system measures
+      // without drawing an extra clef glyph.
+      ;(stave as unknown as { clef: string }).clef = clefSpec
+    }
 
     if (suppressSystemDecorations) {
       trebleStave.setBegBarType(BarlineType.NONE)
       bassStave.setBegBarType(BarlineType.NONE)
       if (!isSystemStart) {
+        setImplicitClefContext(trebleStave, 'treble')
+        setImplicitClefContext(bassStave, 'bass')
         if (showKeySignature) {
           const keySignature = getKeySignatureSpecFromFifths(keyFifths)
           trebleStave.addKeySignature(keySignature)
@@ -1791,6 +1798,8 @@ function App() {
     } else {
       trebleStave.setBegBarType(BarlineType.NONE)
       bassStave.setBegBarType(BarlineType.NONE)
+      setImplicitClefContext(trebleStave, 'treble')
+      setImplicitClefContext(bassStave, 'bass')
       if (showKeySignature) {
         const keySignature = getKeySignatureSpecFromFifths(keyFifths)
         trebleStave.addKeySignature(keySignature)
