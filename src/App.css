@@ -252,6 +252,37 @@
   color: #1f4a61;
 }
 
+.debug-tools {
+  margin-top: 0.45rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.debug-tools button {
+  border: 1px solid #c3d2db;
+  background: #ffffff;
+  color: #123246;
+  border-radius: 10px;
+  font-weight: 600;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.82rem;
+}
+
+.debug-log {
+  width: 100%;
+  min-height: 220px;
+  border: 1px solid #cddbe4;
+  border-radius: 10px;
+  background: #f7fbff;
+  color: #16384b;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  font-family: 'Consolas', 'Courier New', monospace;
+  padding: 0.55rem;
+  resize: vertical;
+}
+
 @media (max-width: 700px) {
   .hero {
     padding: 1rem;

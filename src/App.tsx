@@ -13,6 +13,8 @@ const SYSTEM_HEIGHT = 208
 const STAFF_X = SCORE_PAGE_PADDING_X
 const SCORE_RENDER_BACKEND = Renderer.Backends.CANVAS
 const QUARTER_NOTE_SECONDS = 0.5
+const PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX = -8
+const PREVIEW_START_THRESHOLD_PX = 3
 
 const PIANO_MIN_MIDI = 21 // A0
 const PIANO_MAX_MIDI = 108 // C8
@@ -72,6 +74,7 @@ type ImportFeedback = {
 }
 
 type NoteHeadLayout = {
+  x: number
   y: number
   pitch: Pitch
   keyIndex: number
@@ -86,6 +89,47 @@ type NoteLayout = {
   y: number
   pitchYMap: Record<Pitch, number>
   noteHeads: NoteHeadLayout[]
+  accidentalRightXByKeyIndex: Record<number, number>
+}
+
+type DragDebugStaticRecord = {
+  staff: StaffKind
+  noteId: string
+  noteIndex: number
+  noteX: number
+  headXByKeyIndex: Map<number, number>
+  accidentalRightXByKeyIndex: Map<number, number>
+}
+
+type DragDebugRow = {
+  frame: number
+  pairIndex: number
+  staff: StaffKind
+  noteId: string
+  noteIndex: number
+  keyIndex: number
+  pitch: Pitch
+  noteXStatic: number | null
+  noteXPreview: number | null
+  noteXDelta: number | null
+  headXStatic: number | null
+  headXPreview: number | null
+  headXDelta: number | null
+  accidentalRightXStatic: number | null
+  accidentalRightXPreview: number | null
+  accidentalRightXDelta: number | null
+  hasAccidentalModifier: boolean
+  accidentalTargetRightX: number | null
+  accidentalLockApplied: boolean
+  accidentalLockReason: string
+}
+
+type DragDebugSnapshot = {
+  frame: number
+  pairIndex: number
+  draggedNoteId: string
+  draggedStaff: StaffKind
+  rows: DragDebugRow[]
 }
 
 type Selection = {
@@ -102,12 +146,15 @@ type DragState = {
   noteIndex: number
   pointerId: number
   surfaceTop: number
+  startClientY: number
   pitch: Pitch
   previewStarted: boolean
   grabOffsetY: number
   pitchYMap: Record<Pitch, number>
   keyFifths: number
   accidentalStateBeforeNote: Map<string, number>
+  previewAccidentalRightXById: Map<string, Map<number, number>>
+  debugStaticByNoteKey: Map<string, DragDebugStaticRecord>
 }
 
 type MeasureLayout = {
@@ -443,6 +490,50 @@ function getLayoutNoteKey(staff: StaffKind, noteId: string): string {
 
 function getRenderedNoteVisualX(note: StaveNote): number {
   return note.getNoteHeadBeginX()
+}
+
+function finiteOrNull(value: number | undefined | null): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function deltaOrNull(preview: number | null, baseline: number | null): number | null {
+  if (preview === null || baseline === null) return null
+  return preview - baseline
+}
+
+function roundNumber(value: number, digits = 3): number {
+  const base = 10 ** digits
+  return Math.round(value * base) / base
+}
+
+function getAccidentalVisualX(note: StaveNote, modifier: Accidental, renderedIndex: number): number | null {
+  const absoluteX = (modifier as unknown as { getAbsoluteX?: () => number }).getAbsoluteX?.()
+  if (typeof absoluteX === 'number' && Number.isFinite(absoluteX)) return absoluteX
+  const start = note.getModifierStartXY(1, renderedIndex)
+  const startX = start?.x
+  if (!Number.isFinite(startX)) return null
+  // Mirror VexFlow Accidental.draw(): x = start.x - width (+ xShift at render time).
+  const width = modifier.getWidth()
+  const fallbackX = startX - width + modifier.getXShift()
+  return Number.isFinite(fallbackX) ? fallbackX : null
+}
+
+function getAccidentalRightXByRenderedIndex(note: StaveNote): Map<number, number> {
+  const positions = new Map<number, number>()
+  note.getModifiersByType(Accidental.CATEGORY).forEach((modifier) => {
+    const renderedIndex = modifier.getIndex()
+    if (renderedIndex === undefined) return
+    const rightX = getAccidentalVisualX(note, modifier as Accidental, renderedIndex)
+    if (rightX === null) return
+    positions.set(renderedIndex, rightX)
+  })
+  return positions
+}
+
+function addModifierXShift(modifier: Accidental, delta: number): void {
+  const raw = modifier as unknown as { xShift?: number }
+  const current = typeof raw.xShift === 'number' ? raw.xShift : modifier.getXShift()
+  raw.xShift = current + delta
 }
 
 function getEffectiveAlterFromContext(
@@ -1668,7 +1759,7 @@ function getHitNote(x: number, y: number, layouts: NoteLayout[], radius = 24): H
 
   for (const layout of layouts) {
     for (const head of layout.noteHeads) {
-      const distance = Math.hypot(layout.x - x, head.y - y)
+      const distance = Math.hypot(head.x - x, head.y - y)
       if (distance < winnerDistance) {
         winnerLayout = layout
         winnerHead = head
@@ -1764,8 +1855,8 @@ function buildMeasureOverlayRect(
   isSystemStart: boolean,
   includeMeasureStartDecorations: boolean,
 ): MeasureLayout['overlayRect'] {
-  const leftPad = 20
-  const rightPad = 28
+  const leftPad = 56
+  const rightPad = 42
   const topPad = 34
   const bottomPad = 42
   const systemStartDecorationGuard = 2
@@ -1856,6 +1947,7 @@ function App() {
   const [measureTimeSignaturesFromImport, setMeasureTimeSignaturesFromImport] = useState<TimeSignature[] | null>(null)
   const [musicXmlMetadataFromImport, setMusicXmlMetadataFromImport] = useState<MusicXmlMetadata | null>(null)
   const [visibleSystemRange, setVisibleSystemRange] = useState<{ start: number; end: number }>({ start: 0, end: 0 })
+  const [dragDebugReport, setDragDebugReport] = useState<string>('')
 
   const scoreRef = useRef<HTMLCanvasElement | null>(null)
   const scoreOverlayRef = useRef<HTMLCanvasElement | null>(null)
@@ -1866,7 +1958,9 @@ function App() {
   const noteLayoutsRef = useRef<NoteLayout[]>([])
   const measureLayoutsRef = useRef<Map<number, MeasureLayout>>(new Map())
   const measurePairsRef = useRef<MeasurePair[]>([])
+  const dragDebugFramesRef = useRef<DragDebugSnapshot[]>([])
   const dragRef = useRef<DragState | null>(null)
+  const dragPreviewFrameRef = useRef(0)
   const dragRafRef = useRef<number | null>(null)
   const dragPendingRef = useRef<{ drag: DragState; pitch: Pitch } | null>(null)
   const rendererRef = useRef<Renderer | null>(null)
@@ -1915,6 +2009,14 @@ function App() {
     freezePreviewAccidentalLayout?: boolean
     formatWidthOverride?: number
     staticNoteXById?: Map<string, number> | null
+    staticAccidentalRightXById?: Map<string, Map<number, number>> | null
+    debugCapture?: {
+      frame: number
+      draggedNoteId: string
+      draggedStaff: StaffKind
+      staticByNoteKey: Map<string, DragDebugStaticRecord>
+      pushSnapshot: (snapshot: DragDebugSnapshot) => void
+    } | null
   }): NoteLayout[] => {
     const {
       context,
@@ -1941,12 +2043,16 @@ function App() {
       freezePreviewAccidentalLayout = false,
       formatWidthOverride,
       staticNoteXById = null,
+      staticAccidentalRightXById = null,
+      debugCapture = null,
     } = params
     const noteLayouts: NoteLayout[] = []
     const timeSignatureLabel = `${timeSignature.beats}/${timeSignature.beatType}`
     const endTimeSignatureLabel =
       showEndTimeSignature && endTimeSignature ? `${endTimeSignature.beats}/${endTimeSignature.beatType}` : null
     const lockPreviewAccidentalLayout = freezePreviewAccidentalLayout && previewNote !== null
+    const previewAccidentalByRowKey = new Map<string, number>()
+    const accidentalLockByRowKey = new Map<string, { targetRightX: number | null; applied: boolean; reason: string }>()
 
     const resolveRenderedNoteData = (
       note: ScoreNote,
@@ -2222,6 +2328,149 @@ function App() {
       measureRenderedDriftAfter('bass', measure.bass, bassRendered)
     }
 
+    if (staticAccidentalRightXById && staticAccidentalRightXById.size > 0) {
+      const alignRenderedAccidentalOffset = (
+        staff: StaffKind,
+        sourceNotes: ScoreNote[],
+        rendered: { vexNote: StaveNote; renderedKeys: RenderedNoteKey[] }[],
+      ) => {
+        sourceNotes.forEach((sourceNote, noteIndex) => {
+          const renderedEntry = rendered[noteIndex]
+          if (!renderedEntry) return
+          const layoutKey = getLayoutNoteKey(staff, sourceNote.id)
+          const targetByKeyIndex = staticAccidentalRightXById.get(layoutKey)
+          const noteBaseX = staticNoteXById?.get(layoutKey) ?? getRenderedNoteVisualX(renderedEntry.vexNote)
+          const accidentalModifiers = renderedEntry.vexNote
+            .getModifiersByType(Accidental.CATEGORY)
+            .map((modifier) => modifier as Accidental)
+
+          renderedEntry.renderedKeys.forEach((renderedKey, renderedIndex) => {
+            if (!renderedKey.accidental) return
+            const rowKey = `${layoutKey}|${renderedKey.keyIndex}`
+            const modifier = accidentalModifiers.find((item) => item.getIndex() === renderedIndex)
+            if (!modifier) {
+              accidentalLockByRowKey.set(rowKey, {
+                targetRightX: null,
+                applied: false,
+                reason: 'no-modifier',
+              })
+              return
+            }
+
+            const targetedX = targetByKeyIndex?.get(renderedKey.keyIndex)
+            const fallbackTarget = Number.isFinite(noteBaseX) ? noteBaseX + PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX : null
+            const targetRightX =
+              typeof targetedX === 'number' && Number.isFinite(targetedX)
+                ? targetedX
+                : fallbackTarget
+            if (targetRightX === null) {
+              accidentalLockByRowKey.set(rowKey, {
+                targetRightX: null,
+                applied: false,
+                reason: 'no-target',
+              })
+              return
+            }
+
+            const currentRightX = getAccidentalVisualX(renderedEntry.vexNote, modifier, renderedIndex)
+            if (currentRightX === null) {
+              accidentalLockByRowKey.set(rowKey, {
+                targetRightX,
+                applied: false,
+                reason: 'invalid-current-x',
+              })
+              return
+            }
+
+            const delta = targetRightX - currentRightX
+            if (Math.abs(delta) >= 0.001) {
+              addModifierXShift(modifier, delta)
+            }
+
+            const alignedRightX = getAccidentalVisualX(renderedEntry.vexNote, modifier, renderedIndex)
+            if (alignedRightX !== null) {
+              previewAccidentalByRowKey.set(rowKey, alignedRightX)
+            } else {
+              previewAccidentalByRowKey.set(rowKey, targetRightX)
+            }
+            accidentalLockByRowKey.set(rowKey, {
+              targetRightX,
+              applied: true,
+              reason: Math.abs(delta) >= 0.001 ? 'native-aligned' : 'native-already-aligned',
+            })
+          })
+        })
+      }
+
+      alignRenderedAccidentalOffset('treble', measure.treble, trebleRendered)
+      alignRenderedAccidentalOffset('bass', measure.bass, bassRendered)
+    }
+
+    if (debugCapture) {
+      const rows: DragDebugRow[] = []
+      const captureDebugRowsForStaff = (
+        staff: StaffKind,
+        sourceNotes: ScoreNote[],
+        rendered: { vexNote: StaveNote; renderedKeys: RenderedNoteKey[] }[],
+      ) => {
+        sourceNotes.forEach((sourceNote, noteIndex) => {
+          const renderedEntry = rendered[noteIndex]
+          if (!renderedEntry) return
+          const noteKey = getLayoutNoteKey(staff, sourceNote.id)
+          const staticRecord = debugCapture.staticByNoteKey.get(noteKey)
+          const noteXPreview = finiteOrNull(getRenderedNoteVisualX(renderedEntry.vexNote))
+          const noteXStatic = finiteOrNull(staticRecord?.noteX ?? null)
+          const accidentalPreviewByRenderedIndex = getAccidentalRightXByRenderedIndex(renderedEntry.vexNote)
+
+          renderedEntry.renderedKeys.forEach((renderedKey, renderedIndex) => {
+            const lockInfo = accidentalLockByRowKey.get(`${noteKey}|${renderedKey.keyIndex}`)
+            const rawHeadXPreview = finiteOrNull(renderedEntry.vexNote.noteHeads[renderedIndex]?.getAbsoluteX())
+            const headXPreview =
+              rawHeadXPreview !== null && Math.abs(rawHeadXPreview) > 0.0001 ? rawHeadXPreview : noteXPreview
+            const headXStatic = finiteOrNull(staticRecord?.headXByKeyIndex.get(renderedKey.keyIndex))
+            const previewByLock = finiteOrNull(previewAccidentalByRowKey.get(`${noteKey}|${renderedKey.keyIndex}`))
+            const accidentalRightXPreview =
+              previewByLock ?? finiteOrNull(accidentalPreviewByRenderedIndex.get(renderedIndex))
+            const accidentalRightXStatic = finiteOrNull(
+              staticRecord?.accidentalRightXByKeyIndex.get(renderedKey.keyIndex),
+            )
+            rows.push({
+              frame: debugCapture.frame,
+              pairIndex,
+              staff,
+              noteId: sourceNote.id,
+              noteIndex,
+              keyIndex: renderedKey.keyIndex,
+              pitch: renderedKey.pitch,
+              noteXStatic,
+              noteXPreview,
+              noteXDelta: deltaOrNull(noteXPreview, noteXStatic),
+              headXStatic,
+              headXPreview,
+              headXDelta: deltaOrNull(headXPreview, headXStatic),
+              accidentalRightXStatic,
+              accidentalRightXPreview,
+              accidentalRightXDelta: deltaOrNull(accidentalRightXPreview, accidentalRightXStatic),
+              hasAccidentalModifier: Boolean(renderedKey.accidental),
+              accidentalTargetRightX: lockInfo?.targetRightX ?? null,
+              accidentalLockApplied: lockInfo?.applied ?? false,
+              accidentalLockReason: lockInfo?.reason ?? 'no-lock-record',
+            })
+          })
+        })
+      }
+
+      captureDebugRowsForStaff('treble', measure.treble, trebleRendered)
+      captureDebugRowsForStaff('bass', measure.bass, bassRendered)
+      debugCapture.pushSnapshot({
+        frame: debugCapture.frame,
+        pairIndex,
+        draggedNoteId: debugCapture.draggedNoteId,
+        draggedStaff: debugCapture.draggedStaff,
+        rows,
+      })
+    }
+
 
     const trebleBeams = Beam.generateBeams(trebleVexNotes, { groups: [new Fraction(1, 4)] })
     const bassBeams = Beam.generateBeams(bassVexNotes, { groups: [new Fraction(1, 4)] })
@@ -2256,7 +2505,21 @@ function App() {
     noteLayouts.push(
       ...trebleRendered.map(({ vexNote, renderedKeys }, noteIndex) => {
         const ys = vexNote.getYs()
+        const renderedHeadXByIndex = new Map<number, number>()
+        renderedKeys.forEach((_, renderedIndex) => {
+          const headX = vexNote.noteHeads[renderedIndex]?.getAbsoluteX() ?? getRenderedNoteVisualX(vexNote)
+          if (!Number.isFinite(headX)) return
+          renderedHeadXByIndex.set(renderedIndex, headX)
+        })
+        const accidentalByRenderedIndex = getAccidentalRightXByRenderedIndex(vexNote)
+        const accidentalRightXByKeyIndex: Record<number, number> = {}
+        renderedKeys.forEach((entry, renderedIndex) => {
+          const offset = accidentalByRenderedIndex.get(renderedIndex)
+          if (offset === undefined) return
+          accidentalRightXByKeyIndex[entry.keyIndex] = offset
+        })
         const noteHeads = renderedKeys.map((entry, renderedIndex) => ({
+          x: renderedHeadXByIndex.get(renderedIndex) ?? getRenderedNoteVisualX(vexNote),
           y: ys[renderedIndex] ?? ys[0],
           pitch: entry.pitch,
           keyIndex: entry.keyIndex,
@@ -2271,13 +2534,28 @@ function App() {
         y: rootHead?.y ?? ys[0] ?? 0,
         pitchYMap: treblePitchYMap,
         noteHeads,
+        accidentalRightXByKeyIndex,
       }
       }),
     )
     noteLayouts.push(
       ...bassRendered.map(({ vexNote, renderedKeys }, noteIndex) => {
         const ys = vexNote.getYs()
+        const renderedHeadXByIndex = new Map<number, number>()
+        renderedKeys.forEach((_, renderedIndex) => {
+          const headX = vexNote.noteHeads[renderedIndex]?.getAbsoluteX() ?? getRenderedNoteVisualX(vexNote)
+          if (!Number.isFinite(headX)) return
+          renderedHeadXByIndex.set(renderedIndex, headX)
+        })
+        const accidentalByRenderedIndex = getAccidentalRightXByRenderedIndex(vexNote)
+        const accidentalRightXByKeyIndex: Record<number, number> = {}
+        renderedKeys.forEach((entry, renderedIndex) => {
+          const offset = accidentalByRenderedIndex.get(renderedIndex)
+          if (offset === undefined) return
+          accidentalRightXByKeyIndex[entry.keyIndex] = offset
+        })
         const noteHeads = renderedKeys.map((entry, renderedIndex) => ({
+          x: renderedHeadXByIndex.get(renderedIndex) ?? getRenderedNoteVisualX(vexNote),
           y: ys[renderedIndex] ?? ys[0],
           pitch: entry.pitch,
           keyIndex: entry.keyIndex,
@@ -2292,6 +2570,7 @@ function App() {
         y: rootHead?.y ?? ys[0] ?? 0,
         pitchYMap: bassPitchYMap,
         noteHeads,
+        accidentalRightXByKeyIndex,
       }
       }),
     )
@@ -2645,7 +2924,156 @@ function App() {
     return renderer.getContext()
   }
 
+  const buildDragDebugStaticByNoteKey = (pairIndex: number): Map<string, DragDebugStaticRecord> => {
+    const byNoteKey = new Map<string, DragDebugStaticRecord>()
+    noteLayoutsRef.current.forEach((layout) => {
+      if (layout.pairIndex !== pairIndex) return
+      const noteKey = getLayoutNoteKey(layout.staff, layout.id)
+      const headXByKeyIndex = new Map<number, number>()
+      layout.noteHeads.forEach((head) => {
+        if (!Number.isFinite(head.keyIndex) || !Number.isFinite(head.x)) return
+        headXByKeyIndex.set(head.keyIndex, head.x)
+      })
+      const accidentalRightXByKeyIndex = new Map<number, number>()
+      Object.entries(layout.accidentalRightXByKeyIndex).forEach(([keyIndexText, rightX]) => {
+        const keyIndex = Number(keyIndexText)
+        if (!Number.isFinite(keyIndex) || !Number.isFinite(rightX)) return
+        accidentalRightXByKeyIndex.set(keyIndex, rightX)
+      })
+      byNoteKey.set(noteKey, {
+        staff: layout.staff,
+        noteId: layout.id,
+        noteIndex: layout.noteIndex,
+        noteX: layout.x,
+        headXByKeyIndex,
+        accidentalRightXByKeyIndex,
+      })
+    })
+    return byNoteKey
+  }
+
+  const buildPreviewAccidentalRightXFromStatic = (
+    staticByNoteKey: Map<string, DragDebugStaticRecord>,
+  ): Map<string, Map<number, number>> => {
+    const byId = new Map<string, Map<number, number>>()
+    staticByNoteKey.forEach((record, noteKey) => {
+      const byKeyIndex = new Map<number, number>()
+      record.headXByKeyIndex.forEach((headX, keyIndex) => {
+        if (!Number.isFinite(headX)) return
+        byKeyIndex.set(keyIndex, headX + PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX)
+      })
+      record.accidentalRightXByKeyIndex.forEach((rightX, keyIndex) => {
+        if (!Number.isFinite(rightX)) return
+        byKeyIndex.set(keyIndex, rightX)
+      })
+      if (byKeyIndex.size === 0) return
+      byId.set(noteKey, byKeyIndex)
+    })
+    return byId
+  }
+
+  const dumpDragDebugReport = () => {
+    const frames = dragDebugFramesRef.current
+    if (frames.length === 0) {
+      setDragDebugReport('No drag preview frames captured yet. Drag a note first, then click this button again.')
+      return
+    }
+
+    const maxAbsNoteDelta = Math.max(
+      0,
+      ...frames.flatMap((frame) =>
+        frame.rows.map((row) => Math.abs(row.noteXDelta ?? 0)),
+      ),
+    )
+    const maxAbsHeadDelta = Math.max(
+      0,
+      ...frames.flatMap((frame) =>
+        frame.rows.map((row) => Math.abs(row.headXDelta ?? 0)),
+      ),
+    )
+    const maxAbsAccidentalDelta = Math.max(
+      0,
+      ...frames.flatMap((frame) =>
+        frame.rows.map((row) => Math.abs(row.accidentalRightXDelta ?? 0)),
+      ),
+    )
+    const allRows = frames.flatMap((frame) => frame.rows)
+    const accidentalLockReasonCount = allRows.reduce<Record<string, number>>((acc, row) => {
+      const key = row.accidentalLockReason
+      acc[key] = (acc[key] ?? 0) + 1
+      return acc
+    }, {})
+    const accidentalLockAppliedCount = allRows.filter((row) => row.accidentalLockApplied).length
+    const accidentalModifierRows = allRows.filter((row) => row.hasAccidentalModifier).length
+    const unstableAccidentalRows = allRows
+      .filter((row) => Math.abs(row.accidentalRightXDelta ?? 0) > 0.5)
+      .map((row) => ({
+        frame: row.frame,
+        staff: row.staff,
+        noteId: row.noteId,
+        keyIndex: row.keyIndex,
+        accidentalRightXStatic: row.accidentalRightXStatic === null ? null : roundNumber(row.accidentalRightXStatic),
+        accidentalRightXPreview:
+          row.accidentalRightXPreview === null ? null : roundNumber(row.accidentalRightXPreview),
+        accidentalRightXDelta: row.accidentalRightXDelta === null ? null : roundNumber(row.accidentalRightXDelta),
+        accidentalTargetRightX:
+          row.accidentalTargetRightX === null ? null : roundNumber(row.accidentalTargetRightX),
+        accidentalLockApplied: row.accidentalLockApplied,
+        accidentalLockReason: row.accidentalLockReason,
+      }))
+
+    const report = {
+      generatedAt: new Date().toISOString(),
+      frameCount: frames.length,
+      pairIndex: frames[0]?.pairIndex ?? null,
+      draggedNote: frames[0] ? { staff: frames[0].draggedStaff, noteId: frames[0].draggedNoteId } : null,
+      maxAbsDelta: {
+        noteX: roundNumber(maxAbsNoteDelta),
+        headX: roundNumber(maxAbsHeadDelta),
+        accidentalRightX: roundNumber(maxAbsAccidentalDelta),
+      },
+      summary: {
+        rowCount: allRows.length,
+        accidentalModifierRows,
+        accidentalLockAppliedCount,
+        accidentalLockReasonCount,
+        unstableAccidentalRowsCount: unstableAccidentalRows.length,
+        unstableAccidentalRows,
+      },
+      frames: frames.map((frame) => ({
+        frame: frame.frame,
+        pairIndex: frame.pairIndex,
+        draggedNoteId: frame.draggedNoteId,
+        draggedStaff: frame.draggedStaff,
+        rows: frame.rows.map((row) => ({
+          ...row,
+          noteXStatic: row.noteXStatic === null ? null : roundNumber(row.noteXStatic),
+          noteXPreview: row.noteXPreview === null ? null : roundNumber(row.noteXPreview),
+          noteXDelta: row.noteXDelta === null ? null : roundNumber(row.noteXDelta),
+          headXStatic: row.headXStatic === null ? null : roundNumber(row.headXStatic),
+          headXPreview: row.headXPreview === null ? null : roundNumber(row.headXPreview),
+          headXDelta: row.headXDelta === null ? null : roundNumber(row.headXDelta),
+          accidentalRightXStatic:
+            row.accidentalRightXStatic === null ? null : roundNumber(row.accidentalRightXStatic),
+          accidentalRightXPreview:
+            row.accidentalRightXPreview === null ? null : roundNumber(row.accidentalRightXPreview),
+          accidentalRightXDelta:
+            row.accidentalRightXDelta === null ? null : roundNumber(row.accidentalRightXDelta),
+          accidentalTargetRightX:
+            row.accidentalTargetRightX === null ? null : roundNumber(row.accidentalTargetRightX),
+        })),
+      })),
+    }
+    setDragDebugReport(JSON.stringify(report, null, 2))
+  }
+
+  const clearDragDebugReport = () => {
+    dragDebugFramesRef.current = []
+    setDragDebugReport('')
+  }
+
   const drawDragMeasurePreview = (drag: DragState) => {
+    dragPreviewFrameRef.current += 1
     const measureLayout = measureLayoutsRef.current.get(drag.pairIndex)
     const measure = measurePairsRef.current[drag.pairIndex]
     if (!measureLayout || !measure) return
@@ -2661,7 +3089,8 @@ function App() {
     const staticNoteXById = new Map<string, number>()
     noteLayoutsRef.current.forEach((layout) => {
       if (layout.pairIndex !== drag.pairIndex) return
-      staticNoteXById.set(getLayoutNoteKey(layout.staff, layout.id), layout.x)
+      const layoutKey = getLayoutNoteKey(layout.staff, layout.id)
+      staticNoteXById.set(layoutKey, layout.x)
     })
 
     overlayContext.clearRect(0, 0, overlayFrame.width, overlayFrame.height)
@@ -2702,6 +3131,20 @@ function App() {
       freezePreviewAccidentalLayout: false,
       formatWidthOverride: measureLayout.formatWidth,
       staticNoteXById,
+      staticAccidentalRightXById: drag.previewAccidentalRightXById,
+      debugCapture: {
+        frame: dragPreviewFrameRef.current,
+        draggedNoteId: drag.noteId,
+        draggedStaff: drag.staff,
+        staticByNoteKey: drag.debugStaticByNoteKey,
+        pushSnapshot: (snapshot) => {
+          const list = dragDebugFramesRef.current
+          list.push(snapshot)
+          if (list.length > 360) {
+            list.splice(0, list.length - 360)
+          }
+        },
+      },
     })
   }
 
@@ -2759,6 +3202,10 @@ function App() {
     const drag = dragRef.current
     if (!drag || event.pointerId !== drag.pointerId) return
 
+    if (!drag.previewStarted && Math.abs(event.clientY - drag.startClientY) < PREVIEW_START_THRESHOLD_PX) {
+      return
+    }
+
     const y = event.clientY - drag.surfaceTop
     const targetY = y - drag.grabOffsetY
     const staffPositionPitch = getNearestPitchByY(targetY, drag.pitchYMap, drag.pitch)
@@ -2791,6 +3238,7 @@ function App() {
     commitDragPitchToScore(drag, finalPitch)
 
     dragRef.current = null
+    dragPreviewFrameRef.current = 0
     clearDragOverlay()
     setDraggingSelection(null)
     event.currentTarget.releasePointerCapture(event.pointerId)
@@ -3012,6 +3460,9 @@ function App() {
     const hitHead = hit.head
 
     event.preventDefault()
+    dragPreviewFrameRef.current = 0
+    dragDebugFramesRef.current = []
+    clearDragOverlay()
     let current: ScoreNote | undefined
     const importedPairs = measurePairsFromImportRef.current
     if (importedPairs) {
@@ -3043,6 +3494,8 @@ function App() {
     const currentPitch =
       current && hitKeyIndex > 0 ? current.chordPitches?.[hitKeyIndex - 1] ?? current.pitch : current?.pitch
     const pitch = currentPitch ?? hitHead.pitch ?? getNearestPitchByY(noteCenterY, hitNote.pitchYMap)
+    const debugStaticByNoteKey = buildDragDebugStaticByNoteKey(hitNote.pairIndex)
+    const previewAccidentalRightXById = buildPreviewAccidentalRightXFromStatic(debugStaticByNoteKey)
 
     const dragState: DragState = {
       noteId: hitNote.id,
@@ -3052,12 +3505,15 @@ function App() {
       noteIndex: hitNote.noteIndex,
       pointerId: event.pointerId,
       surfaceTop: rect.top,
+      startClientY: event.clientY,
       pitch,
       previewStarted: false,
       grabOffsetY,
       pitchYMap: hitNote.pitchYMap,
       keyFifths,
       accidentalStateBeforeNote,
+      previewAccidentalRightXById,
+      debugStaticByNoteKey,
     }
 
     dragRef.current = dragState
@@ -3179,6 +3635,21 @@ function App() {
           </p>
           <p className="sequence">Treble: {trebleSequenceText}</p>
           <p className="sequence">Bass: {bassSequenceText}</p>
+          <div className="debug-tools">
+            <button type="button" onClick={dumpDragDebugReport}>
+              Dump Drag Log
+            </button>
+            <button type="button" onClick={clearDragDebugReport}>
+              Clear Drag Log
+            </button>
+          </div>
+          <textarea
+            className="debug-log"
+            value={dragDebugReport}
+            readOnly
+            placeholder="Drag a note, then click Dump Drag Log."
+            spellCheck={false}
+          />
         </div>
       </section>
     </main>
@@ -3186,4 +3657,5 @@ function App() {
 }
 
 export default App
+
 
