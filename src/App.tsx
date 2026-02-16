@@ -225,6 +225,19 @@ const DURATION_MUSIC_XML: Record<NoteDuration, { type: string; dots: number }> =
   '32': { type: '32nd', dots: 0 },
 }
 
+const DURATION_LAYOUT_WEIGHT: Record<NoteDuration, number> = {
+  w: 0.8,
+  h: 1.0,
+  qd: 1.3,
+  q: 1.2,
+  '8d': 1.7,
+  '8': 1.6,
+  '16d': 2.2,
+  '16': 2.0,
+  '32d': 2.8,
+  '32': 2.6,
+}
+
 const ACCIDENTAL_TO_MUSIC_XML: Record<string, string> = {
   '#': 'sharp',
   b: 'flat',
@@ -714,6 +727,77 @@ function toVexDuration(duration: NoteDuration): NoteDurationBase {
 function getDurationDots(duration: NoteDuration): number {
   const dots = duration.match(/d/g)
   return dots ? dots.length : 0
+}
+
+function countVisibleAccidentals(accidentals?: Array<string | null>): number {
+  if (!accidentals || accidentals.length === 0) return 0
+  let count = 0
+  accidentals.forEach((value) => {
+    if (value) count += 1
+  })
+  return count
+}
+
+function getNoteLayoutDemand(note: ScoreNote): number {
+  const durationWeight = DURATION_LAYOUT_WEIGHT[note.duration] ?? 1
+  const chordSize = 1 + (note.chordPitches?.length ?? 0)
+  const accidentalCount = (note.accidental ? 1 : 0) + countVisibleAccidentals(note.chordAccidentals)
+  const chordSpreadBonus = chordSize > 1 ? (chordSize - 1) * 0.35 : 0
+  return durationWeight * chordSize + accidentalCount * 0.85 + chordSpreadBonus
+}
+
+function getStaffLayoutDemand(notes: ScoreNote[]): number {
+  if (notes.length === 0) return 1
+  return notes.reduce((sum, note) => sum + getNoteLayoutDemand(note), 0)
+}
+
+function getMeasureLayoutDemand(
+  measure: MeasurePair,
+  showKeySignature: boolean,
+  showTimeSignature: boolean,
+  showEndTimeSignature: boolean,
+): number {
+  const noteDemand = getStaffLayoutDemand(measure.treble) + getStaffLayoutDemand(measure.bass)
+  const beginDecorations = (showKeySignature ? 2.2 : 0) + (showTimeSignature ? 2.4 : 0)
+  const endDecoration = showEndTimeSignature ? 1.6 : 0
+  return Math.max(1, noteDemand + beginDecorations + endDecoration)
+}
+
+function allocateMeasureWidthsByDemand(demands: number[], totalWidth: number): number[] {
+  if (demands.length === 0) return []
+
+  const safeTotal = Math.max(demands.length, Math.floor(totalWidth))
+  const measureCount = demands.length
+  const idealMinWidth = Math.floor(safeTotal / measureCount)
+  const minWidth = Math.max(80, Math.min(180, Math.floor(idealMinWidth * 0.45)))
+  const minTotal = minWidth * measureCount
+  if (safeTotal <= minTotal) {
+    const even = Math.floor(safeTotal / measureCount)
+    const result = new Array<number>(measureCount).fill(even)
+    let remainder = safeTotal - even * measureCount
+    for (let i = 0; i < result.length && remainder > 0; i += 1) {
+      result[i] += 1
+      remainder -= 1
+    }
+    return result
+  }
+
+  const flex = safeTotal - minTotal
+  const demandSum = demands.reduce((sum, demand) => sum + Math.max(0.0001, demand), 0)
+  const floatWidths = demands.map((demand) => minWidth + (flex * Math.max(0.0001, demand)) / demandSum)
+  const widths = floatWidths.map((value) => Math.floor(value))
+  let remainder = safeTotal - widths.reduce((sum, width) => sum + width, 0)
+
+  const rankByFraction = floatWidths
+    .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
+    .sort((a, b) => b.fraction - a.fraction)
+
+  for (let i = 0; i < rankByFraction.length && remainder > 0; i += 1) {
+    widths[rankByFraction[i].index] += 1
+    remainder -= 1
+  }
+
+  return widths
 }
 
 function createImportedNoteId(staff: StaffKind): string {
@@ -2317,11 +2401,9 @@ function App() {
       const trebleY = systemTop + SYSTEM_TREBLE_OFFSET_Y
       const bassY = systemTop + SYSTEM_BASS_OFFSET_Y
       const systemUsableWidth = scoreWidth - SCORE_PAGE_PADDING_X * 2
-      const measureWidth = Math.floor(systemUsableWidth / systemMeasures.length)
 
-      systemMeasures.forEach((measure, indexInSystem) => {
+      const systemMeta = systemMeasures.map((measure, indexInSystem) => {
         const pairIndex = start + indexInSystem
-        const measureX = STAFF_X + indexInSystem * measureWidth
         const isSystemStart = indexInSystem === 0
         const timeSignature =
           measureTimeSignaturesFromImport?.[pairIndex] ??
@@ -2357,41 +2439,71 @@ function App() {
         const previousKeyFifths = pairIndex > 0 ? (measureKeyFifthsFromImport?.[pairIndex - 1] ?? 0) : keyFifths
         const showKeySignature = isSystemStart || keyFifths !== previousKeyFifths
         const includeMeasureStartDecorations = !isSystemStart && (showKeySignature || showTimeSignature)
-        const noteStartProbe = new Stave(measureX, trebleY, measureWidth)
-        if (isSystemStart) {
-          noteStartProbe.addClef('treble')
-          if (showKeySignature) {
-            noteStartProbe.addKeySignature(getKeySignatureSpecFromFifths(keyFifths))
-          }
-          if (showTimeSignature) {
-            noteStartProbe.addTimeSignature(`${timeSignature.beats}/${timeSignature.beatType}`)
-          }
-        } else {
-          noteStartProbe.setBegBarType(BarlineType.NONE)
-          if (showKeySignature) {
-            noteStartProbe.addKeySignature(getKeySignatureSpecFromFifths(keyFifths))
-          }
-          if (showTimeSignature) {
-            noteStartProbe.addTimeSignature(`${timeSignature.beats}/${timeSignature.beatType}`)
-          }
-        }
-        const noteStartX = noteStartProbe.getNoteStartX()
-        const formatWidth = Math.max(80, noteStartProbe.getNoteEndX() - noteStartX - 8)
-        const measureNoteLayouts = drawMeasureToContext({
-          context,
-          measure,
+        return {
           pairIndex,
-          measureX,
-          measureWidth,
-          trebleY,
-          bassY,
+          measure,
           isSystemStart,
           keyFifths,
           showKeySignature,
           timeSignature,
           showTimeSignature,
-          endTimeSignature: nextTimeSignature,
+          nextTimeSignature,
           showEndTimeSignature,
+          includeMeasureStartDecorations,
+        }
+      })
+      const measureDemands = systemMeta.map((entry) =>
+        getMeasureLayoutDemand(
+          entry.measure,
+          entry.showKeySignature,
+          entry.showTimeSignature,
+          entry.showEndTimeSignature,
+        ),
+      )
+      const measureWidths = allocateMeasureWidthsByDemand(measureDemands, systemUsableWidth)
+      let measureCursorX = STAFF_X
+
+      systemMeta.forEach((entry, indexInSystem) => {
+        const measureWidth = measureWidths[indexInSystem] ?? Math.floor(systemUsableWidth / systemMeasures.length)
+        const measureX = measureCursorX
+        measureCursorX += measureWidth
+
+        const noteStartProbe = new Stave(measureX, trebleY, measureWidth)
+        if (entry.isSystemStart) {
+          noteStartProbe.addClef('treble')
+          if (entry.showKeySignature) {
+            noteStartProbe.addKeySignature(getKeySignatureSpecFromFifths(entry.keyFifths))
+          }
+          if (entry.showTimeSignature) {
+            noteStartProbe.addTimeSignature(`${entry.timeSignature.beats}/${entry.timeSignature.beatType}`)
+          }
+        } else {
+          noteStartProbe.setBegBarType(BarlineType.NONE)
+          if (entry.showKeySignature) {
+            noteStartProbe.addKeySignature(getKeySignatureSpecFromFifths(entry.keyFifths))
+          }
+          if (entry.showTimeSignature) {
+            noteStartProbe.addTimeSignature(`${entry.timeSignature.beats}/${entry.timeSignature.beatType}`)
+          }
+        }
+
+        const noteStartX = noteStartProbe.getNoteStartX()
+        const formatWidth = Math.max(80, noteStartProbe.getNoteEndX() - noteStartX - 8)
+        const measureNoteLayouts = drawMeasureToContext({
+          context,
+          measure: entry.measure,
+          pairIndex: entry.pairIndex,
+          measureX,
+          measureWidth,
+          trebleY,
+          bassY,
+          isSystemStart: entry.isSystemStart,
+          keyFifths: entry.keyFifths,
+          showKeySignature: entry.showKeySignature,
+          timeSignature: entry.timeSignature,
+          showTimeSignature: entry.showTimeSignature,
+          endTimeSignature: entry.nextTimeSignature,
+          showEndTimeSignature: entry.showEndTimeSignature,
           activeSelection,
           draggingSelection: null,
         })
@@ -2413,24 +2525,24 @@ function App() {
           systemTop,
           scoreWidth,
           scoreHeight,
-          isSystemStart,
-          includeMeasureStartDecorations,
+          entry.isSystemStart,
+          entry.includeMeasureStartDecorations,
         )
-        nextMeasureLayouts.set(pairIndex, {
-          pairIndex,
+        nextMeasureLayouts.set(entry.pairIndex, {
+          pairIndex: entry.pairIndex,
           measureX,
           measureWidth,
           trebleY,
           bassY,
           systemTop,
-          isSystemStart,
-          keyFifths,
-          showKeySignature,
-          timeSignature,
-          showTimeSignature,
-          endTimeSignature: nextTimeSignature,
-          showEndTimeSignature,
-          includeMeasureStartDecorations,
+          isSystemStart: entry.isSystemStart,
+          keyFifths: entry.keyFifths,
+          showKeySignature: entry.showKeySignature,
+          timeSignature: entry.timeSignature,
+          showTimeSignature: entry.showTimeSignature,
+          endTimeSignature: entry.nextTimeSignature,
+          showEndTimeSignature: entry.showEndTimeSignature,
+          includeMeasureStartDecorations: entry.includeMeasureStartDecorations,
           noteStartX,
           formatWidth,
           overlayRect,
