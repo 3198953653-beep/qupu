@@ -24,6 +24,28 @@ type NoteDuration = 'w' | 'h' | 'q' | '8' | '16' | '32' | 'qd' | '8d' | '16d' | 
 type NoteDurationBase = 'w' | 'h' | 'q' | '8' | '16' | '32'
 type RhythmPresetId = 'quarter' | 'twoEighth' | 'fourSixteenth' | 'eightSixteenth' | 'shortDotted'
 type StaffKind = 'treble' | 'bass'
+type BeamTag = 'begin' | 'continue' | 'end'
+
+type TimeSignature = {
+  beats: number
+  beatType: number
+}
+
+type MusicXmlCreator = {
+  type?: string
+  text: string
+}
+
+type MusicXmlMetadata = {
+  version: string
+  workTitle: string
+  rights?: string
+  creators: MusicXmlCreator[]
+  softwares: string[]
+  encodingDate?: string
+  partName: string
+  partAbbreviation?: string
+}
 
 type ScoreNote = {
   id: string
@@ -39,6 +61,9 @@ type ImportResult = {
   bassNotes: ScoreNote[]
   measurePairs: MeasurePair[]
   measureKeyFifths: number[]
+  measureDivisions: number[]
+  measureTimeSignatures: TimeSignature[]
+  metadata: MusicXmlMetadata
 }
 
 type ImportFeedback = {
@@ -175,6 +200,27 @@ const DURATION_LABEL: Record<NoteDuration, string> = {
   '32': 'Thirty-second',
   '8d': 'Dotted Eighth',
   '32d': 'Dotted Thirty-second',
+}
+
+const DURATION_MUSIC_XML: Record<NoteDuration, { type: string; dots: number }> = {
+  w: { type: 'whole', dots: 0 },
+  h: { type: 'half', dots: 0 },
+  qd: { type: 'quarter', dots: 1 },
+  q: { type: 'quarter', dots: 0 },
+  '8d': { type: 'eighth', dots: 1 },
+  '8': { type: 'eighth', dots: 0 },
+  '16d': { type: '16th', dots: 1 },
+  '16': { type: '16th', dots: 0 },
+  '32d': { type: '32nd', dots: 1 },
+  '32': { type: '32nd', dots: 0 },
+}
+
+const ACCIDENTAL_TO_MUSIC_XML: Record<string, string> = {
+  '#': 'sharp',
+  b: 'flat',
+  n: 'natural',
+  '##': 'double-sharp',
+  bb: 'flat-flat',
 }
 
 const RHYTHM_PRESETS: { id: RhythmPresetId; label: string; pattern: NoteDuration[] }[] = [
@@ -631,6 +677,380 @@ function parseMusicXmlBeats(noteEl: Element, divisions: number): number | null {
   return beats
 }
 
+function escapeXml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&apos;')
+}
+
+function getCurrentIsoDate(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function getDefaultMusicXmlMetadata(): MusicXmlMetadata {
+  return {
+    version: '3.1',
+    workTitle: 'Untitled',
+    creators: [],
+    softwares: ['Interactive Music Score MVP'],
+    encodingDate: getCurrentIsoDate(),
+    partName: 'Piano',
+    partAbbreviation: 'Pno.',
+  }
+}
+
+function parseMusicXmlMetadata(doc: Document): MusicXmlMetadata {
+  const fallback = getDefaultMusicXmlMetadata()
+  const version = doc.querySelector('score-partwise')?.getAttribute('version')?.trim() || fallback.version
+  const workTitle = doc.querySelector('work > work-title')?.textContent?.trim() || fallback.workTitle
+  const rights = doc.querySelector('identification > rights')?.textContent?.trim() || undefined
+  const creators: MusicXmlCreator[] = Array.from(doc.querySelectorAll('identification > creator')).reduce(
+    (list, creatorEl) => {
+      const text = creatorEl.textContent?.trim() ?? ''
+      const type = creatorEl.getAttribute('type')?.trim() ?? undefined
+      if (text) list.push({ type, text })
+      return list
+    },
+    [] as MusicXmlCreator[],
+  )
+  const softwares = Array.from(doc.querySelectorAll('identification > encoding > software'))
+    .map((softwareEl) => softwareEl.textContent?.trim() ?? '')
+    .filter((software) => software.length > 0)
+  const encodingDate = doc.querySelector('identification > encoding > encoding-date')?.textContent?.trim() || fallback.encodingDate
+  const partName = doc.querySelector('part-list > score-part > part-name')?.textContent?.trim() || fallback.partName
+  const partAbbreviation = doc.querySelector('part-list > score-part > part-abbreviation')?.textContent?.trim() || fallback.partAbbreviation
+
+  return {
+    version,
+    workTitle,
+    rights,
+    creators,
+    softwares: softwares.length > 0 ? softwares : fallback.softwares,
+    encodingDate,
+    partName,
+    partAbbreviation: partAbbreviation || undefined,
+  }
+}
+
+function getBeamCountFromDuration(duration: NoteDuration): number {
+  const base = toVexDuration(duration)
+  if (base === '8') return 1
+  if (base === '16') return 2
+  if (base === '32') return 3
+  return 0
+}
+
+function computeMeasureBeamTags(notes: ScoreNote[], time: TimeSignature): Array<Record<number, BeamTag>> {
+  const beamTags: Array<Record<number, BeamTag>> = notes.map(() => ({}))
+  if (notes.length === 0) return beamTags
+
+  const starts: number[] = []
+  let cursor = 0
+  for (const note of notes) {
+    starts.push(cursor)
+    cursor += DURATION_BEATS[note.duration]
+  }
+
+  const beatSpan = time.beatType > 0 ? 4 / time.beatType : 1
+  const epsilon = 1e-6
+
+  const applyRun = (level: number, run: number[]) => {
+    if (run.length < 2) return
+    beamTags[run[0]][level] = 'begin'
+    for (let index = 1; index < run.length - 1; index += 1) {
+      beamTags[run[index]][level] = 'continue'
+    }
+    beamTags[run[run.length - 1]][level] = 'end'
+  }
+
+  for (let level = 1; level <= 3; level += 1) {
+    const groupMap = new Map<number, number[]>()
+    notes.forEach((note, noteIndex) => {
+      if (getBeamCountFromDuration(note.duration) < level) return
+      const group = Math.floor((starts[noteIndex] + epsilon) / beatSpan)
+      const existing = groupMap.get(group)
+      if (existing) {
+        existing.push(noteIndex)
+      } else {
+        groupMap.set(group, [noteIndex])
+      }
+    })
+
+    groupMap.forEach((groupNoteIndexes) => {
+      if (groupNoteIndexes.length < 2) return
+      groupNoteIndexes.sort((left, right) => starts[left] - starts[right])
+
+      let run: number[] = []
+      for (const noteIndex of groupNoteIndexes) {
+        if (run.length === 0) {
+          run = [noteIndex]
+          continue
+        }
+        const previousIndex = run[run.length - 1]
+        const previousEnd = starts[previousIndex] + DURATION_BEATS[notes[previousIndex].duration]
+        if (Math.abs(starts[noteIndex] - previousEnd) > epsilon) {
+          applyRun(level, run)
+          run = [noteIndex]
+          continue
+        }
+        run.push(noteIndex)
+      }
+      applyRun(level, run)
+    })
+  }
+
+  return beamTags
+}
+
+function getDurationValueByDivisions(duration: NoteDuration, divisions: number): number {
+  const value = Math.round(DURATION_BEATS[duration] * divisions)
+  return Math.max(1, value)
+}
+
+function getMusicXmlDoctype(version: string): string {
+  if (version.startsWith('3.0')) {
+    return '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">'
+  }
+  if (version.startsWith('3.1')) {
+    return '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">'
+  }
+  return '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">'
+}
+
+function buildMusicXmlFromMeasurePairs(params: {
+  measurePairs: MeasurePair[]
+  keyFifthsByMeasure?: number[] | null
+  divisionsByMeasure?: number[] | null
+  timeSignaturesByMeasure?: TimeSignature[] | null
+  metadata?: MusicXmlMetadata | null
+}): string {
+  const { measurePairs, keyFifthsByMeasure, divisionsByMeasure, timeSignaturesByMeasure, metadata } = params
+  const meta = metadata ?? getDefaultMusicXmlMetadata()
+  const version = meta.version || '3.1'
+  const lines: string[] = []
+
+  const pickDivisions = (measureIndex: number): number => {
+    const source = divisionsByMeasure?.[measureIndex] ?? divisionsByMeasure?.[measureIndex - 1] ?? 16
+    const numeric = Number(source)
+    if (!Number.isFinite(numeric) || numeric <= 0) return 16
+    return Math.max(1, Math.round(numeric))
+  }
+
+  const pickTime = (measureIndex: number): TimeSignature => {
+    const source = timeSignaturesByMeasure?.[measureIndex] ?? timeSignaturesByMeasure?.[measureIndex - 1]
+    if (!source) return { beats: 4, beatType: 4 }
+    const beats = Number(source.beats)
+    const beatType = Number(source.beatType)
+    if (!Number.isFinite(beats) || beats <= 0 || !Number.isFinite(beatType) || beatType <= 0) {
+      return { beats: 4, beatType: 4 }
+    }
+    return { beats: Math.round(beats), beatType: Math.round(beatType) }
+  }
+
+  const pickKeyFifths = (measureIndex: number): number => {
+    const source = keyFifthsByMeasure?.[measureIndex] ?? keyFifthsByMeasure?.[measureIndex - 1] ?? 0
+    const numeric = Number(source)
+    if (!Number.isFinite(numeric)) return 0
+    return Math.trunc(numeric)
+  }
+
+  const appendNote = (noteParams: {
+    destination: string[]
+    pitch: Pitch
+    duration: NoteDuration
+    accidental: string | null | undefined
+    divisions: number
+    staff: 1 | 2
+    voice: 1 | 2
+    isChord: boolean
+    beamTags: Record<number, BeamTag>
+  }) => {
+    const { destination, pitch, duration, accidental, divisions, staff, voice, isChord, beamTags } = noteParams
+    const { step, octave, alter } = getStepOctaveAlterFromPitch(pitch)
+    const durationType = DURATION_MUSIC_XML[duration]
+    const accidentalXml = accidental ? ACCIDENTAL_TO_MUSIC_XML[accidental] : undefined
+    const durationValue = getDurationValueByDivisions(duration, divisions)
+
+    destination.push('   <note>')
+    if (isChord) destination.push('    <chord/>')
+    destination.push('    <pitch>')
+    destination.push(`     <step>${step}</step>`)
+    if (alter !== 0) destination.push(`     <alter>${alter}</alter>`)
+    destination.push(`     <octave>${octave}</octave>`)
+    destination.push('    </pitch>')
+    destination.push(`    <duration>${durationValue}</duration>`)
+    destination.push(`    <voice>${voice}</voice>`)
+    destination.push(`    <type>${durationType.type}</type>`)
+    for (let dotIndex = 0; dotIndex < durationType.dots; dotIndex += 1) {
+      destination.push('    <dot/>')
+    }
+    if (accidentalXml) destination.push(`    <accidental>${accidentalXml}</accidental>`)
+    destination.push(`    <staff>${staff}</staff>`)
+    const beamNumbers = Object.keys(beamTags)
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value))
+      .sort((left, right) => left - right)
+    beamNumbers.forEach((beamNumber) => {
+      const beamValue = beamTags[beamNumber]
+      if (!beamValue) return
+      destination.push(`    <beam number="${beamNumber}">${beamValue}</beam>`)
+    })
+    destination.push('   </note>')
+  }
+
+  const appendStaffNotes = (staffParams: {
+    destination: string[]
+    notes: ScoreNote[]
+    staff: 1 | 2
+    voice: 1 | 2
+    divisions: number
+    time: TimeSignature
+  }) => {
+    const { destination, notes, staff, voice, divisions, time } = staffParams
+    const staffBeamTags = computeMeasureBeamTags(notes, time)
+    notes.forEach((note, noteIndex) => {
+      const beamTags = staffBeamTags[noteIndex] ?? {}
+      appendNote({
+        destination,
+        pitch: note.pitch,
+        duration: note.duration,
+        accidental: note.accidental,
+        divisions,
+        staff,
+        voice,
+        isChord: false,
+        beamTags,
+      })
+      note.chordPitches?.forEach((chordPitch, chordIndex) => {
+        appendNote({
+          destination,
+          pitch: chordPitch,
+          duration: note.duration,
+          accidental: note.chordAccidentals?.[chordIndex],
+          divisions,
+          staff,
+          voice,
+          isChord: true,
+          beamTags,
+        })
+      })
+    })
+  }
+
+  lines.push('<?xml version="1.0" encoding="UTF-8" standalone="no"?>')
+  lines.push(getMusicXmlDoctype(version))
+  lines.push(`<score-partwise version="${escapeXml(version)}">`)
+  lines.push(' <work>')
+  lines.push(`  <work-title>${escapeXml(meta.workTitle || 'Untitled')}</work-title>`)
+  lines.push(' </work>')
+  lines.push(' <identification>')
+  meta.creators.forEach((creator) => {
+    if (!creator.text) return
+    const typeAttr = creator.type ? ` type="${escapeXml(creator.type)}"` : ''
+    lines.push(`  <creator${typeAttr}>${escapeXml(creator.text)}</creator>`)
+  })
+  if (meta.rights) lines.push(`  <rights>${escapeXml(meta.rights)}</rights>`)
+  lines.push('  <encoding>')
+  lines.push(`   <encoding-date>${escapeXml(meta.encodingDate || getCurrentIsoDate())}</encoding-date>`)
+  meta.softwares.forEach((software) => {
+    if (!software) return
+    lines.push(`   <software>${escapeXml(software)}</software>`)
+  })
+  lines.push('  </encoding>')
+  lines.push(' </identification>')
+  lines.push(' <part-list>')
+  lines.push('  <part-group type="start" number="1">')
+  lines.push('   <group-symbol>brace</group-symbol>')
+  lines.push('  </part-group>')
+  lines.push('  <score-part id="P1">')
+  lines.push(`   <part-name>${escapeXml(meta.partName || 'Piano')}</part-name>`)
+  if (meta.partAbbreviation) {
+    lines.push(`   <part-abbreviation>${escapeXml(meta.partAbbreviation)}</part-abbreviation>`)
+  }
+  lines.push('  </score-part>')
+  lines.push('  <part-group type="stop" number="1" />')
+  lines.push(' </part-list>')
+  lines.push(' <part id="P1">')
+
+  let previousDivisions = -1
+  let previousFifths = Number.NaN
+  let previousTime = ''
+
+  measurePairs.forEach((pair, measureIndex) => {
+    const divisions = pickDivisions(measureIndex)
+    const fifths = pickKeyFifths(measureIndex)
+    const time = pickTime(measureIndex)
+    const timeKey = `${time.beats}/${time.beatType}`
+    const shouldWriteDivisions = measureIndex === 0 || divisions !== previousDivisions
+    const shouldWriteKey = measureIndex === 0 || fifths !== previousFifths
+    const shouldWriteTime = measureIndex === 0 || timeKey !== previousTime
+
+    lines.push(`  <measure number="${measureIndex + 1}">`)
+    if (shouldWriteDivisions || shouldWriteKey || shouldWriteTime || measureIndex === 0) {
+      lines.push('   <attributes>')
+      if (shouldWriteDivisions) lines.push(`    <divisions>${divisions}</divisions>`)
+      if (shouldWriteKey) {
+        lines.push('    <key>')
+        lines.push(`     <fifths>${fifths}</fifths>`)
+        lines.push('    </key>')
+      }
+      if (shouldWriteTime) {
+        lines.push('    <time>')
+        lines.push(`     <beats>${time.beats}</beats>`)
+        lines.push(`     <beat-type>${time.beatType}</beat-type>`)
+        lines.push('    </time>')
+      }
+      if (measureIndex === 0) {
+        lines.push('    <staves>2</staves>')
+        lines.push('    <clef number="1">')
+        lines.push('     <sign>G</sign>')
+        lines.push('     <line>2</line>')
+        lines.push('    </clef>')
+        lines.push('    <clef number="2">')
+        lines.push('     <sign>F</sign>')
+        lines.push('     <line>4</line>')
+        lines.push('    </clef>')
+      }
+      lines.push('   </attributes>')
+    }
+
+    appendStaffNotes({
+      destination: lines,
+      notes: pair.treble,
+      staff: 1,
+      voice: 1,
+      divisions,
+      time,
+    })
+
+    const backupDuration = Math.max(1, Math.round(divisions * time.beats * (4 / time.beatType)))
+    lines.push('   <backup>')
+    lines.push(`    <duration>${backupDuration}</duration>`)
+    lines.push('   </backup>')
+
+    appendStaffNotes({
+      destination: lines,
+      notes: pair.bass,
+      staff: 2,
+      voice: 2,
+      divisions,
+      time,
+    })
+
+    lines.push('  </measure>')
+    previousDivisions = divisions
+    previousFifths = fifths
+    previousTime = timeKey
+  })
+
+  lines.push(' </part>')
+  lines.push('</score-partwise>')
+  return `${lines.join('\n')}\n`
+}
+
 function fillMissingTicksWithCarryNotes(notes: ScoreNote[], staff: StaffKind, ticksUsed: number, carryPitch: Pitch): ScoreNote[] {
   const filled = [...notes]
   let remaining = clamp(MEASURE_TICKS - ticksUsed, 0, MEASURE_TICKS)
@@ -717,6 +1137,7 @@ function parseMusicXml(xml: string): ImportResult {
   if (parseError) {
     throw new Error('Failed to parse MusicXML. Check XML format.')
   }
+  const metadata = parseMusicXmlMetadata(doc)
 
   const partNodes = Array.from(doc.getElementsByTagName('part'))
   if (partNodes.length === 0) {
@@ -729,6 +1150,8 @@ function parseMusicXml(xml: string): ImportResult {
     touched: Record<StaffKind, boolean>
   }[] = []
   const measureKeyFifths: number[] = []
+  const measureDivisions: number[] = []
+  const measureTimeSignatures: TimeSignature[] = []
 
   const ensureMeasureSlot = (index: number) => {
     if (!measureSlots[index]) {
@@ -749,6 +1172,7 @@ function parseMusicXml(xml: string): ImportResult {
 
     let divisions = 1
     let currentFifths = 0
+    let currentTime: TimeSignature = { beats: 4, beatType: 4 }
     measureEls.forEach((measureEl, measureIndex) => {
       const slot = ensureMeasureSlot(measureIndex)
       const divisionsText = measureEl.querySelector('attributes > divisions')?.textContent?.trim()
@@ -756,6 +1180,22 @@ function parseMusicXml(xml: string): ImportResult {
       if (Number.isFinite(maybeDivisions) && maybeDivisions > 0) {
         divisions = maybeDivisions
       }
+      if (measureDivisions[measureIndex] === undefined) {
+        measureDivisions[measureIndex] = Math.max(1, Math.round(divisions))
+      }
+
+      const beatsText = measureEl.querySelector('attributes > time > beats')?.textContent?.trim()
+      const beatTypeText = measureEl.querySelector('attributes > time > beat-type')?.textContent?.trim()
+      const maybeBeats = beatsText ? Number(beatsText) : Number.NaN
+      const maybeBeatType = beatTypeText ? Number(beatTypeText) : Number.NaN
+      const nextBeats = Number.isFinite(maybeBeats) && maybeBeats > 0 ? Math.round(maybeBeats) : currentTime.beats
+      const nextBeatType =
+        Number.isFinite(maybeBeatType) && maybeBeatType > 0 ? Math.round(maybeBeatType) : currentTime.beatType
+      currentTime = { beats: nextBeats, beatType: nextBeatType }
+      if (measureTimeSignatures[measureIndex] === undefined) {
+        measureTimeSignatures[measureIndex] = { ...currentTime }
+      }
+
       const fifthsText = measureEl.querySelector('attributes > key > fifths')?.textContent?.trim()
       const maybeFifths = fifthsText ? Number(fifthsText) : Number.NaN
       if (Number.isFinite(maybeFifths)) {
@@ -878,17 +1318,31 @@ function parseMusicXml(xml: string): ImportResult {
       bassNotes: fallbackPairs.flatMap((pair) => pair.bass),
       measurePairs: fallbackPairs,
       measureKeyFifths: new Array(fallbackPairs.length).fill(0),
+      measureDivisions: new Array(fallbackPairs.length).fill(16),
+      measureTimeSignatures: new Array(fallbackPairs.length).fill(null).map(() => ({ beats: 4, beatType: 4 })),
+      metadata,
     }
   }
+
+  const alignedKeyFifths =
+    measureKeyFifths.length === importedPairs.length
+      ? measureKeyFifths
+      : importedPairs.map((_, index) => measureKeyFifths[index] ?? measureKeyFifths[index - 1] ?? 0)
+  const alignedDivisions = importedPairs.map(
+    (_, index) => measureDivisions[index] ?? measureDivisions[index - 1] ?? 16,
+  )
+  const alignedTimes = importedPairs.map(
+    (_, index) => measureTimeSignatures[index] ?? measureTimeSignatures[index - 1] ?? { beats: 4, beatType: 4 },
+  )
 
   return {
     trebleNotes: importedPairs.flatMap((pair) => pair.treble),
     bassNotes: importedPairs.flatMap((pair) => pair.bass),
     measurePairs: importedPairs,
-    measureKeyFifths:
-      measureKeyFifths.length === importedPairs.length
-        ? measureKeyFifths
-        : importedPairs.map((_, index) => measureKeyFifths[index] ?? 0),
+    measureKeyFifths: alignedKeyFifths,
+    measureDivisions: alignedDivisions,
+    measureTimeSignatures: alignedTimes,
+    metadata,
   }
 }
 
@@ -1142,6 +1596,9 @@ function App() {
   const [isRhythmLinked, setIsRhythmLinked] = useState(true)
   const [measurePairsFromImport, setMeasurePairsFromImport] = useState<MeasurePair[] | null>(null)
   const [measureKeyFifthsFromImport, setMeasureKeyFifthsFromImport] = useState<number[] | null>(null)
+  const [measureDivisionsFromImport, setMeasureDivisionsFromImport] = useState<number[] | null>(null)
+  const [measureTimeSignaturesFromImport, setMeasureTimeSignaturesFromImport] = useState<TimeSignature[] | null>(null)
+  const [musicXmlMetadataFromImport, setMusicXmlMetadataFromImport] = useState<MusicXmlMetadata | null>(null)
   const [visibleSystemRange, setVisibleSystemRange] = useState<{ start: number; end: number }>({ start: 0, end: 0 })
 
   const scoreRef = useRef<HTMLCanvasElement | null>(null)
@@ -1164,6 +1621,9 @@ function App() {
   const stopPlayTimerRef = useRef<number | null>(null)
   const measurePairsFromImportRef = useRef<MeasurePair[] | null>(null)
   const measureKeyFifthsFromImportRef = useRef<number[] | null>(null)
+  const measureDivisionsFromImportRef = useRef<number[] | null>(null)
+  const measureTimeSignaturesFromImportRef = useRef<TimeSignature[] | null>(null)
+  const musicXmlMetadataFromImportRef = useRef<MusicXmlMetadata | null>(null)
   const importedNoteLookupRef = useRef<Map<string, ImportedNoteLocation>>(new Map())
   const scoreWidth = A4_PAGE_WIDTH
   const measurePairs = useMemo(
@@ -1330,7 +1790,7 @@ function App() {
         vexNote.setKeyStyle(Math.max(0, renderedKeyIndex), { fillStyle: '#0e9ac7', strokeStyle: '#0e9ac7' })
       } else if (selection && selection.staff === 'treble' && selection.noteId === noteId) {
         const renderedKeyIndex = renderedKeys.findIndex((entry) => entry.keyIndex === selection.keyIndex)
-        vexNote.setKeyStyle(Math.max(0, renderedKeyIndex), { fillStyle: '#145f84', strokeStyle: '#145f84' })
+        vexNote.setKeyStyle(Math.max(0, renderedKeyIndex), { fillStyle: '#1f7aa8', strokeStyle: '#1f7aa8' })
       }
     })
 
@@ -1341,7 +1801,7 @@ function App() {
         vexNote.setKeyStyle(Math.max(0, renderedKeyIndex), { fillStyle: '#0e9ac7', strokeStyle: '#0e9ac7' })
       } else if (selection && selection.staff === 'bass' && selection.noteId === noteId) {
         const renderedKeyIndex = renderedKeys.findIndex((entry) => entry.keyIndex === selection.keyIndex)
-        vexNote.setKeyStyle(Math.max(0, renderedKeyIndex), { fillStyle: '#145f84', strokeStyle: '#145f84' })
+        vexNote.setKeyStyle(Math.max(0, renderedKeyIndex), { fillStyle: '#1f7aa8', strokeStyle: '#1f7aa8' })
       }
     })
 
@@ -1435,6 +1895,18 @@ function App() {
   useEffect(() => {
     measureKeyFifthsFromImportRef.current = measureKeyFifthsFromImport
   }, [measureKeyFifthsFromImport])
+
+  useEffect(() => {
+    measureDivisionsFromImportRef.current = measureDivisionsFromImport
+  }, [measureDivisionsFromImport])
+
+  useEffect(() => {
+    measureTimeSignaturesFromImportRef.current = measureTimeSignaturesFromImport
+  }, [measureTimeSignaturesFromImport])
+
+  useEffect(() => {
+    musicXmlMetadataFromImportRef.current = musicXmlMetadataFromImport
+  }, [musicXmlMetadataFromImport])
 
   useEffect(() => {
     measurePairsRef.current = measurePairs
@@ -1540,7 +2012,7 @@ function App() {
           trebleY,
           bassY,
           isSystemStart,
-          activeSelection: null,
+          activeSelection,
           draggingSelection: null,
         })
 
@@ -1587,6 +2059,9 @@ function App() {
     measuresPerLine,
     visibleSystemRange.start,
     visibleSystemRange.end,
+    activeSelection.noteId,
+    activeSelection.staff,
+    activeSelection.keyIndex,
   ])
 
   useEffect(() => {
@@ -1826,6 +2301,12 @@ function App() {
     measurePairsFromImportRef.current = result.measurePairs
     setMeasureKeyFifthsFromImport(result.measureKeyFifths)
     measureKeyFifthsFromImportRef.current = result.measureKeyFifths
+    setMeasureDivisionsFromImport(result.measureDivisions)
+    measureDivisionsFromImportRef.current = result.measureDivisions
+    setMeasureTimeSignaturesFromImport(result.measureTimeSignatures)
+    measureTimeSignaturesFromImportRef.current = result.measureTimeSignatures
+    setMusicXmlMetadataFromImport(result.metadata)
+    musicXmlMetadataFromImportRef.current = result.metadata
     importedNoteLookupRef.current = buildImportedNoteLookup(result.measurePairs)
     dragRef.current = null
     clearDragOverlay()
@@ -1889,6 +2370,31 @@ function App() {
     importMusicXmlText(SAMPLE_MUSIC_XML)
   }
 
+  const exportMusicXmlFile = () => {
+    const xmlText = buildMusicXmlFromMeasurePairs({
+      measurePairs,
+      keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
+      divisionsByMeasure: measureDivisionsFromImportRef.current,
+      timeSignaturesByMeasure: measureTimeSignaturesFromImportRef.current,
+      metadata: musicXmlMetadataFromImportRef.current,
+    })
+
+    const title = musicXmlMetadataFromImportRef.current?.workTitle?.trim() || 'score'
+    const safeName = title.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_') || 'score'
+    const blob = new Blob([xmlText], { type: 'application/vnd.recordare.musicxml+xml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${safeName}.musicxml`
+    link.click()
+    URL.revokeObjectURL(url)
+
+    setImportFeedback({
+      kind: 'success',
+      message: `Exported ${measurePairs.length} measures to ${safeName}.musicxml`,
+    })
+  }
+
   const resetScore = () => {
     setNotes(INITIAL_NOTES)
     setBassNotes(INITIAL_BASS_NOTES)
@@ -1896,6 +2402,12 @@ function App() {
     measurePairsFromImportRef.current = null
     setMeasureKeyFifthsFromImport(null)
     measureKeyFifthsFromImportRef.current = null
+    setMeasureDivisionsFromImport(null)
+    measureDivisionsFromImportRef.current = null
+    setMeasureTimeSignaturesFromImport(null)
+    measureTimeSignaturesFromImportRef.current = null
+    setMusicXmlMetadataFromImport(null)
+    musicXmlMetadataFromImportRef.current = null
     importedNoteLookupRef.current.clear()
     dragRef.current = null
     clearDragOverlay()
@@ -1911,6 +2423,12 @@ function App() {
     measurePairsFromImportRef.current = null
     setMeasureKeyFifthsFromImport(null)
     measureKeyFifthsFromImportRef.current = null
+    setMeasureDivisionsFromImport(null)
+    measureDivisionsFromImportRef.current = null
+    setMeasureTimeSignaturesFromImport(null)
+    measureTimeSignaturesFromImportRef.current = null
+    setMusicXmlMetadataFromImport(null)
+    musicXmlMetadataFromImportRef.current = null
     importedNoteLookupRef.current.clear()
     dragRef.current = null
     clearDragOverlay()
@@ -1926,6 +2444,12 @@ function App() {
     measurePairsFromImportRef.current = null
     setMeasureKeyFifthsFromImport(null)
     measureKeyFifthsFromImportRef.current = null
+    setMeasureDivisionsFromImport(null)
+    measureDivisionsFromImportRef.current = null
+    setMeasureTimeSignaturesFromImport(null)
+    measureTimeSignaturesFromImportRef.current = null
+    setMusicXmlMetadataFromImport(null)
+    musicXmlMetadataFromImportRef.current = null
     importedNoteLookupRef.current.clear()
     dragRef.current = null
     clearDragOverlay()
@@ -2040,6 +2564,9 @@ function App() {
           </button>
           <button type="button" onClick={loadSampleMusicXml}>
             Load Sample XML
+          </button>
+          <button type="button" onClick={exportMusicXmlFile}>
+            Export MusicXML
           </button>
           <button type="button" onClick={importMusicXmlFromTextarea}>
             Import XML Text
