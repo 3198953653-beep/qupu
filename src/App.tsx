@@ -126,6 +126,7 @@ type MeasureLayout = {
   showEndTimeSignature: boolean
   includeMeasureStartDecorations: boolean
   noteStartX: number
+  formatWidth: number
   overlayRect: {
     x: number
     y: number
@@ -421,6 +422,14 @@ function getAccidentalSymbolFromAlter(alter: number): string | null {
 
 function getAccidentalStateKey(step: string, octave: number): string {
   return `${step}${octave}`
+}
+
+function getLayoutNoteKey(staff: StaffKind, noteId: string): string {
+  return `${staff}|${noteId}`
+}
+
+function getRenderedNoteVisualX(note: StaveNote): number {
+  return note.getNoteHeadBeginX()
 }
 
 function getEffectiveAlterFromContext(
@@ -1811,6 +1820,9 @@ function App() {
     collectLayouts?: boolean
     suppressSystemDecorations?: boolean
     noteStartXOverride?: number
+    freezePreviewAccidentalLayout?: boolean
+    formatWidthOverride?: number
+    staticNoteXById?: Map<string, number> | null
   }): NoteLayout[] => {
     const {
       context,
@@ -1834,11 +1846,15 @@ function App() {
       collectLayouts = true,
       suppressSystemDecorations = false,
       noteStartXOverride,
+      freezePreviewAccidentalLayout = false,
+      formatWidthOverride,
+      staticNoteXById = null,
     } = params
     const noteLayouts: NoteLayout[] = []
     const timeSignatureLabel = `${timeSignature.beats}/${timeSignature.beatType}`
     const endTimeSignatureLabel =
       showEndTimeSignature && endTimeSignature ? `${endTimeSignature.beats}/${endTimeSignature.beatType}` : null
+    const lockPreviewAccidentalLayout = freezePreviewAccidentalLayout && previewNote !== null
 
     const resolveRenderedNoteData = (
       note: ScoreNote,
@@ -1940,7 +1956,9 @@ function App() {
     const trebleRendered = measure.treble.map((note) => {
       const rendered = resolveRenderedNoteData(note, 'treble')
       const forceChordIndex =
-        rendered.previewedKeyIndex !== null && rendered.previewedKeyIndex > 0 ? rendered.previewedKeyIndex - 1 : null
+        !lockPreviewAccidentalLayout && rendered.previewedKeyIndex !== null && rendered.previewedKeyIndex > 0
+          ? rendered.previewedKeyIndex - 1
+          : null
       const renderedKeys = buildRenderedNoteKeys(
         note,
         'treble',
@@ -1948,7 +1966,7 @@ function App() {
         rendered.chordPitches,
         keyFifths,
         previewAccidentalStateBeforeNote,
-        rendered.previewedKeyIndex === 0,
+        !lockPreviewAccidentalLayout && rendered.previewedKeyIndex === 0,
         forceChordIndex,
       )
       const dots = getDurationDots(note.duration)
@@ -1972,7 +1990,9 @@ function App() {
     const bassRendered = measure.bass.map((note) => {
       const rendered = resolveRenderedNoteData(note, 'bass')
       const forceChordIndex =
-        rendered.previewedKeyIndex !== null && rendered.previewedKeyIndex > 0 ? rendered.previewedKeyIndex - 1 : null
+        !lockPreviewAccidentalLayout && rendered.previewedKeyIndex !== null && rendered.previewedKeyIndex > 0
+          ? rendered.previewedKeyIndex - 1
+          : null
       const renderedKeys = buildRenderedNoteKeys(
         note,
         'bass',
@@ -1980,7 +2000,7 @@ function App() {
         rendered.chordPitches,
         keyFifths,
         previewAccidentalStateBeforeNote,
-        rendered.previewedKeyIndex === 0,
+        !lockPreviewAccidentalLayout && rendered.previewedKeyIndex === 0,
         forceChordIndex,
       )
       const dots = getDurationDots(note.duration)
@@ -2003,6 +2023,8 @@ function App() {
 
     const trebleVexNotes = trebleRendered.map((entry) => entry.vexNote)
     const bassVexNotes = bassRendered.map((entry) => entry.vexNote)
+    trebleVexNotes.forEach((vexNote) => vexNote.setStave(trebleStave))
+    bassVexNotes.forEach((vexNote) => vexNote.setStave(bassStave))
 
     trebleRendered.forEach(({ vexNote, renderedKeys }, noteIndex) => {
       const noteId = measure.treble[noteIndex].id
@@ -2028,13 +2050,52 @@ function App() {
 
     const trebleVoice = new Voice({ numBeats: timeSignature.beats, beatValue: timeSignature.beatType }).addTickables(trebleVexNotes)
     const bassVoice = new Voice({ numBeats: timeSignature.beats, beatValue: timeSignature.beatType }).addTickables(bassVexNotes)
-    const formatWidth = Math.max(80, trebleStave.getNoteEndX() - trebleStave.getNoteStartX() - 8)
+    const formatWidth =
+      typeof formatWidthOverride === 'number' && Number.isFinite(formatWidthOverride)
+        ? Math.max(80, formatWidthOverride)
+        : Math.max(80, trebleStave.getNoteEndX() - trebleStave.getNoteStartX() - 8)
 
     new Formatter().joinVoices([trebleVoice]).joinVoices([bassVoice]).format([trebleVoice, bassVoice], formatWidth)
 
+    let shiftedNotes = 0
+    let maxDriftBefore = 0
+    let maxDriftAfter = 0
+    if (staticNoteXById && staticNoteXById.size > 0) {
+      const alignRenderedX = (staff: StaffKind, sourceNotes: ScoreNote[], rendered: { vexNote: StaveNote }[]) => {
+        sourceNotes.forEach((sourceNote, noteIndex) => {
+          const targetX = staticNoteXById.get(getLayoutNoteKey(staff, sourceNote.id))
+          const vexNote = rendered[noteIndex]?.vexNote
+          if (targetX === undefined || !vexNote) return
+          const currentX = getRenderedNoteVisualX(vexNote)
+          if (!Number.isFinite(currentX)) return
+          const delta = targetX - currentX
+          maxDriftBefore = Math.max(maxDriftBefore, Math.abs(delta))
+          if (Math.abs(delta) < 0.001) return
+          vexNote.setXShift(vexNote.getXShift() + delta)
+          shiftedNotes += 1
+        })
+      }
+
+      alignRenderedX('treble', measure.treble, trebleRendered)
+      alignRenderedX('bass', measure.bass, bassRendered)
+
+      const measureRenderedDriftAfter = (staff: StaffKind, sourceNotes: ScoreNote[], rendered: { vexNote: StaveNote }[]) => {
+        sourceNotes.forEach((sourceNote, noteIndex) => {
+          const targetX = staticNoteXById.get(getLayoutNoteKey(staff, sourceNote.id))
+          const vexNote = rendered[noteIndex]?.vexNote
+          if (targetX === undefined || !vexNote) return
+          const afterX = getRenderedNoteVisualX(vexNote)
+          if (!Number.isFinite(afterX)) return
+          maxDriftAfter = Math.max(maxDriftAfter, Math.abs(afterX - targetX))
+        })
+      }
+      measureRenderedDriftAfter('treble', measure.treble, trebleRendered)
+      measureRenderedDriftAfter('bass', measure.bass, bassRendered)
+    }
+
+
     const trebleBeams = Beam.generateBeams(trebleVexNotes, { groups: [new Fraction(1, 4)] })
     const bassBeams = Beam.generateBeams(bassVexNotes, { groups: [new Fraction(1, 4)] })
-
     trebleVoice.draw(context, trebleStave)
     bassVoice.draw(context, bassStave)
     trebleBeams.forEach((beam) => beam.setContext(context).draw())
@@ -2077,7 +2138,7 @@ function App() {
         staff: 'treble' as const,
         pairIndex,
         noteIndex,
-        x: vexNote.getAbsoluteX(),
+        x: getRenderedNoteVisualX(vexNote),
         y: rootHead?.y ?? ys[0] ?? 0,
         pitchYMap: treblePitchYMap,
         noteHeads,
@@ -2098,7 +2159,7 @@ function App() {
         staff: 'bass' as const,
         pairIndex,
         noteIndex,
-        x: vexNote.getAbsoluteX(),
+        x: getRenderedNoteVisualX(vexNote),
         y: rootHead?.y ?? ys[0] ?? 0,
         pitchYMap: bassPitchYMap,
         noteHeads,
@@ -2270,6 +2331,7 @@ function App() {
           }
         }
         const noteStartX = noteStartProbe.getNoteStartX()
+        const formatWidth = Math.max(80, noteStartProbe.getNoteEndX() - noteStartX - 8)
         const measureNoteLayouts = drawMeasureToContext({
           context,
           measure,
@@ -2325,6 +2387,7 @@ function App() {
           showEndTimeSignature,
           includeMeasureStartDecorations,
           noteStartX,
+          formatWidth,
           overlayRect,
         })
       })
@@ -2383,10 +2446,10 @@ function App() {
     const overlay = scoreOverlayRef.current
     if (!overlay) return null
 
-    const nextWidth = Math.max(1, Math.ceil(rect.width))
-    const nextHeight = Math.max(1, Math.ceil(rect.height))
-    const nextLeft = Math.floor(rect.x)
-    const nextTop = Math.floor(rect.y)
+    const nextWidth = Math.max(1, Math.ceil(scoreWidth))
+    const nextHeight = Math.max(1, Math.ceil(scoreHeight))
+    const nextLeft = 0
+    const nextTop = 0
 
     if (overlay.width !== nextWidth || overlay.height !== nextHeight) {
       overlay.width = nextWidth
@@ -2438,9 +2501,21 @@ function App() {
     const overlayContext = getOverlayContext()
     if (!overlayContext) return
 
+    const staticNoteXById = new Map<string, number>()
+    noteLayoutsRef.current.forEach((layout) => {
+      if (layout.pairIndex !== drag.pairIndex) return
+      staticNoteXById.set(getLayoutNoteKey(layout.staff, layout.id), layout.x)
+    })
+
+    overlayContext.clearRect(0, 0, overlayFrame.width, overlayFrame.height)
     overlayContext.save()
     overlayContext.setFillStyle('#ffffff')
-    overlayContext.fillRect(0, 0, overlayFrame.width, overlayFrame.height)
+    overlayContext.fillRect(
+      measureLayout.overlayRect.x,
+      measureLayout.overlayRect.y,
+      measureLayout.overlayRect.width,
+      measureLayout.overlayRect.height,
+    )
     overlayContext.restore()
     overlayContext.setFillStyle('#000000')
     overlayContext.setStrokeStyle('#000000')
@@ -2449,10 +2524,10 @@ function App() {
       context: overlayContext,
       measure,
       pairIndex: measureLayout.pairIndex,
-      measureX: measureLayout.measureX - overlayFrame.x,
+      measureX: measureLayout.measureX,
       measureWidth: measureLayout.measureWidth,
-      trebleY: measureLayout.trebleY - overlayFrame.y,
-      bassY: measureLayout.bassY - overlayFrame.y,
+      trebleY: measureLayout.trebleY,
+      bassY: measureLayout.bassY,
       isSystemStart: measureLayout.isSystemStart,
       keyFifths: measureLayout.keyFifths,
       showKeySignature: previewShowKeySignature,
@@ -2466,7 +2541,10 @@ function App() {
       previewAccidentalStateBeforeNote: drag.accidentalStateBeforeNote,
       collectLayouts: false,
       suppressSystemDecorations: true,
-      noteStartXOverride: measureLayout.noteStartX - overlayFrame.x,
+      noteStartXOverride: measureLayout.noteStartX,
+      freezePreviewAccidentalLayout: true,
+      formatWidthOverride: measureLayout.formatWidth,
+      staticNoteXById,
     })
   }
 
@@ -2524,19 +2602,19 @@ function App() {
     const drag = dragRef.current
     if (!drag || event.pointerId !== drag.pointerId) return
 
-    if (!drag.previewStarted) {
-      const nextDrag = { ...drag, previewStarted: true }
-      dragRef.current = nextDrag
-      drawDragMeasurePreview(nextDrag)
-    }
-
     const y = event.clientY - drag.surfaceTop
     const targetY = y - drag.grabOffsetY
     const staffPositionPitch = getNearestPitchByY(targetY, drag.pitchYMap, drag.pitch)
     const pitch = isSameStaffPositionPitch(staffPositionPitch, drag.pitch)
       ? drag.pitch
       : getEffectivePitchForStaffPosition(staffPositionPitch, drag.keyFifths, drag.accidentalStateBeforeNote)
-    scheduleDragCommit(drag, pitch)
+    if (pitch === drag.pitch) return
+
+    const dragForPreview = drag.previewStarted ? drag : { ...drag, previewStarted: true }
+    if (!drag.previewStarted) {
+      dragRef.current = dragForPreview
+    }
+    scheduleDragCommit(dragForPreview, pitch)
   }
 
   const endDrag = (event: React.PointerEvent<HTMLCanvasElement>) => {
