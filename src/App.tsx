@@ -106,6 +106,8 @@ type DragState = {
   previewStarted: boolean
   grabOffsetY: number
   pitchYMap: Record<Pitch, number>
+  keyFifths: number
+  accidentalStateBeforeNote: Map<string, number>
 }
 
 type MeasureLayout = {
@@ -417,11 +419,40 @@ function getAccidentalSymbolFromAlter(alter: number): string | null {
   return null
 }
 
-function getAccidentalFromPitchAgainstKey(renderedPitch: Pitch, keyFifths: number): string | null {
-  const { step, alter } = getStepOctaveAlterFromPitch(renderedPitch)
-  const keyAlter = getKeySignatureAlterForStep(step, keyFifths)
-  if (alter === keyAlter) return null
-  if (alter === 0 && keyAlter !== 0) return 'n'
+function getAccidentalStateKey(step: string, octave: number): string {
+  return `${step}${octave}`
+}
+
+function getEffectiveAlterFromContext(
+  step: string,
+  octave: number,
+  keyFifths: number,
+  accidentalStateBeforeNote?: Map<string, number> | null,
+): number {
+  const carried = accidentalStateBeforeNote?.get(getAccidentalStateKey(step, octave))
+  if (carried !== undefined) return carried
+  return getKeySignatureAlterForStep(step, keyFifths)
+}
+
+function getEffectivePitchForStaffPosition(
+  staffPositionPitch: Pitch,
+  keyFifths: number,
+  accidentalStateBeforeNote?: Map<string, number> | null,
+): Pitch {
+  const { step, octave } = getStepOctaveAlterFromPitch(staffPositionPitch)
+  const effectiveAlter = getEffectiveAlterFromContext(step, octave, keyFifths, accidentalStateBeforeNote)
+  return toPitchFromStepAlter(step, effectiveAlter, octave)
+}
+
+function getAccidentalFromPitchAgainstContext(
+  renderedPitch: Pitch,
+  keyFifths: number,
+  accidentalStateBeforeNote?: Map<string, number> | null,
+): string | null {
+  const { step, octave, alter } = getStepOctaveAlterFromPitch(renderedPitch)
+  const expectedAlter = getEffectiveAlterFromContext(step, octave, keyFifths, accidentalStateBeforeNote)
+  if (alter === expectedAlter) return null
+  if (alter === 0 && expectedAlter !== 0) return 'n'
   return getAccidentalSymbolFromAlter(alter)
 }
 
@@ -429,10 +460,13 @@ function getRenderedAccidental(
   note: ScoreNote,
   renderedPitch: Pitch,
   keyFifths: number,
+  accidentalStateBeforeNote?: Map<string, number> | null,
   forceFromPitch = false,
 ): string | null {
   if (!forceFromPitch && note.accidental !== undefined) return note.accidental
-  return forceFromPitch ? getAccidentalFromPitchAgainstKey(renderedPitch, keyFifths) : getAccidentalFromPitch(renderedPitch)
+  return forceFromPitch
+    ? getAccidentalFromPitchAgainstContext(renderedPitch, keyFifths, accidentalStateBeforeNote)
+    : getAccidentalFromPitch(renderedPitch)
 }
 
 function toPitchFromStepAlter(step: string, alter: number, octave: number): Pitch {
@@ -491,14 +525,27 @@ function resolvePitchByAccidentalState(
 
   let resolvedAlter = pitchAlter
   if (accidental === null) {
-    const carried = state.get(key)
-    resolvedAlter = carried !== undefined ? carried : getKeySignatureAlterForStep(step, keyFifths)
+    resolvedAlter = getEffectiveAlterFromContext(step, octave, keyFifths, state)
   } else if (typeof accidental === 'string') {
     resolvedAlter = getAlterFromAccidentalSymbol(accidental) ?? pitchAlter
   }
 
   state.set(key, resolvedAlter)
   return toPitchFromStepAlter(step, resolvedAlter, octave)
+}
+
+function buildAccidentalStateBeforeNote(notes: ScoreNote[], noteIndex: number, keyFifths: number): Map<string, number> {
+  const state = new Map<string, number>()
+  const end = clamp(noteIndex, 0, notes.length)
+  for (let index = 0; index < end; index += 1) {
+    const note = notes[index]
+    resolvePitchByAccidentalState(note.pitch, note.accidental, state, keyFifths)
+    note.chordPitches?.forEach((chordPitch, chordIndex) => {
+      const chordAccidental = note.chordAccidentals?.[chordIndex]
+      resolvePitchByAccidentalState(chordPitch, chordAccidental, state, keyFifths)
+    })
+  }
+  return state
 }
 
 function normalizeMeasureStaffByAccidentalState(notes: ScoreNote[], keyFifths: number): ScoreNote[] {
@@ -554,13 +601,20 @@ function buildRenderedNoteKeys(
   renderedPitch: Pitch,
   renderedChordPitches: Pitch[] | undefined,
   keyFifths: number,
+  accidentalStateBeforeNote: Map<string, number> | null,
   forceRootAccidentalFromPitch: boolean,
   forceChordAccidentalFromPitchIndex: number | null,
 ): RenderedNoteKey[] {
   const keys: RenderedNoteKey[] = [
     {
       pitch: renderedPitch,
-      accidental: getRenderedAccidental(note, renderedPitch, keyFifths, forceRootAccidentalFromPitch),
+      accidental: getRenderedAccidental(
+        note,
+        renderedPitch,
+        keyFifths,
+        accidentalStateBeforeNote,
+        forceRootAccidentalFromPitch,
+      ),
       keyIndex: 0,
     },
   ]
@@ -569,7 +623,7 @@ function buildRenderedNoteKeys(
     const chordAccidental = note.chordAccidentals?.[index]
     const accidental =
       forceChordAccidentalFromPitchIndex === index
-        ? getAccidentalFromPitchAgainstKey(pitch, keyFifths)
+        ? getAccidentalFromPitchAgainstContext(pitch, keyFifths, accidentalStateBeforeNote)
         : chordAccidental !== undefined
           ? chordAccidental
           : getAccidentalFromPitch(pitch)
@@ -1724,6 +1778,7 @@ function App() {
     activeSelection: Selection | null
     draggingSelection: Selection | null
     previewNote?: { noteId: string; staff: StaffKind; pitch: Pitch; keyIndex: number } | null
+    previewAccidentalStateBeforeNote?: Map<string, number> | null
     collectLayouts?: boolean
     suppressSystemDecorations?: boolean
     noteStartXOverride?: number
@@ -1746,6 +1801,7 @@ function App() {
       activeSelection: selection,
       draggingSelection: dragging,
       previewNote = null,
+      previewAccidentalStateBeforeNote = null,
       collectLayouts = true,
       suppressSystemDecorations = false,
       noteStartXOverride,
@@ -1862,6 +1918,7 @@ function App() {
         rendered.rootPitch,
         rendered.chordPitches,
         keyFifths,
+        previewAccidentalStateBeforeNote,
         rendered.previewedKeyIndex === 0,
         forceChordIndex,
       )
@@ -1893,6 +1950,7 @@ function App() {
         rendered.rootPitch,
         rendered.chordPitches,
         keyFifths,
+        previewAccidentalStateBeforeNote,
         rendered.previewedKeyIndex === 0,
         forceChordIndex,
       )
@@ -2376,6 +2434,7 @@ function App() {
       activeSelection: null,
       draggingSelection: null,
       previewNote: { noteId: drag.noteId, staff: drag.staff, pitch: drag.pitch, keyIndex: drag.keyIndex },
+      previewAccidentalStateBeforeNote: drag.accidentalStateBeforeNote,
       collectLayouts: false,
       suppressSystemDecorations: true,
       noteStartXOverride: measureLayout.noteStartX - overlayFrame.x,
@@ -2444,7 +2503,8 @@ function App() {
 
     const y = event.clientY - drag.surfaceTop
     const targetY = y - drag.grabOffsetY
-    const pitch = getNearestPitchByY(targetY, drag.pitchYMap, drag.pitch)
+    const staffPositionPitch = getNearestPitchByY(targetY, drag.pitchYMap, drag.pitch)
+    const pitch = getEffectivePitchForStaffPosition(staffPositionPitch, drag.keyFifths, drag.accidentalStateBeforeNote)
     scheduleDragCommit(drag, pitch)
   }
 
@@ -2703,6 +2763,14 @@ function App() {
       const sourceNotes = hitNote.staff === 'treble' ? notes : bassNotes
       current = sourceNotes.find((note) => note.id === hitNote.id)
     }
+    const measurePair = (importedPairs ?? measurePairsRef.current)[hitNote.pairIndex]
+    const measureStaffNotes = hitNote.staff === 'treble' ? (measurePair?.treble ?? []) : (measurePair?.bass ?? [])
+    const keyFifths =
+      measureLayoutsRef.current.get(hitNote.pairIndex)?.keyFifths ??
+      measureKeyFifthsFromImportRef.current?.[hitNote.pairIndex] ??
+      measureKeyFifthsFromImportRef.current?.[hitNote.pairIndex - 1] ??
+      0
+    const accidentalStateBeforeNote = buildAccidentalStateBeforeNote(measureStaffNotes, hitNote.noteIndex, keyFifths)
     const noteCenterY = hitHead.y
     const grabOffsetY = y - noteCenterY
     const hitKeyIndex = hitHead.keyIndex
@@ -2722,6 +2790,8 @@ function App() {
       previewStarted: false,
       grabOffsetY,
       pitchYMap: hitNote.pitchYMap,
+      keyFifths,
+      accidentalStateBeforeNote,
     }
 
     dragRef.current = dragState
