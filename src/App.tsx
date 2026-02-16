@@ -1688,6 +1688,8 @@ function App() {
     showKeySignature: boolean
     timeSignature: TimeSignature
     showTimeSignature: boolean
+    endTimeSignature?: TimeSignature | null
+    showEndTimeSignature?: boolean
     activeSelection: Selection | null
     draggingSelection: Selection | null
     previewNote?: { noteId: string; staff: StaffKind; pitch: Pitch; keyIndex: number } | null
@@ -1708,6 +1710,8 @@ function App() {
       showKeySignature,
       timeSignature,
       showTimeSignature,
+      endTimeSignature = null,
+      showEndTimeSignature = false,
       activeSelection: selection,
       draggingSelection: dragging,
       previewNote = null,
@@ -1717,6 +1721,8 @@ function App() {
     } = params
     const noteLayouts: NoteLayout[] = []
     const timeSignatureLabel = `${timeSignature.beats}/${timeSignature.beatType}`
+    const endTimeSignatureLabel =
+      showEndTimeSignature && endTimeSignature ? `${endTimeSignature.beats}/${endTimeSignature.beatType}` : null
 
     const resolveRenderedNoteData = (
       note: ScoreNote,
@@ -1777,6 +1783,11 @@ function App() {
       }
     }
 
+    if (endTimeSignatureLabel) {
+      trebleStave.setEndTimeSignature(endTimeSignatureLabel)
+      bassStave.setEndTimeSignature(endTimeSignatureLabel)
+    }
+
     trebleStave.setContext(context).draw()
     bassStave.setContext(context).draw()
 
@@ -1785,7 +1796,9 @@ function App() {
         new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.BRACE).setContext(context).draw()
         new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.SINGLE_LEFT).setContext(context).draw()
       }
-      new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.SINGLE_RIGHT).setContext(context).draw()
+      if (!showEndTimeSignature) {
+        new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.SINGLE_RIGHT).setContext(context).draw()
+      }
     }
 
     const trebleRendered = measure.treble.map((note) => {
@@ -2079,9 +2092,21 @@ function App() {
               }
             : timeSignature
         const showTimeSignature =
-          isSystemStart ||
+          pairIndex === 0 ||
           timeSignature.beats !== previousTimeSignature.beats ||
           timeSignature.beatType !== previousTimeSignature.beatType
+        const hasNextMeasure = pairIndex + 1 < measurePairs.length
+        const nextTimeSignature =
+          hasNextMeasure
+            ? measureTimeSignaturesFromImport?.[pairIndex + 1] ??
+              measureTimeSignaturesFromImport?.[pairIndex] ??
+              timeSignature
+            : timeSignature
+        const isSystemEnd = indexInSystem === systemMeasures.length - 1
+        const showEndTimeSignature =
+          hasNextMeasure &&
+          isSystemEnd &&
+          (nextTimeSignature.beats !== timeSignature.beats || nextTimeSignature.beatType !== timeSignature.beatType)
         const keyFifths = measureKeyFifthsFromImport?.[pairIndex] ?? measureKeyFifthsFromImport?.[pairIndex - 1] ?? 0
         const previousKeyFifths = pairIndex > 0 ? (measureKeyFifthsFromImport?.[pairIndex - 1] ?? 0) : keyFifths
         const showKeySignature = isSystemStart || keyFifths !== previousKeyFifths
@@ -2117,6 +2142,8 @@ function App() {
           showKeySignature,
           timeSignature,
           showTimeSignature,
+          endTimeSignature: nextTimeSignature,
+          showEndTimeSignature,
           activeSelection,
           draggingSelection: null,
         })
@@ -2254,6 +2281,25 @@ function App() {
     const measure = measurePairsRef.current[drag.pairIndex]
     if (!measureLayout || !measure) return
 
+    const currentTimeSignature =
+      measureTimeSignaturesFromImportRef.current?.[measureLayout.pairIndex] ??
+      measureTimeSignaturesFromImportRef.current?.[measureLayout.pairIndex - 1] ?? {
+        beats: 4,
+        beatType: 4,
+      }
+    const hasNextMeasure = measureLayout.pairIndex + 1 < measurePairsRef.current.length
+    const nextTimeSignature =
+      hasNextMeasure
+        ? measureTimeSignaturesFromImportRef.current?.[measureLayout.pairIndex + 1] ??
+          measureTimeSignaturesFromImportRef.current?.[measureLayout.pairIndex] ??
+          currentTimeSignature
+        : currentTimeSignature
+    const isSystemEnd = (measureLayout.pairIndex + 1) % measuresPerLine === 0
+    const showEndTimeSignature =
+      hasNextMeasure &&
+      isSystemEnd &&
+      (nextTimeSignature.beats !== currentTimeSignature.beats || nextTimeSignature.beatType !== currentTimeSignature.beatType)
+
     const overlayFrame = ensureOverlayCanvasForRect(measureLayout.overlayRect)
     if (!overlayFrame) return
 
@@ -2278,13 +2324,10 @@ function App() {
       isSystemStart: measureLayout.isSystemStart,
       keyFifths: measureKeyFifthsFromImportRef.current?.[measureLayout.pairIndex] ?? 0,
       showKeySignature: false,
-      timeSignature:
-        measureTimeSignaturesFromImportRef.current?.[measureLayout.pairIndex] ??
-        measureTimeSignaturesFromImportRef.current?.[measureLayout.pairIndex - 1] ?? {
-          beats: 4,
-          beatType: 4,
-        },
+      timeSignature: currentTimeSignature,
       showTimeSignature: false,
+      endTimeSignature: nextTimeSignature,
+      showEndTimeSignature,
       activeSelection: null,
       draggingSelection: null,
       previewNote: { noteId: drag.noteId, staff: drag.staff, pitch: drag.pitch, keyIndex: drag.keyIndex },
