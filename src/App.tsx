@@ -153,6 +153,7 @@ type DragState = {
   pitchYMap: Record<Pitch, number>
   keyFifths: number
   accidentalStateBeforeNote: Map<string, number>
+  staticNoteXById: Map<string, number>
   previewAccidentalRightXById: Map<string, Map<number, number>>
   debugStaticByNoteKey: Map<string, DragDebugStaticRecord>
 }
@@ -2292,9 +2293,6 @@ function App() {
 
     new Formatter().joinVoices([trebleVoice]).joinVoices([bassVoice]).format([trebleVoice, bassVoice], formatWidth)
 
-    let shiftedNotes = 0
-    let maxDriftBefore = 0
-    let maxDriftAfter = 0
     if (staticNoteXById && staticNoteXById.size > 0) {
       const alignRenderedX = (staff: StaffKind, sourceNotes: ScoreNote[], rendered: { vexNote: StaveNote }[]) => {
         sourceNotes.forEach((sourceNote, noteIndex) => {
@@ -2304,28 +2302,13 @@ function App() {
           const currentX = getRenderedNoteVisualX(vexNote)
           if (!Number.isFinite(currentX)) return
           const delta = targetX - currentX
-          maxDriftBefore = Math.max(maxDriftBefore, Math.abs(delta))
           if (Math.abs(delta) < 0.001) return
           vexNote.setXShift(vexNote.getXShift() + delta)
-          shiftedNotes += 1
         })
       }
 
       alignRenderedX('treble', measure.treble, trebleRendered)
       alignRenderedX('bass', measure.bass, bassRendered)
-
-      const measureRenderedDriftAfter = (staff: StaffKind, sourceNotes: ScoreNote[], rendered: { vexNote: StaveNote }[]) => {
-        sourceNotes.forEach((sourceNote, noteIndex) => {
-          const targetX = staticNoteXById.get(getLayoutNoteKey(staff, sourceNote.id))
-          const vexNote = rendered[noteIndex]?.vexNote
-          if (targetX === undefined || !vexNote) return
-          const afterX = getRenderedNoteVisualX(vexNote)
-          if (!Number.isFinite(afterX)) return
-          maxDriftAfter = Math.max(maxDriftAfter, Math.abs(afterX - targetX))
-        })
-      }
-      measureRenderedDriftAfter('treble', measure.treble, trebleRendered)
-      measureRenderedDriftAfter('bass', measure.bass, bassRendered)
     }
 
     if (staticAccidentalRightXById && staticAccidentalRightXById.size > 0) {
@@ -2882,10 +2865,10 @@ function App() {
     const overlay = scoreOverlayRef.current
     if (!overlay) return null
 
-    const nextWidth = Math.max(1, Math.ceil(scoreWidth))
-    const nextHeight = Math.max(1, Math.ceil(scoreHeight))
-    const nextLeft = 0
-    const nextTop = 0
+    const nextWidth = Math.max(1, Math.ceil(rect.width))
+    const nextHeight = Math.max(1, Math.ceil(rect.height))
+    const nextLeft = Math.floor(rect.x)
+    const nextTop = Math.floor(rect.y)
 
     if (overlay.width !== nextWidth || overlay.height !== nextHeight) {
       overlay.width = nextWidth
@@ -2922,6 +2905,16 @@ function App() {
     }
 
     return renderer.getContext()
+  }
+
+  const buildStaticNoteXById = (pairIndex: number): Map<string, number> => {
+    const byId = new Map<string, number>()
+    noteLayoutsRef.current.forEach((layout) => {
+      if (layout.pairIndex !== pairIndex) return
+      const layoutKey = getLayoutNoteKey(layout.staff, layout.id)
+      byId.set(layoutKey, layout.x)
+    })
+    return byId
   }
 
   const buildDragDebugStaticByNoteKey = (pairIndex: number): Map<string, DragDebugStaticRecord> => {
@@ -3085,24 +3078,16 @@ function App() {
 
     const overlayContext = getOverlayContext()
     if (!overlayContext) return
-
-    const staticNoteXById = new Map<string, number>()
-    noteLayoutsRef.current.forEach((layout) => {
-      if (layout.pairIndex !== drag.pairIndex) return
-      const layoutKey = getLayoutNoteKey(layout.staff, layout.id)
-      staticNoteXById.set(layoutKey, layout.x)
-    })
+    const overlayContext2D = (overlayContext as unknown as { context2D?: CanvasRenderingContext2D }).context2D
+    if (!overlayContext2D) return
 
     overlayContext.clearRect(0, 0, overlayFrame.width, overlayFrame.height)
     overlayContext.save()
     overlayContext.setFillStyle('#ffffff')
-    overlayContext.fillRect(
-      measureLayout.overlayRect.x,
-      measureLayout.overlayRect.y,
-      measureLayout.overlayRect.width,
-      measureLayout.overlayRect.height,
-    )
+    overlayContext.fillRect(0, 0, overlayFrame.width, overlayFrame.height)
     overlayContext.restore()
+    overlayContext.save()
+    overlayContext2D.translate(-overlayFrame.x, -overlayFrame.y)
     overlayContext.setFillStyle('#000000')
     overlayContext.setStrokeStyle('#000000')
 
@@ -3130,7 +3115,7 @@ function App() {
       noteStartXOverride: measureLayout.noteStartX,
       freezePreviewAccidentalLayout: false,
       formatWidthOverride: measureLayout.formatWidth,
-      staticNoteXById,
+      staticNoteXById: drag.staticNoteXById,
       staticAccidentalRightXById: drag.previewAccidentalRightXById,
       debugCapture: {
         frame: dragPreviewFrameRef.current,
@@ -3146,6 +3131,7 @@ function App() {
         },
       },
     })
+    overlayContext.restore()
   }
 
   const applyDragPreview = (drag: DragState, pitch: Pitch) => {
@@ -3206,6 +3192,12 @@ function App() {
       return
     }
 
+    const dragForPreview = drag.previewStarted ? drag : { ...drag, previewStarted: true }
+    if (!drag.previewStarted) {
+      dragRef.current = dragForPreview
+      drawDragMeasurePreview(dragForPreview)
+    }
+
     const y = event.clientY - drag.surfaceTop
     const targetY = y - drag.grabOffsetY
     const staffPositionPitch = getNearestPitchByY(targetY, drag.pitchYMap, drag.pitch)
@@ -3214,10 +3206,6 @@ function App() {
       : getEffectivePitchForStaffPosition(staffPositionPitch, drag.keyFifths, drag.accidentalStateBeforeNote)
     if (pitch === drag.pitch) return
 
-    const dragForPreview = drag.previewStarted ? drag : { ...drag, previewStarted: true }
-    if (!drag.previewStarted) {
-      dragRef.current = dragForPreview
-    }
     scheduleDragCommit(dragForPreview, pitch)
   }
 
@@ -3494,6 +3482,7 @@ function App() {
     const currentPitch =
       current && hitKeyIndex > 0 ? current.chordPitches?.[hitKeyIndex - 1] ?? current.pitch : current?.pitch
     const pitch = currentPitch ?? hitHead.pitch ?? getNearestPitchByY(noteCenterY, hitNote.pitchYMap)
+    const staticNoteXById = buildStaticNoteXById(hitNote.pairIndex)
     const debugStaticByNoteKey = buildDragDebugStaticByNoteKey(hitNote.pairIndex)
     const previewAccidentalRightXById = buildPreviewAccidentalRightXFromStatic(debugStaticByNoteKey)
 
@@ -3512,6 +3501,7 @@ function App() {
       pitchYMap: hitNote.pitchYMap,
       keyFifths,
       accidentalStateBeforeNote,
+      staticNoteXById,
       previewAccidentalRightXById,
       debugStaticByNoteKey,
     }
