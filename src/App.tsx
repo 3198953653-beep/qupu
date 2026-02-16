@@ -590,9 +590,9 @@ function createImportedNoteId(staff: StaffKind): string {
   return `${staff}-${createNoteId()}`
 }
 
-function beatsToTicks(beats: number): number {
+function beatsToTicks(beats: number, maxTicks = MEASURE_TICKS): number {
   const ticks = Math.round(beats * TICKS_PER_BEAT)
-  return clamp(ticks, 1, MEASURE_TICKS)
+  return clamp(ticks, 1, maxTicks)
 }
 
 function splitTicksToDurations(ticks: number): NoteDuration[] {
@@ -625,6 +625,13 @@ function parseMusicXmlPitchParts(noteEl: Element): { step: string; octave: numbe
   const alter = Number(alterText)
   if (!Number.isFinite(alter)) return null
   return { step, octave, alter }
+}
+
+function getMeasureTicksByTime(time: TimeSignature): number {
+  const beats = Number.isFinite(time.beats) && time.beats > 0 ? time.beats : 4
+  const beatType = Number.isFinite(time.beatType) && time.beatType > 0 ? time.beatType : 4
+  const ticks = Math.round(beats * TICKS_PER_BEAT * (4 / beatType))
+  return Math.max(1, ticks)
 }
 
 function parseMusicXmlAccidental(noteEl: Element): string | undefined {
@@ -999,16 +1006,14 @@ function buildMusicXmlFromMeasurePairs(params: {
 
   let previousDivisions = -1
   let previousFifths = Number.NaN
-  let previousTime = ''
 
   measurePairs.forEach((pair, measureIndex) => {
     const divisions = pickDivisions(measureIndex)
     const fifths = pickKeyFifths(measureIndex)
     const time = pickTime(measureIndex)
-    const timeKey = `${time.beats}/${time.beatType}`
     const shouldWriteDivisions = measureIndex === 0 || divisions !== previousDivisions
     const shouldWriteKey = measureIndex === 0 || fifths !== previousFifths
-    const shouldWriteTime = measureIndex === 0 || timeKey !== previousTime
+    const shouldWriteTime = true
 
     lines.push(`  <measure number="${measureIndex + 1}">`)
     if (shouldWriteDivisions || shouldWriteKey || shouldWriteTime || measureIndex === 0) {
@@ -1065,7 +1070,6 @@ function buildMusicXmlFromMeasurePairs(params: {
     lines.push('  </measure>')
     previousDivisions = divisions
     previousFifths = fifths
-    previousTime = timeKey
   })
 
   lines.push(' </part>')
@@ -1073,9 +1077,15 @@ function buildMusicXmlFromMeasurePairs(params: {
   return `${lines.join('\n')}\n`
 }
 
-function fillMissingTicksWithCarryNotes(notes: ScoreNote[], staff: StaffKind, ticksUsed: number, carryPitch: Pitch): ScoreNote[] {
+function fillMissingTicksWithCarryNotes(
+  notes: ScoreNote[],
+  staff: StaffKind,
+  ticksUsed: number,
+  carryPitch: Pitch,
+  measureTicks = MEASURE_TICKS,
+): ScoreNote[] {
   const filled = [...notes]
-  let remaining = clamp(MEASURE_TICKS - ticksUsed, 0, MEASURE_TICKS)
+  let remaining = clamp(measureTicks - ticksUsed, 0, measureTicks)
 
   while (remaining > 0) {
     const duration = DURATION_GREEDY_ORDER.find((item) => DURATION_TICKS[item] <= remaining)
@@ -1170,6 +1180,7 @@ function parseMusicXml(xml: string): ImportResult {
     notes: Record<StaffKind, ScoreNote[]>
     ticksUsed: Record<StaffKind, number>
     touched: Record<StaffKind, boolean>
+    measureTicks: number
   }[] = []
   const measureKeyFifths: number[] = []
   const measureDivisions: number[] = []
@@ -1177,14 +1188,15 @@ function parseMusicXml(xml: string): ImportResult {
 
   const ensureMeasureSlot = (index: number) => {
     if (!measureSlots[index]) {
-      measureSlots[index] = {
-        notes: { treble: [], bass: [] },
-        ticksUsed: { treble: 0, bass: 0 },
-        touched: { treble: false, bass: false },
+        measureSlots[index] = {
+          notes: { treble: [], bass: [] },
+          ticksUsed: { treble: 0, bass: 0 },
+          touched: { treble: false, bass: false },
+          measureTicks: MEASURE_TICKS,
+        }
       }
+      return measureSlots[index]
     }
-    return measureSlots[index]
-  }
 
   const lastPitch: Record<StaffKind, Pitch> = { treble: 'c/4', bass: 'c/3' }
 
@@ -1217,6 +1229,7 @@ function parseMusicXml(xml: string): ImportResult {
       if (measureTimeSignatures[measureIndex] === undefined) {
         measureTimeSignatures[measureIndex] = { ...currentTime }
       }
+      slot.measureTicks = getMeasureTicksByTime(currentTime)
 
       const fifthsText = measureEl.querySelector('attributes > key > fifths')?.textContent?.trim()
       const maybeFifths = fifthsText ? Number(fifthsText) : Number.NaN
@@ -1273,7 +1286,7 @@ function parseMusicXml(xml: string): ImportResult {
           return
         }
 
-        if (slot.ticksUsed[staff] >= MEASURE_TICKS) return
+        if (slot.ticksUsed[staff] >= slot.measureTicks) return
 
         const beats = parseMusicXmlBeats(noteEl, divisions)
         if (!beats) return
@@ -1295,13 +1308,13 @@ function parseMusicXml(xml: string): ImportResult {
           }
         }
         const explicitAccidental = isRest ? undefined : parseMusicXmlAccidental(noteEl) ?? null
-        const notePattern = splitTicksToDurations(beatsToTicks(beats))
+        const notePattern = splitTicksToDurations(beatsToTicks(beats, slot.measureTicks))
 
         slot.touched[staff] = true
         for (let patternIndex = 0; patternIndex < notePattern.length; patternIndex += 1) {
           const duration = notePattern[patternIndex]
           const durationTicks = DURATION_TICKS[duration]
-          if (slot.ticksUsed[staff] + durationTicks > MEASURE_TICKS) break
+          if (slot.ticksUsed[staff] + durationTicks > slot.measureTicks) break
           slot.notes[staff].push({
             id: createImportedNoteId(staff),
             pitch,
@@ -1325,8 +1338,14 @@ function parseMusicXml(xml: string): ImportResult {
 
     const treblePitch = getLastPitch(slot.notes.treble, trebleCarry)
     const bassPitch = getLastPitch(slot.notes.bass, bassCarry)
-    const treble = fillMissingTicksWithCarryNotes(slot.notes.treble, 'treble', slot.ticksUsed.treble, treblePitch)
-    const bass = fillMissingTicksWithCarryNotes(slot.notes.bass, 'bass', slot.ticksUsed.bass, bassPitch)
+    const treble = fillMissingTicksWithCarryNotes(
+      slot.notes.treble,
+      'treble',
+      slot.ticksUsed.treble,
+      treblePitch,
+      slot.measureTicks,
+    )
+    const bass = fillMissingTicksWithCarryNotes(slot.notes.bass, 'bass', slot.ticksUsed.bass, bassPitch, slot.measureTicks)
 
     trebleCarry = getLastPitch(treble, trebleCarry)
     bassCarry = getLastPitch(bass, bassCarry)
@@ -1667,6 +1686,8 @@ function App() {
     isSystemStart: boolean
     keyFifths: number
     showKeySignature: boolean
+    timeSignature: TimeSignature
+    showTimeSignature: boolean
     activeSelection: Selection | null
     draggingSelection: Selection | null
     previewNote?: { noteId: string; staff: StaffKind; pitch: Pitch; keyIndex: number } | null
@@ -1685,6 +1706,8 @@ function App() {
       isSystemStart,
       keyFifths,
       showKeySignature,
+      timeSignature,
+      showTimeSignature,
       activeSelection: selection,
       draggingSelection: dragging,
       previewNote = null,
@@ -1693,6 +1716,7 @@ function App() {
       noteStartXOverride,
     } = params
     const noteLayouts: NoteLayout[] = []
+    const timeSignatureLabel = `${timeSignature.beats}/${timeSignature.beatType}`
 
     const resolveRenderedNoteData = (
       note: ScoreNote,
@@ -1735,8 +1759,10 @@ function App() {
         trebleStave.addKeySignature(keySignature)
         bassStave.addKeySignature(keySignature)
       }
-      trebleStave.addTimeSignature('4/4')
-      bassStave.addTimeSignature('4/4')
+      if (showTimeSignature) {
+        trebleStave.addTimeSignature(timeSignatureLabel)
+        bassStave.addTimeSignature(timeSignatureLabel)
+      }
     } else {
       trebleStave.setBegBarType(BarlineType.NONE)
       bassStave.setBegBarType(BarlineType.NONE)
@@ -1744,6 +1770,10 @@ function App() {
         const keySignature = getKeySignatureSpecFromFifths(keyFifths)
         trebleStave.addKeySignature(keySignature)
         bassStave.addKeySignature(keySignature)
+      }
+      if (showTimeSignature) {
+        trebleStave.addTimeSignature(timeSignatureLabel)
+        bassStave.addTimeSignature(timeSignatureLabel)
       }
     }
 
@@ -1843,8 +1873,8 @@ function App() {
       }
     })
 
-    const trebleVoice = new Voice({ numBeats: 4, beatValue: 4 }).addTickables(trebleVexNotes)
-    const bassVoice = new Voice({ numBeats: 4, beatValue: 4 }).addTickables(bassVexNotes)
+    const trebleVoice = new Voice({ numBeats: timeSignature.beats, beatValue: timeSignature.beatType }).addTickables(trebleVexNotes)
+    const bassVoice = new Voice({ numBeats: timeSignature.beats, beatValue: timeSignature.beatType }).addTickables(bassVexNotes)
     const formatWidth = Math.max(80, trebleStave.getNoteEndX() - trebleStave.getNoteStartX() - 8)
 
     new Formatter().joinVoices([trebleVoice]).joinVoices([bassVoice]).format([trebleVoice, bassVoice], formatWidth)
@@ -2034,6 +2064,24 @@ function App() {
         const pairIndex = start + indexInSystem
         const measureX = STAFF_X + indexInSystem * measureWidth
         const isSystemStart = indexInSystem === 0
+        const timeSignature =
+          measureTimeSignaturesFromImport?.[pairIndex] ??
+          measureTimeSignaturesFromImport?.[pairIndex - 1] ?? {
+            beats: 4,
+            beatType: 4,
+          }
+        const previousTimeSignature =
+          pairIndex > 0
+            ? measureTimeSignaturesFromImport?.[pairIndex - 1] ??
+              measureTimeSignaturesFromImport?.[pairIndex - 2] ?? {
+                beats: 4,
+                beatType: 4,
+              }
+            : timeSignature
+        const showTimeSignature =
+          isSystemStart ||
+          timeSignature.beats !== previousTimeSignature.beats ||
+          timeSignature.beatType !== previousTimeSignature.beatType
         const keyFifths = measureKeyFifthsFromImport?.[pairIndex] ?? measureKeyFifthsFromImport?.[pairIndex - 1] ?? 0
         const previousKeyFifths = pairIndex > 0 ? (measureKeyFifthsFromImport?.[pairIndex - 1] ?? 0) : keyFifths
         const showKeySignature = isSystemStart || keyFifths !== previousKeyFifths
@@ -2043,11 +2091,16 @@ function App() {
           if (showKeySignature) {
             noteStartProbe.addKeySignature(getKeySignatureSpecFromFifths(keyFifths))
           }
-          noteStartProbe.addTimeSignature('4/4')
+          if (showTimeSignature) {
+            noteStartProbe.addTimeSignature(`${timeSignature.beats}/${timeSignature.beatType}`)
+          }
         } else {
           noteStartProbe.setBegBarType(BarlineType.NONE)
           if (showKeySignature) {
             noteStartProbe.addKeySignature(getKeySignatureSpecFromFifths(keyFifths))
+          }
+          if (showTimeSignature) {
+            noteStartProbe.addTimeSignature(`${timeSignature.beats}/${timeSignature.beatType}`)
           }
         }
         const noteStartX = noteStartProbe.getNoteStartX()
@@ -2062,6 +2115,8 @@ function App() {
           isSystemStart,
           keyFifths,
           showKeySignature,
+          timeSignature,
+          showTimeSignature,
           activeSelection,
           draggingSelection: null,
         })
@@ -2113,6 +2168,7 @@ function App() {
     activeSelection.staff,
     activeSelection.keyIndex,
     measureKeyFifthsFromImport,
+    measureTimeSignaturesFromImport,
   ])
 
   useEffect(() => {
@@ -2222,6 +2278,13 @@ function App() {
       isSystemStart: measureLayout.isSystemStart,
       keyFifths: measureKeyFifthsFromImportRef.current?.[measureLayout.pairIndex] ?? 0,
       showKeySignature: false,
+      timeSignature:
+        measureTimeSignaturesFromImportRef.current?.[measureLayout.pairIndex] ??
+        measureTimeSignaturesFromImportRef.current?.[measureLayout.pairIndex - 1] ?? {
+          beats: 4,
+          beatType: 4,
+        },
+      showTimeSignature: false,
       activeSelection: null,
       draggingSelection: null,
       previewNote: { noteId: drag.noteId, staff: drag.staff, pitch: drag.pitch, keyIndex: drag.keyIndex },
