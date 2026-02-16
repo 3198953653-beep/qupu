@@ -642,29 +642,37 @@ function buildRenderedNoteKeys(
   accidentalStateBeforeNote: Map<string, number> | null,
   forceRootAccidentalFromPitch: boolean,
   forceChordAccidentalFromPitchIndex: number | null,
+  accidentalOverridesByKeyIndex?: Map<number, string | null> | null,
 ): RenderedNoteKey[] {
+  const rootOverride = accidentalOverridesByKeyIndex?.get(0)
   const keys: RenderedNoteKey[] = [
     {
       pitch: renderedPitch,
-      accidental: getRenderedAccidental(
-        note,
-        renderedPitch,
-        keyFifths,
-        accidentalStateBeforeNote,
-        forceRootAccidentalFromPitch,
-      ),
+      accidental:
+        rootOverride !== undefined
+          ? rootOverride
+          : getRenderedAccidental(
+              note,
+              renderedPitch,
+              keyFifths,
+              accidentalStateBeforeNote,
+              forceRootAccidentalFromPitch,
+            ),
       keyIndex: 0,
     },
   ]
 
   renderedChordPitches?.forEach((pitch, index) => {
+    const chordOverride = accidentalOverridesByKeyIndex?.get(index + 1)
     const chordAccidental = note.chordAccidentals?.[index]
     const accidental =
-      forceChordAccidentalFromPitchIndex === index
-        ? getAccidentalFromPitchAgainstContext(pitch, keyFifths, accidentalStateBeforeNote)
-        : chordAccidental !== undefined
-          ? chordAccidental
-          : getAccidentalFromPitch(pitch)
+      chordOverride !== undefined
+        ? chordOverride
+        : forceChordAccidentalFromPitchIndex === index
+          ? getAccidentalFromPitchAgainstContext(pitch, keyFifths, accidentalStateBeforeNote)
+          : chordAccidental !== undefined
+            ? chordAccidental
+            : getAccidentalFromPitch(pitch)
     keys.push({ pitch, accidental, keyIndex: index + 1 })
   })
 
@@ -1879,6 +1887,41 @@ function App() {
       return { rootPitch: note.pitch, chordPitches, previewedKeyIndex: previewNote.keyIndex }
     }
 
+    const buildPreviewAccidentalOverridesForStaff = (
+      notes: ScoreNote[],
+      staff: StaffKind,
+    ): Map<string, Map<number, string | null>> | null => {
+      if (!previewNote || previewNote.staff !== staff || lockPreviewAccidentalLayout) return null
+
+      const state = new Map<string, number>()
+      const overrides = new Map<string, Map<number, string | null>>()
+      notes.forEach((note) => {
+        const rendered = resolveRenderedNoteData(note, staff)
+        const noteOverrides = new Map<number, string | null>()
+
+        const rootParts = getStepOctaveAlterFromPitch(rendered.rootPitch)
+        const rootExpectedAlter = getEffectiveAlterFromContext(rootParts.step, rootParts.octave, keyFifths, state)
+        const rootAccidental = getRequiredAccidentalForTargetAlter(rootParts.alter, rootExpectedAlter)
+        noteOverrides.set(0, rootAccidental)
+        state.set(getAccidentalStateKey(rootParts.step, rootParts.octave), rootParts.alter)
+
+        rendered.chordPitches?.forEach((chordPitch, chordIndex) => {
+          const chordParts = getStepOctaveAlterFromPitch(chordPitch)
+          const chordExpectedAlter = getEffectiveAlterFromContext(chordParts.step, chordParts.octave, keyFifths, state)
+          const chordAccidental = getRequiredAccidentalForTargetAlter(chordParts.alter, chordExpectedAlter)
+          noteOverrides.set(chordIndex + 1, chordAccidental)
+          state.set(getAccidentalStateKey(chordParts.step, chordParts.octave), chordParts.alter)
+        })
+
+        overrides.set(note.id, noteOverrides)
+      })
+
+      return overrides
+    }
+
+    const treblePreviewAccidentalOverrides = buildPreviewAccidentalOverridesForStaff(measure.treble, 'treble')
+    const bassPreviewAccidentalOverrides = buildPreviewAccidentalOverridesForStaff(measure.bass, 'bass')
+
     const trebleStave = new Stave(measureX, trebleY, measureWidth)
     const bassStave = new Stave(measureX, bassY, measureWidth)
     const setImplicitClefContext = (stave: Stave, clefSpec: 'treble' | 'bass') => {
@@ -1968,6 +2011,7 @@ function App() {
         previewAccidentalStateBeforeNote,
         !lockPreviewAccidentalLayout && rendered.previewedKeyIndex === 0,
         forceChordIndex,
+        treblePreviewAccidentalOverrides?.get(note.id) ?? null,
       )
       const dots = getDurationDots(note.duration)
       const vexNote = new StaveNote({
@@ -2002,6 +2046,7 @@ function App() {
         previewAccidentalStateBeforeNote,
         !lockPreviewAccidentalLayout && rendered.previewedKeyIndex === 0,
         forceChordIndex,
+        bassPreviewAccidentalOverrides?.get(note.id) ?? null,
       )
       const dots = getDurationDots(note.duration)
       const vexNote = new StaveNote({
@@ -2542,7 +2587,7 @@ function App() {
       collectLayouts: false,
       suppressSystemDecorations: true,
       noteStartXOverride: measureLayout.noteStartX,
-      freezePreviewAccidentalLayout: true,
+      freezePreviewAccidentalLayout: false,
       formatWidthOverride: measureLayout.formatWidth,
       staticNoteXById,
     })
