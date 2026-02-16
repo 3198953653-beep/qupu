@@ -46,6 +46,12 @@ type ImportFeedback = {
   message: string
 }
 
+type NoteHeadLayout = {
+  y: number
+  pitch: Pitch
+  keyIndex: number
+}
+
 type NoteLayout = {
   id: string
   staff: StaffKind
@@ -54,16 +60,19 @@ type NoteLayout = {
   x: number
   y: number
   pitchYMap: Record<Pitch, number>
+  noteHeads: NoteHeadLayout[]
 }
 
 type Selection = {
   noteId: string
   staff: StaffKind
+  keyIndex: number
 }
 
 type DragState = {
   noteId: string
   staff: StaffKind
+  keyIndex: number
   pairIndex: number
   noteIndex: number
   pointerId: number
@@ -436,23 +445,37 @@ function normalizeMeasurePairAt(pairs: MeasurePair[], pairIndex: number, keyFift
   return nextPairs
 }
 
+type RenderedNoteKey = {
+  pitch: Pitch
+  accidental: string | null
+  keyIndex: number
+}
+
 function buildRenderedNoteKeys(
   note: ScoreNote,
   staff: StaffKind,
   renderedPitch: Pitch,
+  renderedChordPitches: Pitch[] | undefined,
   forceRootAccidentalFromPitch: boolean,
-): Array<{ pitch: Pitch; accidental: string | null }> {
-  const keys: Array<{ pitch: Pitch; accidental: string | null }> = [
+  forceChordAccidentalFromPitchIndex: number | null,
+): RenderedNoteKey[] {
+  const keys: RenderedNoteKey[] = [
     {
       pitch: renderedPitch,
       accidental: getRenderedAccidental(note, renderedPitch, forceRootAccidentalFromPitch),
+      keyIndex: 0,
     },
   ]
 
-  note.chordPitches?.forEach((pitch, index) => {
+  renderedChordPitches?.forEach((pitch, index) => {
     const chordAccidental = note.chordAccidentals?.[index]
-    const accidental = chordAccidental !== undefined ? chordAccidental : getAccidentalFromPitch(pitch)
-    keys.push({ pitch, accidental })
+    const accidental =
+      forceChordAccidentalFromPitchIndex === index
+        ? getAccidentalFromPitch(pitch)
+        : chordAccidental !== undefined
+          ? chordAccidental
+          : getAccidentalFromPitch(pitch)
+    keys.push({ pitch, accidental, keyIndex: index + 1 })
   })
 
   keys.sort((left, right) => getPitchLine(staff, left.pitch) - getPitchLine(staff, right.pitch))
@@ -922,34 +945,67 @@ function getNearestPitchByY(y: number, pitchYMap: Record<Pitch, number>, preferr
   return winner
 }
 
-function getHitNote(x: number, y: number, layouts: NoteLayout[], radius = 24): NoteLayout | null {
+type HitNote = {
+  layout: NoteLayout
+  head: NoteHeadLayout
+}
+
+function getHitNote(x: number, y: number, layouts: NoteLayout[], radius = 24): HitNote | null {
   if (layouts.length === 0) return null
 
-  let winner: NoteLayout | null = null
+  let winnerLayout: NoteLayout | null = null
+  let winnerHead: NoteHeadLayout | null = null
   let winnerDistance = Number.POSITIVE_INFINITY
 
   for (const layout of layouts) {
-    const distance = Math.hypot(layout.x - x, layout.y - y)
-    if (distance < winnerDistance) {
-      winner = layout
-      winnerDistance = distance
+    for (const head of layout.noteHeads) {
+      const distance = Math.hypot(layout.x - x, head.y - y)
+      if (distance < winnerDistance) {
+        winnerLayout = layout
+        winnerHead = head
+        winnerDistance = distance
+      }
     }
   }
 
-  if (!winner || winnerDistance > radius) return null
-  return winner
+  if (!winnerLayout || !winnerHead || winnerDistance > radius) return null
+  return { layout: winnerLayout, head: winnerHead }
 }
 
-function updateNotePitch(notes: ScoreNote[], noteId: string, pitch: Pitch): ScoreNote[] {
+function updateScoreNotePitchAtKey(note: ScoreNote, pitch: Pitch, keyIndex: number): ScoreNote {
+  if (keyIndex <= 0) {
+    if (note.pitch === pitch) return note
+    const { accidental: _accidental, ...rest } = note
+    return { ...rest, pitch, accidental: null }
+  }
+
+  const chordIndex = keyIndex - 1
+  const sourceChordPitches = note.chordPitches
+  if (!sourceChordPitches || chordIndex < 0 || chordIndex >= sourceChordPitches.length) {
+    if (note.pitch === pitch) return note
+    const { accidental: _accidental, ...rest } = note
+    return { ...rest, pitch, accidental: null }
+  }
+
+  if (sourceChordPitches[chordIndex] === pitch) return note
+
+  const chordPitches = sourceChordPitches.slice()
+  chordPitches[chordIndex] = pitch
+  const chordAccidentals = note.chordAccidentals ? note.chordAccidentals.slice() : new Array(chordPitches.length).fill(undefined)
+  chordAccidentals[chordIndex] = null
+  return { ...note, chordPitches, chordAccidentals }
+}
+
+function updateNotePitch(notes: ScoreNote[], noteId: string, pitch: Pitch, keyIndex = 0): ScoreNote[] {
   const noteIndex = notes.findIndex((note) => note.id === noteId)
   if (noteIndex < 0) return notes
 
   const source = notes[noteIndex]
-  if (source.pitch === pitch) return notes
+  const nextNote = updateScoreNotePitchAtKey(source, pitch, keyIndex)
+  if (nextNote === source) return notes
 
   const next = notes.slice()
-  const { accidental: _accidental, ...rest } = source
-  next[noteIndex] = { ...rest, pitch, accidental: null }
+  next[noteIndex] = nextNote
   return next
 }
 
@@ -961,11 +1017,11 @@ function flattenBassFromPairs(pairs: MeasurePair[]): ScoreNote[] {
   return pairs.flatMap((pair) => pair.bass)
 }
 
-function updateMeasurePairsPitch(pairs: MeasurePair[], noteId: string, pitch: Pitch): MeasurePair[] {
+function updateMeasurePairsPitch(pairs: MeasurePair[], noteId: string, pitch: Pitch, keyIndex = 0): MeasurePair[] {
   let changed = false
   const nextPairs = pairs.map((pair) => {
-    const nextTreble = updateNotePitch(pair.treble, noteId, pitch)
-    const nextBass = updateNotePitch(pair.bass, noteId, pitch)
+    const nextTreble = updateNotePitch(pair.treble, noteId, pitch, keyIndex)
+    const nextBass = updateNotePitch(pair.bass, noteId, pitch, keyIndex)
     if (nextTreble === pair.treble && nextBass === pair.bass) return pair
     changed = true
     return { treble: nextTreble, bass: nextBass }
@@ -1038,19 +1094,20 @@ function buildImportedNoteLookup(pairs: MeasurePair[]): Map<string, ImportedNote
   return lookup
 }
 
-function updateMeasurePairPitchAt(pairs: MeasurePair[], location: ImportedNoteLocation, pitch: Pitch): MeasurePair[] {
+function updateMeasurePairPitchAt(pairs: MeasurePair[], location: ImportedNoteLocation, pitch: Pitch, keyIndex = 0): MeasurePair[] {
   const pair = pairs[location.pairIndex]
   if (!pair) return pairs
 
   const sourceList = location.staff === 'treble' ? pair.treble : pair.bass
   const sourceNote = sourceList[location.noteIndex]
-  if (!sourceNote || sourceNote.pitch === pitch) return pairs
+  if (!sourceNote) return pairs
+  const nextNote = updateScoreNotePitchAtKey(sourceNote, pitch, keyIndex)
+  if (nextNote === sourceNote) return pairs
 
   const nextPairs = pairs.slice()
   const nextPair: MeasurePair = { treble: pair.treble, bass: pair.bass }
   const nextList = sourceList.slice()
-  const { accidental: _accidental, ...rest } = sourceNote
-  nextList[location.noteIndex] = { ...rest, pitch, accidental: null }
+  nextList[location.noteIndex] = nextNote
 
   if (location.staff === 'treble') {
     nextPair.treble = nextList
@@ -1077,7 +1134,7 @@ function App() {
   const [notes, setNotes] = useState<ScoreNote[]>(INITIAL_NOTES)
   const [bassNotes, setBassNotes] = useState<ScoreNote[]>(INITIAL_BASS_NOTES)
   const [rhythmPreset, setRhythmPreset] = useState<RhythmPresetId>('quarter')
-  const [activeSelection, setActiveSelection] = useState<Selection>({ noteId: INITIAL_NOTES[0].id, staff: 'treble' })
+  const [activeSelection, setActiveSelection] = useState<Selection>({ noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 })
   const [draggingSelection, setDraggingSelection] = useState<Selection | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [musicXmlInput, setMusicXmlInput] = useState<string>('')
@@ -1128,7 +1185,7 @@ function App() {
     isSystemStart: boolean
     activeSelection: Selection | null
     draggingSelection: Selection | null
-    previewNote?: { noteId: string; staff: StaffKind; pitch: Pitch } | null
+    previewNote?: { noteId: string; staff: StaffKind; pitch: Pitch; keyIndex: number } | null
     collectLayouts?: boolean
     suppressSystemDecorations?: boolean
     noteStartXOverride?: number
@@ -1151,10 +1208,27 @@ function App() {
     } = params
     const noteLayouts: NoteLayout[] = []
 
-    const resolvePitch = (note: ScoreNote, staff: StaffKind): Pitch => {
-      if (!previewNote) return note.pitch
-      if (previewNote.noteId !== note.id || previewNote.staff !== staff) return note.pitch
-      return previewNote.pitch
+    const resolveRenderedNoteData = (
+      note: ScoreNote,
+      staff: StaffKind,
+    ): { rootPitch: Pitch; chordPitches?: Pitch[]; previewedKeyIndex: number | null } => {
+      if (!previewNote || previewNote.noteId !== note.id || previewNote.staff !== staff) {
+        return { rootPitch: note.pitch, chordPitches: note.chordPitches, previewedKeyIndex: null }
+      }
+
+      if (previewNote.keyIndex <= 0) {
+        return { rootPitch: previewNote.pitch, chordPitches: note.chordPitches, previewedKeyIndex: 0 }
+      }
+
+      const chordIndex = previewNote.keyIndex - 1
+      const sourceChordPitches = note.chordPitches
+      if (!sourceChordPitches || chordIndex < 0 || chordIndex >= sourceChordPitches.length) {
+        return { rootPitch: note.pitch, chordPitches: sourceChordPitches, previewedKeyIndex: null }
+      }
+
+      const chordPitches = sourceChordPitches.slice()
+      chordPitches[chordIndex] = previewNote.pitch
+      return { rootPitch: note.pitch, chordPitches, previewedKeyIndex: previewNote.keyIndex }
     }
 
     const trebleStave = new Stave(measureX, trebleY, measureWidth)
@@ -1186,17 +1260,25 @@ function App() {
       new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.SINGLE_RIGHT).setContext(context).draw()
     }
 
-    const trebleVexNotes = measure.treble.map((note) => {
-      const renderedPitch = resolvePitch(note, 'treble')
-      const isPreviewed = Boolean(previewNote && previewNote.staff === 'treble' && previewNote.noteId === note.id)
-      const renderedKeys = buildRenderedNoteKeys(note, 'treble', renderedPitch, isPreviewed)
+    const trebleRendered = measure.treble.map((note) => {
+      const rendered = resolveRenderedNoteData(note, 'treble')
+      const forceChordIndex =
+        rendered.previewedKeyIndex !== null && rendered.previewedKeyIndex > 0 ? rendered.previewedKeyIndex - 1 : null
+      const renderedKeys = buildRenderedNoteKeys(
+        note,
+        'treble',
+        rendered.rootPitch,
+        rendered.chordPitches,
+        rendered.previewedKeyIndex === 0,
+        forceChordIndex,
+      )
       const dots = getDurationDots(note.duration)
       const vexNote = new StaveNote({
         keys: renderedKeys.map((entry) => entry.pitch),
         duration: toVexDuration(note.duration),
         dots,
         clef: 'treble',
-        stemDirection: getStrictStemDirection(renderedPitch),
+        stemDirection: getStrictStemDirection(rendered.rootPitch),
       })
       renderedKeys.forEach((entry, keyIndex) => {
         if (!entry.accidental) return
@@ -1205,13 +1287,21 @@ function App() {
       if (dots > 0) {
         Dot.buildAndAttach([vexNote], { all: true })
       }
-      return vexNote
+      return { vexNote, renderedKeys }
     })
 
-    const bassVexNotes = measure.bass.map((note) => {
-      const renderedPitch = resolvePitch(note, 'bass')
-      const isPreviewed = Boolean(previewNote && previewNote.staff === 'bass' && previewNote.noteId === note.id)
-      const renderedKeys = buildRenderedNoteKeys(note, 'bass', renderedPitch, isPreviewed)
+    const bassRendered = measure.bass.map((note) => {
+      const rendered = resolveRenderedNoteData(note, 'bass')
+      const forceChordIndex =
+        rendered.previewedKeyIndex !== null && rendered.previewedKeyIndex > 0 ? rendered.previewedKeyIndex - 1 : null
+      const renderedKeys = buildRenderedNoteKeys(
+        note,
+        'bass',
+        rendered.rootPitch,
+        rendered.chordPitches,
+        rendered.previewedKeyIndex === 0,
+        forceChordIndex,
+      )
       const dots = getDurationDots(note.duration)
       const vexNote = new StaveNote({
         keys: renderedKeys.map((entry) => entry.pitch),
@@ -1227,24 +1317,31 @@ function App() {
       if (dots > 0) {
         Dot.buildAndAttach([vexNote], { all: true })
       }
-      return vexNote
+      return { vexNote, renderedKeys }
     })
 
-    trebleVexNotes.forEach((vexNote, noteIndex) => {
+    const trebleVexNotes = trebleRendered.map((entry) => entry.vexNote)
+    const bassVexNotes = bassRendered.map((entry) => entry.vexNote)
+
+    trebleRendered.forEach(({ vexNote, renderedKeys }, noteIndex) => {
       const noteId = measure.treble[noteIndex].id
       if (dragging?.staff === 'treble' && dragging.noteId === noteId) {
-        vexNote.setKeyStyle(0, { fillStyle: '#0e9ac7', strokeStyle: '#0e9ac7' })
+        const renderedKeyIndex = renderedKeys.findIndex((entry) => entry.keyIndex === dragging.keyIndex)
+        vexNote.setKeyStyle(Math.max(0, renderedKeyIndex), { fillStyle: '#0e9ac7', strokeStyle: '#0e9ac7' })
       } else if (selection && selection.staff === 'treble' && selection.noteId === noteId) {
-        vexNote.setKeyStyle(0, { fillStyle: '#145f84', strokeStyle: '#145f84' })
+        const renderedKeyIndex = renderedKeys.findIndex((entry) => entry.keyIndex === selection.keyIndex)
+        vexNote.setKeyStyle(Math.max(0, renderedKeyIndex), { fillStyle: '#145f84', strokeStyle: '#145f84' })
       }
     })
 
-    bassVexNotes.forEach((vexNote, noteIndex) => {
+    bassRendered.forEach(({ vexNote, renderedKeys }, noteIndex) => {
       const noteId = measure.bass[noteIndex].id
       if (dragging?.staff === 'bass' && dragging.noteId === noteId) {
-        vexNote.setKeyStyle(0, { fillStyle: '#0e9ac7', strokeStyle: '#0e9ac7' })
+        const renderedKeyIndex = renderedKeys.findIndex((entry) => entry.keyIndex === dragging.keyIndex)
+        vexNote.setKeyStyle(Math.max(0, renderedKeyIndex), { fillStyle: '#0e9ac7', strokeStyle: '#0e9ac7' })
       } else if (selection && selection.staff === 'bass' && selection.noteId === noteId) {
-        vexNote.setKeyStyle(0, { fillStyle: '#145f84', strokeStyle: '#145f84' })
+        const renderedKeyIndex = renderedKeys.findIndex((entry) => entry.keyIndex === selection.keyIndex)
+        vexNote.setKeyStyle(Math.max(0, renderedKeyIndex), { fillStyle: '#145f84', strokeStyle: '#145f84' })
       }
     })
 
@@ -1271,12 +1368,10 @@ function App() {
       bassPitchYMap[pitch] = bassStave.getYForNote(PITCH_LINE_MAP.bass[pitch])
     }
 
-    const trebleExtraPitches = new Set<Pitch>(measure.treble.map((note) => resolvePitch(note, 'treble')))
-    const bassExtraPitches = new Set<Pitch>(measure.bass.map((note) => resolvePitch(note, 'bass')))
-    measure.treble.forEach((note) => note.chordPitches?.forEach((pitch) => trebleExtraPitches.add(pitch)))
-    measure.bass.forEach((note) => note.chordPitches?.forEach((pitch) => bassExtraPitches.add(pitch)))
-    if (previewNote?.staff === 'treble') trebleExtraPitches.add(previewNote.pitch)
-    if (previewNote?.staff === 'bass') bassExtraPitches.add(previewNote.pitch)
+    const trebleExtraPitches = new Set<Pitch>()
+    const bassExtraPitches = new Set<Pitch>()
+    trebleRendered.forEach(({ renderedKeys }) => renderedKeys.forEach((entry) => trebleExtraPitches.add(entry.pitch)))
+    bassRendered.forEach(({ renderedKeys }) => renderedKeys.forEach((entry) => bassExtraPitches.add(entry.pitch)))
 
     trebleExtraPitches.forEach((pitch) => {
       if (treblePitchYMap[pitch] !== undefined) return
@@ -1288,26 +1383,46 @@ function App() {
     })
 
     noteLayouts.push(
-      ...trebleVexNotes.map((vexNote, noteIndex) => ({
+      ...trebleRendered.map(({ vexNote, renderedKeys }, noteIndex) => {
+        const ys = vexNote.getYs()
+        const noteHeads = renderedKeys.map((entry, renderedIndex) => ({
+          y: ys[renderedIndex] ?? ys[0],
+          pitch: entry.pitch,
+          keyIndex: entry.keyIndex,
+        }))
+        const rootHead = noteHeads.find((head) => head.keyIndex === 0) ?? noteHeads[0]
+        return {
         id: measure.treble[noteIndex].id,
         staff: 'treble' as const,
         pairIndex,
         noteIndex,
         x: vexNote.getAbsoluteX(),
-        y: vexNote.getYs()[0],
+        y: rootHead?.y ?? ys[0] ?? 0,
         pitchYMap: treblePitchYMap,
-      })),
+        noteHeads,
+      }
+      }),
     )
     noteLayouts.push(
-      ...bassVexNotes.map((vexNote, noteIndex) => ({
+      ...bassRendered.map(({ vexNote, renderedKeys }, noteIndex) => {
+        const ys = vexNote.getYs()
+        const noteHeads = renderedKeys.map((entry, renderedIndex) => ({
+          y: ys[renderedIndex] ?? ys[0],
+          pitch: entry.pitch,
+          keyIndex: entry.keyIndex,
+        }))
+        const rootHead = noteHeads.find((head) => head.keyIndex === 0) ?? noteHeads[0]
+        return {
         id: measure.bass[noteIndex].id,
         staff: 'bass' as const,
         pairIndex,
         noteIndex,
         x: vexNote.getAbsoluteX(),
-        y: vexNote.getYs()[0],
+        y: rootHead?.y ?? ys[0] ?? 0,
         pitchYMap: bassPitchYMap,
-      })),
+        noteHeads,
+      }
+      }),
     )
 
     return noteLayouts
@@ -1581,7 +1696,7 @@ function App() {
       isSystemStart: measureLayout.isSystemStart,
       activeSelection: null,
       draggingSelection: null,
-      previewNote: { noteId: drag.noteId, staff: drag.staff, pitch: drag.pitch },
+      previewNote: { noteId: drag.noteId, staff: drag.staff, pitch: drag.pitch, keyIndex: drag.keyIndex },
       collectLayouts: false,
       suppressSystemDecorations: true,
       noteStartXOverride: measureLayout.noteStartX - overlayFrame.x,
@@ -1601,8 +1716,8 @@ function App() {
     if (importedPairs) {
       const location = importedNoteLookupRef.current.get(drag.noteId)
       const updated = location
-        ? updateMeasurePairPitchAt(importedPairs, location, pitch)
-        : updateMeasurePairsPitch(importedPairs, drag.noteId, pitch)
+        ? updateMeasurePairPitchAt(importedPairs, location, pitch, drag.keyIndex)
+        : updateMeasurePairsPitch(importedPairs, drag.noteId, pitch, drag.keyIndex)
       const normalizeIndex = location?.pairIndex ?? drag.pairIndex
       const normalized = normalizeMeasurePairAt(updated, normalizeIndex, measureKeyFifthsFromImportRef.current)
 
@@ -1614,7 +1729,7 @@ function App() {
     }
 
     const currentPairs = measurePairsRef.current
-    const updated = updateMeasurePairsPitch(currentPairs, drag.noteId, pitch)
+    const updated = updateMeasurePairsPitch(currentPairs, drag.noteId, pitch, drag.keyIndex)
     const normalized = normalizeMeasurePairAt(updated, drag.pairIndex, null)
     setNotes(flattenTrebleFromPairs(normalized))
     setBassNotes(flattenBassFromPairs(normalized))
@@ -1717,11 +1832,11 @@ function App() {
     setDraggingSelection(null)
 
     if (result.trebleNotes[0]) {
-      setActiveSelection({ noteId: result.trebleNotes[0].id, staff: 'treble' })
+      setActiveSelection({ noteId: result.trebleNotes[0].id, staff: 'treble', keyIndex: 0 })
       return
     }
     if (result.bassNotes[0]) {
-      setActiveSelection({ noteId: result.bassNotes[0].id, staff: 'bass' })
+      setActiveSelection({ noteId: result.bassNotes[0].id, staff: 'bass', keyIndex: 0 })
     }
   }
 
@@ -1784,7 +1899,7 @@ function App() {
     importedNoteLookupRef.current.clear()
     dragRef.current = null
     clearDragOverlay()
-    setActiveSelection({ noteId: INITIAL_NOTES[0].id, staff: 'treble' })
+    setActiveSelection({ noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 })
     setDraggingSelection(null)
     setRhythmPreset('quarter')
     setImportFeedback({ kind: 'idle', message: '' })
@@ -1822,7 +1937,7 @@ function App() {
       return next
     })
     if (nextActive) {
-      setActiveSelection({ noteId: nextActive, staff: 'treble' })
+      setActiveSelection({ noteId: nextActive, staff: 'treble', keyIndex: 0 })
     }
     setRhythmPreset(presetId)
   }
@@ -1835,9 +1950,12 @@ function App() {
     const x = event.clientX - rect.left
     const y = event.clientY - rect.top
 
-    const hitNote = getHitNote(x, y, noteLayoutsRef.current, 30)
+    const hit = getHitNote(x, y, noteLayoutsRef.current, 30)
 
-    if (!hitNote) return
+    if (!hit) return
+
+    const hitNote = hit.layout
+    const hitHead = hit.head
 
     event.preventDefault()
     let current: ScoreNote | undefined
@@ -1857,13 +1975,17 @@ function App() {
       const sourceNotes = hitNote.staff === 'treble' ? notes : bassNotes
       current = sourceNotes.find((note) => note.id === hitNote.id)
     }
-    const noteCenterY = hitNote.y
+    const noteCenterY = hitHead.y
     const grabOffsetY = y - noteCenterY
-    const pitch = current?.pitch ?? getNearestPitchByY(noteCenterY, hitNote.pitchYMap)
+    const hitKeyIndex = hitHead.keyIndex
+    const currentPitch =
+      current && hitKeyIndex > 0 ? current.chordPitches?.[hitKeyIndex - 1] ?? current.pitch : current?.pitch
+    const pitch = currentPitch ?? hitHead.pitch ?? getNearestPitchByY(noteCenterY, hitNote.pitchYMap)
 
     const dragState: DragState = {
       noteId: hitNote.id,
       staff: hitNote.staff,
+      keyIndex: hitKeyIndex,
       pairIndex: hitNote.pairIndex,
       noteIndex: hitNote.noteIndex,
       pointerId: event.pointerId,
@@ -1875,13 +1997,17 @@ function App() {
     }
 
     dragRef.current = dragState
-    setActiveSelection({ noteId: hitNote.id, staff: hitNote.staff })
-    setDraggingSelection({ noteId: hitNote.id, staff: hitNote.staff })
+    setActiveSelection({ noteId: hitNote.id, staff: hitNote.staff, keyIndex: hitKeyIndex })
+    setDraggingSelection({ noteId: hitNote.id, staff: hitNote.staff, keyIndex: hitKeyIndex })
     event.currentTarget.setPointerCapture(event.pointerId)
   }
 
   const activePool = activeSelection.staff === 'treble' ? notes : bassNotes
   const currentSelection = activePool.find((note) => note.id === activeSelection.noteId) ?? activePool[0] ?? notes[0]
+  const currentSelectionPitch =
+    activeSelection.keyIndex > 0
+      ? currentSelection.chordPitches?.[activeSelection.keyIndex - 1] ?? currentSelection.pitch
+      : currentSelection.pitch
   const trebleSequenceText = useMemo(() => notes.map((note) => toDisplayPitch(note.pitch)).join('  |  '), [notes])
   const bassSequenceText = useMemo(() => bassNotes.map((note) => toDisplayPitch(note.pitch)).join('  |  '), [bassNotes])
 
@@ -1975,7 +2101,7 @@ function App() {
             Staff: <strong>{activeSelection.staff === 'treble' ? 'Treble' : 'Bass'}</strong>
           </p>
           <p>
-            Pitch: <strong>{toDisplayPitch(currentSelection.pitch)}</strong>
+            Pitch: <strong>{toDisplayPitch(currentSelectionPitch)}</strong>
           </p>
           <p>
             Duration: <strong>{toDisplayDuration(currentSelection.duration)}</strong>
