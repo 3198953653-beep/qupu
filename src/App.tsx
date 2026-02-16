@@ -444,6 +444,12 @@ function getEffectivePitchForStaffPosition(
   return toPitchFromStepAlter(step, effectiveAlter, octave)
 }
 
+function isSameStaffPositionPitch(left: Pitch, right: Pitch): boolean {
+  const leftParts = getStepOctaveAlterFromPitch(left)
+  const rightParts = getStepOctaveAlterFromPitch(right)
+  return leftParts.step === rightParts.step && leftParts.octave === rightParts.octave
+}
+
 function getAccidentalFromPitchAgainstContext(
   renderedPitch: Pitch,
   keyFifths: number,
@@ -548,28 +554,51 @@ function buildAccidentalStateBeforeNote(notes: ScoreNote[], noteIndex: number, k
   return state
 }
 
+function getRequiredAccidentalForTargetAlter(targetAlter: number, expectedAlter: number): string | null {
+  if (targetAlter === expectedAlter) return null
+  if (targetAlter === 0 && expectedAlter !== 0) return 'n'
+  return getAccidentalSymbolFromAlter(targetAlter)
+}
+
 function normalizeMeasureStaffByAccidentalState(notes: ScoreNote[], keyFifths: number): ScoreNote[] {
   const state = new Map<string, number>()
   let changed = false
 
   const next = notes.map((note) => {
-    const nextPitch = resolvePitchByAccidentalState(note.pitch, note.accidental, state, keyFifths)
-    const hasChord = Boolean(note.chordPitches?.length)
-    let nextChordPitches = note.chordPitches
-    let chordChanged = false
+    const { step, octave, alter } = getStepOctaveAlterFromPitch(note.pitch)
+    const expectedAlter = getEffectiveAlterFromContext(step, octave, keyFifths, state)
+    const nextAccidental = getRequiredAccidentalForTargetAlter(alter, expectedAlter)
+    state.set(getAccidentalStateKey(step, octave), alter)
 
-    if (hasChord && note.chordPitches) {
-      const computedChord = note.chordPitches.map((chordPitch, index) => {
-        const chordAccidental = note.chordAccidentals?.[index]
-        return resolvePitchByAccidentalState(chordPitch, chordAccidental, state, keyFifths)
+    const currentAccidental = note.accidental ?? null
+    const rootChanged = currentAccidental !== nextAccidental
+
+    let nextChordAccidentals = note.chordAccidentals
+    let chordChanged = false
+    if (note.chordPitches?.length) {
+      const computedChordAccidentals = note.chordPitches.map((chordPitch) => {
+        const chordParts = getStepOctaveAlterFromPitch(chordPitch)
+        const chordExpectedAlter = getEffectiveAlterFromContext(chordParts.step, chordParts.octave, keyFifths, state)
+        const chordAccidental = getRequiredAccidentalForTargetAlter(chordParts.alter, chordExpectedAlter)
+        state.set(getAccidentalStateKey(chordParts.step, chordParts.octave), chordParts.alter)
+        return chordAccidental
       })
-      chordChanged = computedChord.some((pitch, index) => pitch !== note.chordPitches?.[index])
-      if (chordChanged) nextChordPitches = computedChord
+      const currentChordAccidentals = note.chordAccidentals ?? new Array(computedChordAccidentals.length).fill(null)
+      chordChanged =
+        currentChordAccidentals.length !== computedChordAccidentals.length ||
+        computedChordAccidentals.some((accidental, index) => accidental !== currentChordAccidentals[index])
+      if (chordChanged) {
+        nextChordAccidentals = computedChordAccidentals
+      }
     }
 
-    if (nextPitch === note.pitch && !chordChanged) return note
+    if (!rootChanged && !chordChanged) return note
     changed = true
-    return { ...note, pitch: nextPitch, chordPitches: nextChordPitches }
+    const nextNote: ScoreNote = { ...note, accidental: nextAccidental }
+    if (note.chordPitches?.length) {
+      nextNote.chordAccidentals = nextChordAccidentals
+    }
+    return nextNote
   })
 
   return changed ? next : notes
@@ -2504,7 +2533,9 @@ function App() {
     const y = event.clientY - drag.surfaceTop
     const targetY = y - drag.grabOffsetY
     const staffPositionPitch = getNearestPitchByY(targetY, drag.pitchYMap, drag.pitch)
-    const pitch = getEffectivePitchForStaffPosition(staffPositionPitch, drag.keyFifths, drag.accidentalStateBeforeNote)
+    const pitch = isSameStaffPositionPitch(staffPositionPitch, drag.pitch)
+      ? drag.pitch
+      : getEffectivePitchForStaffPosition(staffPositionPitch, drag.keyFifths, drag.accidentalStateBeforeNote)
     scheduleDragCommit(drag, pitch)
   }
 
