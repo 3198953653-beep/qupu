@@ -408,9 +408,31 @@ function getAccidentalFromPitch(pitch: Pitch): string | null {
   return accidental.length > 0 ? accidental : null
 }
 
-function getRenderedAccidental(note: ScoreNote, renderedPitch: Pitch, forceFromPitch = false): string | null {
+function getAccidentalSymbolFromAlter(alter: number): string | null {
+  if (alter === 2) return '##'
+  if (alter === 1) return '#'
+  if (alter === -1) return 'b'
+  if (alter === -2) return 'bb'
+  if (alter === 0) return null
+  return null
+}
+
+function getAccidentalFromPitchAgainstKey(renderedPitch: Pitch, keyFifths: number): string | null {
+  const { step, alter } = getStepOctaveAlterFromPitch(renderedPitch)
+  const keyAlter = getKeySignatureAlterForStep(step, keyFifths)
+  if (alter === keyAlter) return null
+  if (alter === 0 && keyAlter !== 0) return 'n'
+  return getAccidentalSymbolFromAlter(alter)
+}
+
+function getRenderedAccidental(
+  note: ScoreNote,
+  renderedPitch: Pitch,
+  keyFifths: number,
+  forceFromPitch = false,
+): string | null {
   if (!forceFromPitch && note.accidental !== undefined) return note.accidental
-  return getAccidentalFromPitch(renderedPitch)
+  return forceFromPitch ? getAccidentalFromPitchAgainstKey(renderedPitch, keyFifths) : getAccidentalFromPitch(renderedPitch)
 }
 
 function toPitchFromStepAlter(step: string, alter: number, octave: number): Pitch {
@@ -531,13 +553,14 @@ function buildRenderedNoteKeys(
   staff: StaffKind,
   renderedPitch: Pitch,
   renderedChordPitches: Pitch[] | undefined,
+  keyFifths: number,
   forceRootAccidentalFromPitch: boolean,
   forceChordAccidentalFromPitchIndex: number | null,
 ): RenderedNoteKey[] {
   const keys: RenderedNoteKey[] = [
     {
       pitch: renderedPitch,
-      accidental: getRenderedAccidental(note, renderedPitch, forceRootAccidentalFromPitch),
+      accidental: getRenderedAccidental(note, renderedPitch, keyFifths, forceRootAccidentalFromPitch),
       keyIndex: 0,
     },
   ]
@@ -546,7 +569,7 @@ function buildRenderedNoteKeys(
     const chordAccidental = note.chordAccidentals?.[index]
     const accidental =
       forceChordAccidentalFromPitchIndex === index
-        ? getAccidentalFromPitch(pitch)
+        ? getAccidentalFromPitchAgainstKey(pitch, keyFifths)
         : chordAccidental !== undefined
           ? chordAccidental
           : getAccidentalFromPitch(pitch)
@@ -1838,6 +1861,7 @@ function App() {
         'treble',
         rendered.rootPitch,
         rendered.chordPitches,
+        keyFifths,
         rendered.previewedKeyIndex === 0,
         forceChordIndex,
       )
@@ -1868,6 +1892,7 @@ function App() {
         'bass',
         rendered.rootPitch,
         rendered.chordPitches,
+        keyFifths,
         rendered.previewedKeyIndex === 0,
         forceChordIndex,
       )
