@@ -116,6 +116,13 @@ type MeasureLayout = {
   bassY: number
   systemTop: number
   isSystemStart: boolean
+  keyFifths: number
+  showKeySignature: boolean
+  timeSignature: TimeSignature
+  showTimeSignature: boolean
+  endTimeSignature: TimeSignature | null
+  showEndTimeSignature: boolean
+  includeMeasureStartDecorations: boolean
   noteStartX: number
   overlayRect: {
     x: number
@@ -1548,6 +1555,7 @@ function buildMeasureOverlayRect(
   scoreWidth: number,
   scoreHeight: number,
   isSystemStart: boolean,
+  includeMeasureStartDecorations: boolean,
 ): MeasureLayout['overlayRect'] {
   const leftPad = 20
   const rightPad = 28
@@ -1564,7 +1572,7 @@ function buildMeasureOverlayRect(
     leftEdge = Math.max(leftEdge, minSafeLeft)
   } else {
     const minSafeLeft = Math.floor(measureX + interMeasureBarlineGuard)
-    leftEdge = Math.max(leftEdge, minSafeLeft)
+    leftEdge = includeMeasureStartDecorations ? minSafeLeft : Math.max(leftEdge, minSafeLeft)
   }
   const x = clamp(leftEdge, 0, scoreWidth)
   const right = clamp(Math.ceil(noteRight + rightPad), x, Math.min(scoreWidth, measureRight))
@@ -1753,6 +1761,17 @@ function App() {
     if (suppressSystemDecorations) {
       trebleStave.setBegBarType(BarlineType.NONE)
       bassStave.setBegBarType(BarlineType.NONE)
+      if (!isSystemStart) {
+        if (showKeySignature) {
+          const keySignature = getKeySignatureSpecFromFifths(keyFifths)
+          trebleStave.addKeySignature(keySignature)
+          bassStave.addKeySignature(keySignature)
+        }
+        if (showTimeSignature) {
+          trebleStave.addTimeSignature(timeSignatureLabel)
+          bassStave.addTimeSignature(timeSignatureLabel)
+        }
+      }
       if (typeof noteStartXOverride === 'number') {
         trebleStave.setNoteStartX(noteStartXOverride)
         bassStave.setNoteStartX(noteStartXOverride)
@@ -2110,6 +2129,7 @@ function App() {
         const keyFifths = measureKeyFifthsFromImport?.[pairIndex] ?? measureKeyFifthsFromImport?.[pairIndex - 1] ?? 0
         const previousKeyFifths = pairIndex > 0 ? (measureKeyFifthsFromImport?.[pairIndex - 1] ?? 0) : keyFifths
         const showKeySignature = isSystemStart || keyFifths !== previousKeyFifths
+        const includeMeasureStartDecorations = !isSystemStart && (showKeySignature || showTimeSignature)
         const noteStartProbe = new Stave(measureX, trebleY, measureWidth)
         if (isSystemStart) {
           noteStartProbe.addClef('treble')
@@ -2166,6 +2186,7 @@ function App() {
           scoreWidth,
           scoreHeight,
           isSystemStart,
+          includeMeasureStartDecorations,
         )
         nextMeasureLayouts.set(pairIndex, {
           pairIndex,
@@ -2175,6 +2196,13 @@ function App() {
           bassY,
           systemTop,
           isSystemStart,
+          keyFifths,
+          showKeySignature,
+          timeSignature,
+          showTimeSignature,
+          endTimeSignature: nextTimeSignature,
+          showEndTimeSignature,
+          includeMeasureStartDecorations,
           noteStartX,
           overlayRect,
         })
@@ -2280,25 +2308,8 @@ function App() {
     const measureLayout = measureLayoutsRef.current.get(drag.pairIndex)
     const measure = measurePairsRef.current[drag.pairIndex]
     if (!measureLayout || !measure) return
-
-    const currentTimeSignature =
-      measureTimeSignaturesFromImportRef.current?.[measureLayout.pairIndex] ??
-      measureTimeSignaturesFromImportRef.current?.[measureLayout.pairIndex - 1] ?? {
-        beats: 4,
-        beatType: 4,
-      }
-    const hasNextMeasure = measureLayout.pairIndex + 1 < measurePairsRef.current.length
-    const nextTimeSignature =
-      hasNextMeasure
-        ? measureTimeSignaturesFromImportRef.current?.[measureLayout.pairIndex + 1] ??
-          measureTimeSignaturesFromImportRef.current?.[measureLayout.pairIndex] ??
-          currentTimeSignature
-        : currentTimeSignature
-    const isSystemEnd = (measureLayout.pairIndex + 1) % measuresPerLine === 0
-    const showEndTimeSignature =
-      hasNextMeasure &&
-      isSystemEnd &&
-      (nextTimeSignature.beats !== currentTimeSignature.beats || nextTimeSignature.beatType !== currentTimeSignature.beatType)
+    const previewShowKeySignature = !measureLayout.isSystemStart && measureLayout.showKeySignature
+    const previewShowTimeSignature = !measureLayout.isSystemStart && measureLayout.showTimeSignature
 
     const overlayFrame = ensureOverlayCanvasForRect(measureLayout.overlayRect)
     if (!overlayFrame) return
@@ -2322,12 +2333,12 @@ function App() {
       trebleY: measureLayout.trebleY - overlayFrame.y,
       bassY: measureLayout.bassY - overlayFrame.y,
       isSystemStart: measureLayout.isSystemStart,
-      keyFifths: measureKeyFifthsFromImportRef.current?.[measureLayout.pairIndex] ?? 0,
-      showKeySignature: false,
-      timeSignature: currentTimeSignature,
-      showTimeSignature: false,
-      endTimeSignature: nextTimeSignature,
-      showEndTimeSignature,
+      keyFifths: measureLayout.keyFifths,
+      showKeySignature: previewShowKeySignature,
+      timeSignature: measureLayout.timeSignature,
+      showTimeSignature: previewShowTimeSignature,
+      endTimeSignature: measureLayout.endTimeSignature,
+      showEndTimeSignature: measureLayout.showEndTimeSignature,
       activeSelection: null,
       draggingSelection: null,
       previewNote: { noteId: drag.noteId, staff: drag.staff, pitch: drag.pitch, keyIndex: drag.keyIndex },
