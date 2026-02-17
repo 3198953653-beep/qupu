@@ -1913,7 +1913,7 @@ function getVisibleSystemRange(scrollTop: number, viewportHeight: number, system
   const systemStride = SYSTEM_HEIGHT + SYSTEM_GAP_Y
   const startOffset = Math.max(0, scrollTop - SCORE_TOP_PADDING)
   const endOffset = Math.max(0, scrollTop + viewportHeight - SCORE_TOP_PADDING)
-  const bufferSystems = 1
+  const bufferSystems = systemCount > 12 ? 0 : 1
 
   const start = clamp(Math.floor(startOffset / systemStride) - bufferSystems, 0, systemCount - 1)
   const end = clamp(Math.ceil(endOffset / systemStride) + bufferSystems, 0, systemCount - 1)
@@ -2736,7 +2736,6 @@ function App() {
       rendererSizeRef.current = { width: scoreWidth, height: scoreHeight }
     }
     const context = renderer.getContext()
-    context.clear()
 
     const nextLayouts: NoteLayout[] = []
     const nextLayoutsByPair = new Map<number, NoteLayout[]>()
@@ -2744,6 +2743,14 @@ function App() {
     const maxSystemIndex = Math.max(0, systemCount - 1)
     const startSystem = clamp(visibleSystemRange.start, 0, maxSystemIndex)
     const endSystem = clamp(visibleSystemRange.end, startSystem, maxSystemIndex)
+    const systemStride = SYSTEM_HEIGHT + SYSTEM_GAP_Y
+    const clearTop = clamp(SCORE_TOP_PADDING + startSystem * systemStride - SYSTEM_GAP_Y, 0, scoreHeight)
+    const clearBottom = clamp(
+      SCORE_TOP_PADDING + endSystem * systemStride + SYSTEM_HEIGHT + SYSTEM_GAP_Y,
+      clearTop,
+      scoreHeight,
+    )
+    context.clearRect(0, clearTop, scoreWidth, clearBottom - clearTop)
 
     for (let systemIndex = startSystem; systemIndex <= endSystem; systemIndex += 1) {
       const start = systemIndex * measuresPerLine
@@ -2857,7 +2864,7 @@ function App() {
           showTimeSignature: entry.showTimeSignature,
           endTimeSignature: entry.nextTimeSignature,
           showEndTimeSignature: entry.showEndTimeSignature,
-          activeSelection,
+          activeSelection: null,
           draggingSelection: null,
         })
 
@@ -2921,9 +2928,6 @@ function App() {
     measuresPerLine,
     visibleSystemRange.start,
     visibleSystemRange.end,
-    activeSelection.noteId,
-    activeSelection.staff,
-    activeSelection.keyIndex,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
   ])
