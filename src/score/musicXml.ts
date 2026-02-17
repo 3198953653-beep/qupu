@@ -21,6 +21,7 @@ import {
 import type {
   BeamTag,
   ImportResult,
+  ImportedNoteLocation,
   MeasurePair,
   MusicXmlCreator,
   MusicXmlMetadata,
@@ -33,22 +34,134 @@ import type {
 
 const INITIAL_BASS_NOTES = buildBassMockNotes(INITIAL_NOTES)
 
-function parseMusicXmlPitchParts(noteEl: Element): { step: string; octave: number; alter?: number } | null {
-  const pitchEl = noteEl.querySelector('pitch')
-  if (!pitchEl) return null
+const ACCIDENTAL_TEXT_TO_SYMBOL: Record<string, string> = {
+  sharp: '#',
+  flat: 'b',
+  natural: 'n',
+  'double-sharp': '##',
+  'flat-flat': 'bb',
+  'natural-sharp': '#',
+  'natural-flat': 'b',
+}
 
-  const step = pitchEl.querySelector('step')?.textContent?.trim().toUpperCase()
-  const alterText = pitchEl.querySelector('alter')?.textContent?.trim()
-  const octaveText = pitchEl.querySelector('octave')?.textContent?.trim()
-  if (!step || !octaveText || STEP_TO_SEMITONE[step] === undefined) return null
+const ACCIDENTAL_TEXT_TO_ALTER: Record<string, number> = {
+  sharp: 1,
+  flat: -1,
+  natural: 0,
+  'double-sharp': 2,
+  'flat-flat': -2,
+  'natural-sharp': 1,
+  'natural-flat': -1,
+}
 
-  const octave = Number(octaveText)
-  if (!Number.isFinite(octave)) return null
-  if (!alterText) return { step, octave }
+const NOTE_TYPE_TO_BEATS: Record<string, number> = {
+  whole: 4,
+  half: 2,
+  quarter: 1,
+  eighth: 0.5,
+  '16th': 0.25,
+  '32nd': 0.125,
+  '64th': 0.0625,
+}
 
-  const alter = Number(alterText)
-  if (!Number.isFinite(alter)) return null
-  return { step, octave, alter }
+function getFirstTagText(root: Element | Document, tagName: string): string | undefined {
+  const node = root.getElementsByTagName(tagName)[0]
+  const text = node?.textContent?.trim()
+  return text ? text : undefined
+}
+
+type FastNoteData = {
+  isGrace: boolean
+  isChord: boolean
+  isRest: boolean
+  staffText?: string
+  typeText?: string
+  durationValue: number | null
+  dots: number
+  accidentalText?: string
+  pitchStep?: string
+  pitchAlter: number | null
+  pitchOctave: number | null
+}
+
+function collectFastNoteData(noteEl: Element): FastNoteData {
+  const data: FastNoteData = {
+    isGrace: false,
+    isChord: false,
+    isRest: false,
+    durationValue: null,
+    dots: 0,
+    pitchAlter: null,
+    pitchOctave: null,
+  }
+
+  const children = noteEl.children
+  for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
+    const child = children[childIndex]
+    const tag = child.tagName.toLowerCase()
+    if (tag === 'grace') {
+      data.isGrace = true
+      continue
+    }
+    if (tag === 'chord') {
+      data.isChord = true
+      continue
+    }
+    if (tag === 'rest') {
+      data.isRest = true
+      continue
+    }
+    if (tag === 'staff') {
+      const value = child.textContent?.trim()
+      if (value) data.staffText = value
+      continue
+    }
+    if (tag === 'type') {
+      const value = child.textContent?.trim().toLowerCase()
+      if (value) data.typeText = value
+      continue
+    }
+    if (tag === 'duration') {
+      const value = child.textContent?.trim()
+      const parsed = value ? Number(value) : Number.NaN
+      data.durationValue = Number.isFinite(parsed) ? parsed : null
+      continue
+    }
+    if (tag === 'dot') {
+      data.dots += 1
+      continue
+    }
+    if (tag === 'accidental') {
+      const value = child.textContent?.trim().toLowerCase()
+      if (value) data.accidentalText = value
+      continue
+    }
+    if (tag !== 'pitch') continue
+
+    const pitchChildren = child.children
+    for (let pitchIndex = 0; pitchIndex < pitchChildren.length; pitchIndex += 1) {
+      const pitchChild = pitchChildren[pitchIndex]
+      const pitchTag = pitchChild.tagName.toLowerCase()
+      if (pitchTag === 'step') {
+        const step = pitchChild.textContent?.trim().toUpperCase()
+        if (step) data.pitchStep = step
+        continue
+      }
+      if (pitchTag === 'alter') {
+        const alterText = pitchChild.textContent?.trim()
+        const alterValue = alterText ? Number(alterText) : Number.NaN
+        data.pitchAlter = Number.isFinite(alterValue) ? alterValue : null
+        continue
+      }
+      if (pitchTag === 'octave') {
+        const octaveText = pitchChild.textContent?.trim()
+        const octaveValue = octaveText ? Number(octaveText) : Number.NaN
+        data.pitchOctave = Number.isFinite(octaveValue) ? octaveValue : null
+      }
+    }
+  }
+
+  return data
 }
 
 function getMeasureTicksByTime(time: TimeSignature): number {
@@ -56,78 +169,6 @@ function getMeasureTicksByTime(time: TimeSignature): number {
   const beatType = Number.isFinite(time.beatType) && time.beatType > 0 ? time.beatType : 4
   const ticks = Math.round(beats * TICKS_PER_BEAT * (4 / beatType))
   return Math.max(1, ticks)
-}
-
-function parseMusicXmlAccidental(noteEl: Element): string | undefined {
-  const accidentalText = noteEl.querySelector('accidental')?.textContent?.trim().toLowerCase()
-  if (!accidentalText) return undefined
-
-  const ACCIDENTAL_MAP: Record<string, string> = {
-    sharp: '#',
-    flat: 'b',
-    natural: 'n',
-    'double-sharp': '##',
-    'flat-flat': 'bb',
-    'natural-sharp': '#',
-    'natural-flat': 'b',
-  }
-
-  return ACCIDENTAL_MAP[accidentalText]
-}
-
-function parseMusicXmlAccidentalAlter(noteEl: Element): number | undefined {
-  const accidentalText = noteEl.querySelector('accidental')?.textContent?.trim().toLowerCase()
-  if (!accidentalText) return undefined
-
-  const ACCIDENTAL_ALTER_MAP: Record<string, number> = {
-    sharp: 1,
-    flat: -1,
-    natural: 0,
-    'double-sharp': 2,
-    'flat-flat': -2,
-    'natural-sharp': 1,
-    'natural-flat': -1,
-  }
-
-  return ACCIDENTAL_ALTER_MAP[accidentalText]
-}
-
-function parseMusicXmlBeats(noteEl: Element, divisions: number): number | null {
-  const typeText = noteEl.querySelector('type')?.textContent?.trim().toLowerCase()
-  const dots = noteEl.getElementsByTagName('dot').length
-
-  let beats: number | null = null
-  if (typeText) {
-    const baseBeats: Record<string, number> = {
-      whole: 4,
-      half: 2,
-      quarter: 1,
-      eighth: 0.5,
-      '16th': 0.25,
-      '32nd': 0.125,
-      '64th': 0.0625,
-    }
-    const base = baseBeats[typeText]
-    if (base) {
-      beats = base
-      let add = base / 2
-      for (let i = 0; i < dots; i += 1) {
-        beats += add
-        add /= 2
-      }
-    }
-  }
-
-  if (beats === null) {
-    const durationText = noteEl.querySelector('duration')?.textContent?.trim()
-    const durationValue = durationText ? Number(durationText) : Number.NaN
-    if (Number.isFinite(durationValue) && divisions > 0) {
-      beats = durationValue / divisions
-    }
-  }
-
-  if (beats === null || beats <= 0) return null
-  return beats
 }
 
 function escapeXml(value: string): string {
@@ -556,15 +597,17 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
   const lastPitch: Record<StaffKind, Pitch> = { treble: 'c/4', bass: 'c/3' }
 
   partNodes.forEach((partEl, partIndex) => {
-    const measureEls = Array.from(partEl.getElementsByTagName('measure'))
+    const measureEls = partEl.getElementsByTagName('measure')
     if (measureEls.length === 0) return
 
     let divisions = 1
     let currentFifths = 0
     let currentTime: TimeSignature = { beats: 4, beatType: 4 }
-    measureEls.slice(0, measureLimit).forEach((measureEl, measureIndex) => {
+    const measureCount = Math.min(measureEls.length, measureLimit)
+    for (let measureIndex = 0; measureIndex < measureCount; measureIndex += 1) {
+      const measureEl = measureEls[measureIndex]
       const slot = ensureMeasureSlot(measureIndex)
-      const divisionsText = measureEl.querySelector('attributes > divisions')?.textContent?.trim()
+      const divisionsText = getFirstTagText(measureEl, 'divisions')
       const maybeDivisions = divisionsText ? Number(divisionsText) : Number.NaN
       if (Number.isFinite(maybeDivisions) && maybeDivisions > 0) {
         divisions = maybeDivisions
@@ -573,8 +616,8 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
         measureDivisions[measureIndex] = Math.max(1, Math.round(divisions))
       }
 
-      const beatsText = measureEl.querySelector('attributes > time > beats')?.textContent?.trim()
-      const beatTypeText = measureEl.querySelector('attributes > time > beat-type')?.textContent?.trim()
+      const beatsText = getFirstTagText(measureEl, 'beats')
+      const beatTypeText = getFirstTagText(measureEl, 'beat-type')
       const maybeBeats = beatsText ? Number(beatsText) : Number.NaN
       const maybeBeatType = beatTypeText ? Number(beatTypeText) : Number.NaN
       const nextBeats = Number.isFinite(maybeBeats) && maybeBeats > 0 ? Math.round(maybeBeats) : currentTime.beats
@@ -586,7 +629,7 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
       }
       slot.measureTicks = getMeasureTicksByTime(currentTime)
 
-      const fifthsText = measureEl.querySelector('attributes > key > fifths')?.textContent?.trim()
+      const fifthsText = getFirstTagText(measureEl, 'fifths')
       const maybeFifths = fifthsText ? Number(fifthsText) : Number.NaN
       if (Number.isFinite(maybeFifths)) {
         currentFifths = Math.trunc(maybeFifths)
@@ -600,35 +643,38 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
         bass: new Map(),
       }
 
-      const noteEls = Array.from(measureEl.getElementsByTagName('note'))
-      noteEls.forEach((noteEl) => {
-        if (noteEl.querySelector('grace')) return
+      const noteEls = measureEl.getElementsByTagName('note')
+      for (let noteIndex = 0; noteIndex < noteEls.length; noteIndex += 1) {
+        const noteEl = noteEls[noteIndex]
+        const noteData = collectFastNoteData(noteEl)
+        if (noteData.isGrace) continue
 
-        const staffText = noteEl.querySelector('staff')?.textContent?.trim()
+        const staffText = noteData.staffText
         const staff: StaffKind =
           staffText === '2' ? 'bass' : staffText === '1' ? 'treble' : partNodes.length > 1 && partIndex === 1 ? 'bass' : 'treble'
 
-        const isChordTone = Boolean(noteEl.querySelector('chord'))
+        const isChordTone = noteData.isChord
         if (isChordTone) {
-          const isRest = Boolean(noteEl.querySelector('rest'))
-          const chordPitchParts = isRest ? null : parseMusicXmlPitchParts(noteEl)
-          if (!chordPitchParts) return
+          if (noteData.isRest) continue
+          const chordStep = noteData.pitchStep
+          const chordOctave = noteData.pitchOctave
+          if (!chordStep || chordOctave === null || STEP_TO_SEMITONE[chordStep] === undefined) continue
 
-          const pitchKey = `${chordPitchParts.step}${chordPitchParts.octave}`
+          const pitchKey = `${chordStep}${chordOctave}`
           const carriedAlter = measureAlterState[staff].get(pitchKey)
-          const accidentalAlter = parseMusicXmlAccidentalAlter(noteEl)
+          const accidentalAlter = noteData.accidentalText ? ACCIDENTAL_TEXT_TO_ALTER[noteData.accidentalText] : undefined
           const resolvedAlter =
-            chordPitchParts.alter ??
+            noteData.pitchAlter ??
             accidentalAlter ??
-            (carriedAlter !== undefined ? carriedAlter : getKeySignatureAlterForStep(chordPitchParts.step, currentFifths))
-          const chordPitch = toPitchFromStepAlter(chordPitchParts.step, resolvedAlter, chordPitchParts.octave)
+            (carriedAlter !== undefined ? carriedAlter : getKeySignatureAlterForStep(chordStep, currentFifths))
+          const chordPitch = toPitchFromStepAlter(chordStep, resolvedAlter, chordOctave)
           measureAlterState[staff].set(pitchKey, resolvedAlter)
 
           const previous = slot.notes[staff][slot.notes[staff].length - 1]
-          if (!previous) return
+          if (!previous) continue
 
           const nextChordPitches = previous.chordPitches ? [...previous.chordPitches, chordPitch] : [chordPitch]
-          const chordAccidental = parseMusicXmlAccidental(noteEl) ?? null
+          const chordAccidental = (noteData.accidentalText ? ACCIDENTAL_TEXT_TO_SYMBOL[noteData.accidentalText] : undefined) ?? null
           const nextChordAccidentals = previous.chordAccidentals
             ? [...previous.chordAccidentals, chordAccidental]
             : [chordAccidental]
@@ -638,31 +684,44 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
             chordPitches: nextChordPitches,
             chordAccidentals: nextChordAccidentals,
           }
-          return
+          continue
         }
 
-        if (slot.ticksUsed[staff] >= slot.measureTicks) return
+        if (slot.ticksUsed[staff] >= slot.measureTicks) continue
 
-        const beats = parseMusicXmlBeats(noteEl, divisions)
-        if (!beats) return
+        let beats: number | null = null
+        if (noteData.typeText) {
+          const base = NOTE_TYPE_TO_BEATS[noteData.typeText]
+          if (base) {
+            beats = base
+            let add = base / 2
+            for (let dotIndex = 0; dotIndex < noteData.dots; dotIndex += 1) {
+              beats += add
+              add /= 2
+            }
+          }
+        }
+        if (beats === null && noteData.durationValue !== null && divisions > 0) {
+          beats = noteData.durationValue / divisions
+        }
+        if (!beats) continue
 
-        const isRest = Boolean(noteEl.querySelector('rest'))
+        const isRest = noteData.isRest
         let pitch = lastPitch[staff]
         if (!isRest) {
-          const parsedPitch = parseMusicXmlPitchParts(noteEl)
-          if (parsedPitch) {
-            const pitchKey = `${parsedPitch.step}${parsedPitch.octave}`
+          if (noteData.pitchStep && noteData.pitchOctave !== null && STEP_TO_SEMITONE[noteData.pitchStep] !== undefined) {
+            const pitchKey = `${noteData.pitchStep}${noteData.pitchOctave}`
             const carriedAlter = measureAlterState[staff].get(pitchKey)
-            const accidentalAlter = parseMusicXmlAccidentalAlter(noteEl)
+            const accidentalAlter = noteData.accidentalText ? ACCIDENTAL_TEXT_TO_ALTER[noteData.accidentalText] : undefined
             const resolvedAlter =
-              parsedPitch.alter ??
+              noteData.pitchAlter ??
               accidentalAlter ??
-              (carriedAlter !== undefined ? carriedAlter : getKeySignatureAlterForStep(parsedPitch.step, currentFifths))
-            pitch = toPitchFromStepAlter(parsedPitch.step, resolvedAlter, parsedPitch.octave)
+              (carriedAlter !== undefined ? carriedAlter : getKeySignatureAlterForStep(noteData.pitchStep, currentFifths))
+            pitch = toPitchFromStepAlter(noteData.pitchStep, resolvedAlter, noteData.pitchOctave)
             measureAlterState[staff].set(pitchKey, resolvedAlter)
           }
         }
-        const explicitAccidental = isRest ? undefined : parseMusicXmlAccidental(noteEl) ?? null
+        const explicitAccidental = isRest ? undefined : (noteData.accidentalText ? ACCIDENTAL_TEXT_TO_SYMBOL[noteData.accidentalText] : undefined) ?? null
         const notePattern = splitTicksToDurations(beatsToTicks(beats, slot.measureTicks))
 
         slot.touched[staff] = true
@@ -680,11 +739,14 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
         }
 
         lastPitch[staff] = pitch
-      })
-    })
+      }
+    }
   })
 
   const importedPairs: MeasurePair[] = []
+  const importedTrebleNotes: ScoreNote[] = []
+  const importedBassNotes: ScoreNote[] = []
+  const importedNoteLookup = new Map<string, ImportedNoteLocation>()
   let trebleCarry = 'c/4'
   let bassCarry = 'c/3'
 
@@ -701,6 +763,18 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
       slot.measureTicks,
     )
     const bass = fillMissingTicksWithCarryNotes(slot.notes.bass, 'bass', slot.ticksUsed.bass, bassPitch, slot.measureTicks)
+
+    const pairIndex = importedPairs.length
+    for (let noteIndex = 0; noteIndex < treble.length; noteIndex += 1) {
+      const note = treble[noteIndex]
+      importedTrebleNotes.push(note)
+      importedNoteLookup.set(note.id, { pairIndex, noteIndex, staff: 'treble' })
+    }
+    for (let noteIndex = 0; noteIndex < bass.length; noteIndex += 1) {
+      const note = bass[noteIndex]
+      importedBassNotes.push(note)
+      importedNoteLookup.set(note.id, { pairIndex, noteIndex, staff: 'bass' })
+    }
 
     trebleCarry = getLastPitch(treble, trebleCarry)
     bassCarry = getLastPitch(bass, bassCarry)
@@ -732,12 +806,13 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
   )
 
   return {
-    trebleNotes: importedPairs.flatMap((pair) => pair.treble),
-    bassNotes: importedPairs.flatMap((pair) => pair.bass),
+    trebleNotes: importedTrebleNotes,
+    bassNotes: importedBassNotes,
     measurePairs: importedPairs,
     measureKeyFifths: alignedKeyFifths,
     measureDivisions: alignedDivisions,
     measureTimeSignatures: alignedTimes,
     metadata,
+    importedNoteLookup,
   }
 }

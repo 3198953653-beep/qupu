@@ -50,9 +50,18 @@ import type {
 } from './score/types'
 
 const SCORE_RENDER_BACKEND = Renderer.Backends.CANVAS
+const INSPECTOR_SEQUENCE_PREVIEW_LIMIT = 64
 
 const PITCHES: Pitch[] = createPianoPitches()
 const INITIAL_BASS_NOTES: ScoreNote[] = buildBassMockNotes(INITIAL_NOTES)
+
+function toSequencePreview(notes: ScoreNote[]): string {
+  if (notes.length <= INSPECTOR_SEQUENCE_PREVIEW_LIMIT) {
+    return notes.map((note) => toDisplayPitch(note.pitch)).join('  |  ')
+  }
+  const preview = notes.slice(0, INSPECTOR_SEQUENCE_PREVIEW_LIMIT).map((note) => toDisplayPitch(note.pitch)).join('  |  ')
+  return `${preview}  |  ... (+${notes.length - INSPECTOR_SEQUENCE_PREVIEW_LIMIT} more)`
+}
 
 function App() {
   const [notes, setNotes] = useState<ScoreNote[]>(INITIAL_NOTES)
@@ -126,7 +135,6 @@ function App() {
   )
   const pageCount = Math.max(1, Math.ceil(systemCount / systemsPerPage))
   const safeCurrentPage = Math.min(currentPage, pageCount - 1)
-  const progressiveImportMeasureLimit = systemsPerPage * measuresPerLine
   const visibleSystemRange = useMemo(() => {
     const start = Math.min(systemCount - 1, safeCurrentPage * systemsPerPage)
     const end = Math.min(systemCount - 1, start + systemsPerPage - 1)
@@ -271,7 +279,6 @@ function App() {
     musicXmlInput,
     setMusicXmlInput,
     fileInputRef,
-    progressiveImportMeasureLimit,
     measurePairs,
     setRhythmPreset,
     pitches: PITCHES,
@@ -288,8 +295,8 @@ function App() {
     activeSelection.keyIndex > 0
       ? currentSelection.chordPitches?.[activeSelection.keyIndex - 1] ?? currentSelection.pitch
       : currentSelection.pitch
-  const trebleSequenceText = useMemo(() => notes.map((note) => toDisplayPitch(note.pitch)).join('  |  '), [notes])
-  const bassSequenceText = useMemo(() => bassNotes.map((note) => toDisplayPitch(note.pitch)).join('  |  '), [bassNotes])
+  const trebleSequenceText = useMemo(() => toSequencePreview(notes), [notes])
+  const bassSequenceText = useMemo(() => toSequencePreview(bassNotes), [bassNotes])
   const isImportLoading = importFeedback.kind === 'loading'
   const importProgressPercent =
     typeof importFeedback.progress === 'number' ? Math.max(0, Math.min(100, importFeedback.progress)) : null

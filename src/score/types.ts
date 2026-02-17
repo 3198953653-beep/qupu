@@ -44,6 +44,7 @@ export type ImportResult = {
   measureDivisions: number[]
   measureTimeSignatures: TimeSignature[]
   metadata: MusicXmlMetadata
+  importedNoteLookup?: Map<string, ImportedNoteLocation>
 }
 
 export type ImportFeedback = {

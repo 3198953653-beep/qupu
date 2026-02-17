@@ -55,7 +55,6 @@ export function useEditorHandlers(params: {
   musicXmlInput: string
   setMusicXmlInput: StateSetter<string>
   fileInputRef: MutableRefObject<HTMLInputElement | null>
-  progressiveImportMeasureLimit?: number
 
   measurePairs: MeasurePair[]
   setRhythmPreset: StateSetter<RhythmPresetId>
@@ -103,7 +102,6 @@ export function useEditorHandlers(params: {
     musicXmlInput,
     setMusicXmlInput,
     fileInputRef,
-    progressiveImportMeasureLimit,
     measurePairs,
     setRhythmPreset,
     pitches,
@@ -153,9 +151,7 @@ export function useEditorHandlers(params: {
       setIsRhythmLinked,
       applyImportedScore,
       setImportFeedback,
-      previewMeasureLimit: progressiveImportMeasureLimit,
       isRequestLatest: () => importRequestIdRef.current === requestId,
-      canApplyBackgroundResult: () => dragRef.current === null,
     })
   }
 

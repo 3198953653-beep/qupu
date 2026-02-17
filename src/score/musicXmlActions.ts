@@ -94,26 +94,13 @@ function disableMusicXmlImportWorker(): void {
 
 function parseMusicXmlOnMainThreadAsync(xmlText: string): Promise<ImportResult> {
   return new Promise<ImportResult>((resolve, reject) => {
-    const run = () => {
+    window.setTimeout(() => {
       try {
         resolve(parseMusicXml(xmlText))
       } catch (error) {
         reject(error instanceof Error ? error : new Error('Failed to import MusicXML.'))
       }
-    }
-
-    if (typeof window === 'undefined') {
-      run()
-      return
-    }
-
-    const requestIdle = (window as Window & { requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number })
-      .requestIdleCallback
-    if (typeof requestIdle === 'function') {
-      requestIdle(run, { timeout: 250 })
-      return
-    }
-    window.setTimeout(run, 16)
+    }, 0)
   })
 }
 
@@ -124,6 +111,12 @@ function isWorkerDomParserUnavailableError(error: unknown): boolean {
 }
 
 function parseMusicXmlInWorker(xmlText: string): Promise<ImportResult> {
+  // Speed-first mode: prefer native main-thread DOMParser when available.
+  // In many environments this is much faster than worker + JS polyfill parser.
+  if (typeof DOMParser !== 'undefined') {
+    return parseMusicXmlOnMainThreadAsync(xmlText)
+  }
+
   const worker = ensureMusicXmlImportWorker()
   if (!worker) {
     return parseMusicXmlOnMainThreadAsync(xmlText)
@@ -159,38 +152,6 @@ function estimateMeasureCount(xmlText: string): number {
 
 function buildImportSuccessMessage(imported: ImportResult): string {
   return `Imported ${imported.measurePairs.length} measures: treble ${imported.trebleNotes.length} notes, bass ${imported.bassNotes.length} notes.`
-}
-
-type UserInteractionTracker = {
-  isIdle: (idleMs: number) => boolean
-  dispose: () => void
-}
-
-function createUserInteractionTracker(): UserInteractionTracker {
-  if (typeof window === 'undefined') {
-    return {
-      isIdle: () => true,
-      dispose: () => {},
-    }
-  }
-
-  let lastInputAt = performance.now()
-  const markInput = () => {
-    lastInputAt = performance.now()
-  }
-  const eventNames: Array<keyof WindowEventMap> = ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart']
-  eventNames.forEach((name) => {
-    window.addEventListener(name, markInput, { passive: true })
-  })
-
-  return {
-    isIdle: (idleMs: number) => performance.now() - lastInputAt >= idleMs,
-    dispose: () => {
-      eventNames.forEach((name) => {
-        window.removeEventListener(name, markInput)
-      })
-    },
-  }
 }
 
 function scheduleAfterNextPaint(task: () => void): void {
@@ -263,7 +224,7 @@ export function applyImportedScoreState(params: {
   measureTimeSignaturesFromImportRef.current = result.measureTimeSignatures
   setMusicXmlMetadataFromImport(result.metadata)
   musicXmlMetadataFromImportRef.current = result.metadata
-  importedNoteLookupRef.current = buildImportedNoteLookup(result.measurePairs)
+  importedNoteLookupRef.current = result.importedNoteLookup ?? buildImportedNoteLookup(result.measurePairs)
   dragRef.current = null
   clearDragOverlay()
   setDraggingSelection(null)
@@ -282,35 +243,21 @@ export function importMusicXmlTextAndApply(params: {
   setIsRhythmLinked: StateSetter<boolean>
   applyImportedScore: (result: ImportResult) => void
   setImportFeedback: StateSetter<ImportFeedback>
-  previewMeasureLimit?: number
   isRequestLatest?: () => boolean
-  canApplyBackgroundResult?: () => boolean
 }): void {
   const {
     xmlText,
     setIsRhythmLinked,
     applyImportedScore,
     setImportFeedback,
-    previewMeasureLimit: rawPreviewMeasureLimit,
     isRequestLatest,
-    canApplyBackgroundResult,
   } = params
   const content = xmlText.trim()
   if (!content) {
     setImportFeedback({ kind: 'error', message: 'Paste MusicXML text first, then import.' })
     return
   }
-  const previewMeasureLimit =
-    typeof rawPreviewMeasureLimit === 'number' && Number.isFinite(rawPreviewMeasureLimit) && rawPreviewMeasureLimit > 0
-      ? Math.max(1, Math.trunc(rawPreviewMeasureLimit))
-      : 0
   const requestIsLatest = isRequestLatest ?? (() => true)
-  const canApplyResult = canApplyBackgroundResult ?? (() => true)
-  const interactionTracker = createUserInteractionTracker()
-  const releaseInteractionTracker = () => {
-    interactionTracker.dispose()
-  }
-  const canRunBackgroundApply = () => canApplyResult() && interactionTracker.isIdle(500)
   const setLoadingFeedback = (message: string, progress: number) => {
     if (!requestIsLatest()) return
     setImportFeedback({ kind: 'loading', message, progress: Math.max(0, Math.min(100, Math.round(progress))) })
@@ -318,100 +265,54 @@ export function importMusicXmlTextAndApply(params: {
 
   try {
     const estimatedMeasureCount = estimateMeasureCount(content)
-    setLoadingFeedback('Preparing import...', 6)
-    const usePreviewImport = previewMeasureLimit > 0 && estimatedMeasureCount > previewMeasureLimit
-
-    if (!usePreviewImport) {
-      setLoadingFeedback('Parsing score...', 35)
-      const imported = parseMusicXml(content)
-      if (!requestIsLatest()) {
-        releaseInteractionTracker()
-        return
-      }
-      setIsRhythmLinked(false)
-      applyImportedScore(imported)
-      setImportFeedback({
-        kind: 'success',
-        message: buildImportSuccessMessage(imported),
-        progress: 100,
-      })
-      releaseInteractionTracker()
-      return
-    }
-
-    setLoadingFeedback(`Rendering first page (${Math.min(previewMeasureLimit, estimatedMeasureCount)} measures)...`, 20)
-    const previewImported = parseMusicXml(content, { measureLimit: previewMeasureLimit })
-    if (!requestIsLatest()) {
-      releaseInteractionTracker()
-      return
-    }
     flushSync(() => {
-      setIsRhythmLinked(false)
-      applyImportedScore(previewImported)
       setImportFeedback({
         kind: 'loading',
-        message: `Loaded first ${previewImported.measurePairs.length} measures (of ${estimatedMeasureCount}). Loading remaining measures...`,
-        progress: 42,
+        message: `Loading ${estimatedMeasureCount > 0 ? `${estimatedMeasureCount} measures` : 'score'}...`,
+        progress: 10,
       })
     })
 
-    const applyFullImportedWhenReady = (fullImported: ImportResult) => {
-      if (!requestIsLatest()) {
-        releaseInteractionTracker()
-        return
-      }
-      if (!canRunBackgroundApply()) {
-        window.setTimeout(() => applyFullImportedWhenReady(fullImported), 32)
-        return
-      }
-      setLoadingFeedback('Applying complete score...', 88)
-      startTransition(() => {
-        setIsRhythmLinked(false)
-        applyImportedScore(fullImported)
-        setImportFeedback({
-          kind: 'success',
-          message: buildImportSuccessMessage(fullImported),
-          progress: 100,
-        })
-      })
-      releaseInteractionTracker()
-    }
-
     const runFullImport = () => {
-      if (!requestIsLatest()) {
-        releaseInteractionTracker()
-        return
-      }
-      if (!canRunBackgroundApply()) {
-        window.setTimeout(runFullImport, 32)
-        return
-      }
-      setLoadingFeedback('Loading full score in background...', 56)
+      if (!requestIsLatest()) return
+      setLoadingFeedback('Parsing full score...', 45)
+      const parseStartAt = typeof performance !== 'undefined' ? performance.now() : 0
       void parseMusicXmlInWorker(content)
-        .then((fullImported) => {
-          setLoadingFeedback('Background parse complete.', 80)
-          applyFullImportedWhenReady(fullImported)
+        .then((imported) => {
+          if (!requestIsLatest()) return
+          const parseDurationMs = typeof performance !== 'undefined' ? performance.now() - parseStartAt : 0
+          setLoadingFeedback('Applying score...', 88)
+          const applyStartAt = typeof performance !== 'undefined' ? performance.now() : 0
+          startTransition(() => {
+            setIsRhythmLinked(false)
+            applyImportedScore(imported)
+            setImportFeedback({
+              kind: 'success',
+              message: buildImportSuccessMessage(imported),
+              progress: 100,
+            })
+          })
+          if (typeof window !== 'undefined' && typeof performance !== 'undefined') {
+            window.requestAnimationFrame(() => {
+              const applyToPaintMs = performance.now() - applyStartAt
+              console.info(
+                `[import] parse=${parseDurationMs.toFixed(1)}ms, apply+paint=${applyToPaintMs.toFixed(1)}ms, measures=${imported.measurePairs.length}`,
+              )
+            })
+          }
         })
         .catch((error) => {
-          if (!requestIsLatest()) {
-            releaseInteractionTracker()
-            return
-          }
+          if (!requestIsLatest()) return
           const message = error instanceof Error ? error.message : 'Failed to import MusicXML.'
-          setImportFeedback({ kind: 'error', message: `Partial import loaded, but full import failed: ${message}` })
-          releaseInteractionTracker()
+          setImportFeedback({ kind: 'error', message })
         })
     }
 
     scheduleAfterNextPaint(runFullImport)
   } catch (error) {
-    if (!requestIsLatest()) {
-      releaseInteractionTracker()
-      return
-    }
+    if (!requestIsLatest()) return
     const message = error instanceof Error ? error.message : 'Failed to import MusicXML.'
     setImportFeedback({ kind: 'error', message })
-    releaseInteractionTracker()
   }
 }
 

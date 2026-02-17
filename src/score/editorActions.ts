@@ -24,6 +24,14 @@ import type {
 } from './types'
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>
+const MUSIC_XML_TEXTAREA_MAX_CHARS = 2000
+
+function formatMusicXmlTextareaPreview(xmlText: string): string {
+  if (xmlText.length <= MUSIC_XML_TEXTAREA_MAX_CHARS) return xmlText
+  return `<!-- Large MusicXML loaded from file (${xmlText.length.toLocaleString()} chars).
+Preview hidden for performance.
+Re-open the source file if you need full XML text editing. -->`
+}
 
 export async function playScoreAction(params: {
   synth: Tone.PolySynth | null
@@ -71,7 +79,7 @@ export async function handleMusicXmlFileChange(params: {
 
   try {
     const xmlText = await file.text()
-    setMusicXmlInput(xmlText)
+    setMusicXmlInput(formatMusicXmlTextareaPreview(xmlText))
     importMusicXmlText(xmlText)
   } catch {
     setImportFeedback({ kind: 'error', message: 'Could not read the selected file.' })
