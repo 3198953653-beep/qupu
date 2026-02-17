@@ -13,7 +13,8 @@ export function getStepOctaveAlterFromPitch(pitch: Pitch): { step: string; octav
   const octave = Number(octaveText)
   const note = rawNote?.trim() || 'c'
   const step = note[0]?.toUpperCase() || 'C'
-  const alter = (note.match(/#/g)?.length ?? 0) - (note.match(/b/g)?.length ?? 0)
+  const accidentalText = note.slice(1)
+  const alter = (accidentalText.match(/#/g)?.length ?? 0) - (accidentalText.match(/b/g)?.length ?? 0)
   return { step, octave: Number.isFinite(octave) ? octave : 4, alter }
 }
 
