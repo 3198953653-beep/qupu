@@ -93,8 +93,11 @@ export function handleBeginDragPointer(params: {
   if (!surface) return
 
   const rect = surface.getBoundingClientRect()
-  const clientToScoreScaleX = rect.width > 0 ? surface.width / rect.width : 1
-  const clientToScoreScaleY = rect.height > 0 ? surface.height / rect.height : 1
+  // Use CSS layout size instead of backing-store size to avoid DPR-induced hit-test drift.
+  const logicalWidth = surface.clientWidth || surface.width
+  const logicalHeight = surface.clientHeight || surface.height
+  const clientToScoreScaleX = rect.width > 0 ? logicalWidth / rect.width : 1
+  const clientToScoreScaleY = rect.height > 0 ? logicalHeight / rect.height : 1
   const x = (event.clientX - rect.left) * clientToScoreScaleX
   const y = (event.clientY - rect.top) * clientToScoreScaleY
   const logicalHitRadius = hitRadius * clientToScoreScaleX

@@ -99,6 +99,9 @@ function App() {
   const [dragDebugReport, setDragDebugReport] = useState<string>('')
   const [autoScaleEnabled, setAutoScaleEnabled] = useState(false)
   const [manualScalePercent, setManualScalePercent] = useState(100)
+  const [requiredMeasureWidthCacheByMeasure] = useState(
+    () => new WeakMap<MeasurePair, Map<string, number>>(),
+  )
 
   const scoreRef = useRef<HTMLCanvasElement | null>(null)
   const scoreOverlayRef = useRef<HTMLCanvasElement | null>(null)
@@ -156,7 +159,6 @@ function App() {
   const systemUsableWidth = scoreWidth - SCORE_PAGE_PADDING_X * 2
   const systemRanges = useMemo(
     () => {
-      const requiredWidthCache = new Map<string, number>()
       return buildAdaptiveSystemRanges({
         measurePairs,
         systemUsableWidth,
@@ -164,7 +166,6 @@ function App() {
         measureTimeSignaturesFromImport,
         getRequiredMeasureWidth: (context) => {
           const cacheKey = [
-            context.pairIndex,
             context.isSystemStart ? 1 : 0,
             context.showKeySignature ? 1 : 0,
             context.showTimeSignature ? 1 : 0,
@@ -175,15 +176,26 @@ function App() {
             context.nextTimeSignature.beats,
             context.nextTimeSignature.beatType,
           ].join('|')
-          const cached = requiredWidthCache.get(cacheKey)
+          const measureCache = requiredMeasureWidthCacheByMeasure.get(context.measure)
+          const cached = measureCache?.get(cacheKey)
           if (cached !== undefined) return cached
           const width = estimateRequiredMeasureWidth(context)
-          requiredWidthCache.set(cacheKey, width)
+          if (measureCache) {
+            measureCache.set(cacheKey, width)
+          } else {
+            requiredMeasureWidthCacheByMeasure.set(context.measure, new Map([[cacheKey, width]]))
+          }
           return width
         },
       })
     },
-    [measurePairs, systemUsableWidth, measureKeyFifthsFromImport, measureTimeSignaturesFromImport],
+    [
+      measurePairs,
+      systemUsableWidth,
+      measureKeyFifthsFromImport,
+      measureTimeSignaturesFromImport,
+      requiredMeasureWidthCacheByMeasure,
+    ],
   )
   const systemCount = Math.max(1, systemRanges.length)
   const systemsPerPage = Math.max(
