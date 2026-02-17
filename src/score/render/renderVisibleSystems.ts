@@ -11,7 +11,6 @@ import {
 import { getKeySignatureSpecFromFifths } from '../accidentals'
 import {
   allocateMeasureWidthsByDemand,
-  estimateAdaptiveMeasureWidth,
   getMeasureLayoutDemand,
   type SystemMeasureRange,
 } from '../layout/demand'
@@ -23,7 +22,7 @@ import type { MeasureLayout, MeasurePair, NoteLayout, Selection, TimeSignature }
 
 const MEASURE_RIGHT_EDGE_GUARD_PX = 3
 const OVERFLOW_RECOVERY_PADDING_PX = 8
-const OVERFLOW_ANALYSIS_MAX_PASSES = 2
+const OVERFLOW_ANALYSIS_MAX_PASSES = 6
 
 export function renderVisibleSystems(params: {
   context: ReturnType<Renderer['getContext']>
@@ -146,9 +145,6 @@ export function renderVisibleSystems(params: {
         entry.showEndTimeSignature,
       ),
     )
-    const minimumMeasureWidths = measureDemands.map((demand) =>
-      Math.min(systemUsableWidth, estimateAdaptiveMeasureWidth(demand)),
-    )
     const buildMeasureProbe = (entry: (typeof systemMeta)[number], measureX: number, measureWidth: number) => {
       const noteStartProbe = new Stave(measureX, trebleY, measureWidth)
       if (entry.isSystemStart) {
@@ -225,7 +221,16 @@ export function renderVisibleSystems(params: {
       return { nextMinimums, hasIncrease }
     }
 
-    let enforcedMinimumWidths = [...minimumMeasureWidths]
+    const probeWidth = Math.max(140, Math.floor(systemUsableWidth / Math.max(1, systemMeasures.length)))
+    const baseMinimumWidths = systemMeta.map((entry) => {
+      const { noteStartX } = buildMeasureProbe(entry, STAFF_X, probeWidth)
+      const decorationWidth = Math.max(0, noteStartX - STAFF_X)
+      // Keep only structural left decoration space in the base minimum.
+      // Real per-measure note width is raised by overflow analysis below.
+      return Math.max(1, Math.ceil(decorationWidth + 24))
+    })
+
+    let enforcedMinimumWidths = [...baseMinimumWidths]
     let measureWidths = allocateMeasureWidthsByDemand(measureDemands, systemUsableWidth, enforcedMinimumWidths)
 
     for (let pass = 0; pass < OVERFLOW_ANALYSIS_MAX_PASSES; pass += 1) {

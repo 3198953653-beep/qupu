@@ -14,6 +14,7 @@ import {
   SYSTEM_HEIGHT,
 } from './score/constants'
 import { buildAdaptiveSystemRanges, toDisplayDuration } from './score/layout/demand'
+import { estimateRequiredMeasureWidth } from './score/layout/requiredWidth'
 import { useDragHandlers } from './score/dragHandlers'
 import { useEditorHandlers } from './score/editorHandlers'
 import {
@@ -154,13 +155,34 @@ function App() {
   }, [bassNotes])
   const systemUsableWidth = scoreWidth - SCORE_PAGE_PADDING_X * 2
   const systemRanges = useMemo(
-    () =>
-      buildAdaptiveSystemRanges({
+    () => {
+      const requiredWidthCache = new Map<string, number>()
+      return buildAdaptiveSystemRanges({
         measurePairs,
         systemUsableWidth,
         measureKeyFifthsFromImport,
         measureTimeSignaturesFromImport,
-      }),
+        getRequiredMeasureWidth: (context) => {
+          const cacheKey = [
+            context.pairIndex,
+            context.isSystemStart ? 1 : 0,
+            context.showKeySignature ? 1 : 0,
+            context.showTimeSignature ? 1 : 0,
+            context.showEndTimeSignature ? 1 : 0,
+            context.keyFifths,
+            context.timeSignature.beats,
+            context.timeSignature.beatType,
+            context.nextTimeSignature.beats,
+            context.nextTimeSignature.beatType,
+          ].join('|')
+          const cached = requiredWidthCache.get(cacheKey)
+          if (cached !== undefined) return cached
+          const width = estimateRequiredMeasureWidth(context)
+          requiredWidthCache.set(cacheKey, width)
+          return width
+        },
+      })
+    },
     [measurePairs, systemUsableWidth, measureKeyFifthsFromImport, measureTimeSignaturesFromImport],
   )
   const systemCount = Math.max(1, systemRanges.length)

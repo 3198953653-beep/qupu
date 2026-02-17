@@ -16,6 +16,18 @@ export type SystemMeasureRange = {
   endPairIndexExclusive: number
 }
 
+export type MeasureRequiredWidthContext = {
+  pairIndex: number
+  measure: MeasurePair
+  isSystemStart: boolean
+  keyFifths: number
+  showKeySignature: boolean
+  timeSignature: TimeSignature
+  showTimeSignature: boolean
+  nextTimeSignature: TimeSignature
+  showEndTimeSignature: boolean
+}
+
 export function toDisplayDuration(duration: NoteDuration): string {
   return DURATION_LABEL[duration]
 }
@@ -100,12 +112,14 @@ export function buildAdaptiveSystemRanges(params: {
   systemUsableWidth: number
   measureKeyFifthsFromImport: number[] | null
   measureTimeSignaturesFromImport: TimeSignature[] | null
+  getRequiredMeasureWidth?: ((context: MeasureRequiredWidthContext) => number) | null
 }): SystemMeasureRange[] {
   const {
     measurePairs,
     systemUsableWidth,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
+    getRequiredMeasureWidth = null,
   } = params
 
   if (measurePairs.length === 0) return []
@@ -146,13 +160,33 @@ export function buildAdaptiveSystemRanges(params: {
       const showPotentialEndTimeSignature =
         pairIndex + 1 < measurePairs.length &&
         hasTimeSignatureChanged(resolvedTimeSignatures[pairIndex + 1], resolvedTimeSignatures[pairIndex])
-      const demand = getMeasureLayoutDemandFromNoteDemand(
-        noteDemands[pairIndex],
+      const nextTimeSignature =
+        pairIndex + 1 < measurePairs.length
+          ? resolvedTimeSignatures[pairIndex + 1]
+          : resolvedTimeSignatures[pairIndex]
+      const requiredWidthByEstimator = getRequiredMeasureWidth?.({
+        pairIndex,
+        measure: measurePairs[pairIndex],
+        isSystemStart,
+        keyFifths: resolvedKeyFifths[pairIndex],
         showKeySignature,
+        timeSignature: resolvedTimeSignatures[pairIndex],
         showTimeSignature,
-        showPotentialEndTimeSignature,
-      )
-      const requiredWidth = Math.min(safeSystemUsableWidth, estimateAdaptiveMeasureWidth(demand))
+        nextTimeSignature,
+        showEndTimeSignature: showPotentialEndTimeSignature,
+      })
+      const demandWidth =
+        requiredWidthByEstimator && Number.isFinite(requiredWidthByEstimator)
+          ? requiredWidthByEstimator
+          : estimateAdaptiveMeasureWidth(
+              getMeasureLayoutDemandFromNoteDemand(
+                noteDemands[pairIndex],
+                showKeySignature,
+                showTimeSignature,
+                showPotentialEndTimeSignature,
+              ),
+            )
+      const requiredWidth = Math.min(safeSystemUsableWidth, Math.max(1, Math.ceil(demandWidth)))
       const wouldOverflow = pairIndex > startPairIndex && usedWidth + requiredWidth > safeSystemUsableWidth
       if (wouldOverflow) break
       usedWidth += requiredWidth
