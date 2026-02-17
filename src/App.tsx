@@ -153,6 +153,7 @@ type DragState = {
   pitchYMap: Record<Pitch, number>
   keyFifths: number
   accidentalStateBeforeNote: Map<string, number>
+  layoutCacheReady: boolean
   staticNoteXById: Map<string, number>
   previewAccidentalRightXById: Map<string, Map<number, number>>
   debugStaticByNoteKey: Map<string, DragDebugStaticRecord>
@@ -2058,6 +2059,18 @@ function App() {
     () => measurePairsFromImport ?? buildMeasurePairs(notes, bassNotes),
     [measurePairsFromImport, notes, bassNotes],
   )
+  const trebleNoteById = useMemo(() => new Map(notes.map((note) => [note.id, note] as const)), [notes])
+  const bassNoteById = useMemo(() => new Map(bassNotes.map((note) => [note.id, note] as const)), [bassNotes])
+  const trebleNoteIndexById = useMemo(() => {
+    const byId = new Map<string, number>()
+    notes.forEach((note, index) => byId.set(note.id, index))
+    return byId
+  }, [notes])
+  const bassNoteIndexById = useMemo(() => {
+    const byId = new Map<string, number>()
+    bassNotes.forEach((note, index) => byId.set(note.id, index))
+    return byId
+  }, [bassNotes])
   const measuresPerLine = 2
   const systemCount = Math.max(1, Math.ceil(measurePairs.length / measuresPerLine))
   const scoreHeight = SCORE_TOP_PADDING * 2 + systemCount * SYSTEM_HEIGHT + Math.max(0, systemCount - 1) * SYSTEM_GAP_Y
@@ -3051,6 +3064,23 @@ function App() {
     return byId
   }
 
+  const ensureDragLayoutCache = (drag: DragState): DragState => {
+    if (drag.layoutCacheReady) return drag
+
+    const debugStaticByNoteKey = buildDragDebugStaticByNoteKey(drag.pairIndex)
+    const nextDrag = {
+      ...drag,
+      layoutCacheReady: true,
+      staticNoteXById: buildStaticNoteXById(drag.pairIndex),
+      debugStaticByNoteKey,
+      previewAccidentalRightXById: buildPreviewAccidentalRightXFromStatic(debugStaticByNoteKey),
+    }
+    if (dragRef.current?.pointerId === drag.pointerId) {
+      dragRef.current = nextDrag
+    }
+    return nextDrag
+  }
+
   const dumpDragDebugReport = () => {
     const frames = dragDebugFramesRef.current
     if (frames.length === 0) {
@@ -3152,9 +3182,10 @@ function App() {
   }
 
   const drawDragMeasurePreview = (drag: DragState) => {
+    const dragWithLayout = ensureDragLayoutCache(drag)
     dragPreviewFrameRef.current += 1
-    const measureLayout = measureLayoutsRef.current.get(drag.pairIndex)
-    const measure = measurePairsRef.current[drag.pairIndex]
+    const measureLayout = measureLayoutsRef.current.get(dragWithLayout.pairIndex)
+    const measure = measurePairsRef.current[dragWithLayout.pairIndex]
     if (!measureLayout || !measure) return
     const previewShowKeySignature = !measureLayout.isSystemStart && measureLayout.showKeySignature
     const previewShowTimeSignature = !measureLayout.isSystemStart && measureLayout.showTimeSignature
@@ -3194,20 +3225,25 @@ function App() {
       showEndTimeSignature: measureLayout.showEndTimeSignature,
       activeSelection: null,
       draggingSelection: null,
-      previewNote: { noteId: drag.noteId, staff: drag.staff, pitch: drag.pitch, keyIndex: drag.keyIndex },
-      previewAccidentalStateBeforeNote: drag.accidentalStateBeforeNote,
+      previewNote: {
+        noteId: dragWithLayout.noteId,
+        staff: dragWithLayout.staff,
+        pitch: dragWithLayout.pitch,
+        keyIndex: dragWithLayout.keyIndex,
+      },
+      previewAccidentalStateBeforeNote: dragWithLayout.accidentalStateBeforeNote,
       collectLayouts: false,
       suppressSystemDecorations: true,
       noteStartXOverride: measureLayout.noteStartX,
       freezePreviewAccidentalLayout: false,
       formatWidthOverride: measureLayout.formatWidth,
-      staticNoteXById: drag.staticNoteXById,
-      staticAccidentalRightXById: drag.previewAccidentalRightXById,
+      staticNoteXById: dragWithLayout.staticNoteXById,
+      staticAccidentalRightXById: dragWithLayout.previewAccidentalRightXById,
       debugCapture: {
         frame: dragPreviewFrameRef.current,
-        draggedNoteId: drag.noteId,
-        draggedStaff: drag.staff,
-        staticByNoteKey: drag.debugStaticByNoteKey,
+        draggedNoteId: dragWithLayout.noteId,
+        draggedStaff: dragWithLayout.staff,
+        staticByNoteKey: dragWithLayout.debugStaticByNoteKey,
         pushSnapshot: (snapshot) => {
           const list = dragDebugFramesRef.current
           list.push(snapshot)
@@ -3551,8 +3587,7 @@ function App() {
       }
     }
     if (!current) {
-      const sourceNotes = hitNote.staff === 'treble' ? notes : bassNotes
-      current = sourceNotes.find((note) => note.id === hitNote.id)
+      current = hitNote.staff === 'treble' ? trebleNoteById.get(hitNote.id) : bassNoteById.get(hitNote.id)
     }
     const measurePair = (importedPairs ?? measurePairsRef.current)[hitNote.pairIndex]
     const measureStaffNotes = hitNote.staff === 'treble' ? (measurePair?.treble ?? []) : (measurePair?.bass ?? [])
@@ -3568,9 +3603,6 @@ function App() {
     const currentPitch =
       current && hitKeyIndex > 0 ? current.chordPitches?.[hitKeyIndex - 1] ?? current.pitch : current?.pitch
     const pitch = currentPitch ?? hitHead.pitch ?? getNearestPitchByY(noteCenterY, hitNote.pitchYMap)
-    const staticNoteXById = buildStaticNoteXById(hitNote.pairIndex)
-    const debugStaticByNoteKey = buildDragDebugStaticByNoteKey(hitNote.pairIndex)
-    const previewAccidentalRightXById = buildPreviewAccidentalRightXFromStatic(debugStaticByNoteKey)
 
     const dragState: DragState = {
       noteId: hitNote.id,
@@ -3587,9 +3619,10 @@ function App() {
       pitchYMap: hitNote.pitchYMap,
       keyFifths,
       accidentalStateBeforeNote,
-      staticNoteXById,
-      previewAccidentalRightXById,
-      debugStaticByNoteKey,
+      layoutCacheReady: false,
+      staticNoteXById: new Map(),
+      previewAccidentalRightXById: new Map(),
+      debugStaticByNoteKey: new Map(),
     }
 
     dragRef.current = dragState
@@ -3618,7 +3651,10 @@ function App() {
   }
 
   const activePool = activeSelection.staff === 'treble' ? notes : bassNotes
-  const currentSelection = activePool.find((note) => note.id === activeSelection.noteId) ?? activePool[0] ?? notes[0]
+  const activePoolById = activeSelection.staff === 'treble' ? trebleNoteById : bassNoteById
+  const activePoolIndexById = activeSelection.staff === 'treble' ? trebleNoteIndexById : bassNoteIndexById
+  const currentSelection = activePoolById.get(activeSelection.noteId) ?? activePool[0] ?? notes[0]
+  const currentSelectionPosition = (activePoolIndexById.get(currentSelection.id) ?? 0) + 1
   const currentSelectionPitch =
     activeSelection.keyIndex > 0
       ? currentSelection.chordPitches?.[activeSelection.keyIndex - 1] ?? currentSelection.pitch
@@ -3725,8 +3761,7 @@ function App() {
             Duration: <strong>{toDisplayDuration(currentSelection.duration)}</strong>
           </p>
           <p>
-            Position: <strong>{activePool.findIndex((note) => note.id === currentSelection.id) + 1}</strong> /{' '}
-            {activePool.length}
+            Position: <strong>{currentSelectionPosition}</strong> / {activePool.length}
           </p>
           <p className="sequence">Treble: {trebleSequenceText}</p>
           <p className="sequence">Bass: {bassSequenceText}</p>
