@@ -1,3 +1,4 @@
+import { startTransition } from 'react'
 import type { Dispatch, MutableRefObject, PointerEvent, SetStateAction } from 'react'
 import { commitDragPitchToScoreData } from './dragInteractions'
 import {
@@ -12,6 +13,7 @@ import {
   getDragDebugReportText,
 } from './dragPreviewController'
 import { flushPendingDragFrame, scheduleDragCommitFrame } from './dragScheduler'
+import { flattenBassFromPairs, flattenTrebleFromPairs } from './scoreOps'
 import type { Renderer } from 'vexflow'
 import type { HitGridIndex } from './layout/hitTest'
 import type {
@@ -179,6 +181,12 @@ export function useDragHandlers(params: {
     if (result.fromImported) {
       measurePairsFromImportRef.current = result.normalizedPairs
       setMeasurePairsFromImport(result.normalizedPairs)
+      // Keep drag release responsive on large imported scores: sync flat note lists at low priority.
+      startTransition(() => {
+        setNotes(flattenTrebleFromPairs(result.normalizedPairs))
+        setBassNotes(flattenBassFromPairs(result.normalizedPairs))
+      })
+      return
     }
     setNotes(result.trebleNotes)
     setBassNotes(result.bassNotes)

@@ -102,7 +102,9 @@ export function commitDragPitchToScoreData(params: {
   importedNoteLookup: Map<string, ImportedNoteLocation>
   currentPairs: MeasurePair[]
   importedKeyFifths: number[] | null
-}): { normalizedPairs: MeasurePair[]; trebleNotes: ScoreNote[]; bassNotes: ScoreNote[]; fromImported: boolean } {
+}):
+  | { normalizedPairs: MeasurePair[]; fromImported: true }
+  | { normalizedPairs: MeasurePair[]; trebleNotes: ScoreNote[]; bassNotes: ScoreNote[]; fromImported: false } {
   const { drag, pitch, importedPairs, importedNoteLookup, currentPairs, importedKeyFifths } = params
 
   if (importedPairs) {
@@ -114,8 +116,6 @@ export function commitDragPitchToScoreData(params: {
     const normalizedPairs = normalizeMeasurePairAt(updated, normalizeIndex, importedKeyFifths)
     return {
       normalizedPairs,
-      trebleNotes: flattenTrebleFromPairs(normalizedPairs),
-      bassNotes: flattenBassFromPairs(normalizedPairs),
       fromImported: true,
     }
   }
