@@ -66,6 +66,7 @@ export type NoteLayout = {
   pairIndex: number
   noteIndex: number
   x: number
+  rightX: number
   y: number
   pitchYMap: Record<Pitch, number>
   noteHeads: NoteHeadLayout[]

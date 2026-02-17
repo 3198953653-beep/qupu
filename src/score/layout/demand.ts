@@ -8,7 +8,6 @@ const MEASURE_END_TIME_SIGNATURE_DEMAND = 1.6
 const ADAPTIVE_MEASURE_BASE_WIDTH_PX = 34
 const ADAPTIVE_DEMAND_TO_WIDTH_FACTOR = 6.4
 const ADAPTIVE_MEASURE_MIN_WIDTH_PX = 92
-const ADAPTIVE_MEASURE_MAX_WIDTH_PX = 320
 
 const DEFAULT_TIME_SIGNATURE: TimeSignature = { beats: 4, beatType: 4 }
 
@@ -93,7 +92,7 @@ function getResolvedArrayValue<T>(values: T[] | null, index: number, fallback: T
 
 export function estimateAdaptiveMeasureWidth(layoutDemand: number): number {
   const scaled = Math.round(ADAPTIVE_MEASURE_BASE_WIDTH_PX + layoutDemand * ADAPTIVE_DEMAND_TO_WIDTH_FACTOR)
-  return Math.max(ADAPTIVE_MEASURE_MIN_WIDTH_PX, Math.min(ADAPTIVE_MEASURE_MAX_WIDTH_PX, scaled))
+  return Math.max(ADAPTIVE_MEASURE_MIN_WIDTH_PX, scaled)
 }
 
 export function buildAdaptiveSystemRanges(params: {
@@ -144,13 +143,16 @@ export function buildAdaptiveSystemRanges(params: {
       const isSystemStart = pairIndex === startPairIndex
       const showKeySignature = isSystemStart || keyChangeFlags[pairIndex]
       const showTimeSignature = timeChangeFlags[pairIndex]
+      const showPotentialEndTimeSignature =
+        pairIndex + 1 < measurePairs.length &&
+        hasTimeSignatureChanged(resolvedTimeSignatures[pairIndex + 1], resolvedTimeSignatures[pairIndex])
       const demand = getMeasureLayoutDemandFromNoteDemand(
         noteDemands[pairIndex],
         showKeySignature,
         showTimeSignature,
-        false,
+        showPotentialEndTimeSignature,
       )
-      const requiredWidth = estimateAdaptiveMeasureWidth(demand)
+      const requiredWidth = Math.min(safeSystemUsableWidth, estimateAdaptiveMeasureWidth(demand))
       const wouldOverflow = pairIndex > startPairIndex && usedWidth + requiredWidth > safeSystemUsableWidth
       if (wouldOverflow) break
       usedWidth += requiredWidth
@@ -168,32 +170,9 @@ export function buildAdaptiveSystemRanges(params: {
   return ranges
 }
 
-export function allocateMeasureWidthsByDemand(demands: number[], totalWidth: number): number[] {
-  if (demands.length === 0) return []
-  if (demands.length === 1) return [Math.floor(totalWidth)]
-
-  const safeTotal = Math.max(demands.length, Math.floor(totalWidth))
-  const measureCount = demands.length
-  const idealMinWidth = Math.floor(safeTotal / measureCount)
-  const minWidth = Math.max(80, Math.min(180, Math.floor(idealMinWidth * 0.45)))
-  const minTotal = minWidth * measureCount
-  if (safeTotal <= minTotal) {
-    const even = Math.floor(safeTotal / measureCount)
-    const result = new Array<number>(measureCount).fill(even)
-    let remainder = safeTotal - even * measureCount
-    for (let i = 0; i < result.length && remainder > 0; i += 1) {
-      result[i] += 1
-      remainder -= 1
-    }
-    return result
-  }
-
-  const flex = safeTotal - minTotal
-  const demandSum = demands.reduce((sum, demand) => sum + Math.max(0.0001, demand), 0)
-  const floatWidths = demands.map((demand) => minWidth + (flex * Math.max(0.0001, demand)) / demandSum)
+function distributeWidthsByFloats(floatWidths: number[], targetTotal: number): number[] {
   const widths = floatWidths.map((value) => Math.floor(value))
-  let remainder = safeTotal - widths.reduce((sum, width) => sum + width, 0)
-
+  let remainder = targetTotal - widths.reduce((sum, width) => sum + width, 0)
   const rankByFraction = floatWidths
     .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
     .sort((a, b) => b.fraction - a.fraction)
@@ -202,6 +181,45 @@ export function allocateMeasureWidthsByDemand(demands: number[], totalWidth: num
     widths[rankByFraction[i].index] += 1
     remainder -= 1
   }
+
+  return widths
+}
+
+export function allocateMeasureWidthsByDemand(
+  demands: number[],
+  totalWidth: number,
+  minimumWidths?: number[] | null,
+): number[] {
+  if (demands.length === 0) return []
+  if (demands.length === 1) return [Math.floor(totalWidth)]
+
+  const safeTotal = Math.max(demands.length, Math.floor(totalWidth))
+  const measureCount = demands.length
+  const minimumByMeasure =
+    minimumWidths && minimumWidths.length > 0
+      ? demands.map((_, index) => {
+          const raw = minimumWidths[index]
+          if (!Number.isFinite(raw)) return 1
+          return Math.max(1, Math.min(safeTotal, Math.floor(raw)))
+        })
+      : (() => {
+          const idealMinWidth = Math.floor(safeTotal / measureCount)
+          const minWidth = Math.max(80, Math.min(180, Math.floor(idealMinWidth * 0.45)))
+          return new Array<number>(measureCount).fill(minWidth)
+        })()
+
+  const minimumTotal = minimumByMeasure.reduce((sum, width) => sum + width, 0)
+  if (minimumTotal >= safeTotal) {
+    const scaled = minimumByMeasure.map((width) => (safeTotal * width) / minimumTotal)
+    return distributeWidthsByFloats(scaled, safeTotal)
+  }
+
+  const flex = safeTotal - minimumTotal
+  const demandSum = demands.reduce((sum, demand) => sum + Math.max(0.0001, demand), 0)
+  const floatWidths = demands.map(
+    (demand, index) => minimumByMeasure[index] + (flex * Math.max(0.0001, demand)) / demandSum,
+  )
+  const widths = distributeWidthsByFloats(floatWidths, safeTotal)
 
   return widths
 }

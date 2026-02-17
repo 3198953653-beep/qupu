@@ -9,12 +9,21 @@ import {
   SYSTEM_TREBLE_OFFSET_Y,
 } from '../constants'
 import { getKeySignatureSpecFromFifths } from '../accidentals'
-import { allocateMeasureWidthsByDemand, getMeasureLayoutDemand, type SystemMeasureRange } from '../layout/demand'
+import {
+  allocateMeasureWidthsByDemand,
+  estimateAdaptiveMeasureWidth,
+  getMeasureLayoutDemand,
+  type SystemMeasureRange,
+} from '../layout/demand'
 import { getLayoutNoteKey } from '../layout/renderPosition'
 import { buildMeasureOverlayRect } from '../layout/viewport'
 import { clamp } from '../math'
 import { drawMeasureToContext } from './drawMeasure'
 import type { MeasureLayout, MeasurePair, NoteLayout, Selection, TimeSignature } from '../types'
+
+const MEASURE_RIGHT_EDGE_GUARD_PX = 3
+const OVERFLOW_RECOVERY_PADDING_PX = 8
+const OVERFLOW_ANALYSIS_MAX_PASSES = 2
 
 export function renderVisibleSystems(params: {
   context: ReturnType<Renderer['getContext']>
@@ -137,14 +146,10 @@ export function renderVisibleSystems(params: {
         entry.showEndTimeSignature,
       ),
     )
-    const measureWidths = allocateMeasureWidthsByDemand(measureDemands, systemUsableWidth)
-    let measureCursorX = STAFF_X
-
-    systemMeta.forEach((entry, indexInSystem) => {
-      const measureWidth = measureWidths[indexInSystem] ?? Math.floor(systemUsableWidth / systemMeasures.length)
-      const measureX = measureCursorX
-      measureCursorX += measureWidth
-
+    const minimumMeasureWidths = measureDemands.map((demand) =>
+      Math.min(systemUsableWidth, estimateAdaptiveMeasureWidth(demand)),
+    )
+    const buildMeasureProbe = (entry: (typeof systemMeta)[number], measureX: number, measureWidth: number) => {
       const noteStartProbe = new Stave(measureX, trebleY, measureWidth)
       if (entry.isSystemStart) {
         noteStartProbe.addClef('treble')
@@ -163,9 +168,79 @@ export function renderVisibleSystems(params: {
           noteStartProbe.addTimeSignature(`${entry.timeSignature.beats}/${entry.timeSignature.beatType}`)
         }
       }
-
       const noteStartX = noteStartProbe.getNoteStartX()
       const formatWidth = Math.max(80, noteStartProbe.getNoteEndX() - noteStartX - 8)
+      return { noteStartX, formatWidth }
+    }
+
+    const analyzeOverflowMinimumWidths = (
+      candidateWidths: number[],
+      currentMinimums: number[],
+    ): { nextMinimums: number[]; hasIncrease: boolean } => {
+      const nextMinimums = [...currentMinimums]
+      let hasIncrease = false
+      let analysisCursorX = STAFF_X
+
+      systemMeta.forEach((entry, indexInSystem) => {
+        const measureWidth = candidateWidths[indexInSystem] ?? Math.floor(systemUsableWidth / systemMeasures.length)
+        const measureX = analysisCursorX
+        analysisCursorX += measureWidth
+        const { formatWidth } = buildMeasureProbe(entry, measureX, measureWidth)
+        const measureNoteLayouts = drawMeasureToContext({
+          context,
+          measure: entry.measure,
+          pairIndex: entry.pairIndex,
+          measureX,
+          measureWidth,
+          trebleY,
+          bassY,
+          isSystemStart: entry.isSystemStart,
+          keyFifths: entry.keyFifths,
+          showKeySignature: entry.showKeySignature,
+          timeSignature: entry.timeSignature,
+          showTimeSignature: entry.showTimeSignature,
+          endTimeSignature: entry.nextTimeSignature,
+          showEndTimeSignature: entry.showEndTimeSignature,
+          activeSelection: null,
+          draggingSelection: null,
+          collectLayouts: true,
+          skipPainting: true,
+          formatWidthOverride: formatWidth,
+        })
+
+        let maxHeadX = Number.NEGATIVE_INFINITY
+        for (const layout of measureNoteLayouts) {
+          if (layout.rightX > maxHeadX) maxHeadX = layout.rightX
+        }
+        if (!Number.isFinite(maxHeadX)) return
+        const rightBoundary = measureX + measureWidth - MEASURE_RIGHT_EDGE_GUARD_PX
+        const overflow = maxHeadX - rightBoundary
+        if (overflow <= 0) return
+        const requiredWidth = Math.ceil(measureWidth + overflow + OVERFLOW_RECOVERY_PADDING_PX)
+        if (requiredWidth <= nextMinimums[indexInSystem]) return
+        nextMinimums[indexInSystem] = requiredWidth
+        hasIncrease = true
+      })
+
+      return { nextMinimums, hasIncrease }
+    }
+
+    let enforcedMinimumWidths = [...minimumMeasureWidths]
+    let measureWidths = allocateMeasureWidthsByDemand(measureDemands, systemUsableWidth, enforcedMinimumWidths)
+
+    for (let pass = 0; pass < OVERFLOW_ANALYSIS_MAX_PASSES; pass += 1) {
+      const { nextMinimums, hasIncrease } = analyzeOverflowMinimumWidths(measureWidths, enforcedMinimumWidths)
+      if (!hasIncrease) break
+      enforcedMinimumWidths = nextMinimums
+      measureWidths = allocateMeasureWidthsByDemand(measureDemands, systemUsableWidth, enforcedMinimumWidths)
+    }
+
+    let measureCursorX = STAFF_X
+    systemMeta.forEach((entry, indexInSystem) => {
+      const measureWidth = measureWidths[indexInSystem] ?? Math.floor(systemUsableWidth / systemMeasures.length)
+      const measureX = measureCursorX
+      measureCursorX += measureWidth
+      const { noteStartX, formatWidth } = buildMeasureProbe(entry, measureX, measureWidth)
       const measureNoteLayouts = drawMeasureToContext({
         context,
         measure: entry.measure,
@@ -183,6 +258,7 @@ export function renderVisibleSystems(params: {
         showEndTimeSignature: entry.showEndTimeSignature,
         activeSelection,
         draggingSelection,
+        formatWidthOverride: formatWidth,
       })
 
       nextLayouts.push(...measureNoteLayouts)
@@ -200,7 +276,7 @@ export function renderVisibleSystems(params: {
       let maxNoteX = Number.NEGATIVE_INFINITY
       for (const layout of measureNoteLayouts) {
         if (layout.x < minNoteX) minNoteX = layout.x
-        if (layout.x > maxNoteX) maxNoteX = layout.x
+        if (layout.rightX > maxNoteX) maxNoteX = layout.rightX
       }
       const overlayRect = buildMeasureOverlayRect(
         minNoteX,

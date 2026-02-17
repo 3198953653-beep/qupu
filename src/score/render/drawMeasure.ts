@@ -38,6 +38,7 @@ const PITCH_LINE_MAP: Record<StaffKind, Record<Pitch, number>> = {
   treble: buildPitchLineMap('treble', PITCHES),
   bass: buildPitchLineMap('bass', PITCHES),
 }
+const VALID_BEAM_DURATIONS = ['4', '8', '16', '32', '64'] as const
 export type DrawMeasureParams = {
   context: ReturnType<Renderer['getContext']>
   measure: MeasurePair
@@ -62,6 +63,7 @@ export type DrawMeasureParams = {
   noteStartXOverride?: number
   freezePreviewAccidentalLayout?: boolean
   formatWidthOverride?: number
+  skipPainting?: boolean
   staticNoteXById?: Map<string, number> | null
   staticAccidentalRightXById?: Map<string, Map<number, number>> | null
   debugCapture?: {
@@ -98,6 +100,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     noteStartXOverride,
     freezePreviewAccidentalLayout = false,
     formatWidthOverride,
+    skipPainting = false,
     staticNoteXById = null,
     staticAccidentalRightXById = null,
     debugCapture = null,
@@ -229,10 +232,12 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     bassStave.setEndTimeSignature(endTimeSignatureLabel)
   }
 
-  trebleStave.setContext(context).draw()
-  bassStave.setContext(context).draw()
+  if (!skipPainting) {
+    trebleStave.setContext(context).draw()
+    bassStave.setContext(context).draw()
+  }
 
-  if (!suppressSystemDecorations) {
+  if (!suppressSystemDecorations && !skipPainting) {
     if (isSystemStart) {
       new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.BRACE).setContext(context).draw()
       new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.SINGLE_LEFT).setContext(context).draw()
@@ -514,12 +519,73 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
 
   const trebleBeams = Beam.generateBeams(trebleVexNotes, { groups: [new Fraction(1, 4)] })
   const bassBeams = Beam.generateBeams(bassVexNotes, { groups: [new Fraction(1, 4)] })
-  trebleVoice.draw(context, trebleStave)
-  bassVoice.draw(context, bassStave)
-  trebleBeams.forEach((beam) => beam.setContext(context).draw())
-  bassBeams.forEach((beam) => beam.setContext(context).draw())
+  if (!skipPainting) {
+    trebleVoice.draw(context, trebleStave)
+    bassVoice.draw(context, bassStave)
+    trebleBeams.forEach((beam) => beam.setContext(context).draw())
+    bassBeams.forEach((beam) => beam.setContext(context).draw())
+  }
 
   if (!collectLayouts) return noteLayouts
+
+  const getRenderedNoteRightX = (
+    vexNote: StaveNote,
+    noteHeads: Array<{ x: number }>,
+  ): number => {
+    const fallbackRightX = noteHeads.reduce(
+      (maxX, head) => Math.max(maxX, head.x),
+      getRenderedNoteVisualX(vexNote),
+    )
+    const bbox = vexNote.getBoundingBox()
+    const rightFromBBox = bbox ? bbox.getX() + bbox.getW() : Number.NEGATIVE_INFINITY
+
+    let rightFromMetrics = Number.NEGATIVE_INFINITY
+    try {
+      const metrics = vexNote.getMetrics()
+      const absoluteX = vexNote.getAbsoluteX()
+      const metricRightEdge =
+        absoluteX + metrics.notePx + metrics.rightDisplacedHeadPx + metrics.modRightPx
+      if (Number.isFinite(metricRightEdge)) {
+        rightFromMetrics = metricRightEdge
+      }
+    } catch {
+      rightFromMetrics = Number.NEGATIVE_INFINITY
+    }
+
+    const tieRightXRaw = vexNote.getTieRightX()
+    const rightFromTie = Number.isFinite(tieRightXRaw) ? tieRightXRaw : Number.NEGATIVE_INFINITY
+
+    let rightFromStem = Number.NEGATIVE_INFINITY
+    if (vexNote.hasStem()) {
+      const stemX = vexNote.getStemX()
+      if (Number.isFinite(stemX)) {
+        rightFromStem = stemX + 1
+      }
+    }
+
+    const computedRightX = Math.max(fallbackRightX, rightFromBBox, rightFromMetrics, rightFromTie, rightFromStem)
+    return Number.isFinite(computedRightX) ? computedRightX : fallbackRightX
+  }
+
+  const getMaxBeamRightX = (beams: Beam[]): number => {
+    let maxRightX = Number.NEGATIVE_INFINITY
+    beams.forEach((beam) => {
+      VALID_BEAM_DURATIONS.forEach((duration) => {
+        const beamLines = beam.getBeamLines(duration)
+        beamLines.forEach((line) => {
+          const start = line.start
+          const end = line.end
+          if (Number.isFinite(start)) {
+            maxRightX = Math.max(maxRightX, start + 1)
+          }
+          if (typeof end === 'number' && Number.isFinite(end)) {
+            maxRightX = Math.max(maxRightX, end + 1)
+          }
+        })
+      })
+    })
+    return maxRightX
+  }
 
   const treblePitchYMap = {} as Record<Pitch, number>
   const bassPitchYMap = {} as Record<Pitch, number>
@@ -565,17 +631,19 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         keyIndex: entry.keyIndex,
       }))
       const rootHead = noteHeads.find((head) => head.keyIndex === 0) ?? noteHeads[0]
+      const noteRightX = getRenderedNoteRightX(vexNote, noteHeads)
       return {
-      id: measure.treble[noteIndex].id,
-      staff: 'treble' as const,
-      pairIndex,
-      noteIndex,
-      x: getRenderedNoteVisualX(vexNote),
-      y: rootHead?.y ?? ys[0] ?? 0,
-      pitchYMap: treblePitchYMap,
-      noteHeads,
-      accidentalRightXByKeyIndex,
-    }
+        id: measure.treble[noteIndex].id,
+        staff: 'treble' as const,
+        pairIndex,
+        noteIndex,
+        x: getRenderedNoteVisualX(vexNote),
+        rightX: noteRightX,
+        y: rootHead?.y ?? ys[0] ?? 0,
+        pitchYMap: treblePitchYMap,
+        noteHeads,
+        accidentalRightXByKeyIndex,
+      }
     }),
   )
   noteLayouts.push(
@@ -601,19 +669,32 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         keyIndex: entry.keyIndex,
       }))
       const rootHead = noteHeads.find((head) => head.keyIndex === 0) ?? noteHeads[0]
+      const noteRightX = getRenderedNoteRightX(vexNote, noteHeads)
       return {
-      id: measure.bass[noteIndex].id,
-      staff: 'bass' as const,
-      pairIndex,
-      noteIndex,
-      x: getRenderedNoteVisualX(vexNote),
-      y: rootHead?.y ?? ys[0] ?? 0,
-      pitchYMap: bassPitchYMap,
-      noteHeads,
-      accidentalRightXByKeyIndex,
-    }
+        id: measure.bass[noteIndex].id,
+        staff: 'bass' as const,
+        pairIndex,
+        noteIndex,
+        x: getRenderedNoteVisualX(vexNote),
+        rightX: noteRightX,
+        y: rootHead?.y ?? ys[0] ?? 0,
+        pitchYMap: bassPitchYMap,
+        noteHeads,
+        accidentalRightXByKeyIndex,
+      }
     }),
   )
+
+  const beamRightX = getMaxBeamRightX([...trebleBeams, ...bassBeams])
+  if (Number.isFinite(beamRightX) && noteLayouts.length > 0) {
+    let rightMostLayoutIndex = 0
+    for (let i = 1; i < noteLayouts.length; i += 1) {
+      if (noteLayouts[i].rightX > noteLayouts[rightMostLayoutIndex].rightX) {
+        rightMostLayoutIndex = i
+      }
+    }
+    noteLayouts[rightMostLayoutIndex].rightX = Math.max(noteLayouts[rightMostLayoutIndex].rightX, beamRightX)
+  }
 
   return noteLayouts
 }
