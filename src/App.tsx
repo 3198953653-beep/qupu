@@ -290,6 +290,9 @@ function App() {
       : currentSelection.pitch
   const trebleSequenceText = useMemo(() => notes.map((note) => toDisplayPitch(note.pitch)).join('  |  '), [notes])
   const bassSequenceText = useMemo(() => bassNotes.map((note) => toDisplayPitch(note.pitch)).join('  |  '), [bassNotes])
+  const isImportLoading = importFeedback.kind === 'loading'
+  const importProgressPercent =
+    typeof importFeedback.progress === 'number' ? Math.max(0, Math.min(100, importFeedback.progress)) : null
   const goToPrevPage = () => setCurrentPage((page) => Math.max(0, Math.min(page, pageCount - 1) - 1))
   const goToNextPage = () => setCurrentPage((page) => Math.min(pageCount - 1, Math.max(0, page) + 1))
   const goToPage = (pageIndex: number) => setCurrentPage(Math.max(0, Math.min(pageCount - 1, pageIndex)))
@@ -348,6 +351,24 @@ function App() {
         onDumpDragLog={dumpDragDebugReport}
         onClearDragLog={clearDragDebugReport}
       />
+
+      {isImportLoading && (
+        <div className="import-modal" role="status" aria-live="polite" aria-label="Import in progress">
+          <div className="import-modal-card">
+            <h3>Loading Score</h3>
+            <p>{importFeedback.message}</p>
+            <div className="import-modal-track">
+              <div
+                className="import-modal-bar"
+                style={{ width: `${importProgressPercent === null ? 45 : Math.max(4, importProgressPercent)}%` }}
+              />
+            </div>
+            <p className="import-modal-percent">
+              {importProgressPercent === null ? 'Working...' : `${importProgressPercent}%`}
+            </p>
+          </div>
+        </div>
+      )}
     </main>
   )
 }

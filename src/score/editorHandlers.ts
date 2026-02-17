@@ -155,6 +155,7 @@ export function useEditorHandlers(params: {
       setImportFeedback,
       previewMeasureLimit: progressiveImportMeasureLimit,
       isRequestLatest: () => importRequestIdRef.current === requestId,
+      canApplyBackgroundResult: () => dragRef.current === null,
     })
   }
 

@@ -47,8 +47,9 @@ export type ImportResult = {
 }
 
 export type ImportFeedback = {
-  kind: 'idle' | 'success' | 'error'
+  kind: 'idle' | 'loading' | 'success' | 'error'
   message: string
+  progress?: number | null
 }
 
 export type NoteHeadLayout = {

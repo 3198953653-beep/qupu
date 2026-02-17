@@ -83,7 +83,25 @@ export function ScoreControls(props: {
           spellCheck={false}
         />
 
-        {importFeedback.kind !== 'idle' && <p className={`import-feedback ${importFeedback.kind}`}>{importFeedback.message}</p>}
+        {importFeedback.kind === 'loading' && (
+          <div className="import-progress">
+            <div className="import-progress-header">
+              <span>{importFeedback.message}</span>
+              <strong>{typeof importFeedback.progress === 'number' ? `${importFeedback.progress}%` : ''}</strong>
+            </div>
+            <div className="import-progress-track">
+              <div
+                className="import-progress-bar"
+                style={{
+                  width: `${typeof importFeedback.progress === 'number' ? Math.max(4, Math.min(100, importFeedback.progress)) : 40}%`,
+                }}
+              />
+            </div>
+          </div>
+        )}
+        {importFeedback.kind !== 'idle' && importFeedback.kind !== 'loading' && (
+          <p className={`import-feedback ${importFeedback.kind}`}>{importFeedback.message}</p>
+        )}
       </section>
 
       <section className="rhythm-row">

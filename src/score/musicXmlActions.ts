@@ -1,5 +1,6 @@
-import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
+import { startTransition, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 import { flushSync } from 'react-dom'
+import MusicXmlImportWorker from './musicXmlImport.worker?worker'
 import { buildMusicXmlFromMeasurePairs, parseMusicXml } from './musicXml'
 import { buildImportedNoteLookup } from './scoreOps'
 import type {
@@ -15,6 +16,132 @@ import type {
 } from './types'
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>
+type WorkerParseRequest = {
+  id: number
+  xmlText: string
+}
+type WorkerParseResponse =
+  | {
+      id: number
+      ok: true
+      result: ImportResult
+    }
+  | {
+      id: number
+      ok: false
+      error: string
+    }
+
+let musicXmlImportWorker: Worker | null = null
+let musicXmlImportWorkerBroken = false
+let musicXmlImportWorkerRequestSeq = 0
+const musicXmlImportWorkerPending = new Map<number, { resolve: (result: ImportResult) => void; reject: (error: Error) => void }>()
+
+function handleWorkerFatalError(message: string): void {
+  musicXmlImportWorkerBroken = true
+  const worker = musicXmlImportWorker
+  musicXmlImportWorker = null
+  if (worker) {
+    worker.terminate()
+  }
+  musicXmlImportWorkerPending.forEach(({ reject }) => reject(new Error(message)))
+  musicXmlImportWorkerPending.clear()
+}
+
+function ensureMusicXmlImportWorker(): Worker | null {
+  if (musicXmlImportWorkerBroken || typeof Worker === 'undefined') {
+    return null
+  }
+  if (musicXmlImportWorker) {
+    return musicXmlImportWorker
+  }
+
+  try {
+    const worker = new MusicXmlImportWorker()
+    worker.onmessage = (event: MessageEvent<WorkerParseResponse>) => {
+      const payload = event.data
+      const pending = musicXmlImportWorkerPending.get(payload.id)
+      if (!pending) return
+      musicXmlImportWorkerPending.delete(payload.id)
+      if (payload.ok) {
+        pending.resolve(payload.result)
+      } else {
+        pending.reject(new Error(payload.error))
+      }
+    }
+    worker.onmessageerror = () => {
+      handleWorkerFatalError('MusicXML worker message decoding failed.')
+    }
+    worker.onerror = () => {
+      handleWorkerFatalError('MusicXML worker failed.')
+    }
+    musicXmlImportWorker = worker
+    return worker
+  } catch {
+    musicXmlImportWorkerBroken = true
+    return null
+  }
+}
+
+function disableMusicXmlImportWorker(): void {
+  musicXmlImportWorkerBroken = true
+  const worker = musicXmlImportWorker
+  musicXmlImportWorker = null
+  if (worker) {
+    worker.terminate()
+  }
+}
+
+function parseMusicXmlOnMainThreadAsync(xmlText: string): Promise<ImportResult> {
+  return new Promise<ImportResult>((resolve, reject) => {
+    const run = () => {
+      try {
+        resolve(parseMusicXml(xmlText))
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error('Failed to import MusicXML.'))
+      }
+    }
+
+    if (typeof window === 'undefined') {
+      run()
+      return
+    }
+
+    const requestIdle = (window as Window & { requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number })
+      .requestIdleCallback
+    if (typeof requestIdle === 'function') {
+      requestIdle(run, { timeout: 250 })
+      return
+    }
+    window.setTimeout(run, 16)
+  })
+}
+
+function isWorkerDomParserUnavailableError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const message = error.message.toLowerCase()
+  return message.includes('domparser is unavailable in worker') || message.includes('domparser is not defined')
+}
+
+function parseMusicXmlInWorker(xmlText: string): Promise<ImportResult> {
+  const worker = ensureMusicXmlImportWorker()
+  if (!worker) {
+    return parseMusicXmlOnMainThreadAsync(xmlText)
+  }
+
+  const id = ++musicXmlImportWorkerRequestSeq
+  return new Promise<ImportResult>((resolve, reject) => {
+    musicXmlImportWorkerPending.set(id, { resolve, reject })
+    const message: WorkerParseRequest = { id, xmlText }
+    worker.postMessage(message)
+  }).catch((error: unknown) => {
+    if (!isWorkerDomParserUnavailableError(error)) {
+      throw error
+    }
+    disableMusicXmlImportWorker()
+    return parseMusicXmlOnMainThreadAsync(xmlText)
+  })
+}
 
 function sanitizeFileName(name: string): string {
   const withoutReservedChars = name.replace(/[<>:"/\\|?*]/g, '_')
@@ -32,6 +159,38 @@ function estimateMeasureCount(xmlText: string): number {
 
 function buildImportSuccessMessage(imported: ImportResult): string {
   return `Imported ${imported.measurePairs.length} measures: treble ${imported.trebleNotes.length} notes, bass ${imported.bassNotes.length} notes.`
+}
+
+type UserInteractionTracker = {
+  isIdle: (idleMs: number) => boolean
+  dispose: () => void
+}
+
+function createUserInteractionTracker(): UserInteractionTracker {
+  if (typeof window === 'undefined') {
+    return {
+      isIdle: () => true,
+      dispose: () => {},
+    }
+  }
+
+  let lastInputAt = performance.now()
+  const markInput = () => {
+    lastInputAt = performance.now()
+  }
+  const eventNames: Array<keyof WindowEventMap> = ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart']
+  eventNames.forEach((name) => {
+    window.addEventListener(name, markInput, { passive: true })
+  })
+
+  return {
+    isIdle: (idleMs: number) => performance.now() - lastInputAt >= idleMs,
+    dispose: () => {
+      eventNames.forEach((name) => {
+        window.removeEventListener(name, markInput)
+      })
+    },
+  }
 }
 
 function scheduleAfterNextPaint(task: () => void): void {
@@ -125,6 +284,7 @@ export function importMusicXmlTextAndApply(params: {
   setImportFeedback: StateSetter<ImportFeedback>
   previewMeasureLimit?: number
   isRequestLatest?: () => boolean
+  canApplyBackgroundResult?: () => boolean
 }): void {
   const {
     xmlText,
@@ -133,6 +293,7 @@ export function importMusicXmlTextAndApply(params: {
     setImportFeedback,
     previewMeasureLimit: rawPreviewMeasureLimit,
     isRequestLatest,
+    canApplyBackgroundResult,
   } = params
   const content = xmlText.trim()
   if (!content) {
@@ -144,55 +305,113 @@ export function importMusicXmlTextAndApply(params: {
       ? Math.max(1, Math.trunc(rawPreviewMeasureLimit))
       : 0
   const requestIsLatest = isRequestLatest ?? (() => true)
+  const canApplyResult = canApplyBackgroundResult ?? (() => true)
+  const interactionTracker = createUserInteractionTracker()
+  const releaseInteractionTracker = () => {
+    interactionTracker.dispose()
+  }
+  const canRunBackgroundApply = () => canApplyResult() && interactionTracker.isIdle(500)
+  const setLoadingFeedback = (message: string, progress: number) => {
+    if (!requestIsLatest()) return
+    setImportFeedback({ kind: 'loading', message, progress: Math.max(0, Math.min(100, Math.round(progress))) })
+  }
 
   try {
     const estimatedMeasureCount = estimateMeasureCount(content)
+    setLoadingFeedback('Preparing import...', 6)
     const usePreviewImport = previewMeasureLimit > 0 && estimatedMeasureCount > previewMeasureLimit
 
     if (!usePreviewImport) {
+      setLoadingFeedback('Parsing score...', 35)
       const imported = parseMusicXml(content)
-      if (!requestIsLatest()) return
+      if (!requestIsLatest()) {
+        releaseInteractionTracker()
+        return
+      }
       setIsRhythmLinked(false)
       applyImportedScore(imported)
       setImportFeedback({
         kind: 'success',
         message: buildImportSuccessMessage(imported),
+        progress: 100,
       })
+      releaseInteractionTracker()
       return
     }
 
+    setLoadingFeedback(`Rendering first page (${Math.min(previewMeasureLimit, estimatedMeasureCount)} measures)...`, 20)
     const previewImported = parseMusicXml(content, { measureLimit: previewMeasureLimit })
-    if (!requestIsLatest()) return
+    if (!requestIsLatest()) {
+      releaseInteractionTracker()
+      return
+    }
     flushSync(() => {
       setIsRhythmLinked(false)
       applyImportedScore(previewImported)
       setImportFeedback({
-        kind: 'success',
+        kind: 'loading',
         message: `Loaded first ${previewImported.measurePairs.length} measures (of ${estimatedMeasureCount}). Loading remaining measures...`,
+        progress: 42,
       })
     })
 
-    scheduleAfterNextPaint(() => {
-      if (!requestIsLatest()) return
-      try {
-        const fullImported = parseMusicXml(content)
-        if (!requestIsLatest()) return
+    const applyFullImportedWhenReady = (fullImported: ImportResult) => {
+      if (!requestIsLatest()) {
+        releaseInteractionTracker()
+        return
+      }
+      if (!canRunBackgroundApply()) {
+        window.setTimeout(() => applyFullImportedWhenReady(fullImported), 32)
+        return
+      }
+      setLoadingFeedback('Applying complete score...', 88)
+      startTransition(() => {
         setIsRhythmLinked(false)
         applyImportedScore(fullImported)
         setImportFeedback({
           kind: 'success',
           message: buildImportSuccessMessage(fullImported),
+          progress: 100,
         })
-      } catch (error) {
-        if (!requestIsLatest()) return
-        const message = error instanceof Error ? error.message : 'Failed to import MusicXML.'
-        setImportFeedback({ kind: 'error', message: `Partial import loaded, but full import failed: ${message}` })
+      })
+      releaseInteractionTracker()
+    }
+
+    const runFullImport = () => {
+      if (!requestIsLatest()) {
+        releaseInteractionTracker()
+        return
       }
-    })
+      if (!canRunBackgroundApply()) {
+        window.setTimeout(runFullImport, 32)
+        return
+      }
+      setLoadingFeedback('Loading full score in background...', 56)
+      void parseMusicXmlInWorker(content)
+        .then((fullImported) => {
+          setLoadingFeedback('Background parse complete.', 80)
+          applyFullImportedWhenReady(fullImported)
+        })
+        .catch((error) => {
+          if (!requestIsLatest()) {
+            releaseInteractionTracker()
+            return
+          }
+          const message = error instanceof Error ? error.message : 'Failed to import MusicXML.'
+          setImportFeedback({ kind: 'error', message: `Partial import loaded, but full import failed: ${message}` })
+          releaseInteractionTracker()
+        })
+    }
+
+    scheduleAfterNextPaint(runFullImport)
   } catch (error) {
-    if (!requestIsLatest()) return
+    if (!requestIsLatest()) {
+      releaseInteractionTracker()
+      return
+    }
     const message = error instanceof Error ? error.message : 'Failed to import MusicXML.'
     setImportFeedback({ kind: 'error', message })
+    releaseInteractionTracker()
   }
 }
 

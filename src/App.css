@@ -147,6 +147,41 @@
   color: #9f2626;
 }
 
+.import-progress {
+  border: 1px solid #cfe2ea;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 0.55rem 0.65rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.import-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  color: #1c495f;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.import-progress-track {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: #e1ecf2;
+}
+
+.import-progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1f6f94 0%, #2da9a2 100%);
+  transition: width 180ms ease;
+}
+
 .rhythm-row {
   display: flex;
   flex-wrap: wrap;
@@ -314,6 +349,62 @@
   font-family: 'Consolas', 'Courier New', monospace;
   padding: 0.55rem;
   resize: vertical;
+}
+
+.import-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgba(6, 18, 28, 0.32);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+
+.import-modal-card {
+  width: min(420px, calc(100vw - 2rem));
+  border-radius: 16px;
+  border: 1px solid #d2e3ec;
+  background: #ffffff;
+  box-shadow: 0 24px 50px -28px rgba(8, 24, 38, 0.95);
+  padding: 1rem 1.1rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.import-modal-card h3 {
+  margin: 0;
+  color: #123246;
+  font-size: 1.02rem;
+  letter-spacing: 0.02em;
+}
+
+.import-modal-card p {
+  margin: 0;
+  color: #21495f;
+  font-size: 0.88rem;
+}
+
+.import-modal-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: #e1ecf2;
+  overflow: hidden;
+}
+
+.import-modal-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1f6f94 0%, #2da9a2 100%);
+  transition: width 180ms ease;
+}
+
+.import-modal-percent {
+  justify-self: end;
+  font-weight: 700;
+  color: #1c546f;
 }
 
 @media (max-width: 700px) {
