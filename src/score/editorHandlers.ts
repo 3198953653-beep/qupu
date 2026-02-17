@@ -25,7 +25,7 @@ import type {
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>
 
-export function createEditorHandlers(params: {
+export function useEditorHandlers(params: {
   synthRef: MutableRefObject<import('tone').PolySynth | null>
   notes: ScoreNote[]
   bassNotes: ScoreNote[]

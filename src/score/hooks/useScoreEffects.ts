@@ -148,6 +148,8 @@ export function useScoreRenderEffect(params: {
   visibleSystemRange: { start: number; end: number }
   measureKeyFifthsFromImport: number[] | null
   measureTimeSignaturesFromImport: TimeSignature[] | null
+  activeSelection: Selection | null
+  draggingSelection: Selection | null
   noteLayoutsRef: MutableRefObject<NoteLayout[]>
   noteLayoutsByPairRef: MutableRefObject<Map<number, NoteLayout[]>>
   noteLayoutByKeyRef: MutableRefObject<Map<string, NoteLayout>>
@@ -167,6 +169,8 @@ export function useScoreRenderEffect(params: {
     visibleSystemRange,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
+    activeSelection,
+    draggingSelection,
     noteLayoutsRef,
     noteLayoutsByPairRef,
     noteLayoutByKeyRef,
@@ -200,6 +204,8 @@ export function useScoreRenderEffect(params: {
       visibleSystemRange,
       measureKeyFifthsFromImport,
       measureTimeSignaturesFromImport,
+      activeSelection,
+      draggingSelection,
     })
 
     noteLayoutsRef.current = nextLayouts
@@ -219,6 +225,8 @@ export function useScoreRenderEffect(params: {
     visibleSystemRange,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
+    activeSelection,
+    draggingSelection,
     noteLayoutsRef,
     noteLayoutsByPairRef,
     noteLayoutByKeyRef,

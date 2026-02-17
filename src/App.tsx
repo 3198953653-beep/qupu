@@ -12,14 +12,13 @@ import {
   SYSTEM_HEIGHT,
 } from './score/constants'
 import { toDisplayDuration } from './score/layout/demand'
-import { createDragHandlers } from './score/dragHandlers'
-import { createEditorHandlers } from './score/editorHandlers'
+import { useDragHandlers } from './score/dragHandlers'
+import { useEditorHandlers } from './score/editorHandlers'
 import {
   useImportedRefsSync,
   useRendererCleanup,
   useRhythmLinkedBassSync,
   useScoreRenderEffect,
-  useSelectionOverlayEffect,
   useSynthLifecycle,
   useVisibleSystemRangeTracking,
 } from './score/hooks/useScoreEffects'
@@ -162,6 +161,8 @@ function App() {
     visibleSystemRange,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
+    activeSelection,
+    draggingSelection,
     noteLayoutsRef,
     noteLayoutsByPairRef,
     noteLayoutByKeyRef,
@@ -188,11 +189,10 @@ function App() {
     clearDragOverlay,
     dumpDragDebugReport,
     clearDragDebugReport,
-    drawSelectionMeasureOverlay,
     onSurfacePointerMove,
     endDrag,
     beginDrag,
-  } = createDragHandlers({
+  } = useDragHandlers({
     scoreRef,
     scoreOverlayRef,
     noteLayoutsRef,
@@ -226,16 +226,6 @@ function App() {
     backend: SCORE_RENDER_BACKEND,
   })
 
-  useSelectionOverlayEffect({
-    activeSelection,
-    draggingSelection,
-    drawSelectionMeasureOverlay,
-    measurePairs,
-    visibleSystemRange,
-    measureKeyFifthsFromImport,
-    measureTimeSignaturesFromImport,
-  })
-
   const {
     playScore,
     importMusicXmlFromTextarea,
@@ -246,7 +236,7 @@ function App() {
     resetScore,
     runAiDraft,
     applyRhythmPreset,
-  } = createEditorHandlers({
+  } = useEditorHandlers({
     synthRef,
     notes,
     bassNotes,

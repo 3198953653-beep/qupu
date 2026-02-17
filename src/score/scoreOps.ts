@@ -78,16 +78,14 @@ export function syncBassNotesToTreble(trebleNotes: ScoreNote[], currentBass: Sco
 export function updateScoreNotePitchAtKey(note: ScoreNote, pitch: Pitch, keyIndex: number): ScoreNote {
   if (keyIndex <= 0) {
     if (note.pitch === pitch) return note
-    const { accidental: _accidental, ...rest } = note
-    return { ...rest, pitch, accidental: null }
+    return { ...note, pitch, accidental: null }
   }
 
   const chordIndex = keyIndex - 1
   const sourceChordPitches = note.chordPitches
   if (!sourceChordPitches || chordIndex < 0 || chordIndex >= sourceChordPitches.length) {
     if (note.pitch === pitch) return note
-    const { accidental: _accidental, ...rest } = note
-    return { ...rest, pitch, accidental: null }
+    return { ...note, pitch, accidental: null }
   }
 
   if (sourceChordPitches[chordIndex] === pitch) return note

@@ -15,6 +15,15 @@ import type {
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>
 
+function sanitizeFileName(name: string): string {
+  const withoutReservedChars = name.replace(/[<>:"/\\|?*]/g, '_')
+  let sanitized = ''
+  for (const char of withoutReservedChars) {
+    sanitized += char.charCodeAt(0) < 32 ? '_' : char
+  }
+  return sanitized || 'score'
+}
+
 export function applyImportedScoreState(params: {
   result: ImportResult
   setNotes: StateSetter<ScoreNote[]>
@@ -126,6 +135,6 @@ export function buildMusicXmlExportPayload(params: {
   })
 
   const title = metadata?.workTitle?.trim() || 'score'
-  const safeName = title.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_') || 'score'
+  const safeName = sanitizeFileName(title)
   return { xmlText, safeName }
 }

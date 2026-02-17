@@ -28,7 +28,7 @@ import type {
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>
 
-export function createDragHandlers(params: {
+export function useDragHandlers(params: {
   scoreRef: MutableRefObject<HTMLCanvasElement | null>
   scoreOverlayRef: MutableRefObject<HTMLCanvasElement | null>
   noteLayoutsRef: MutableRefObject<NoteLayout[]>

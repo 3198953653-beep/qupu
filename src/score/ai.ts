@@ -8,7 +8,8 @@ export function createAiVariation(notes: ScoreNote[], pitches: Pitch[]): ScoreNo
     const deltaOptions = [-2, -1, 0, 1, 2]
     const delta = deltaOptions[Math.floor(Math.random() * deltaOptions.length)]
     cursor = clamp(cursor + delta, 0, pitches.length - 1)
-    const { accidental: _accidental, ...rest } = note
-    return { ...rest, pitch: pitches[cursor] }
+    const next = { ...note, pitch: pitches[cursor] }
+    delete next.accidental
+    return next
   })
 }

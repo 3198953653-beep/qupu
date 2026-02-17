@@ -14,7 +14,7 @@ import { getLayoutNoteKey } from '../layout/renderPosition'
 import { buildMeasureOverlayRect } from '../layout/viewport'
 import { clamp } from '../math'
 import { drawMeasureToContext } from './drawMeasure'
-import type { MeasureLayout, MeasurePair, NoteLayout, TimeSignature } from '../types'
+import type { MeasureLayout, MeasurePair, NoteLayout, Selection, TimeSignature } from '../types'
 
 export function renderVisibleSystems(params: {
   context: ReturnType<Renderer['getContext']>
@@ -26,6 +26,8 @@ export function renderVisibleSystems(params: {
   visibleSystemRange: { start: number; end: number }
   measureKeyFifthsFromImport: number[] | null
   measureTimeSignaturesFromImport: TimeSignature[] | null
+  activeSelection: Selection | null
+  draggingSelection: Selection | null
 }): {
   nextLayouts: NoteLayout[]
   nextLayoutsByPair: Map<number, NoteLayout[]>
@@ -42,6 +44,8 @@ export function renderVisibleSystems(params: {
     visibleSystemRange,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
+    activeSelection,
+    draggingSelection,
   } = params
 
   const nextLayouts: NoteLayout[] = []
@@ -172,8 +176,8 @@ export function renderVisibleSystems(params: {
         showTimeSignature: entry.showTimeSignature,
         endTimeSignature: entry.nextTimeSignature,
         showEndTimeSignature: entry.showEndTimeSignature,
-        activeSelection: null,
-        draggingSelection: null,
+        activeSelection,
+        draggingSelection,
       })
 
       nextLayouts.push(...measureNoteLayouts)
