@@ -2034,6 +2034,7 @@ function App() {
 
   const noteLayoutsRef = useRef<NoteLayout[]>([])
   const noteLayoutsByPairRef = useRef<Map<number, NoteLayout[]>>(new Map())
+  const noteLayoutByKeyRef = useRef<Map<string, NoteLayout>>(new Map())
   const hitGridRef = useRef<HitGridIndex | null>(null)
   const measureLayoutsRef = useRef<Map<number, MeasureLayout>>(new Map())
   const measurePairsRef = useRef<MeasurePair[]>([])
@@ -2739,6 +2740,7 @@ function App() {
 
     const nextLayouts: NoteLayout[] = []
     const nextLayoutsByPair = new Map<number, NoteLayout[]>()
+    const nextLayoutsByKey = new Map<string, NoteLayout>()
     const nextMeasureLayouts = new Map<number, MeasureLayout>()
     const maxSystemIndex = Math.max(0, systemCount - 1)
     const startSystem = clamp(visibleSystemRange.start, 0, maxSystemIndex)
@@ -2875,6 +2877,9 @@ function App() {
         } else {
           nextLayoutsByPair.set(entry.pairIndex, [...measureNoteLayouts])
         }
+        measureNoteLayouts.forEach((layout) => {
+          nextLayoutsByKey.set(getLayoutNoteKey(layout.staff, layout.id), layout)
+        })
 
         let minNoteX = Number.POSITIVE_INFINITY
         let maxNoteX = Number.NEGATIVE_INFINITY
@@ -2918,6 +2923,7 @@ function App() {
 
     noteLayoutsRef.current = nextLayouts
     noteLayoutsByPairRef.current = nextLayoutsByPair
+    noteLayoutByKeyRef.current = nextLayoutsByKey
     hitGridRef.current = buildHitGridIndex(nextLayouts)
     measureLayoutsRef.current = nextMeasureLayouts
   }, [
@@ -3184,6 +3190,81 @@ function App() {
     dragDebugFramesRef.current = []
     setDragDebugReport('')
   }
+
+  const drawSelectionMeasureOverlay = (selection: Selection) => {
+    const selectedKey = getLayoutNoteKey(selection.staff, selection.noteId)
+    const selectedLayout = noteLayoutByKeyRef.current.get(selectedKey)
+    if (!selectedLayout) {
+      clearDragOverlay()
+      return
+    }
+
+    const measureLayout = measureLayoutsRef.current.get(selectedLayout.pairIndex)
+    const measure = measurePairsRef.current[selectedLayout.pairIndex]
+    if (!measureLayout || !measure) {
+      clearDragOverlay()
+      return
+    }
+
+    const selectionShowKeySignature = !measureLayout.isSystemStart && measureLayout.showKeySignature
+    const selectionShowTimeSignature = !measureLayout.isSystemStart && measureLayout.showTimeSignature
+    const overlayFrame = ensureOverlayCanvasForRect(measureLayout.overlayRect)
+    if (!overlayFrame) return
+
+    const overlayContext = getOverlayContext()
+    if (!overlayContext) return
+    const overlayContext2D = (overlayContext as unknown as { context2D?: CanvasRenderingContext2D }).context2D
+    if (!overlayContext2D) return
+
+    overlayContext.clearRect(0, 0, overlayFrame.width, overlayFrame.height)
+    overlayContext.save()
+    overlayContext.setFillStyle('#ffffff')
+    overlayContext.fillRect(0, 0, overlayFrame.width, overlayFrame.height)
+    overlayContext.restore()
+    overlayContext.save()
+    overlayContext2D.translate(-overlayFrame.x, -overlayFrame.y)
+    overlayContext.setFillStyle('#000000')
+    overlayContext.setStrokeStyle('#000000')
+
+    drawMeasureToContext({
+      context: overlayContext,
+      measure,
+      pairIndex: measureLayout.pairIndex,
+      measureX: measureLayout.measureX,
+      measureWidth: measureLayout.measureWidth,
+      trebleY: measureLayout.trebleY,
+      bassY: measureLayout.bassY,
+      isSystemStart: measureLayout.isSystemStart,
+      keyFifths: measureLayout.keyFifths,
+      showKeySignature: selectionShowKeySignature,
+      timeSignature: measureLayout.timeSignature,
+      showTimeSignature: selectionShowTimeSignature,
+      endTimeSignature: measureLayout.endTimeSignature,
+      showEndTimeSignature: measureLayout.showEndTimeSignature,
+      activeSelection: selection,
+      draggingSelection: null,
+      collectLayouts: false,
+      suppressSystemDecorations: true,
+      noteStartXOverride: measureLayout.noteStartX,
+      formatWidthOverride: measureLayout.formatWidth,
+    })
+    overlayContext.restore()
+  }
+
+  useEffect(() => {
+    if (draggingSelection) return
+    drawSelectionMeasureOverlay(activeSelection)
+  }, [
+    activeSelection.noteId,
+    activeSelection.staff,
+    activeSelection.keyIndex,
+    draggingSelection,
+    measurePairs,
+    visibleSystemRange.start,
+    visibleSystemRange.end,
+    measureKeyFifthsFromImport,
+    measureTimeSignaturesFromImport,
+  ])
 
   const drawDragMeasurePreview = (drag: DragState) => {
     const dragWithLayout = ensureDragLayoutCache(drag)
