@@ -1,6 +1,7 @@
 import type { NoteDuration, Pitch, RhythmPresetId, ScoreNote } from './types'
 
 export const A4_PAGE_WIDTH = 794
+export const A4_PAGE_HEIGHT = 1123
 export const SCORE_PAGE_PADDING_X = 24
 export const SCORE_TOP_PADDING = 28
 export const SYSTEM_TREBLE_OFFSET_Y = 22

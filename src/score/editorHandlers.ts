@@ -1,4 +1,4 @@
-import type { ChangeEvent, Dispatch, MutableRefObject, SetStateAction } from 'react'
+import { useRef, type ChangeEvent, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 import {
   applyRhythmPresetAction,
   exportMusicXmlFileAction,
@@ -55,6 +55,7 @@ export function useEditorHandlers(params: {
   musicXmlInput: string
   setMusicXmlInput: StateSetter<string>
   fileInputRef: MutableRefObject<HTMLInputElement | null>
+  progressiveImportMeasureLimit?: number
 
   measurePairs: MeasurePair[]
   setRhythmPreset: StateSetter<RhythmPresetId>
@@ -102,12 +103,14 @@ export function useEditorHandlers(params: {
     musicXmlInput,
     setMusicXmlInput,
     fileInputRef,
+    progressiveImportMeasureLimit,
     measurePairs,
     setRhythmPreset,
     pitches,
     initialTrebleNotes,
     initialBassNotes,
   } = params
+  const importRequestIdRef = useRef(0)
 
   const playScore = async () => {
     await playScoreAction({
@@ -143,11 +146,15 @@ export function useEditorHandlers(params: {
   }
 
   const importMusicXmlText = (xmlText: string) => {
+    const requestId = importRequestIdRef.current + 1
+    importRequestIdRef.current = requestId
     importMusicXmlTextAndApply({
       xmlText,
       setIsRhythmLinked,
       applyImportedScore,
       setImportFeedback,
+      previewMeasureLimit: progressiveImportMeasureLimit,
+      isRequestLatest: () => importRequestIdRef.current === requestId,
     })
   }
 
@@ -202,7 +209,12 @@ export function useEditorHandlers(params: {
     clearDragOverlay,
   }
 
+  const invalidatePendingImport = () => {
+    importRequestIdRef.current += 1
+  }
+
   const resetScore = () => {
+    invalidatePendingImport()
     resetScoreAction({
       initialTrebleNotes,
       initialBassNotes,
@@ -220,6 +232,7 @@ export function useEditorHandlers(params: {
   }
 
   const runAiDraft = () => {
+    invalidatePendingImport()
     runAiDraftAction({
       clearImportedSourceParams: clearImportedSourceBase,
       setNotes,
@@ -228,6 +241,7 @@ export function useEditorHandlers(params: {
   }
 
   const applyRhythmPreset = (presetId: RhythmPresetId) => {
+    invalidatePendingImport()
     applyRhythmPresetAction({
       presetId,
       clearImportedSourceParams: clearImportedSourceBase,

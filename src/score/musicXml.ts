@@ -513,13 +513,18 @@ export function buildMusicXmlFromMeasurePairs(params: {
   return `${lines.join('\n')}\n`
 }
 
-export function parseMusicXml(xml: string): ImportResult {
+export function parseMusicXml(xml: string, options?: { measureLimit?: number }): ImportResult {
   const doc = new DOMParser().parseFromString(xml, 'application/xml')
   const parseError = doc.querySelector('parsererror')
   if (parseError) {
     throw new Error('Failed to parse MusicXML. Check XML format.')
   }
   const metadata = parseMusicXmlMetadata(doc)
+  const rawMeasureLimit = options?.measureLimit
+  const measureLimit =
+    typeof rawMeasureLimit === 'number' && Number.isFinite(rawMeasureLimit)
+      ? Math.max(1, Math.trunc(rawMeasureLimit))
+      : Number.POSITIVE_INFINITY
 
   const partNodes = Array.from(doc.getElementsByTagName('part'))
   if (partNodes.length === 0) {
@@ -557,7 +562,7 @@ export function parseMusicXml(xml: string): ImportResult {
     let divisions = 1
     let currentFifths = 0
     let currentTime: TimeSignature = { beats: 4, beatType: 4 }
-    measureEls.forEach((measureEl, measureIndex) => {
+    measureEls.slice(0, measureLimit).forEach((measureEl, measureIndex) => {
       const slot = ensureMeasureSlot(measureIndex)
       const divisionsText = measureEl.querySelector('attributes > divisions')?.textContent?.trim()
       const maybeDivisions = divisionsText ? Number(divisionsText) : Number.NaN

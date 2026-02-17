@@ -146,6 +146,7 @@ export function useScoreRenderEffect(params: {
   systemCount: number
   measuresPerLine: number
   visibleSystemRange: { start: number; end: number }
+  renderOriginSystemIndex: number
   measureKeyFifthsFromImport: number[] | null
   measureTimeSignaturesFromImport: TimeSignature[] | null
   activeSelection: Selection | null
@@ -167,6 +168,7 @@ export function useScoreRenderEffect(params: {
     systemCount,
     measuresPerLine,
     visibleSystemRange,
+    renderOriginSystemIndex,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
     activeSelection,
@@ -202,6 +204,7 @@ export function useScoreRenderEffect(params: {
       systemCount,
       measuresPerLine,
       visibleSystemRange,
+      renderOriginSystemIndex,
       measureKeyFifthsFromImport,
       measureTimeSignaturesFromImport,
       activeSelection,
@@ -223,6 +226,7 @@ export function useScoreRenderEffect(params: {
     systemCount,
     measuresPerLine,
     visibleSystemRange,
+    renderOriginSystemIndex,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
     activeSelection,

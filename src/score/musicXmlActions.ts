@@ -1,4 +1,5 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
+import { flushSync } from 'react-dom'
 import { buildMusicXmlFromMeasurePairs, parseMusicXml } from './musicXml'
 import { buildImportedNoteLookup } from './scoreOps'
 import type {
@@ -22,6 +23,32 @@ function sanitizeFileName(name: string): string {
     sanitized += char.charCodeAt(0) < 32 ? '_' : char
   }
   return sanitized || 'score'
+}
+
+function estimateMeasureCount(xmlText: string): number {
+  const matches = xmlText.match(/<measure\b/gi)
+  return matches ? matches.length : 0
+}
+
+function buildImportSuccessMessage(imported: ImportResult): string {
+  return `Imported ${imported.measurePairs.length} measures: treble ${imported.trebleNotes.length} notes, bass ${imported.bassNotes.length} notes.`
+}
+
+function scheduleAfterNextPaint(task: () => void): void {
+  if (typeof window === 'undefined') {
+    task()
+    return
+  }
+  const raf = window.requestAnimationFrame?.bind(window)
+  if (!raf) {
+    window.setTimeout(task, 16)
+    return
+  }
+  raf(() => {
+    raf(() => {
+      task()
+    })
+  })
 }
 
 export function applyImportedScoreState(params: {
@@ -96,23 +123,74 @@ export function importMusicXmlTextAndApply(params: {
   setIsRhythmLinked: StateSetter<boolean>
   applyImportedScore: (result: ImportResult) => void
   setImportFeedback: StateSetter<ImportFeedback>
+  previewMeasureLimit?: number
+  isRequestLatest?: () => boolean
 }): void {
-  const { xmlText, setIsRhythmLinked, applyImportedScore, setImportFeedback } = params
+  const {
+    xmlText,
+    setIsRhythmLinked,
+    applyImportedScore,
+    setImportFeedback,
+    previewMeasureLimit: rawPreviewMeasureLimit,
+    isRequestLatest,
+  } = params
   const content = xmlText.trim()
   if (!content) {
     setImportFeedback({ kind: 'error', message: 'Paste MusicXML text first, then import.' })
     return
   }
+  const previewMeasureLimit =
+    typeof rawPreviewMeasureLimit === 'number' && Number.isFinite(rawPreviewMeasureLimit) && rawPreviewMeasureLimit > 0
+      ? Math.max(1, Math.trunc(rawPreviewMeasureLimit))
+      : 0
+  const requestIsLatest = isRequestLatest ?? (() => true)
 
   try {
-    const imported = parseMusicXml(content)
-    setIsRhythmLinked(false)
-    applyImportedScore(imported)
-    setImportFeedback({
-      kind: 'success',
-      message: `Imported ${imported.measurePairs.length} measures: treble ${imported.trebleNotes.length} notes, bass ${imported.bassNotes.length} notes.`,
+    const estimatedMeasureCount = estimateMeasureCount(content)
+    const usePreviewImport = previewMeasureLimit > 0 && estimatedMeasureCount > previewMeasureLimit
+
+    if (!usePreviewImport) {
+      const imported = parseMusicXml(content)
+      if (!requestIsLatest()) return
+      setIsRhythmLinked(false)
+      applyImportedScore(imported)
+      setImportFeedback({
+        kind: 'success',
+        message: buildImportSuccessMessage(imported),
+      })
+      return
+    }
+
+    const previewImported = parseMusicXml(content, { measureLimit: previewMeasureLimit })
+    if (!requestIsLatest()) return
+    flushSync(() => {
+      setIsRhythmLinked(false)
+      applyImportedScore(previewImported)
+      setImportFeedback({
+        kind: 'success',
+        message: `Loaded first ${previewImported.measurePairs.length} measures (of ${estimatedMeasureCount}). Loading remaining measures...`,
+      })
+    })
+
+    scheduleAfterNextPaint(() => {
+      if (!requestIsLatest()) return
+      try {
+        const fullImported = parseMusicXml(content)
+        if (!requestIsLatest()) return
+        setIsRhythmLinked(false)
+        applyImportedScore(fullImported)
+        setImportFeedback({
+          kind: 'success',
+          message: buildImportSuccessMessage(fullImported),
+        })
+      } catch (error) {
+        if (!requestIsLatest()) return
+        const message = error instanceof Error ? error.message : 'Failed to import MusicXML.'
+        setImportFeedback({ kind: 'error', message: `Partial import loaded, but full import failed: ${message}` })
+      }
     })
   } catch (error) {
+    if (!requestIsLatest()) return
     const message = error instanceof Error ? error.message : 'Failed to import MusicXML.'
     setImportFeedback({ kind: 'error', message })
   }

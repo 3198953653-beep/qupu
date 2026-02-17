@@ -5,6 +5,11 @@ export function ScoreBoard(props: {
   scoreScrollRef: RefObject<HTMLDivElement | null>
   scoreWidth: number
   scoreHeight: number
+  currentPage: number
+  pageCount: number
+  onPrevPage: () => void
+  onNextPage: () => void
+  onGoToPage: (pageIndex: number) => void
   draggingSelection: { noteId: string; staff: 'treble' | 'bass'; keyIndex: number } | null
   scoreRef: RefObject<HTMLCanvasElement | null>
   scoreOverlayRef: RefObject<HTMLCanvasElement | null>
@@ -26,6 +31,11 @@ export function ScoreBoard(props: {
     scoreScrollRef,
     scoreWidth,
     scoreHeight,
+    currentPage,
+    pageCount,
+    onPrevPage,
+    onNextPage,
+    onGoToPage,
     draggingSelection,
     scoreRef,
     scoreOverlayRef,
@@ -46,6 +56,23 @@ export function ScoreBoard(props: {
 
   return (
     <section className="board">
+      <div className="page-nav">
+        <button type="button" onClick={() => onGoToPage(0)} disabled={currentPage <= 0}>
+          First
+        </button>
+        <button type="button" onClick={onPrevPage} disabled={currentPage <= 0}>
+          Prev
+        </button>
+        <p className="page-label">
+          Page <strong>{currentPage + 1}</strong> / {pageCount}
+        </p>
+        <button type="button" onClick={onNextPage} disabled={currentPage >= pageCount - 1}>
+          Next
+        </button>
+        <button type="button" onClick={() => onGoToPage(pageCount - 1)} disabled={currentPage >= pageCount - 1}>
+          Last
+        </button>
+      </div>
       <div className="score-scroll" ref={scoreScrollRef}>
         <div className="score-stage" style={{ width: `${scoreWidth}px`, height: `${scoreHeight}px` }}>
           <canvas

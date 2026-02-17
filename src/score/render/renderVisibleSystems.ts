@@ -24,6 +24,7 @@ export function renderVisibleSystems(params: {
   systemCount: number
   measuresPerLine: number
   visibleSystemRange: { start: number; end: number }
+  renderOriginSystemIndex?: number
   measureKeyFifthsFromImport: number[] | null
   measureTimeSignaturesFromImport: TimeSignature[] | null
   activeSelection: Selection | null
@@ -42,6 +43,7 @@ export function renderVisibleSystems(params: {
     systemCount,
     measuresPerLine,
     visibleSystemRange,
+    renderOriginSystemIndex = 0,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
     activeSelection,
@@ -55,21 +57,14 @@ export function renderVisibleSystems(params: {
   const maxSystemIndex = Math.max(0, systemCount - 1)
   const startSystem = clamp(visibleSystemRange.start, 0, maxSystemIndex)
   const endSystem = clamp(visibleSystemRange.end, startSystem, maxSystemIndex)
-  const systemStride = SYSTEM_HEIGHT + SYSTEM_GAP_Y
-  const clearTop = clamp(SCORE_TOP_PADDING + startSystem * systemStride - SYSTEM_GAP_Y, 0, scoreHeight)
-  const clearBottom = clamp(
-    SCORE_TOP_PADDING + endSystem * systemStride + SYSTEM_HEIGHT + SYSTEM_GAP_Y,
-    clearTop,
-    scoreHeight,
-  )
-  context.clearRect(0, clearTop, scoreWidth, clearBottom - clearTop)
+  context.clearRect(0, 0, scoreWidth, scoreHeight)
 
   for (let systemIndex = startSystem; systemIndex <= endSystem; systemIndex += 1) {
     const start = systemIndex * measuresPerLine
     const systemMeasures = measurePairs.slice(start, start + measuresPerLine)
     if (systemMeasures.length === 0) continue
 
-    const systemTop = SCORE_TOP_PADDING + systemIndex * (SYSTEM_HEIGHT + SYSTEM_GAP_Y)
+    const systemTop = SCORE_TOP_PADDING + (systemIndex - renderOriginSystemIndex) * (SYSTEM_HEIGHT + SYSTEM_GAP_Y)
     const trebleY = systemTop + SYSTEM_TREBLE_OFFSET_Y
     const bassY = systemTop + SYSTEM_BASS_OFFSET_Y
     const systemUsableWidth = scoreWidth - SCORE_PAGE_PADDING_X * 2

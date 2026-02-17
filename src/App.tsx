@@ -3,6 +3,7 @@ import * as Tone from 'tone'
 import { Renderer } from 'vexflow'
 import './App.css'
 import {
+  A4_PAGE_HEIGHT,
   A4_PAGE_WIDTH,
   INITIAL_NOTES,
   PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX,
@@ -20,7 +21,6 @@ import {
   useRhythmLinkedBassSync,
   useScoreRenderEffect,
   useSynthLifecycle,
-  useVisibleSystemRangeTracking,
 } from './score/hooks/useScoreEffects'
 import { ScoreControls } from './score/components/ScoreControls'
 import { ScoreBoard } from './score/components/ScoreBoard'
@@ -69,7 +69,7 @@ function App() {
   const [measureDivisionsFromImport, setMeasureDivisionsFromImport] = useState<number[] | null>(null)
   const [measureTimeSignaturesFromImport, setMeasureTimeSignaturesFromImport] = useState<TimeSignature[] | null>(null)
   const [musicXmlMetadataFromImport, setMusicXmlMetadataFromImport] = useState<MusicXmlMetadata | null>(null)
-  const [visibleSystemRange, setVisibleSystemRange] = useState<{ start: number; end: number }>({ start: 0, end: 0 })
+  const [currentPage, setCurrentPage] = useState(0)
   const [dragDebugReport, setDragDebugReport] = useState<string>('')
 
   const scoreRef = useRef<HTMLCanvasElement | null>(null)
@@ -120,7 +120,19 @@ function App() {
   }, [bassNotes])
   const measuresPerLine = 2
   const systemCount = Math.max(1, Math.ceil(measurePairs.length / measuresPerLine))
-  const scoreHeight = SCORE_TOP_PADDING * 2 + systemCount * SYSTEM_HEIGHT + Math.max(0, systemCount - 1) * SYSTEM_GAP_Y
+  const systemsPerPage = Math.max(
+    1,
+    Math.floor((A4_PAGE_HEIGHT - SCORE_TOP_PADDING * 2 + SYSTEM_GAP_Y) / (SYSTEM_HEIGHT + SYSTEM_GAP_Y)),
+  )
+  const pageCount = Math.max(1, Math.ceil(systemCount / systemsPerPage))
+  const safeCurrentPage = Math.min(currentPage, pageCount - 1)
+  const progressiveImportMeasureLimit = systemsPerPage * measuresPerLine
+  const visibleSystemRange = useMemo(() => {
+    const start = Math.min(systemCount - 1, safeCurrentPage * systemsPerPage)
+    const end = Math.min(systemCount - 1, start + systemsPerPage - 1)
+    return { start, end }
+  }, [safeCurrentPage, systemCount, systemsPerPage])
+  const scoreHeight = A4_PAGE_HEIGHT
 
   useImportedRefsSync({
     measurePairsFromImport,
@@ -143,12 +155,6 @@ function App() {
     setBassNotes,
   })
 
-  useVisibleSystemRangeTracking({
-    scoreScrollRef,
-    systemCount,
-    setVisibleSystemRange,
-  })
-
   useScoreRenderEffect({
     scoreRef,
     rendererRef,
@@ -159,6 +165,7 @@ function App() {
     systemCount,
     measuresPerLine,
     visibleSystemRange,
+    renderOriginSystemIndex: visibleSystemRange.start,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
     activeSelection,
@@ -264,6 +271,7 @@ function App() {
     musicXmlInput,
     setMusicXmlInput,
     fileInputRef,
+    progressiveImportMeasureLimit,
     measurePairs,
     setRhythmPreset,
     pitches: PITCHES,
@@ -282,6 +290,9 @@ function App() {
       : currentSelection.pitch
   const trebleSequenceText = useMemo(() => notes.map((note) => toDisplayPitch(note.pitch)).join('  |  '), [notes])
   const bassSequenceText = useMemo(() => bassNotes.map((note) => toDisplayPitch(note.pitch)).join('  |  '), [bassNotes])
+  const goToPrevPage = () => setCurrentPage((page) => Math.max(0, Math.min(page, pageCount - 1) - 1))
+  const goToNextPage = () => setCurrentPage((page) => Math.min(pageCount - 1, Math.max(0, page) + 1))
+  const goToPage = (pageIndex: number) => setCurrentPage(Math.max(0, Math.min(pageCount - 1, pageIndex)))
 
   return (
     <main className="app-shell">
@@ -315,6 +326,11 @@ function App() {
         scoreScrollRef={scoreScrollRef}
         scoreWidth={scoreWidth}
         scoreHeight={scoreHeight}
+        currentPage={safeCurrentPage}
+        pageCount={pageCount}
+        onPrevPage={goToPrevPage}
+        onNextPage={goToNextPage}
+        onGoToPage={goToPage}
         draggingSelection={draggingSelection}
         scoreRef={scoreRef}
         scoreOverlayRef={scoreOverlayRef}
