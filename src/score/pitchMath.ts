@@ -1,11 +1,28 @@
-import { CHROMATIC_STEPS, KEY_FLAT_ORDER, KEY_SHARP_ORDER, STEP_TO_SEMITONE } from './constants'
+import { CHROMATIC_STEPS, KEY_FLAT_ORDER, KEY_SHARP_ORDER, PIANO_MAX_MIDI, PIANO_MIN_MIDI, STEP_TO_SEMITONE } from './constants'
 import type { Pitch } from './types'
 
-export function toPitchFromStepAlter(step: string, alter: number, octave: number): Pitch {
-  const semitone = STEP_TO_SEMITONE[step]
-  if (semitone === undefined) return `c/${octave}`
-  const note = CHROMATIC_STEPS[(semitone + alter + 120) % 12]
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+function midiToPitch(midi: number): Pitch {
+  const note = CHROMATIC_STEPS[midi % 12]
+  const octave = Math.floor(midi / 12) - 1
   return `${note}/${octave}`
+}
+
+export function toPitchFromStepAlter(step: string, alter: number, octave: number): Pitch {
+  const normalizedStep = step?.toUpperCase() ?? 'C'
+  const semitone = STEP_TO_SEMITONE[normalizedStep]
+  if (semitone === undefined) return `c/${octave}`
+
+  if (Number.isInteger(alter) && alter >= -2 && alter <= 2) {
+    const accidental = alter > 0 ? '#'.repeat(alter) : alter < 0 ? 'b'.repeat(-alter) : ''
+    return `${normalizedStep.toLowerCase()}${accidental}/${octave}`
+  }
+
+  const midi = clamp((octave + 1) * 12 + semitone + alter, PIANO_MIN_MIDI, PIANO_MAX_MIDI)
+  return midiToPitch(midi)
 }
 
 export function getStepOctaveAlterFromPitch(pitch: Pitch): { step: string; octave: number; alter: number } {
