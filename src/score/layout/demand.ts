@@ -1,5 +1,21 @@
 import { DURATION_LABEL, DURATION_LAYOUT_WEIGHT } from '../constants'
-import type { MeasurePair, NoteDuration, NoteDurationBase, ScoreNote } from '../types'
+import type { MeasurePair, NoteDuration, NoteDurationBase, ScoreNote, TimeSignature } from '../types'
+
+const MEASURE_KEY_SIGNATURE_DEMAND = 2.2
+const MEASURE_TIME_SIGNATURE_DEMAND = 2.4
+const MEASURE_END_TIME_SIGNATURE_DEMAND = 1.6
+
+const ADAPTIVE_MEASURE_BASE_WIDTH_PX = 34
+const ADAPTIVE_DEMAND_TO_WIDTH_FACTOR = 6.4
+const ADAPTIVE_MEASURE_MIN_WIDTH_PX = 92
+const ADAPTIVE_MEASURE_MAX_WIDTH_PX = 320
+
+const DEFAULT_TIME_SIGNATURE: TimeSignature = { beats: 4, beatType: 4 }
+
+export type SystemMeasureRange = {
+  startPairIndex: number
+  endPairIndexExclusive: number
+}
 
 export function toDisplayDuration(duration: NoteDuration): string {
   return DURATION_LABEL[duration]
@@ -36,16 +52,120 @@ export function getStaffLayoutDemand(notes: ScoreNote[]): number {
   return notes.reduce((sum, note) => sum + getNoteLayoutDemand(note), 0)
 }
 
+export function getMeasureNoteLayoutDemand(measure: MeasurePair): number {
+  return getStaffLayoutDemand(measure.treble) + getStaffLayoutDemand(measure.bass)
+}
+
+export function getMeasureLayoutDemandFromNoteDemand(
+  noteDemand: number,
+  showKeySignature: boolean,
+  showTimeSignature: boolean,
+  showEndTimeSignature: boolean,
+): number {
+  const beginDecorations =
+    (showKeySignature ? MEASURE_KEY_SIGNATURE_DEMAND : 0) +
+    (showTimeSignature ? MEASURE_TIME_SIGNATURE_DEMAND : 0)
+  const endDecoration = showEndTimeSignature ? MEASURE_END_TIME_SIGNATURE_DEMAND : 0
+  return Math.max(1, noteDemand + beginDecorations + endDecoration)
+}
+
 export function getMeasureLayoutDemand(
   measure: MeasurePair,
   showKeySignature: boolean,
   showTimeSignature: boolean,
   showEndTimeSignature: boolean,
 ): number {
-  const noteDemand = getStaffLayoutDemand(measure.treble) + getStaffLayoutDemand(measure.bass)
-  const beginDecorations = (showKeySignature ? 2.2 : 0) + (showTimeSignature ? 2.4 : 0)
-  const endDecoration = showEndTimeSignature ? 1.6 : 0
-  return Math.max(1, noteDemand + beginDecorations + endDecoration)
+  const noteDemand = getMeasureNoteLayoutDemand(measure)
+  return getMeasureLayoutDemandFromNoteDemand(noteDemand, showKeySignature, showTimeSignature, showEndTimeSignature)
+}
+
+function hasTimeSignatureChanged(current: TimeSignature, previous: TimeSignature): boolean {
+  return current.beats !== previous.beats || current.beatType !== previous.beatType
+}
+
+function getResolvedArrayValue<T>(values: T[] | null, index: number, fallback: T): T {
+  if (!values || values.length === 0) return fallback
+  const direct = values[index]
+  if (direct !== undefined) return direct
+  if (index > 0) return getResolvedArrayValue(values, index - 1, fallback)
+  return fallback
+}
+
+export function estimateAdaptiveMeasureWidth(layoutDemand: number): number {
+  const scaled = Math.round(ADAPTIVE_MEASURE_BASE_WIDTH_PX + layoutDemand * ADAPTIVE_DEMAND_TO_WIDTH_FACTOR)
+  return Math.max(ADAPTIVE_MEASURE_MIN_WIDTH_PX, Math.min(ADAPTIVE_MEASURE_MAX_WIDTH_PX, scaled))
+}
+
+export function buildAdaptiveSystemRanges(params: {
+  measurePairs: MeasurePair[]
+  systemUsableWidth: number
+  measureKeyFifthsFromImport: number[] | null
+  measureTimeSignaturesFromImport: TimeSignature[] | null
+}): SystemMeasureRange[] {
+  const {
+    measurePairs,
+    systemUsableWidth,
+    measureKeyFifthsFromImport,
+    measureTimeSignaturesFromImport,
+  } = params
+
+  if (measurePairs.length === 0) return []
+
+  const safeSystemUsableWidth = Math.max(1, Math.floor(systemUsableWidth))
+  const noteDemands = measurePairs.map((measure) => getMeasureNoteLayoutDemand(measure))
+  const resolvedKeyFifths = new Array<number>(measurePairs.length).fill(0)
+  const resolvedTimeSignatures = new Array<TimeSignature>(measurePairs.length).fill(DEFAULT_TIME_SIGNATURE)
+
+  for (let index = 0; index < measurePairs.length; index += 1) {
+    const previousKey = index > 0 ? resolvedKeyFifths[index - 1] : 0
+    const previousTime = index > 0 ? resolvedTimeSignatures[index - 1] : DEFAULT_TIME_SIGNATURE
+    resolvedKeyFifths[index] = getResolvedArrayValue(measureKeyFifthsFromImport, index, previousKey)
+    resolvedTimeSignatures[index] = getResolvedArrayValue(measureTimeSignaturesFromImport, index, previousTime)
+  }
+
+  const keyChangeFlags = resolvedKeyFifths.map((keyFifths, index) => {
+    if (index === 0) return false
+    return keyFifths !== resolvedKeyFifths[index - 1]
+  })
+  const timeChangeFlags = resolvedTimeSignatures.map((timeSignature, index) => {
+    if (index === 0) return true
+    return hasTimeSignatureChanged(timeSignature, resolvedTimeSignatures[index - 1])
+  })
+
+  const ranges: SystemMeasureRange[] = []
+  let startPairIndex = 0
+
+  while (startPairIndex < measurePairs.length) {
+    let endPairIndexExclusive = startPairIndex
+    let usedWidth = 0
+
+    while (endPairIndexExclusive < measurePairs.length) {
+      const pairIndex = endPairIndexExclusive
+      const isSystemStart = pairIndex === startPairIndex
+      const showKeySignature = isSystemStart || keyChangeFlags[pairIndex]
+      const showTimeSignature = timeChangeFlags[pairIndex]
+      const demand = getMeasureLayoutDemandFromNoteDemand(
+        noteDemands[pairIndex],
+        showKeySignature,
+        showTimeSignature,
+        false,
+      )
+      const requiredWidth = estimateAdaptiveMeasureWidth(demand)
+      const wouldOverflow = pairIndex > startPairIndex && usedWidth + requiredWidth > safeSystemUsableWidth
+      if (wouldOverflow) break
+      usedWidth += requiredWidth
+      endPairIndexExclusive += 1
+    }
+
+    if (endPairIndexExclusive === startPairIndex) {
+      endPairIndexExclusive = startPairIndex + 1
+    }
+
+    ranges.push({ startPairIndex, endPairIndexExclusive })
+    startPairIndex = endPairIndexExclusive
+  }
+
+  return ranges
 }
 
 export function allocateMeasureWidthsByDemand(demands: number[], totalWidth: number): number[] {

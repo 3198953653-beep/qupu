@@ -14,6 +14,7 @@ export function buildDragStateForHit(params: {
   hit: HitNote
   pointerId: number
   surfaceTop: number
+  surfaceClientToScoreScaleY: number
   startClientY: number
   localPointerY: number
   importedPairs: MeasurePair[] | null
@@ -29,6 +30,7 @@ export function buildDragStateForHit(params: {
     hit,
     pointerId,
     surfaceTop,
+    surfaceClientToScoreScaleY,
     startClientY,
     localPointerY,
     importedPairs,
@@ -71,6 +73,7 @@ export function buildDragStateForHit(params: {
     hit,
     pointerId,
     surfaceTop,
+    surfaceClientToScoreScaleY,
     startClientY,
     pitch,
     grabOffsetY,
@@ -86,7 +89,7 @@ export function buildDragStateForHit(params: {
 
 export function getDragMovePitch(params: { drag: DragState; clientY: number; pitches: Pitch[] }): Pitch {
   const { drag, clientY, pitches } = params
-  const y = clientY - drag.surfaceTop
+  const y = (clientY - drag.surfaceTop) * drag.surfaceClientToScoreScaleY
   const targetY = y - drag.grabOffsetY
   const staffPositionPitch = getNearestPitchByY(targetY, drag.pitchYMap, pitches, drag.pitch)
   if (isSameStaffPositionPitch(staffPositionPitch, drag.pitch)) {

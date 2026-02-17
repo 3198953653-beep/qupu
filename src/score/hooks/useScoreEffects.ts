@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import * as Tone from 'tone'
 import { Renderer } from 'vexflow'
+import type { SystemMeasureRange } from '../layout/demand'
 import { buildHitGridIndex } from '../layout/hitTest'
 import { getVisibleSystemRange } from '../layout/viewport'
 import { renderVisibleSystems } from '../render/renderVisibleSystems'
@@ -143,8 +144,7 @@ export function useScoreRenderEffect(params: {
   scoreWidth: number
   scoreHeight: number
   measurePairs: MeasurePair[]
-  systemCount: number
-  measuresPerLine: number
+  systemRanges: SystemMeasureRange[]
   visibleSystemRange: { start: number; end: number }
   renderOriginSystemIndex: number
   measureKeyFifthsFromImport: number[] | null
@@ -165,8 +165,7 @@ export function useScoreRenderEffect(params: {
     scoreWidth,
     scoreHeight,
     measurePairs,
-    systemCount,
-    measuresPerLine,
+    systemRanges,
     visibleSystemRange,
     renderOriginSystemIndex,
     measureKeyFifthsFromImport,
@@ -201,8 +200,7 @@ export function useScoreRenderEffect(params: {
       measurePairs,
       scoreWidth,
       scoreHeight,
-      systemCount,
-      measuresPerLine,
+      systemRanges,
       visibleSystemRange,
       renderOriginSystemIndex,
       measureKeyFifthsFromImport,
@@ -223,8 +221,7 @@ export function useScoreRenderEffect(params: {
     scoreWidth,
     scoreHeight,
     measurePairs,
-    systemCount,
-    measuresPerLine,
+    systemRanges,
     visibleSystemRange,
     renderOriginSystemIndex,
     measureKeyFifthsFromImport,

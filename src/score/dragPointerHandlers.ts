@@ -93,9 +93,12 @@ export function handleBeginDragPointer(params: {
   if (!surface) return
 
   const rect = surface.getBoundingClientRect()
-  const x = event.clientX - rect.left
-  const y = event.clientY - rect.top
-  const hit = getHitNote(x, y, noteLayouts, hitRadius, hitGrid)
+  const clientToScoreScaleX = rect.width > 0 ? surface.width / rect.width : 1
+  const clientToScoreScaleY = rect.height > 0 ? surface.height / rect.height : 1
+  const x = (event.clientX - rect.left) * clientToScoreScaleX
+  const y = (event.clientY - rect.top) * clientToScoreScaleY
+  const logicalHitRadius = hitRadius * clientToScoreScaleX
+  const hit = getHitNote(x, y, noteLayouts, logicalHitRadius, hitGrid)
   if (!hit) return
 
   event.preventDefault()
@@ -107,6 +110,7 @@ export function handleBeginDragPointer(params: {
     hit,
     pointerId: event.pointerId,
     surfaceTop: rect.top,
+    surfaceClientToScoreScaleY: clientToScoreScaleY,
     startClientY: event.clientY,
     localPointerY: y,
     importedPairs,

@@ -9,7 +9,7 @@ import {
   SYSTEM_TREBLE_OFFSET_Y,
 } from '../constants'
 import { getKeySignatureSpecFromFifths } from '../accidentals'
-import { allocateMeasureWidthsByDemand, getMeasureLayoutDemand } from '../layout/demand'
+import { allocateMeasureWidthsByDemand, getMeasureLayoutDemand, type SystemMeasureRange } from '../layout/demand'
 import { getLayoutNoteKey } from '../layout/renderPosition'
 import { buildMeasureOverlayRect } from '../layout/viewport'
 import { clamp } from '../math'
@@ -21,8 +21,7 @@ export function renderVisibleSystems(params: {
   measurePairs: MeasurePair[]
   scoreWidth: number
   scoreHeight: number
-  systemCount: number
-  measuresPerLine: number
+  systemRanges: SystemMeasureRange[]
   visibleSystemRange: { start: number; end: number }
   renderOriginSystemIndex?: number
   measureKeyFifthsFromImport: number[] | null
@@ -40,8 +39,7 @@ export function renderVisibleSystems(params: {
     measurePairs,
     scoreWidth,
     scoreHeight,
-    systemCount,
-    measuresPerLine,
+    systemRanges,
     visibleSystemRange,
     renderOriginSystemIndex = 0,
     measureKeyFifthsFromImport,
@@ -54,14 +52,26 @@ export function renderVisibleSystems(params: {
   const nextLayoutsByPair = new Map<number, NoteLayout[]>()
   const nextLayoutsByKey = new Map<string, NoteLayout>()
   const nextMeasureLayouts = new Map<number, MeasureLayout>()
-  const maxSystemIndex = Math.max(0, systemCount - 1)
+  if (systemRanges.length === 0) {
+    context.clearRect(0, 0, scoreWidth, scoreHeight)
+    return {
+      nextLayouts,
+      nextLayoutsByPair,
+      nextLayoutsByKey,
+      nextMeasureLayouts,
+    }
+  }
+  const maxSystemIndex = systemRanges.length - 1
   const startSystem = clamp(visibleSystemRange.start, 0, maxSystemIndex)
   const endSystem = clamp(visibleSystemRange.end, startSystem, maxSystemIndex)
   context.clearRect(0, 0, scoreWidth, scoreHeight)
 
   for (let systemIndex = startSystem; systemIndex <= endSystem; systemIndex += 1) {
-    const start = systemIndex * measuresPerLine
-    const systemMeasures = measurePairs.slice(start, start + measuresPerLine)
+    const range = systemRanges[systemIndex]
+    if (!range) continue
+    const start = range.startPairIndex
+    const endExclusive = Math.max(start, range.endPairIndexExclusive)
+    const systemMeasures = measurePairs.slice(start, endExclusive)
     if (systemMeasures.length === 0) continue
 
     const systemTop = SCORE_TOP_PADDING + (systemIndex - renderOriginSystemIndex) * (SYSTEM_HEIGHT + SYSTEM_GAP_Y)

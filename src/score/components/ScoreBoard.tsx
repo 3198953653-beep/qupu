@@ -3,8 +3,9 @@ import { SelectionInspector } from './SelectionInspector'
 
 export function ScoreBoard(props: {
   scoreScrollRef: RefObject<HTMLDivElement | null>
-  scoreWidth: number
-  scoreHeight: number
+  displayScoreWidth: number
+  displayScoreHeight: number
+  scoreScale: number
   currentPage: number
   pageCount: number
   onPrevPage: () => void
@@ -29,8 +30,9 @@ export function ScoreBoard(props: {
 }) {
   const {
     scoreScrollRef,
-    scoreWidth,
-    scoreHeight,
+    displayScoreWidth,
+    displayScoreHeight,
+    scoreScale,
     currentPage,
     pageCount,
     onPrevPage,
@@ -74,16 +76,23 @@ export function ScoreBoard(props: {
         </button>
       </div>
       <div className="score-scroll" ref={scoreScrollRef}>
-        <div className="score-stage" style={{ width: `${scoreWidth}px`, height: `${scoreHeight}px` }}>
+        <div className="score-stage" style={{ width: `${displayScoreWidth}px`, height: `${displayScoreHeight}px` }}>
           <canvas
             className={`score-surface ${draggingSelection ? 'is-dragging' : ''}`}
             ref={scoreRef}
+            style={{ transform: `scale(${scoreScale})`, transformOrigin: 'left top' }}
             onPointerDown={onBeginDrag}
             onPointerMove={onSurfacePointerMove}
             onPointerUp={onEndDrag}
             onPointerCancel={onEndDrag}
           />
-          <canvas className="score-overlay" ref={scoreOverlayRef} width={1} height={1} />
+          <canvas
+            className="score-overlay"
+            ref={scoreOverlayRef}
+            width={1}
+            height={1}
+            style={{ transform: `scale(${scoreScale})`, transformOrigin: 'left top' }}
+          />
         </div>
       </div>
 

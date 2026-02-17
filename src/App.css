@@ -63,6 +63,39 @@
   cursor: wait;
 }
 
+.scale-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.scale-row label {
+  color: #20445a;
+  font-size: 0.9rem;
+  font-weight: 600;
+  min-width: 88px;
+}
+
+.scale-row input[type='range'] {
+  width: min(320px, 58vw);
+}
+
+.scale-percent-input {
+  width: 70px;
+  border: 1px solid #c6d4dd;
+  border-radius: 8px;
+  padding: 0.35rem 0.45rem;
+  background: #ffffff;
+  color: #123246;
+  font-size: 0.9rem;
+}
+
+.scale-percent-label {
+  color: #20445a;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
 .import-panel {
   border: 1px solid #d6e0e5;
   border-radius: 16px;
@@ -263,6 +296,7 @@
   background: #ffffff;
   box-shadow: 0 15px 38px -30px rgba(8, 30, 50, 0.9);
   contain: layout paint;
+  overflow: hidden;
 }
 
 .score-surface {

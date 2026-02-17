@@ -18,6 +18,11 @@ export function ScoreControls(props: {
   importFeedback: ImportFeedback
   rhythmPreset: RhythmPresetId
   onApplyRhythmPreset: (presetId: RhythmPresetId) => void
+  autoScaleEnabled: boolean
+  autoScalePercent: number
+  onToggleAutoScale: () => void
+  manualScalePercent: number
+  onManualScalePercentChange: (nextPercent: number) => void
 }) {
   const {
     isPlaying,
@@ -35,6 +40,11 @@ export function ScoreControls(props: {
     importFeedback,
     rhythmPreset,
     onApplyRhythmPreset,
+    autoScaleEnabled,
+    autoScalePercent,
+    onToggleAutoScale,
+    manualScalePercent,
+    onManualScalePercentChange,
   } = props
 
   return (
@@ -49,6 +59,34 @@ export function ScoreControls(props: {
         <button type="button" onClick={onReset}>
           Reset
         </button>
+        <button type="button" onClick={onToggleAutoScale}>
+          {autoScaleEnabled ? `Auto Scale On (${autoScalePercent}%)` : 'Auto Scale Off'}
+        </button>
+      </section>
+
+      <section className="scale-row">
+        <label htmlFor="manual-scale-range">Manual Zoom</label>
+        <input
+          id="manual-scale-range"
+          type="range"
+          min={55}
+          max={130}
+          step={1}
+          value={manualScalePercent}
+          disabled={autoScaleEnabled}
+          onChange={(event) => onManualScalePercentChange(Number(event.target.value))}
+        />
+        <input
+          className="scale-percent-input"
+          type="number"
+          min={55}
+          max={130}
+          step={1}
+          value={manualScalePercent}
+          disabled={autoScaleEnabled}
+          onChange={(event) => onManualScalePercentChange(Number(event.target.value))}
+        />
+        <span className="scale-percent-label">%</span>
       </section>
 
       <section className="import-panel">

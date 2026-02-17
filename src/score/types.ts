@@ -126,6 +126,7 @@ export type DragState = {
   noteIndex: number
   pointerId: number
   surfaceTop: number
+  surfaceClientToScoreScaleY: number
   startClientY: number
   pitch: Pitch
   previewStarted: boolean

@@ -63,13 +63,24 @@ export function createDragStateFromHit(params: {
   hit: HitNote
   pointerId: number
   surfaceTop: number
+  surfaceClientToScoreScaleY: number
   startClientY: number
   pitch: Pitch
   grabOffsetY: number
   keyFifths: number
   accidentalStateBeforeNote: Map<string, number>
 }): DragState {
-  const { hit, pointerId, surfaceTop, startClientY, pitch, grabOffsetY, keyFifths, accidentalStateBeforeNote } = params
+  const {
+    hit,
+    pointerId,
+    surfaceTop,
+    surfaceClientToScoreScaleY,
+    startClientY,
+    pitch,
+    grabOffsetY,
+    keyFifths,
+    accidentalStateBeforeNote,
+  } = params
   return {
     noteId: hit.layout.id,
     staff: hit.layout.staff,
@@ -78,6 +89,7 @@ export function createDragStateFromHit(params: {
     noteIndex: hit.layout.noteIndex,
     pointerId,
     surfaceTop,
+    surfaceClientToScoreScaleY,
     startClientY,
     pitch,
     previewStarted: false,

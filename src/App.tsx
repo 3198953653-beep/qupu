@@ -6,13 +6,14 @@ import {
   A4_PAGE_HEIGHT,
   A4_PAGE_WIDTH,
   INITIAL_NOTES,
+  SCORE_PAGE_PADDING_X,
   PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX,
   PREVIEW_START_THRESHOLD_PX,
   SCORE_TOP_PADDING,
   SYSTEM_GAP_Y,
   SYSTEM_HEIGHT,
 } from './score/constants'
-import { toDisplayDuration } from './score/layout/demand'
+import { buildAdaptiveSystemRanges, toDisplayDuration } from './score/layout/demand'
 import { useDragHandlers } from './score/dragHandlers'
 import { useEditorHandlers } from './score/editorHandlers'
 import {
@@ -63,6 +64,21 @@ function toSequencePreview(notes: ScoreNote[]): string {
   return `${preview}  |  ... (+${notes.length - INSPECTOR_SEQUENCE_PREVIEW_LIMIT} more)`
 }
 
+function getAutoScoreScale(measureCount: number): number {
+  if (measureCount >= 180) return 0.62
+  if (measureCount >= 140) return 0.68
+  if (measureCount >= 110) return 0.74
+  if (measureCount >= 80) return 0.8
+  if (measureCount >= 56) return 0.86
+  if (measureCount >= 36) return 0.92
+  return 1
+}
+
+function clampScalePercent(value: number): number {
+  if (!Number.isFinite(value)) return 100
+  return Math.max(55, Math.min(130, Math.round(value)))
+}
+
 function App() {
   const [notes, setNotes] = useState<ScoreNote[]>(INITIAL_NOTES)
   const [bassNotes, setBassNotes] = useState<ScoreNote[]>(INITIAL_BASS_NOTES)
@@ -80,6 +96,8 @@ function App() {
   const [musicXmlMetadataFromImport, setMusicXmlMetadataFromImport] = useState<MusicXmlMetadata | null>(null)
   const [currentPage, setCurrentPage] = useState(0)
   const [dragDebugReport, setDragDebugReport] = useState<string>('')
+  const [autoScaleEnabled, setAutoScaleEnabled] = useState(false)
+  const [manualScalePercent, setManualScalePercent] = useState(100)
 
   const scoreRef = useRef<HTMLCanvasElement | null>(null)
   const scoreOverlayRef = useRef<HTMLCanvasElement | null>(null)
@@ -110,11 +128,18 @@ function App() {
   const measureTimeSignaturesFromImportRef = useRef<TimeSignature[] | null>(null)
   const musicXmlMetadataFromImportRef = useRef<MusicXmlMetadata | null>(null)
   const importedNoteLookupRef = useRef<Map<string, ImportedNoteLocation>>(new Map())
-  const scoreWidth = A4_PAGE_WIDTH
   const measurePairs = useMemo(
     () => measurePairsFromImport ?? buildMeasurePairs(notes, bassNotes),
     [measurePairsFromImport, notes, bassNotes],
   )
+  const displayScoreWidth = A4_PAGE_WIDTH
+  const displayScoreHeight = A4_PAGE_HEIGHT
+  const autoScoreScale = useMemo(() => getAutoScoreScale(measurePairs.length), [measurePairs.length])
+  const safeManualScalePercent = clampScalePercent(manualScalePercent)
+  const scoreScale = autoScaleEnabled ? autoScoreScale : safeManualScalePercent / 100
+  const autoScalePercent = Math.round(scoreScale * 100)
+  const scoreWidth = Math.max(1, Math.round(displayScoreWidth / scoreScale))
+  const scoreHeight = Math.max(1, Math.round(displayScoreHeight / scoreScale))
   const trebleNoteById = useMemo(() => new Map(notes.map((note) => [note.id, note] as const)), [notes])
   const bassNoteById = useMemo(() => new Map(bassNotes.map((note) => [note.id, note] as const)), [bassNotes])
   const trebleNoteIndexById = useMemo(() => {
@@ -127,11 +152,21 @@ function App() {
     bassNotes.forEach((note, index) => byId.set(note.id, index))
     return byId
   }, [bassNotes])
-  const measuresPerLine = 2
-  const systemCount = Math.max(1, Math.ceil(measurePairs.length / measuresPerLine))
+  const systemUsableWidth = scoreWidth - SCORE_PAGE_PADDING_X * 2
+  const systemRanges = useMemo(
+    () =>
+      buildAdaptiveSystemRanges({
+        measurePairs,
+        systemUsableWidth,
+        measureKeyFifthsFromImport,
+        measureTimeSignaturesFromImport,
+      }),
+    [measurePairs, systemUsableWidth, measureKeyFifthsFromImport, measureTimeSignaturesFromImport],
+  )
+  const systemCount = Math.max(1, systemRanges.length)
   const systemsPerPage = Math.max(
     1,
-    Math.floor((A4_PAGE_HEIGHT - SCORE_TOP_PADDING * 2 + SYSTEM_GAP_Y) / (SYSTEM_HEIGHT + SYSTEM_GAP_Y)),
+    Math.floor((displayScoreHeight - SCORE_TOP_PADDING * 2 + SYSTEM_GAP_Y) / ((SYSTEM_HEIGHT + SYSTEM_GAP_Y) * scoreScale)),
   )
   const pageCount = Math.max(1, Math.ceil(systemCount / systemsPerPage))
   const safeCurrentPage = Math.min(currentPage, pageCount - 1)
@@ -140,7 +175,6 @@ function App() {
     const end = Math.min(systemCount - 1, start + systemsPerPage - 1)
     return { start, end }
   }, [safeCurrentPage, systemCount, systemsPerPage])
-  const scoreHeight = A4_PAGE_HEIGHT
 
   useImportedRefsSync({
     measurePairsFromImport,
@@ -170,8 +204,7 @@ function App() {
     scoreWidth,
     scoreHeight,
     measurePairs,
-    systemCount,
-    measuresPerLine,
+    systemRanges,
     visibleSystemRange,
     renderOriginSystemIndex: visibleSystemRange.start,
     measureKeyFifthsFromImport,
@@ -319,6 +352,11 @@ function App() {
         onPlayScore={playScore}
         onRunAiDraft={runAiDraft}
         onReset={resetScore}
+        autoScaleEnabled={autoScaleEnabled}
+        autoScalePercent={autoScalePercent}
+        onToggleAutoScale={() => setAutoScaleEnabled((enabled) => !enabled)}
+        manualScalePercent={safeManualScalePercent}
+        onManualScalePercentChange={(nextPercent) => setManualScalePercent(clampScalePercent(nextPercent))}
         onOpenMusicXmlFilePicker={openMusicXmlFilePicker}
         onLoadSampleMusicXml={loadSampleMusicXml}
         onExportMusicXmlFile={exportMusicXmlFile}
@@ -334,8 +372,9 @@ function App() {
 
       <ScoreBoard
         scoreScrollRef={scoreScrollRef}
-        scoreWidth={scoreWidth}
-        scoreHeight={scoreHeight}
+        displayScoreWidth={displayScoreWidth}
+        displayScoreHeight={displayScoreHeight}
+        scoreScale={scoreScale}
         currentPage={safeCurrentPage}
         pageCount={pageCount}
         onPrevPage={goToPrevPage}
