@@ -32,6 +32,7 @@ type OverlayRuntime = {
   overlayRendererSizeRef: MutableRefObject<{ width: number; height: number }>
   overlayLastRectRef: MutableRefObject<MeasureLayout['overlayRect'] | null>
   backend: number
+  scoreScale: number
 }
 
 function buildOverlayAccessors(runtime: OverlayRuntime) {
@@ -46,6 +47,7 @@ function buildOverlayAccessors(runtime: OverlayRuntime) {
         overlayRendererRef: runtime.overlayRendererRef,
         overlayRendererSizeRef: runtime.overlayRendererSizeRef,
         overlayLastRectRef: runtime.overlayLastRectRef,
+        scoreScale: runtime.scoreScale,
       }),
     getContext: () =>
       getOverlayRendererContext({

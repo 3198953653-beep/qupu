@@ -20,14 +20,18 @@ export function ensureOverlayCanvasForRect(params: {
   overlayRendererRef: MutableRefObject<Renderer | null>
   overlayRendererSizeRef: MutableRefObject<{ width: number; height: number }>
   overlayLastRectRef: MutableRefObject<MeasureLayout['overlayRect'] | null>
+  scoreScale?: number
 }): { x: number; y: number; width: number; height: number } | null {
-  const { overlay, rect, overlayRendererRef, overlayRendererSizeRef, overlayLastRectRef } = params
+  const { overlay, rect, overlayRendererRef, overlayRendererSizeRef, overlayLastRectRef, scoreScale = 1 } = params
   if (!overlay) return null
 
   const nextWidth = Math.max(1, Math.ceil(rect.width))
   const nextHeight = Math.max(1, Math.ceil(rect.height))
   const nextLeft = Math.floor(rect.x)
   const nextTop = Math.floor(rect.y)
+  const safeScale = Number.isFinite(scoreScale) && scoreScale > 0 ? scoreScale : 1
+  const displayLeft = Math.floor(nextLeft * safeScale)
+  const displayTop = Math.floor(nextTop * safeScale)
 
   if (overlay.width !== nextWidth || overlay.height !== nextHeight) {
     overlay.width = nextWidth
@@ -36,8 +40,8 @@ export function ensureOverlayCanvasForRect(params: {
     overlayRendererSizeRef.current = { width: 0, height: 0 }
   }
 
-  overlay.style.left = `${nextLeft}px`
-  overlay.style.top = `${nextTop}px`
+  overlay.style.left = `${displayLeft}px`
+  overlay.style.top = `${displayTop}px`
   overlay.style.width = `${nextWidth}px`
   overlay.style.height = `${nextHeight}px`
   overlay.style.display = 'block'

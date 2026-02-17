@@ -294,6 +294,7 @@ function App() {
     previewDefaultAccidentalOffsetPx: PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX,
     previewStartThresholdPx: PREVIEW_START_THRESHOLD_PX,
     backend: SCORE_RENDER_BACKEND,
+    scoreScale,
   })
 
   const {

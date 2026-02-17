@@ -62,6 +62,7 @@ export function useDragHandlers(params: {
   previewDefaultAccidentalOffsetPx: number
   previewStartThresholdPx: number
   backend: number
+  scoreScale: number
 }): {
   clearDragOverlay: () => void
   dumpDragDebugReport: () => void
@@ -108,6 +109,7 @@ export function useDragHandlers(params: {
     previewDefaultAccidentalOffsetPx,
     previewStartThresholdPx,
     backend,
+    scoreScale,
   } = params
 
   const clearDragOverlay = () => {
@@ -138,6 +140,7 @@ export function useDragHandlers(params: {
         overlayRendererSizeRef,
         overlayLastRectRef,
         backend,
+        scoreScale,
       },
     })
   }
@@ -157,6 +160,7 @@ export function useDragHandlers(params: {
         overlayRendererSizeRef,
         overlayLastRectRef,
         backend,
+        scoreScale,
       },
       dragDebugFramesRef,
     })
