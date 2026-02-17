@@ -1756,20 +1756,28 @@ function getHitNote(x: number, y: number, layouts: NoteLayout[], radius = 24): H
 
   let winnerLayout: NoteLayout | null = null
   let winnerHead: NoteHeadLayout | null = null
-  let winnerDistance = Number.POSITIVE_INFINITY
+  const radiusSq = radius * radius
+  let winnerDistanceSq = Number.POSITIVE_INFINITY
 
   for (const layout of layouts) {
     for (const head of layout.noteHeads) {
-      const distance = Math.hypot(head.x - x, head.y - y)
-      if (distance < winnerDistance) {
+      const dx = head.x - x
+      if (dx < -radius || dx > radius) continue
+      const dy = head.y - y
+      if (dy < -radius || dy > radius) continue
+
+      const distanceSq = dx * dx + dy * dy
+      if (distanceSq < winnerDistanceSq) {
         winnerLayout = layout
         winnerHead = head
-        winnerDistance = distance
+        winnerDistanceSq = distanceSq
+        if (winnerDistanceSq === 0) break
       }
     }
+    if (winnerDistanceSq === 0) break
   }
 
-  if (!winnerLayout || !winnerHead || winnerDistance > radius) return null
+  if (!winnerLayout || !winnerHead || winnerDistanceSq > radiusSq) return null
   return { layout: winnerLayout, head: winnerHead }
 }
 
@@ -3507,8 +3515,27 @@ function App() {
     }
 
     dragRef.current = dragState
-    setActiveSelection({ noteId: hitNote.id, staff: hitNote.staff, keyIndex: hitKeyIndex })
-    setDraggingSelection({ noteId: hitNote.id, staff: hitNote.staff, keyIndex: hitKeyIndex })
+    setActiveSelection((currentSelection) => {
+      if (
+        currentSelection.noteId === hitNote.id &&
+        currentSelection.staff === hitNote.staff &&
+        currentSelection.keyIndex === hitKeyIndex
+      ) {
+        return currentSelection
+      }
+      return { noteId: hitNote.id, staff: hitNote.staff, keyIndex: hitKeyIndex }
+    })
+    setDraggingSelection((currentSelection) => {
+      if (
+        currentSelection &&
+        currentSelection.noteId === hitNote.id &&
+        currentSelection.staff === hitNote.staff &&
+        currentSelection.keyIndex === hitKeyIndex
+      ) {
+        return currentSelection
+      }
+      return { noteId: hitNote.id, staff: hitNote.staff, keyIndex: hitKeyIndex }
+    })
     event.currentTarget.setPointerCapture(event.pointerId)
   }
 

@@ -183,6 +183,7 @@
 
 .score-scroll {
   overflow: auto;
+  height: min(78vh, 760px);
   padding: 0.9rem;
   background: linear-gradient(180deg, #f8fbfd 0%, #eef4f8 100%);
 }
