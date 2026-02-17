@@ -1,0 +1,199 @@
+import type { ChangeEvent, Dispatch, MutableRefObject, SetStateAction } from 'react'
+import * as Tone from 'tone'
+import { createAiVariation } from './ai'
+import {
+  DURATION_BEATS,
+  DURATION_TONE,
+  QUARTER_NOTE_SECONDS,
+  RHYTHM_PRESETS,
+  SAMPLE_MUSIC_XML,
+} from './constants'
+import { clearImportedSourceState } from './importSourceState'
+import { buildMusicXmlExportPayload } from './musicXmlActions'
+import { toTonePitch } from './pitchUtils'
+import { buildNotesFromPattern } from './scoreOps'
+import type {
+  ImportFeedback,
+  MeasurePair,
+  MusicXmlMetadata,
+  Pitch,
+  RhythmPresetId,
+  ScoreNote,
+  Selection,
+  TimeSignature,
+} from './types'
+
+type StateSetter<T> = Dispatch<SetStateAction<T>>
+
+export async function playScoreAction(params: {
+  synth: Tone.PolySynth | null
+  notes: ScoreNote[]
+  bassNotes: ScoreNote[]
+  stopPlayTimerRef: MutableRefObject<number | null>
+  setIsPlaying: StateSetter<boolean>
+}): Promise<void> {
+  const { synth, notes, bassNotes, stopPlayTimerRef, setIsPlaying } = params
+  if (!synth) return
+
+  await Tone.start()
+  setIsPlaying(true)
+
+  const start = Tone.now() + 0.05
+  let cursor = start
+  notes.forEach((note, index) => {
+    const bassNote = bassNotes[index]
+    synth.triggerAttackRelease(toTonePitch(note.pitch), DURATION_TONE[note.duration], cursor)
+    if (bassNote) {
+      synth.triggerAttackRelease(toTonePitch(bassNote.pitch), DURATION_TONE[bassNote.duration], cursor, 0.72)
+    }
+    cursor += DURATION_BEATS[note.duration] * QUARTER_NOTE_SECONDS
+  })
+
+  if (stopPlayTimerRef.current !== null) {
+    window.clearTimeout(stopPlayTimerRef.current)
+  }
+
+  stopPlayTimerRef.current = window.setTimeout(() => {
+    setIsPlaying(false)
+    stopPlayTimerRef.current = null
+  }, Math.max(200, (cursor - start) * 1000 + 200))
+}
+
+export async function handleMusicXmlFileChange(params: {
+  event: ChangeEvent<HTMLInputElement>
+  setMusicXmlInput: StateSetter<string>
+  importMusicXmlText: (xmlText: string) => void
+  setImportFeedback: StateSetter<ImportFeedback>
+}): Promise<void> {
+  const { event, setMusicXmlInput, importMusicXmlText, setImportFeedback } = params
+  const file = event.target.files?.[0]
+  if (!file) return
+
+  try {
+    const xmlText = await file.text()
+    setMusicXmlInput(xmlText)
+    importMusicXmlText(xmlText)
+  } catch {
+    setImportFeedback({ kind: 'error', message: 'Could not read the selected file.' })
+  } finally {
+    event.currentTarget.value = ''
+  }
+}
+
+export function loadSampleMusicXmlAction(params: {
+  setMusicXmlInput: StateSetter<string>
+  importMusicXmlText: (xmlText: string) => void
+}): void {
+  const { setMusicXmlInput, importMusicXmlText } = params
+  setMusicXmlInput(SAMPLE_MUSIC_XML)
+  importMusicXmlText(SAMPLE_MUSIC_XML)
+}
+
+export function exportMusicXmlFileAction(params: {
+  measurePairs: MeasurePair[]
+  keyFifthsByMeasure: number[] | null
+  divisionsByMeasure: number[] | null
+  timeSignaturesByMeasure: TimeSignature[] | null
+  metadata: MusicXmlMetadata | null
+  setImportFeedback: StateSetter<ImportFeedback>
+}): void {
+  const {
+    measurePairs,
+    keyFifthsByMeasure,
+    divisionsByMeasure,
+    timeSignaturesByMeasure,
+    metadata,
+    setImportFeedback,
+  } = params
+  const { xmlText, safeName } = buildMusicXmlExportPayload({
+    measurePairs,
+    keyFifthsByMeasure,
+    divisionsByMeasure,
+    timeSignaturesByMeasure,
+    metadata,
+  })
+  const blob = new Blob([xmlText], { type: 'application/vnd.recordare.musicxml+xml;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${safeName}.musicxml`
+  link.click()
+  URL.revokeObjectURL(url)
+
+  setImportFeedback({
+    kind: 'success',
+    message: `Exported ${measurePairs.length} measures to ${safeName}.musicxml`,
+  })
+}
+
+export function resetScoreAction(params: {
+  initialTrebleNotes: ScoreNote[]
+  initialBassNotes: ScoreNote[]
+  clearImportedSourceParams: Parameters<typeof clearImportedSourceState>[0]
+  setNotes: StateSetter<ScoreNote[]>
+  setBassNotes: StateSetter<ScoreNote[]>
+  setActiveSelection: StateSetter<Selection>
+  setRhythmPreset: StateSetter<RhythmPresetId>
+  setImportFeedback: StateSetter<ImportFeedback>
+  setIsRhythmLinked: StateSetter<boolean>
+}): void {
+  const {
+    initialTrebleNotes,
+    initialBassNotes,
+    clearImportedSourceParams,
+    setNotes,
+    setBassNotes,
+    setActiveSelection,
+    setRhythmPreset,
+    setImportFeedback,
+    setIsRhythmLinked,
+  } = params
+  setNotes(initialTrebleNotes)
+  setBassNotes(initialBassNotes)
+  clearImportedSourceState(clearImportedSourceParams)
+  if (initialTrebleNotes[0]) {
+    setActiveSelection({ noteId: initialTrebleNotes[0].id, staff: 'treble', keyIndex: 0 })
+  }
+  setRhythmPreset('quarter')
+  setImportFeedback({ kind: 'idle', message: '' })
+  setIsRhythmLinked(true)
+}
+
+export function runAiDraftAction(params: {
+  clearImportedSourceParams: Parameters<typeof clearImportedSourceState>[0]
+  setNotes: StateSetter<ScoreNote[]>
+  pitches: Pitch[]
+}): void {
+  const { clearImportedSourceParams, setNotes, pitches } = params
+  clearImportedSourceState(clearImportedSourceParams)
+  setNotes((current) => createAiVariation(current, pitches))
+}
+
+export function applyRhythmPresetAction(params: {
+  presetId: RhythmPresetId
+  clearImportedSourceParams: Parameters<typeof clearImportedSourceState>[0]
+  setIsRhythmLinked: StateSetter<boolean>
+  setNotes: StateSetter<ScoreNote[]>
+  setActiveSelection: StateSetter<Selection>
+  setRhythmPreset: StateSetter<RhythmPresetId>
+}): void {
+  const { presetId, clearImportedSourceParams, setIsRhythmLinked, setNotes, setActiveSelection, setRhythmPreset } =
+    params
+
+  const preset = RHYTHM_PRESETS.find((item) => item.id === presetId)
+  if (!preset) return
+
+  setIsRhythmLinked(true)
+  clearImportedSourceState(clearImportedSourceParams)
+
+  let nextActive = ''
+  setNotes((current) => {
+    const next = buildNotesFromPattern(preset.pattern, current)
+    nextActive = next[0]?.id ?? ''
+    return next
+  })
+  if (nextActive) {
+    setActiveSelection({ noteId: nextActive, staff: 'treble', keyIndex: 0 })
+  }
+  setRhythmPreset(presetId)
+}
