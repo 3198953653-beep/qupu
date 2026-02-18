@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:coords:browser": "tsx scripts/measure-coordinate-browser-test.ts"
+    "test:coords:browser": "tsx scripts/measure-coordinate-browser-test.ts",
+    "test:coords:browser:drag-m2": "tsx scripts/measure-2-drag-coordinate-browser-test.ts"
   },
   "dependencies": {
     "linkedom": "^0.18.12",

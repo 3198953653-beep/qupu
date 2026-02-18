@@ -55,27 +55,14 @@ export function countVisibleAccidentals(accidentals?: Array<string | null>): num
   return count
 }
 
-function getPitchAccidentalToken(pitch: string): string | null {
-  const [note] = pitch.split('/')
-  const accidental = note.slice(1)
-  return accidental.length > 0 ? accidental : null
-}
-
 export function getNoteLayoutDemand(note: ScoreNote): number {
   const durationWeight = DURATION_LAYOUT_WEIGHT[note.duration] ?? 1
   const chordSize = 1 + (note.chordPitches?.length ?? 0)
-  const rootAccidental = note.accidental !== undefined ? note.accidental : getPitchAccidentalToken(note.pitch)
-  let chordAccidentalCount = 0
-  note.chordPitches?.forEach((chordPitch, index) => {
-    const chordAccidental =
-      note.chordAccidentals?.[index] !== undefined
-        ? note.chordAccidentals[index]
-        : getPitchAccidentalToken(chordPitch)
-    if (chordAccidental) chordAccidentalCount += 1
-  })
-  const accidentalCount = (rootAccidental ? 1 : 0) + chordAccidentalCount
   const chordSpreadBonus = chordSize > 1 ? (chordSize - 1) * 0.35 : 0
-  return durationWeight * chordSize + accidentalCount * 0.85 + chordSpreadBonus
+  // Keep measure demand stable for pitch-only edits so local pitch drags
+  // do not reflow unrelated measures on the same system.
+  // Accidental width is handled by per-measure overflow probing.
+  return durationWeight * chordSize + chordSpreadBonus
 }
 
 export function getStaffLayoutDemand(notes: ScoreNote[]): number {
