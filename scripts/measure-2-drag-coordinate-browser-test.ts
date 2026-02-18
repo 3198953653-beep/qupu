@@ -74,7 +74,7 @@ const DEV_HOST = '127.0.0.1'
 const DEV_PORT = 4173
 const DEV_URL = `http://${DEV_HOST}:${DEV_PORT}`
 const TARGET_PAIR_INDEX = 1
-const DRAG_DELTA_CLIENT_Y = -42
+const DEFAULT_DRAG_DELTA_CLIENT_Y = -42
 const EPSILON = 0.001
 
 function sleep(ms: number): Promise<void> {
@@ -235,27 +235,38 @@ async function collectMergedDump(page: Page): Promise<DumpCollection> {
   }
 }
 
-function pickTargetNote(secondMeasureRow: MeasureDumpRow): { note: DumpNoteRow; head: DumpNoteHead } {
+function pickTargetNote(
+  secondMeasureRow: MeasureDumpRow,
+  targetStaff: 'treble' | 'bass' | 'any',
+  targetOrder: number,
+): { note: DumpNoteRow; head: DumpNoteHead } {
   const withHead = secondMeasureRow.notes.filter((note) => note.noteHeads.length > 0)
   if (withHead.length === 0) {
     throw new Error(`Measure pair ${TARGET_PAIR_INDEX} has no draggable note heads.`)
   }
 
-  const trebleFirst =
-    withHead
-      .slice()
-      .sort((left, right) => {
-        if (left.staff !== right.staff) {
-          if (left.staff === 'treble') return -1
-          if (right.staff === 'treble') return 1
-          return left.staff.localeCompare(right.staff)
-        }
-        if (left.noteIndex !== right.noteIndex) return left.noteIndex - right.noteIndex
-        return left.x - right.x
-      })[0] ?? withHead[0]
-
-  const rootHead = trebleFirst.noteHeads.find((head) => head.keyIndex === 0) ?? trebleFirst.noteHeads[0]
-  return { note: trebleFirst, head: rootHead }
+  const sorted = withHead
+    .slice()
+    .sort((left, right) => {
+      if (left.staff !== right.staff) {
+        if (left.staff === 'treble') return -1
+        if (right.staff === 'treble') return 1
+        return left.staff.localeCompare(right.staff)
+      }
+      if (left.noteIndex !== right.noteIndex) return left.noteIndex - right.noteIndex
+      return left.x - right.x
+    })
+  const scoped =
+    targetStaff === 'any'
+      ? sorted
+      : sorted.filter((note) => note.staff === targetStaff)
+  if (scoped.length === 0) {
+    throw new Error(`No draggable notes for staff=${targetStaff} in pair ${TARGET_PAIR_INDEX}.`)
+  }
+  const safeOrder = Math.max(0, Math.min(scoped.length - 1, Math.floor(targetOrder)))
+  const target = scoped[safeOrder]
+  const rootHead = target.noteHeads.find((head) => head.keyIndex === 0) ?? target.noteHeads[0]
+  return { note: target, head: rootHead }
 }
 
 async function toClientPoint(page: Page, logicalX: number, logicalY: number): Promise<{ x: number; y: number }> {
@@ -377,6 +388,22 @@ function buildDeltaSummary(beforeRows: MeasureDumpRow[], afterRows: MeasureDumpR
 async function main() {
   const xmlPath = process.argv[2] ?? 'C:\\Users\\76743\\Desktop\\1234.musicxml'
   const outputPath = process.argv[3] ?? path.resolve('debug', 'measure-2-drag-coordinate-report.browser.json')
+  const dragDeltaClientYRaw = process.argv[4]
+  const targetStaffRaw = process.argv[5]
+  const targetOrderRaw = process.argv[6]
+  const dragDeltaClientY =
+    dragDeltaClientYRaw !== undefined ? Number(dragDeltaClientYRaw) : DEFAULT_DRAG_DELTA_CLIENT_Y
+  if (!Number.isFinite(dragDeltaClientY)) {
+    throw new Error(`Invalid drag delta: ${dragDeltaClientYRaw}`)
+  }
+  const targetStaff: 'treble' | 'bass' | 'any' =
+    targetStaffRaw === 'treble' || targetStaffRaw === 'bass' || targetStaffRaw === 'any'
+      ? targetStaffRaw
+      : 'treble'
+  const targetOrder = targetOrderRaw !== undefined ? Number(targetOrderRaw) : 0
+  if (!Number.isFinite(targetOrder)) {
+    throw new Error(`Invalid target order: ${targetOrderRaw}`)
+  }
   const xmlText = await readFile(xmlPath, 'utf8')
 
   const devServer = startDevServer()
@@ -409,12 +436,12 @@ async function main() {
       throw new Error(`Measure pair ${TARGET_PAIR_INDEX} is not rendered.`)
     }
 
-    const target = pickTargetNote(secondMeasure)
+    const target = pickTargetNote(secondMeasure, targetStaff, targetOrder)
     await goToPage(page, 0)
     await page.locator('canvas.score-surface').scrollIntoViewIfNeeded()
 
     const startPoint = await toClientPoint(page, target.head.x, target.head.y)
-    const endPoint = { x: startPoint.x, y: startPoint.y + DRAG_DELTA_CLIENT_Y }
+    const endPoint = { x: startPoint.x, y: startPoint.y + dragDeltaClientY }
 
     await page.mouse.move(startPoint.x, startPoint.y)
     await page.mouse.down()
@@ -435,7 +462,7 @@ async function main() {
       generatedAt: new Date().toISOString(),
       xmlPath,
       targetPairIndex: TARGET_PAIR_INDEX,
-      dragDeltaClientY: DRAG_DELTA_CLIENT_Y,
+      dragDeltaClientY,
       draggedNote: {
         staff: target.note.staff,
         noteId: target.note.noteId,
@@ -466,6 +493,7 @@ async function main() {
 
     console.log(`Generated: ${outputPath}`)
     console.log(`Target measure pair: ${TARGET_PAIR_INDEX}`)
+    console.log(`Target staff/order: ${targetStaff}/${Math.floor(targetOrder)}`)
     console.log(`Dragged note: ${target.note.staff}:${target.note.noteId} idx=${target.note.noteIndex}`)
     console.log(`Changed notes: ${deltaSummary.changedNoteCount}`)
     console.log(`Changed outside pair ${TARGET_PAIR_INDEX}: ${deltaSummary.changedOutsideTargetMeasureCount}`)

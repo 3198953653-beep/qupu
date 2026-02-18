@@ -26,6 +26,7 @@ const OVERFLOW_RECOVERY_PADDING_PX = 0
 const OVERFLOW_ANALYSIS_MAX_PASSES = 6
 
 type FrozenMeasureSpacing = {
+  baselineMeasureX: number
   staticNoteXById: Map<string, number>
   staticAccidentalRightXById: Map<string, Map<number, number>>
 }
@@ -77,10 +78,13 @@ function tryBuildFrozenMeasureSpacing(params: {
   pairIndex: number
   measure: MeasurePair
   previousNoteLayoutsByPair: Map<number, NoteLayout[]> | null | undefined
+  previousMeasureLayouts: Map<number, MeasureLayout> | null | undefined
 }): FrozenMeasureSpacing | null {
-  const { pairIndex, measure, previousNoteLayoutsByPair } = params
+  const { pairIndex, measure, previousNoteLayoutsByPair, previousMeasureLayouts } = params
   const previousLayouts = previousNoteLayoutsByPair?.get(pairIndex)
   if (!previousLayouts || previousLayouts.length === 0) return null
+  const previousMeasureLayout = previousMeasureLayouts?.get(pairIndex)
+  if (!previousMeasureLayout) return null
 
   const previousByNoteKey = new Map<string, NoteLayout>()
   previousLayouts.forEach((layout) => {
@@ -122,6 +126,39 @@ function tryBuildFrozenMeasureSpacing(params: {
 
   const expectedCount = measure.treble.length + measure.bass.length
   if (staticNoteXById.size !== expectedCount) return null
+
+  return {
+    baselineMeasureX: previousMeasureLayout.measureX,
+    staticNoteXById,
+    staticAccidentalRightXById,
+  }
+}
+
+function translateFrozenSpacingToMeasureX(
+  frozen: FrozenMeasureSpacing,
+  targetMeasureX: number,
+): { staticNoteXById: Map<string, number>; staticAccidentalRightXById: Map<string, Map<number, number>> } {
+  const delta = targetMeasureX - frozen.baselineMeasureX
+  if (!Number.isFinite(delta) || Math.abs(delta) < 0.0001) {
+    return {
+      staticNoteXById: frozen.staticNoteXById,
+      staticAccidentalRightXById: frozen.staticAccidentalRightXById,
+    }
+  }
+
+  const staticNoteXById = new Map<string, number>()
+  frozen.staticNoteXById.forEach((x, noteKey) => {
+    staticNoteXById.set(noteKey, x + delta)
+  })
+
+  const staticAccidentalRightXById = new Map<string, Map<number, number>>()
+  frozen.staticAccidentalRightXById.forEach((byKeyIndex, noteKey) => {
+    const shiftedByKeyIndex = new Map<number, number>()
+    byKeyIndex.forEach((rightX, keyIndex) => {
+      shiftedByKeyIndex.set(keyIndex, rightX + delta)
+    })
+    staticAccidentalRightXById.set(noteKey, shiftedByKeyIndex)
+  })
 
   return { staticNoteXById, staticAccidentalRightXById }
 }
@@ -201,6 +238,7 @@ export function renderVisibleSystems(params: {
   activeSelection: Selection | null
   draggingSelection: Selection | null
   previousNoteLayoutsByPair?: Map<number, NoteLayout[]> | null
+  previousMeasureLayouts?: Map<number, MeasureLayout> | null
   allowSelectionFreezeWhenNotDragging?: boolean
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
 }): {
@@ -222,6 +260,7 @@ export function renderVisibleSystems(params: {
     activeSelection,
     draggingSelection,
     previousNoteLayoutsByPair = null,
+    previousMeasureLayouts = null,
     allowSelectionFreezeWhenNotDragging = true,
     timeAxisSpacingConfig,
   } = params
@@ -319,6 +358,7 @@ export function renderVisibleSystems(params: {
         pairIndex: entry.pairIndex,
         measure: entry.measure,
         previousNoteLayoutsByPair,
+        previousMeasureLayouts,
       })
       if (frozen) {
         frozenSpacingByPairIndex.set(entry.pairIndex, frozen)
@@ -388,6 +428,8 @@ export function renderVisibleSystems(params: {
       const probeMeasureX = STAFF_X
       const { noteEndX, formatWidth } = buildMeasureProbe(entry, probeMeasureX, safeMeasureWidth)
       const frozenSpacing = frozenSpacingByPairIndex.get(entry.pairIndex) ?? null
+      const translatedFrozenSpacing =
+        frozenSpacing !== null ? translateFrozenSpacingToMeasureX(frozenSpacing, probeMeasureX) : null
       const measureNoteLayouts = drawMeasureToContext({
         context,
         measure: entry.measure,
@@ -409,8 +451,8 @@ export function renderVisibleSystems(params: {
         skipPainting: true,
         formatWidthOverride: formatWidth,
         timeAxisSpacingConfig,
-        staticNoteXById: frozenSpacing?.staticNoteXById ?? null,
-        staticAccidentalRightXById: frozenSpacing?.staticAccidentalRightXById ?? null,
+        staticNoteXById: translatedFrozenSpacing?.staticNoteXById ?? null,
+        staticAccidentalRightXById: translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
         layoutDetail: 'spacing-only',
       })
 
@@ -550,6 +592,8 @@ export function renderVisibleSystems(params: {
       measureCursorX += measureWidth
       const { noteStartX, noteEndX, formatWidth } = buildMeasureProbe(entry, measureX, measureWidth)
       const frozenSpacing = frozenSpacingByPairIndex.get(entry.pairIndex) ?? null
+      const translatedFrozenSpacing =
+        frozenSpacing !== null ? translateFrozenSpacingToMeasureX(frozenSpacing, measureX) : null
       const measureNoteLayouts = drawMeasureToContext({
         context,
         measure: entry.measure,
@@ -569,8 +613,8 @@ export function renderVisibleSystems(params: {
         draggingSelection,
         formatWidthOverride: formatWidth,
         timeAxisSpacingConfig,
-        staticNoteXById: frozenSpacing?.staticNoteXById ?? null,
-        staticAccidentalRightXById: frozenSpacing?.staticAccidentalRightXById ?? null,
+        staticNoteXById: translatedFrozenSpacing?.staticNoteXById ?? null,
+        staticAccidentalRightXById: translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
       })
 
       nextLayouts.push(...measureNoteLayouts)

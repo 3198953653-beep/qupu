@@ -200,6 +200,7 @@ export function useScoreRenderEffect(params: {
     }
     const context = renderer.getContext()
     const previousNoteLayoutsByPair = noteLayoutsByPairRef.current
+    const previousMeasureLayouts = measureLayoutsRef.current
     const lastScoreSize = lastScoreSizeRef.current
     const scoreSizeChanged =
       !lastScoreSize || lastScoreSize.width !== scoreWidth || lastScoreSize.height !== scoreHeight
@@ -217,6 +218,7 @@ export function useScoreRenderEffect(params: {
       activeSelection,
       draggingSelection,
       previousNoteLayoutsByPair,
+      previousMeasureLayouts,
       allowSelectionFreezeWhenNotDragging: !scoreSizeChanged,
       timeAxisSpacingConfig,
     })
