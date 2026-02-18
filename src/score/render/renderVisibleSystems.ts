@@ -387,6 +387,7 @@ export function renderVisibleSystems(params: {
 
       const probeMeasureX = STAFF_X
       const { noteEndX, formatWidth } = buildMeasureProbe(entry, probeMeasureX, safeMeasureWidth)
+      const frozenSpacing = frozenSpacingByPairIndex.get(entry.pairIndex) ?? null
       const measureNoteLayouts = drawMeasureToContext({
         context,
         measure: entry.measure,
@@ -408,6 +409,8 @@ export function renderVisibleSystems(params: {
         skipPainting: true,
         formatWidthOverride: formatWidth,
         timeAxisSpacingConfig,
+        staticNoteXById: frozenSpacing?.staticNoteXById ?? null,
+        staticAccidentalRightXById: frozenSpacing?.staticAccidentalRightXById ?? null,
         layoutDetail: 'spacing-only',
       })
 
@@ -434,7 +437,6 @@ export function renderVisibleSystems(params: {
           1,
           Math.floor(candidateWidths[indexInSystem] ?? Math.floor(systemUsableWidth / systemMeasures.length)),
         )
-        if (frozenSpacingByPairIndex.has(entry.pairIndex)) return
         const overflow = getMeasureSpacingDelta(entry, measureWidth)
         if (overflow === null) return
         if (overflow <= 0) return
@@ -460,10 +462,6 @@ export function renderVisibleSystems(params: {
             1,
             Math.floor(widths[indexInSystem] ?? Math.floor(systemUsableWidth / systemMeasures.length)),
           )
-          if (frozenSpacingByPairIndex.has(entry.pairIndex)) {
-            deltas[indexInSystem] = 0
-            return
-          }
           const delta = getMeasureSpacingDelta(entry, measureWidth)
           if (delta === null) {
             deltas[indexInSystem] = 0
