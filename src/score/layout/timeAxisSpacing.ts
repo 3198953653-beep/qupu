@@ -71,16 +71,17 @@ function getNoteHorizontalExtents(vexNote: StaveNote): { leftExtent: number; rig
   }).getMetrics?.()
 
   if (metrics) {
-    const notePx = Number.isFinite(metrics.notePx) ? (metrics.notePx as number) : DEFAULT_NOTE_HEAD_WIDTH_PX
-    const modLeftPx = Number.isFinite(metrics.modLeftPx) ? (metrics.modLeftPx as number) : 0
-    const modRightPx = Number.isFinite(metrics.modRightPx) ? (metrics.modRightPx as number) : 0
     const leftDisplacedHeadPx = Number.isFinite(metrics.leftDisplacedHeadPx) ? (metrics.leftDisplacedHeadPx as number) : 0
     const rightDisplacedHeadPx = Number.isFinite(metrics.rightDisplacedHeadPx)
       ? (metrics.rightDisplacedHeadPx as number)
       : 0
 
-    leftExtent = Math.max(0, modLeftPx, leftDisplacedHeadPx)
-    rightExtent = Math.max(DEFAULT_NOTE_HEAD_WIDTH_PX, notePx + modRightPx + rightDisplacedHeadPx)
+    // Keep spacing extent stable for equal rhythmic values:
+    // use only displaced note-head geometry and ignore modifier/stem width.
+    // This prevents pitch drags (crossing stem direction or accidental state)
+    // from perturbing equal-duration onset gaps.
+    leftExtent = Math.max(0, leftDisplacedHeadPx)
+    rightExtent = Math.max(DEFAULT_NOTE_HEAD_WIDTH_PX, DEFAULT_NOTE_HEAD_WIDTH_PX + rightDisplacedHeadPx)
   }
 
   return { leftExtent, rightExtent }

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import * as Tone from 'tone'
 import { Renderer } from 'vexflow'
 import type { SystemMeasureRange } from '../layout/demand'
@@ -182,8 +182,6 @@ export function useScoreRenderEffect(params: {
     backend,
     timeAxisSpacingConfig,
   } = params
-  const lastScoreSizeRef = useRef<{ width: number; height: number } | null>(null)
-
   useEffect(() => {
     const root = scoreRef.current
     if (!root) return
@@ -201,9 +199,6 @@ export function useScoreRenderEffect(params: {
     const context = renderer.getContext()
     const previousNoteLayoutsByPair = noteLayoutsByPairRef.current
     const previousMeasureLayouts = measureLayoutsRef.current
-    const lastScoreSize = lastScoreSizeRef.current
-    const scoreSizeChanged =
-      !lastScoreSize || lastScoreSize.width !== scoreWidth || lastScoreSize.height !== scoreHeight
 
     const { nextLayouts, nextLayoutsByPair, nextLayoutsByKey, nextMeasureLayouts } = renderVisibleSystems({
       context,
@@ -219,7 +214,7 @@ export function useScoreRenderEffect(params: {
       draggingSelection,
       previousNoteLayoutsByPair,
       previousMeasureLayouts,
-      allowSelectionFreezeWhenNotDragging: !scoreSizeChanged,
+      allowSelectionFreezeWhenNotDragging: false,
       timeAxisSpacingConfig,
     })
 
@@ -228,7 +223,6 @@ export function useScoreRenderEffect(params: {
     noteLayoutByKeyRef.current = nextLayoutsByKey
     hitGridRef.current = buildHitGridIndex(nextLayouts)
     measureLayoutsRef.current = nextMeasureLayouts
-    lastScoreSizeRef.current = { width: scoreWidth, height: scoreHeight }
   }, [
     scoreRef,
     rendererRef,

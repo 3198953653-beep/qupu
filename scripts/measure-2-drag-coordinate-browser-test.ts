@@ -27,6 +27,7 @@ type DumpNoteRow = {
   noteIndex: number
   pitch: string | null
   duration: string | null
+  onsetTicksInMeasure?: number | null
   x: number
   rightX: number
   spacingRightX: number
@@ -63,6 +64,11 @@ type PagingInfo = {
   pageCount: number
 }
 
+type DebugScaleConfig = {
+  autoScaleEnabled: boolean
+  manualScalePercent: number
+}
+
 type DumpCollection = {
   pageCount: number
   totalMeasureCount: number
@@ -73,9 +79,19 @@ type DumpCollection = {
 const DEV_HOST = '127.0.0.1'
 const DEV_PORT = 4173
 const DEV_URL = `http://${DEV_HOST}:${DEV_PORT}`
-const TARGET_PAIR_INDEX = 1
+const DEFAULT_TARGET_PAIR_INDEX = 1
 const DEFAULT_DRAG_DELTA_CLIENT_Y = -42
 const EPSILON = 0.001
+const DEFAULT_MANUAL_SCALE_PERCENT = 100
+
+type DragTargetParams = {
+  pairIndex: number
+  targetStaff: 'treble' | 'bass' | 'any'
+  targetOrder: number
+  targetPitch: string | null
+  targetOnsetTicksInMeasure: number | null
+  dragDeltaClientY: number
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -125,7 +141,57 @@ function stopDevServer(server: ChildProcess): Promise<void> {
 async function waitForDebugApi(page: Page): Promise<void> {
   await page.waitForFunction(() => {
     const api = (window as unknown as { __scoreDebug?: Record<string, unknown> }).__scoreDebug
-    return !!api && typeof api.importMusicXmlText === 'function'
+    return (
+      !!api &&
+      typeof api.importMusicXmlText === 'function' &&
+      typeof api.setAutoScaleEnabled === 'function' &&
+      typeof api.setManualScalePercent === 'function' &&
+      typeof api.getScaleConfig === 'function'
+    )
+  })
+}
+
+async function setScoreScale(
+  page: Page,
+  params: { autoScaleEnabled: boolean; manualScalePercent: number },
+): Promise<DebugScaleConfig> {
+  await page.evaluate(({ enabled, percent }) => {
+    const api = (window as unknown as {
+      __scoreDebug: {
+        setAutoScaleEnabled: (next: boolean) => void
+        setManualScalePercent: (next: number) => void
+      }
+    }).__scoreDebug
+    api.setAutoScaleEnabled(enabled)
+    api.setManualScalePercent(percent)
+  }, { enabled: params.autoScaleEnabled, percent: params.manualScalePercent })
+
+  await page.waitForFunction(
+    ({ enabled, percent }) => {
+      const api = (window as unknown as {
+        __scoreDebug: {
+          getScaleConfig: () => {
+            autoScaleEnabled: boolean
+            manualScalePercent: number
+          }
+        }
+      }).__scoreDebug
+      const next = api.getScaleConfig()
+      return next.autoScaleEnabled === enabled && Math.abs(next.manualScalePercent - percent) < 0.001
+    },
+    { enabled: params.autoScaleEnabled, percent: params.manualScalePercent },
+  )
+  await page.waitForTimeout(120)
+  return page.evaluate(() => {
+    const api = (window as unknown as {
+      __scoreDebug: {
+        getScaleConfig: () => {
+          autoScaleEnabled: boolean
+          manualScalePercent: number
+        }
+      }
+    }).__scoreDebug
+    return api.getScaleConfig()
   })
 }
 
@@ -236,13 +302,16 @@ async function collectMergedDump(page: Page): Promise<DumpCollection> {
 }
 
 function pickTargetNote(
-  secondMeasureRow: MeasureDumpRow,
+  targetMeasureRow: MeasureDumpRow,
+  targetPairIndex: number,
   targetStaff: 'treble' | 'bass' | 'any',
   targetOrder: number,
+  targetPitch: string | null,
+  targetOnsetTicksInMeasure: number | null,
 ): { note: DumpNoteRow; head: DumpNoteHead } {
-  const withHead = secondMeasureRow.notes.filter((note) => note.noteHeads.length > 0)
+  const withHead = targetMeasureRow.notes.filter((note) => note.noteHeads.length > 0)
   if (withHead.length === 0) {
-    throw new Error(`Measure pair ${TARGET_PAIR_INDEX} has no draggable note heads.`)
+    throw new Error(`Measure pair ${targetPairIndex} has no draggable note heads.`)
   }
 
   const sorted = withHead
@@ -261,10 +330,26 @@ function pickTargetNote(
       ? sorted
       : sorted.filter((note) => note.staff === targetStaff)
   if (scoped.length === 0) {
-    throw new Error(`No draggable notes for staff=${targetStaff} in pair ${TARGET_PAIR_INDEX}.`)
+    throw new Error(`No draggable notes for staff=${targetStaff} in pair ${targetPairIndex}.`)
   }
-  const safeOrder = Math.max(0, Math.min(scoped.length - 1, Math.floor(targetOrder)))
-  const target = scoped[safeOrder]
+  const byPitchAndOnset =
+    targetPitch !== null || targetOnsetTicksInMeasure !== null
+      ? scoped.filter((note) => {
+          const pitchMatches = targetPitch === null ? true : note.pitch === targetPitch
+          const onsetMatches =
+            targetOnsetTicksInMeasure === null
+              ? true
+              : note.onsetTicksInMeasure === targetOnsetTicksInMeasure
+          return pitchMatches && onsetMatches
+        })
+      : scoped
+  if (byPitchAndOnset.length === 0) {
+    throw new Error(
+      `No draggable note matches pitch=${targetPitch ?? 'any'} onset=${targetOnsetTicksInMeasure ?? 'any'} in pair ${targetPairIndex}.`,
+    )
+  }
+  const safeOrder = Math.max(0, Math.min(byPitchAndOnset.length - 1, Math.floor(targetOrder)))
+  const target = byPitchAndOnset[safeOrder]
   const rootHead = target.noteHeads.find((head) => head.keyIndex === 0) ?? target.noteHeads[0]
   return { note: target, head: rootHead }
 }
@@ -285,6 +370,56 @@ async function toClientPoint(page: Page, logicalX: number, logicalY: number): Pr
   }, { x: logicalX, y: logicalY })
 }
 
+async function performDragAndCollect(params: {
+  page: Page
+  rows: MeasureDumpRow[]
+  target: DragTargetParams
+}): Promise<{
+  targetNote: DumpNoteRow
+  targetHead: DumpNoteHead
+  startPoint: { x: number; y: number }
+  endPoint: { x: number; y: number }
+  dumpAfterDrag: DumpCollection
+}> {
+  const { page, rows, target } = params
+  const measure = rows.find((row) => row.pairIndex === target.pairIndex)
+  if (!measure) {
+    throw new Error(`Measure pair ${target.pairIndex} not found.`)
+  }
+  if (!measure.rendered) {
+    throw new Error(`Measure pair ${target.pairIndex} is not rendered.`)
+  }
+
+  const picked = pickTargetNote(
+    measure,
+    target.pairIndex,
+    target.targetStaff,
+    target.targetOrder,
+    target.targetPitch,
+    target.targetOnsetTicksInMeasure,
+  )
+  await goToPage(page, 0)
+  await page.locator('canvas.score-surface').scrollIntoViewIfNeeded()
+
+  const startPoint = await toClientPoint(page, picked.head.x, picked.head.y)
+  const endPoint = { x: startPoint.x, y: startPoint.y + target.dragDeltaClientY }
+
+  await page.mouse.move(startPoint.x, startPoint.y)
+  await page.mouse.down()
+  await page.mouse.move(endPoint.x, endPoint.y, { steps: 10 })
+  await page.mouse.up()
+  await page.waitForTimeout(180)
+
+  const dumpAfterDrag = await collectMergedDump(page)
+  return {
+    targetNote: picked.note,
+    targetHead: picked.head,
+    startPoint,
+    endPoint,
+    dumpAfterDrag,
+  }
+}
+
 function roundOrNull(value: number | null): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null
   return Number(value.toFixed(3))
@@ -294,7 +429,26 @@ function hasMeaningfulDelta(value: number | null): boolean {
   return typeof value === 'number' && Math.abs(value) > EPSILON
 }
 
-function buildDeltaSummary(beforeRows: MeasureDumpRow[], afterRows: MeasureDumpRow[]) {
+function toNullableString(raw: string | undefined): string | null {
+  if (raw === undefined) return null
+  const normalized = raw.trim().toLowerCase()
+  if (normalized.length === 0 || normalized === 'null' || normalized === 'none' || normalized === '-') {
+    return null
+  }
+  return raw.trim()
+}
+
+function toNullableNumber(raw: string | undefined): number | null {
+  const text = toNullableString(raw)
+  if (text === null) return null
+  const parsed = Number(text)
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`Invalid numeric value: ${raw}`)
+  }
+  return parsed
+}
+
+function buildDeltaSummary(beforeRows: MeasureDumpRow[], afterRows: MeasureDumpRow[], targetPairIndex: number) {
   const beforeByNoteKey = new Map<string, { pairIndex: number; note: DumpNoteRow }>()
   beforeRows.forEach((row) => {
     row.notes.forEach((note) => {
@@ -375,7 +529,7 @@ function buildDeltaSummary(beforeRows: MeasureDumpRow[], afterRows: MeasureDumpR
     }
   })
 
-  const changedOutsideTarget = changedNotes.filter((item) => item.pairIndex !== TARGET_PAIR_INDEX)
+  const changedOutsideTarget = changedNotes.filter((item) => item.pairIndex !== targetPairIndex)
 
   return {
     changedNoteCount: changedNotes.length,
@@ -391,6 +545,17 @@ async function main() {
   const dragDeltaClientYRaw = process.argv[4]
   const targetStaffRaw = process.argv[5]
   const targetOrderRaw = process.argv[6]
+  const targetPairIndexRaw = process.argv[7]
+  const targetPitchRaw = process.argv[8]
+  const targetOnsetTicksRaw = process.argv[9]
+  const secondDragDeltaClientYRaw = process.argv[10]
+  const secondTargetStaffRaw = process.argv[11]
+  const secondTargetOrderRaw = process.argv[12]
+  const secondTargetPairIndexRaw = process.argv[13]
+  const secondTargetPitchRaw = process.argv[14]
+  const secondTargetOnsetTicksRaw = process.argv[15]
+  const manualScalePercentRaw = process.argv[16]
+  const autoScaleEnabledRaw = process.argv[17]
   const dragDeltaClientY =
     dragDeltaClientYRaw !== undefined ? Number(dragDeltaClientYRaw) : DEFAULT_DRAG_DELTA_CLIENT_Y
   if (!Number.isFinite(dragDeltaClientY)) {
@@ -404,6 +569,42 @@ async function main() {
   if (!Number.isFinite(targetOrder)) {
     throw new Error(`Invalid target order: ${targetOrderRaw}`)
   }
+  const targetPairIndex = targetPairIndexRaw !== undefined ? Number(targetPairIndexRaw) : DEFAULT_TARGET_PAIR_INDEX
+  if (!Number.isFinite(targetPairIndex) || targetPairIndex < 0) {
+    throw new Error(`Invalid target pair index: ${targetPairIndexRaw}`)
+  }
+  const targetPitch = toNullableString(targetPitchRaw)
+  const targetOnsetTicksInMeasure = toNullableNumber(targetOnsetTicksRaw)
+  const hasSecondDrag = secondTargetPairIndexRaw !== undefined || secondDragDeltaClientYRaw !== undefined
+  const secondTargetPairIndex =
+    secondTargetPairIndexRaw !== undefined ? Number(secondTargetPairIndexRaw) : DEFAULT_TARGET_PAIR_INDEX
+  if (hasSecondDrag && (!Number.isFinite(secondTargetPairIndex) || secondTargetPairIndex < 0)) {
+    throw new Error(`Invalid second target pair index: ${secondTargetPairIndexRaw}`)
+  }
+  const secondDragDeltaClientY =
+    secondDragDeltaClientYRaw !== undefined ? Number(secondDragDeltaClientYRaw) : DEFAULT_DRAG_DELTA_CLIENT_Y
+  if (hasSecondDrag && !Number.isFinite(secondDragDeltaClientY)) {
+    throw new Error(`Invalid second drag delta: ${secondDragDeltaClientYRaw}`)
+  }
+  const secondTargetStaff: 'treble' | 'bass' | 'any' =
+    secondTargetStaffRaw === 'treble' || secondTargetStaffRaw === 'bass' || secondTargetStaffRaw === 'any'
+      ? secondTargetStaffRaw
+      : 'treble'
+  const secondTargetOrder = secondTargetOrderRaw !== undefined ? Number(secondTargetOrderRaw) : 0
+  if (hasSecondDrag && !Number.isFinite(secondTargetOrder)) {
+    throw new Error(`Invalid second target order: ${secondTargetOrderRaw}`)
+  }
+  const secondTargetPitch = toNullableString(secondTargetPitchRaw)
+  const secondTargetOnsetTicksInMeasure = toNullableNumber(secondTargetOnsetTicksRaw)
+  const manualScalePercent =
+    manualScalePercentRaw !== undefined ? Number(manualScalePercentRaw) : DEFAULT_MANUAL_SCALE_PERCENT
+  if (!Number.isFinite(manualScalePercent) || manualScalePercent <= 0) {
+    throw new Error(`Invalid manual scale percent: ${manualScalePercentRaw}`)
+  }
+  const autoScaleEnabled =
+    autoScaleEnabledRaw !== undefined
+      ? ['1', 'true', 'yes', 'on'].includes(autoScaleEnabledRaw.trim().toLowerCase())
+      : false
   const xmlText = await readFile(xmlPath, 'utf8')
 
   const devServer = startDevServer()
@@ -426,57 +627,100 @@ async function main() {
     await page.goto(DEV_URL, { waitUntil: 'domcontentloaded' })
     await waitForDebugApi(page)
     await importMusicXmlViaDebugApi(page, xmlText)
+    const effectiveScale = await setScoreScale(page, {
+      autoScaleEnabled,
+      manualScalePercent,
+    })
 
     const before = await collectMergedDump(page)
-    const secondMeasure = before.rows.find((row) => row.pairIndex === TARGET_PAIR_INDEX)
-    if (!secondMeasure) {
-      throw new Error(`Measure pair ${TARGET_PAIR_INDEX} not found.`)
+    const firstTargetParams: DragTargetParams = {
+      pairIndex: targetPairIndex,
+      targetStaff,
+      targetOrder,
+      targetPitch,
+      targetOnsetTicksInMeasure,
+      dragDeltaClientY,
     }
-    if (!secondMeasure.rendered) {
-      throw new Error(`Measure pair ${TARGET_PAIR_INDEX} is not rendered.`)
-    }
+    const firstDrag = await performDragAndCollect({
+      page,
+      rows: before.rows,
+      target: firstTargetParams,
+    })
+    const afterFirst = firstDrag.dumpAfterDrag
+    const firstDeltaSummary = buildDeltaSummary(before.rows, afterFirst.rows, targetPairIndex)
 
-    const target = pickTargetNote(secondMeasure, targetStaff, targetOrder)
-    await goToPage(page, 0)
-    await page.locator('canvas.score-surface').scrollIntoViewIfNeeded()
-
-    const startPoint = await toClientPoint(page, target.head.x, target.head.y)
-    const endPoint = { x: startPoint.x, y: startPoint.y + dragDeltaClientY }
-
-    await page.mouse.move(startPoint.x, startPoint.y)
-    await page.mouse.down()
-    await page.mouse.move(endPoint.x, endPoint.y, { steps: 10 })
-    await page.mouse.up()
-    await page.waitForTimeout(180)
-
-    const after = await collectMergedDump(page)
-    const deltaSummary = buildDeltaSummary(before.rows, after.rows)
-    const overflowRowsAfter = after.rows.filter(
+    const secondTargetParams: DragTargetParams | null = hasSecondDrag
+      ? {
+          pairIndex: secondTargetPairIndex,
+          targetStaff: secondTargetStaff,
+          targetOrder: secondTargetOrder,
+          targetPitch: secondTargetPitch,
+          targetOnsetTicksInMeasure: secondTargetOnsetTicksInMeasure,
+          dragDeltaClientY: secondDragDeltaClientY,
+        }
+      : null
+    const secondDrag = secondTargetParams
+      ? await performDragAndCollect({
+          page,
+          rows: afterFirst.rows,
+          target: secondTargetParams,
+        })
+      : null
+    const finalAfter = secondDrag?.dumpAfterDrag ?? afterFirst
+    const secondDeltaSummary = secondDrag ? buildDeltaSummary(afterFirst.rows, finalAfter.rows, secondTargetPairIndex) : null
+    const overflowRowsAfter = finalAfter.rows.filter(
       (row) => typeof row.overflowVsMeasureEndBarX === 'number' && row.overflowVsMeasureEndBarX > 0,
     )
-    const noteEndOverflowRowsAfter = after.rows.filter(
+    const noteEndOverflowRowsAfter = finalAfter.rows.filter(
       (row) => typeof row.overflowVsNoteEndX === 'number' && row.overflowVsNoteEndX > 0,
     )
 
     const report = {
       generatedAt: new Date().toISOString(),
       xmlPath,
-      targetPairIndex: TARGET_PAIR_INDEX,
-      dragDeltaClientY,
-      draggedNote: {
-        staff: target.note.staff,
-        noteId: target.note.noteId,
-        noteIndex: target.note.noteIndex,
-        pitchBefore: target.note.pitch,
-        headKeyIndex: target.head.keyIndex,
-        headXBefore: target.head.x,
-        headYBefore: target.head.y,
-        clientStart: startPoint,
-        clientEnd: endPoint,
+      scale: effectiveScale,
+      firstDrag: {
+        targetPairIndex,
+        dragDeltaClientY,
+        targetPitch,
+        targetOnsetTicksInMeasure,
+        draggedNote: {
+          staff: firstDrag.targetNote.staff,
+          noteId: firstDrag.targetNote.noteId,
+          noteIndex: firstDrag.targetNote.noteIndex,
+          pitchBefore: firstDrag.targetNote.pitch,
+          headKeyIndex: firstDrag.targetHead.keyIndex,
+          headXBefore: firstDrag.targetHead.x,
+          headYBefore: firstDrag.targetHead.y,
+          clientStart: firstDrag.startPoint,
+          clientEnd: firstDrag.endPoint,
+        },
       },
+      secondDrag:
+        secondDrag && secondTargetParams
+          ? {
+              targetPairIndex: secondTargetParams.pairIndex,
+              dragDeltaClientY: secondTargetParams.dragDeltaClientY,
+              targetPitch: secondTargetParams.targetPitch,
+              targetOnsetTicksInMeasure: secondTargetParams.targetOnsetTicksInMeasure,
+              draggedNote: {
+                staff: secondDrag.targetNote.staff,
+                noteId: secondDrag.targetNote.noteId,
+                noteIndex: secondDrag.targetNote.noteIndex,
+                pitchBefore: secondDrag.targetNote.pitch,
+                headKeyIndex: secondDrag.targetHead.keyIndex,
+                headXBefore: secondDrag.targetHead.x,
+                headYBefore: secondDrag.targetHead.y,
+                clientStart: secondDrag.startPoint,
+                clientEnd: secondDrag.endPoint,
+              },
+            }
+          : null,
       before,
-      after,
-      deltaSummary,
+      afterFirst,
+      afterSecond: secondDrag ? finalAfter : null,
+      deltaSummaryFirst: firstDeltaSummary,
+      deltaSummarySecond: secondDeltaSummary,
       overflowAfter: {
         noteEndOverflowMeasureCount: noteEndOverflowRowsAfter.length,
         barlineOverflowMeasureCount: overflowRowsAfter.length,
@@ -492,11 +736,25 @@ async function main() {
     await writeFile(outputPath, JSON.stringify(report, null, 2), 'utf8')
 
     console.log(`Generated: ${outputPath}`)
-    console.log(`Target measure pair: ${TARGET_PAIR_INDEX}`)
-    console.log(`Target staff/order: ${targetStaff}/${Math.floor(targetOrder)}`)
-    console.log(`Dragged note: ${target.note.staff}:${target.note.noteId} idx=${target.note.noteIndex}`)
-    console.log(`Changed notes: ${deltaSummary.changedNoteCount}`)
-    console.log(`Changed outside pair ${TARGET_PAIR_INDEX}: ${deltaSummary.changedOutsideTargetMeasureCount}`)
+    console.log(
+      `Scale: auto=${String(effectiveScale.autoScaleEnabled)}, manual=${effectiveScale.manualScalePercent.toFixed(2)}%`,
+    )
+    console.log(`First drag pair: ${targetPairIndex}, staff/order: ${targetStaff}/${Math.floor(targetOrder)}`)
+    console.log(`First drag pitch/onset: ${targetPitch ?? 'any'}/${targetOnsetTicksInMeasure ?? 'any'}`)
+    console.log(
+      `First changed outside pair ${targetPairIndex}: ${firstDeltaSummary.changedOutsideTargetMeasureCount}`,
+    )
+    if (secondDrag && secondTargetParams && secondDeltaSummary) {
+      console.log(
+        `Second drag pair: ${secondTargetParams.pairIndex}, staff/order: ${secondTargetParams.targetStaff}/${Math.floor(secondTargetParams.targetOrder)}`,
+      )
+      console.log(
+        `Second drag pitch/onset: ${secondTargetParams.targetPitch ?? 'any'}/${secondTargetParams.targetOnsetTicksInMeasure ?? 'any'}`,
+      )
+      console.log(
+        `Second changed outside pair ${secondTargetParams.pairIndex}: ${secondDeltaSummary.changedOutsideTargetMeasureCount}`,
+      )
+    }
     console.log(`Barline overflow measures (after drag): ${overflowRowsAfter.length}`)
 
     await browser.close()

@@ -5,6 +5,7 @@ import './App.css'
 import {
   A4_PAGE_HEIGHT,
   A4_PAGE_WIDTH,
+  DURATION_TICKS,
   INITIAL_NOTES,
   SCORE_PAGE_PADDING_X,
   PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX,
@@ -12,6 +13,7 @@ import {
   SCORE_TOP_PADDING,
   SYSTEM_GAP_Y,
   SYSTEM_HEIGHT,
+  TICKS_PER_BEAT,
 } from './score/constants'
 import { buildAdaptiveSystemRanges, toDisplayDuration } from './score/layout/demand'
 import { DEFAULT_TIME_AXIS_SPACING_CONFIG } from './score/layout/timeAxisSpacing'
@@ -630,9 +632,74 @@ function App() {
     const measureLayouts = measureLayoutsRef.current
     const noteLayoutsByPair = noteLayoutsByPairRef.current
     const pairs = measurePairsRef.current
+    const toRoundedNumber = (value: number | null | undefined, digits: number): number | null => {
+      if (typeof value !== 'number' || !Number.isFinite(value)) return null
+      return Number(value.toFixed(digits))
+    }
+    const buildOnsetTicksByNoteIndex = (staffNotes: ScoreNote[]): number[] => {
+      const onsetTicks: number[] = []
+      let cursor = 0
+      staffNotes.forEach((note) => {
+        onsetTicks.push(cursor)
+        const ticks = DURATION_TICKS[note.duration]
+        const safeTicks = Number.isFinite(ticks) ? Math.max(1, ticks) : TICKS_PER_BEAT
+        cursor += safeTicks
+      })
+      return onsetTicks
+    }
     const rows = pairs.map((pair, pairIndex) => {
       const measureLayout = measureLayouts.get(pairIndex) ?? null
       const pairLayouts = noteLayoutsByPair.get(pairIndex) ?? []
+      const trebleOnsetTicksByIndex = buildOnsetTicksByNoteIndex(pair.treble)
+      const bassOnsetTicksByIndex = buildOnsetTicksByNoteIndex(pair.bass)
+      const axisPointBuckets = new Map<
+        number,
+        { xTotal: number; xCount: number; trebleNoteCount: number; bassNoteCount: number }
+      >()
+      pairLayouts.forEach((layout) => {
+        const onsetTicks =
+          layout.staff === 'treble'
+            ? (trebleOnsetTicksByIndex[layout.noteIndex] ?? null)
+            : (bassOnsetTicksByIndex[layout.noteIndex] ?? null)
+        if (typeof onsetTicks !== 'number' || !Number.isFinite(onsetTicks)) return
+        const bucket = axisPointBuckets.get(onsetTicks) ?? {
+          xTotal: 0,
+          xCount: 0,
+          trebleNoteCount: 0,
+          bassNoteCount: 0,
+        }
+        if (Number.isFinite(layout.x)) {
+          bucket.xTotal += layout.x
+          bucket.xCount += 1
+        }
+        if (layout.staff === 'treble') {
+          bucket.trebleNoteCount += 1
+        } else {
+          bucket.bassNoteCount += 1
+        }
+        axisPointBuckets.set(onsetTicks, bucket)
+      })
+      const orderedOnsets = [...axisPointBuckets.keys()].sort((left, right) => left - right)
+      const timeAxisPointIndexByOnset = new Map<number, number>()
+      const timeAxisPointXByOnset = new Map<number, number | null>()
+      const timeAxisPoints = orderedOnsets.map((onsetTicks, pointIndex) => {
+        const bucket = axisPointBuckets.get(onsetTicks)
+        const averagedX =
+          bucket && bucket.xCount > 0 ? toRoundedNumber(bucket.xTotal / bucket.xCount, 3) : null
+        timeAxisPointIndexByOnset.set(onsetTicks, pointIndex)
+        timeAxisPointXByOnset.set(onsetTicks, averagedX)
+        const trebleNoteCount = bucket?.trebleNoteCount ?? 0
+        const bassNoteCount = bucket?.bassNoteCount ?? 0
+        return {
+          pointIndex,
+          onsetTicksInMeasure: onsetTicks,
+          onsetBeatsInMeasure: toRoundedNumber(onsetTicks / TICKS_PER_BEAT, 4),
+          x: averagedX,
+          noteCount: trebleNoteCount + bassNoteCount,
+          trebleNoteCount,
+          bassNoteCount,
+        }
+      })
       const layoutRows = pairLayouts
         .slice()
         .sort((left, right) => {
@@ -642,12 +709,38 @@ function App() {
         })
         .map((layout) => {
           const sourceNote = layout.staff === 'treble' ? pair.treble[layout.noteIndex] : pair.bass[layout.noteIndex]
+          const onsetTicksInMeasure =
+            sourceNote && layout.staff === 'treble'
+              ? (trebleOnsetTicksByIndex[layout.noteIndex] ?? null)
+              : sourceNote
+                ? (bassOnsetTicksByIndex[layout.noteIndex] ?? null)
+                : null
           return {
             staff: layout.staff,
             noteId: layout.id,
             noteIndex: layout.noteIndex,
             pitch: sourceNote?.pitch ?? null,
             duration: sourceNote?.duration ?? null,
+            durationTicksInMeasure:
+              sourceNote && Number.isFinite(DURATION_TICKS[sourceNote.duration])
+                ? DURATION_TICKS[sourceNote.duration]
+                : null,
+            onsetTicksInMeasure:
+              typeof onsetTicksInMeasure === 'number' && Number.isFinite(onsetTicksInMeasure)
+                ? onsetTicksInMeasure
+                : null,
+            onsetBeatsInMeasure:
+              typeof onsetTicksInMeasure === 'number' && Number.isFinite(onsetTicksInMeasure)
+                ? toRoundedNumber(onsetTicksInMeasure / TICKS_PER_BEAT, 4)
+                : null,
+            timeAxisPointIndex:
+              typeof onsetTicksInMeasure === 'number' && Number.isFinite(onsetTicksInMeasure)
+                ? (timeAxisPointIndexByOnset.get(onsetTicksInMeasure) ?? null)
+                : null,
+            timeAxisPointX:
+              typeof onsetTicksInMeasure === 'number' && Number.isFinite(onsetTicksInMeasure)
+                ? (timeAxisPointXByOnset.get(onsetTicksInMeasure) ?? null)
+                : null,
             x: layout.x,
             rightX: layout.rightX,
             spacingRightX: layout.spacingRightX,
@@ -679,10 +772,15 @@ function App() {
         rendered: measureLayout !== null,
         measureX: measureLayout?.measureX ?? null,
         measureWidth: measureLayout?.measureWidth ?? null,
+        systemTop: measureLayout?.systemTop ?? null,
+        trebleY: measureLayout?.trebleY ?? null,
+        bassY: measureLayout?.bassY ?? null,
         measureStartBarX: measureLayout?.measureX ?? null,
         measureEndBarX: measureLayout ? measureLayout.measureX + measureLayout.measureWidth : null,
         noteStartX: measureLayout?.noteStartX ?? null,
         noteEndX: measureLayout?.noteEndX ?? null,
+        timeAxisTicksPerBeat: TICKS_PER_BEAT,
+        timeAxisPoints,
         maxVisualRightX,
         maxSpacingRightX,
         overflowVsNoteEndX:
@@ -721,6 +819,17 @@ function App() {
         importMusicXmlText(xmlText)
       },
       getImportFeedback: () => importFeedbackRef.current,
+      getScaleConfig: () => ({
+        autoScaleEnabled,
+        manualScalePercent: safeManualScalePercent,
+        scoreScale,
+      }),
+      setAutoScaleEnabled: (enabled: boolean) => {
+        setAutoScaleEnabled(Boolean(enabled))
+      },
+      setManualScalePercent: (nextPercent: number) => {
+        setManualScalePercent(clampScalePercent(nextPercent))
+      },
       dumpAllMeasureCoordinates: () => dumpAllMeasureCoordinateReport(),
       getPaging: () => ({
         currentPage: safeCurrentPage,
@@ -742,6 +851,9 @@ function App() {
     goToPage,
     pageCount,
     safeCurrentPage,
+    safeManualScalePercent,
+    autoScaleEnabled,
+    scoreScale,
     systemsPerPage,
     visibleSystemRange,
   ])

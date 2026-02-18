@@ -31,49 +31,6 @@ type FrozenMeasureSpacing = {
   staticAccidentalRightXById: Map<string, Map<number, number>>
 }
 
-function getPitchAccidentalToken(pitch: string): string | null {
-  const [note] = pitch.split('/')
-  const accidental = note.slice(1)
-  return accidental.length > 0 ? accidental : null
-}
-
-function getVisibleAccidentalKeySetFromNote(note: ScoreNote): Set<number> {
-  const keys = new Set<number>()
-  const rootAccidental = note.accidental !== undefined ? note.accidental : getPitchAccidentalToken(note.pitch)
-  if (rootAccidental) keys.add(0)
-
-  note.chordPitches?.forEach((chordPitch, chordIndex) => {
-    const chordAccidental =
-      note.chordAccidentals?.[chordIndex] !== undefined
-        ? note.chordAccidentals[chordIndex]
-        : getPitchAccidentalToken(chordPitch)
-    if (chordAccidental) keys.add(chordIndex + 1)
-  })
-
-  return keys
-}
-
-function getVisibleAccidentalKeySetFromLayout(layout: NoteLayout): Set<number> {
-  const keys = new Set<number>()
-  Object.keys(layout.accidentalRightXByKeyIndex).forEach((rawKeyIndex) => {
-    const keyIndex = Number(rawKeyIndex)
-    const rightX = layout.accidentalRightXByKeyIndex[keyIndex]
-    if (!Number.isFinite(keyIndex) || !Number.isFinite(rightX)) return
-    keys.add(keyIndex)
-  })
-  return keys
-}
-
-function hasAccidentalPresenceDelta(note: ScoreNote, previousLayout: NoteLayout): boolean {
-  const currentVisibleKeys = getVisibleAccidentalKeySetFromNote(note)
-  const previousVisibleKeys = getVisibleAccidentalKeySetFromLayout(previousLayout)
-  if (currentVisibleKeys.size !== previousVisibleKeys.size) return true
-  for (const keyIndex of currentVisibleKeys) {
-    if (!previousVisibleKeys.has(keyIndex)) return true
-  }
-  return false
-}
-
 function tryBuildFrozenMeasureSpacing(params: {
   pairIndex: number
   measure: MeasurePair
@@ -99,11 +56,6 @@ function tryBuildFrozenMeasureSpacing(params: {
       const noteKey = getLayoutNoteKey(staff, note.id)
       const previousLayout = previousByNoteKey.get(noteKey)
       if (!previousLayout) return false
-
-      // Freeze only when accidental visibility did not change (add/remove).
-      // Accidental type changes (# -> n) are allowed and considered no-presence-change.
-      // Matching uses noteId+keyIndex, so dragged-note pitch moves won't break pairing.
-      if (hasAccidentalPresenceDelta(note, previousLayout)) return false
 
       staticNoteXById.set(noteKey, previousLayout.x)
       const previousAccidentalMap = new Map<number, number>()

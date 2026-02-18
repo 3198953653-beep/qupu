@@ -1,4 +1,4 @@
-import { DURATION_LABEL, DURATION_LAYOUT_WEIGHT } from '../constants'
+import { DURATION_BEATS, DURATION_LABEL } from '../constants'
 import type { MeasurePair, NoteDuration, NoteDurationBase, ScoreNote, TimeSignature } from '../types'
 
 const MEASURE_KEY_SIGNATURE_DEMAND = 2.2
@@ -13,6 +13,10 @@ const ADAPTIVE_MEASURE_SAFETY_PX = 10
 const ADAPTIVE_SYSTEM_OCCUPANCY_TARGET = 0.9
 const ADAPTIVE_SYSTEM_OCCUPANCY_MIN = 0.62
 const ADAPTIVE_SYSTEM_REBALANCE_PASSES = 16
+const DEMAND_MIN_GAP_BEATS = 1 / 32
+const DEMAND_GAP_GAMMA = 1
+const DEMAND_GAP_BASE_WEIGHT = 0.3
+const NOTE_DEMAND_SCALE = 2
 
 const DEFAULT_TIME_SIGNATURE: TimeSignature = { beats: 4, beatType: 4 }
 
@@ -55,8 +59,14 @@ export function countVisibleAccidentals(accidentals?: Array<string | null>): num
   return count
 }
 
+function mapBeatsToDemand(beats: number): number {
+  const compressed = Math.pow(Math.max(DEMAND_MIN_GAP_BEATS, beats), DEMAND_GAP_GAMMA)
+  return DEMAND_GAP_BASE_WEIGHT + compressed
+}
+
 export function getNoteLayoutDemand(note: ScoreNote): number {
-  const durationWeight = DURATION_LAYOUT_WEIGHT[note.duration] ?? 1
+  const durationBeats = DURATION_BEATS[note.duration] ?? 1
+  const durationWeight = mapBeatsToDemand(durationBeats)
   const chordSize = 1 + (note.chordPitches?.length ?? 0)
   const chordSpreadBonus = chordSize > 1 ? (chordSize - 1) * 0.35 : 0
   // Keep measure demand stable for pitch-only edits so local pitch drags
@@ -71,7 +81,8 @@ export function getStaffLayoutDemand(notes: ScoreNote[]): number {
 }
 
 export function getMeasureNoteLayoutDemand(measure: MeasurePair): number {
-  return getStaffLayoutDemand(measure.treble) + getStaffLayoutDemand(measure.bass)
+  const rawDemand = getStaffLayoutDemand(measure.treble) + getStaffLayoutDemand(measure.bass)
+  return Math.max(1, rawDemand * NOTE_DEMAND_SCALE)
 }
 
 export function getMeasureLayoutDemandFromNoteDemand(
