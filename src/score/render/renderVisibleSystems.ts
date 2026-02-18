@@ -360,6 +360,50 @@ export function renderVisibleSystems(params: {
       const formatWidth = Math.max(80, noteEndX - noteStartX - 8)
       return { noteStartX, noteEndX, formatWidth }
     }
+    const spacingProbeDeltaCache = new Map<string, number | null>()
+    const getMeasureSpacingDelta = (entry: (typeof systemMeta)[number], measureWidth: number): number | null => {
+      const safeMeasureWidth = Math.max(1, Math.floor(measureWidth))
+      const cacheKey = `${entry.pairIndex}|${safeMeasureWidth}`
+      if (spacingProbeDeltaCache.has(cacheKey)) {
+        return spacingProbeDeltaCache.get(cacheKey) ?? null
+      }
+
+      const probeMeasureX = STAFF_X
+      const { noteEndX, formatWidth } = buildMeasureProbe(entry, probeMeasureX, safeMeasureWidth)
+      const measureNoteLayouts = drawMeasureToContext({
+        context,
+        measure: entry.measure,
+        pairIndex: entry.pairIndex,
+        measureX: probeMeasureX,
+        measureWidth: safeMeasureWidth,
+        trebleY,
+        bassY,
+        isSystemStart: entry.isSystemStart,
+        keyFifths: entry.keyFifths,
+        showKeySignature: entry.showKeySignature,
+        timeSignature: entry.timeSignature,
+        showTimeSignature: entry.showTimeSignature,
+        endTimeSignature: entry.nextTimeSignature,
+        showEndTimeSignature: entry.showEndTimeSignature,
+        activeSelection: null,
+        draggingSelection: null,
+        collectLayouts: true,
+        skipPainting: true,
+        formatWidthOverride: formatWidth,
+        timeAxisSpacingConfig,
+        layoutDetail: 'spacing-only',
+      })
+
+      const spacingRightEdge = getMeasureSpacingRightEdge(measureNoteLayouts)
+      if (!Number.isFinite(spacingRightEdge)) {
+        spacingProbeDeltaCache.set(cacheKey, null)
+        return null
+      }
+      const rightBoundary = noteEndX - MEASURE_RIGHT_EDGE_GUARD_PX
+      const delta = spacingRightEdge - rightBoundary
+      spacingProbeDeltaCache.set(cacheKey, delta)
+      return delta
+    }
 
     const analyzeOverflowMinimumWidths = (
       candidateWidths: number[],
@@ -367,42 +411,15 @@ export function renderVisibleSystems(params: {
     ): { nextMinimums: number[]; hasIncrease: boolean } => {
       const nextMinimums = [...currentMinimums]
       let hasIncrease = false
-      let analysisCursorX = STAFF_X
 
       systemMeta.forEach((entry, indexInSystem) => {
-        const measureWidth = candidateWidths[indexInSystem] ?? Math.floor(systemUsableWidth / systemMeasures.length)
-        const measureX = analysisCursorX
-        analysisCursorX += measureWidth
+        const measureWidth = Math.max(
+          1,
+          Math.floor(candidateWidths[indexInSystem] ?? Math.floor(systemUsableWidth / systemMeasures.length)),
+        )
         if (frozenSpacingByPairIndex.has(entry.pairIndex)) return
-        const { noteEndX, formatWidth } = buildMeasureProbe(entry, measureX, measureWidth)
-        const measureNoteLayouts = drawMeasureToContext({
-          context,
-          measure: entry.measure,
-          pairIndex: entry.pairIndex,
-          measureX,
-          measureWidth,
-          trebleY,
-          bassY,
-          isSystemStart: entry.isSystemStart,
-          keyFifths: entry.keyFifths,
-          showKeySignature: entry.showKeySignature,
-          timeSignature: entry.timeSignature,
-          showTimeSignature: entry.showTimeSignature,
-          endTimeSignature: entry.nextTimeSignature,
-          showEndTimeSignature: entry.showEndTimeSignature,
-          activeSelection: null,
-          draggingSelection: null,
-          collectLayouts: true,
-          skipPainting: true,
-          formatWidthOverride: formatWidth,
-          timeAxisSpacingConfig,
-          layoutDetail: 'spacing-only',
-        })
-
-        const maxHeadX = getMeasureSpacingRightEdge(measureNoteLayouts)
-        if (!Number.isFinite(maxHeadX)) return
-        const rightBoundary = noteEndX - MEASURE_RIGHT_EDGE_GUARD_PX
-        const overflow = maxHeadX - rightBoundary
+        const overflow = getMeasureSpacingDelta(entry, measureWidth)
+        if (overflow === null) return
         if (overflow <= 0) return
         const requiredWidth = Math.ceil(measureWidth + overflow + OVERFLOW_RECOVERY_PADDING_PX)
         if (requiredWidth <= nextMinimums[indexInSystem]) return
@@ -420,47 +437,22 @@ export function renderVisibleSystems(params: {
       const nextWidths = [...candidateWidths]
       const computeDeltas = (widths: number[]): number[] => {
         const deltas = new Array<number>(systemMeta.length).fill(0)
-        let analysisCursorX = STAFF_X
 
         systemMeta.forEach((entry, indexInSystem) => {
-          const measureWidth = widths[indexInSystem] ?? Math.floor(systemUsableWidth / systemMeasures.length)
-          const measureX = analysisCursorX
-          analysisCursorX += measureWidth
+          const measureWidth = Math.max(
+            1,
+            Math.floor(widths[indexInSystem] ?? Math.floor(systemUsableWidth / systemMeasures.length)),
+          )
           if (frozenSpacingByPairIndex.has(entry.pairIndex)) {
             deltas[indexInSystem] = 0
             return
           }
-          const { noteEndX, formatWidth } = buildMeasureProbe(entry, measureX, measureWidth)
-          const measureNoteLayouts = drawMeasureToContext({
-            context,
-            measure: entry.measure,
-            pairIndex: entry.pairIndex,
-            measureX,
-            measureWidth,
-            trebleY,
-            bassY,
-            isSystemStart: entry.isSystemStart,
-            keyFifths: entry.keyFifths,
-            showKeySignature: entry.showKeySignature,
-            timeSignature: entry.timeSignature,
-            showTimeSignature: entry.showTimeSignature,
-            endTimeSignature: entry.nextTimeSignature,
-            showEndTimeSignature: entry.showEndTimeSignature,
-            activeSelection: null,
-            draggingSelection: null,
-            collectLayouts: true,
-            skipPainting: true,
-            formatWidthOverride: formatWidth,
-            timeAxisSpacingConfig,
-            layoutDetail: 'spacing-only',
-          })
-          const spacingRightEdge = getMeasureSpacingRightEdge(measureNoteLayouts)
-          if (!Number.isFinite(spacingRightEdge)) {
+          const delta = getMeasureSpacingDelta(entry, measureWidth)
+          if (delta === null) {
             deltas[indexInSystem] = 0
             return
           }
-          const rightBoundary = noteEndX - MEASURE_RIGHT_EDGE_GUARD_PX
-          deltas[indexInSystem] = spacingRightEdge - rightBoundary
+          deltas[indexInSystem] = delta
         })
 
         return deltas
