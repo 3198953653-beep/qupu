@@ -4,10 +4,12 @@ import type { MeasurePair, NoteDuration, NoteDurationBase, ScoreNote, TimeSignat
 const MEASURE_KEY_SIGNATURE_DEMAND = 2.2
 const MEASURE_TIME_SIGNATURE_DEMAND = 2.4
 const MEASURE_END_TIME_SIGNATURE_DEMAND = 1.6
+const MEASURE_SYSTEM_START_CLEF_DEMAND = 3.5
 
 const ADAPTIVE_MEASURE_BASE_WIDTH_PX = 34
 const ADAPTIVE_DEMAND_TO_WIDTH_FACTOR = 6.4
 const ADAPTIVE_MEASURE_MIN_WIDTH_PX = 92
+const ADAPTIVE_MEASURE_SAFETY_PX = 10
 
 const DEFAULT_TIME_SIGNATURE: TimeSignature = { beats: 4, beatType: 4 }
 
@@ -50,10 +52,25 @@ export function countVisibleAccidentals(accidentals?: Array<string | null>): num
   return count
 }
 
+function getPitchAccidentalToken(pitch: string): string | null {
+  const [note] = pitch.split('/')
+  const accidental = note.slice(1)
+  return accidental.length > 0 ? accidental : null
+}
+
 export function getNoteLayoutDemand(note: ScoreNote): number {
   const durationWeight = DURATION_LAYOUT_WEIGHT[note.duration] ?? 1
   const chordSize = 1 + (note.chordPitches?.length ?? 0)
-  const accidentalCount = (note.accidental ? 1 : 0) + countVisibleAccidentals(note.chordAccidentals)
+  const rootAccidental = note.accidental !== undefined ? note.accidental : getPitchAccidentalToken(note.pitch)
+  let chordAccidentalCount = 0
+  note.chordPitches?.forEach((chordPitch, index) => {
+    const chordAccidental =
+      note.chordAccidentals?.[index] !== undefined
+        ? note.chordAccidentals[index]
+        : getPitchAccidentalToken(chordPitch)
+    if (chordAccidental) chordAccidentalCount += 1
+  })
+  const accidentalCount = (rootAccidental ? 1 : 0) + chordAccidentalCount
   const chordSpreadBonus = chordSize > 1 ? (chordSize - 1) * 0.35 : 0
   return durationWeight * chordSize + accidentalCount * 0.85 + chordSpreadBonus
 }
@@ -69,11 +86,14 @@ export function getMeasureNoteLayoutDemand(measure: MeasurePair): number {
 
 export function getMeasureLayoutDemandFromNoteDemand(
   noteDemand: number,
+  isSystemStart: boolean,
   showKeySignature: boolean,
   showTimeSignature: boolean,
   showEndTimeSignature: boolean,
 ): number {
+  const systemStartDecoration = isSystemStart ? MEASURE_SYSTEM_START_CLEF_DEMAND : 0
   const beginDecorations =
+    systemStartDecoration +
     (showKeySignature ? MEASURE_KEY_SIGNATURE_DEMAND : 0) +
     (showTimeSignature ? MEASURE_TIME_SIGNATURE_DEMAND : 0)
   const endDecoration = showEndTimeSignature ? MEASURE_END_TIME_SIGNATURE_DEMAND : 0
@@ -82,12 +102,19 @@ export function getMeasureLayoutDemandFromNoteDemand(
 
 export function getMeasureLayoutDemand(
   measure: MeasurePair,
+  isSystemStart: boolean,
   showKeySignature: boolean,
   showTimeSignature: boolean,
   showEndTimeSignature: boolean,
 ): number {
   const noteDemand = getMeasureNoteLayoutDemand(measure)
-  return getMeasureLayoutDemandFromNoteDemand(noteDemand, showKeySignature, showTimeSignature, showEndTimeSignature)
+  return getMeasureLayoutDemandFromNoteDemand(
+    noteDemand,
+    isSystemStart,
+    showKeySignature,
+    showTimeSignature,
+    showEndTimeSignature,
+  )
 }
 
 function hasTimeSignatureChanged(current: TimeSignature, previous: TimeSignature): boolean {
@@ -103,7 +130,9 @@ function getResolvedArrayValue<T>(values: T[] | null, index: number, fallback: T
 }
 
 export function estimateAdaptiveMeasureWidth(layoutDemand: number): number {
-  const scaled = Math.round(ADAPTIVE_MEASURE_BASE_WIDTH_PX + layoutDemand * ADAPTIVE_DEMAND_TO_WIDTH_FACTOR)
+  const scaled = Math.round(
+    ADAPTIVE_MEASURE_BASE_WIDTH_PX + ADAPTIVE_MEASURE_SAFETY_PX + layoutDemand * ADAPTIVE_DEMAND_TO_WIDTH_FACTOR,
+  )
   return Math.max(ADAPTIVE_MEASURE_MIN_WIDTH_PX, scaled)
 }
 
@@ -179,12 +208,13 @@ export function buildAdaptiveSystemRanges(params: {
         requiredWidthByEstimator && Number.isFinite(requiredWidthByEstimator)
           ? requiredWidthByEstimator
           : estimateAdaptiveMeasureWidth(
-              getMeasureLayoutDemandFromNoteDemand(
-                noteDemands[pairIndex],
-                showKeySignature,
-                showTimeSignature,
-                showPotentialEndTimeSignature,
-              ),
+            getMeasureLayoutDemandFromNoteDemand(
+              noteDemands[pairIndex],
+              isSystemStart,
+              showKeySignature,
+              showTimeSignature,
+              showPotentialEndTimeSignature,
+            ),
             )
       const requiredWidth = Math.min(safeSystemUsableWidth, Math.max(1, Math.ceil(demandWidth)))
       const wouldOverflow = pairIndex > startPairIndex && usedWidth + requiredWidth > safeSystemUsableWidth

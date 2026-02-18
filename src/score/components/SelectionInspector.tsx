@@ -9,6 +9,9 @@ export function SelectionInspector(props: {
   dragDebugReport: string
   onDumpDragLog: () => void
   onClearDragLog: () => void
+  measureEdgeDebugReport: string
+  onDumpMeasureEdgeLog: () => void
+  onClearMeasureEdgeLog: () => void
 }) {
   const {
     selectedStaffLabel,
@@ -21,6 +24,9 @@ export function SelectionInspector(props: {
     dragDebugReport,
     onDumpDragLog,
     onClearDragLog,
+    measureEdgeDebugReport,
+    onDumpMeasureEdgeLog,
+    onClearMeasureEdgeLog,
   } = props
 
   return (
@@ -47,12 +53,25 @@ export function SelectionInspector(props: {
         <button type="button" onClick={onClearDragLog}>
           Clear Drag Log
         </button>
+        <button type="button" onClick={onDumpMeasureEdgeLog}>
+          Dump Measure Edge Log
+        </button>
+        <button type="button" onClick={onClearMeasureEdgeLog}>
+          Clear Measure Edge Log
+        </button>
       </div>
       <textarea
         className="debug-log"
         value={dragDebugReport}
         readOnly
         placeholder="Drag a note, then click Dump Drag Log."
+        spellCheck={false}
+      />
+      <textarea
+        className="debug-log"
+        value={measureEdgeDebugReport}
+        readOnly
+        placeholder="Click Dump Measure Edge Log to inspect each rendered measure's last-note and barline coordinates."
         spellCheck={false}
       />
     </div>

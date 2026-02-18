@@ -567,6 +567,30 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     return Number.isFinite(computedRightX) ? computedRightX : fallbackRightX
   }
 
+  const getRenderedNoteSpacingRightX = (
+    vexNote: StaveNote,
+    noteHeads: Array<{ x: number }>,
+  ): number => {
+    const fallbackHeadRightX = noteHeads.reduce(
+      (maxX, head) => Math.max(maxX, head.x + 9),
+      getRenderedNoteVisualX(vexNote) + 9,
+    )
+
+    let rightModifierPadding = 0
+    try {
+      const metrics = vexNote.getMetrics()
+      const modRightPx = metrics.modRightPx
+      if (Number.isFinite(modRightPx) && modRightPx > 0) {
+        rightModifierPadding = modRightPx
+      }
+    } catch {
+      rightModifierPadding = 0
+    }
+
+    const spacingRightX = fallbackHeadRightX + rightModifierPadding
+    return Number.isFinite(spacingRightX) ? spacingRightX : fallbackHeadRightX
+  }
+
   const getMaxBeamRightX = (beams: Beam[]): number => {
     let maxRightX = Number.NEGATIVE_INFINITY
     beams.forEach((beam) => {
@@ -632,6 +656,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       }))
       const rootHead = noteHeads.find((head) => head.keyIndex === 0) ?? noteHeads[0]
       const noteRightX = getRenderedNoteRightX(vexNote, noteHeads)
+      const noteSpacingRightX = getRenderedNoteSpacingRightX(vexNote, noteHeads)
       return {
         id: measure.treble[noteIndex].id,
         staff: 'treble' as const,
@@ -639,6 +664,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         noteIndex,
         x: getRenderedNoteVisualX(vexNote),
         rightX: noteRightX,
+        spacingRightX: noteSpacingRightX,
         y: rootHead?.y ?? ys[0] ?? 0,
         pitchYMap: treblePitchYMap,
         noteHeads,
@@ -670,6 +696,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       }))
       const rootHead = noteHeads.find((head) => head.keyIndex === 0) ?? noteHeads[0]
       const noteRightX = getRenderedNoteRightX(vexNote, noteHeads)
+      const noteSpacingRightX = getRenderedNoteSpacingRightX(vexNote, noteHeads)
       return {
         id: measure.bass[noteIndex].id,
         staff: 'bass' as const,
@@ -677,6 +704,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         noteIndex,
         x: getRenderedNoteVisualX(vexNote),
         rightX: noteRightX,
+        spacingRightX: noteSpacingRightX,
         y: rootHead?.y ?? ys[0] ?? 0,
         pitchYMap: bassPitchYMap,
         noteHeads,

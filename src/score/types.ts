@@ -67,6 +67,7 @@ export type NoteLayout = {
   noteIndex: number
   x: number
   rightX: number
+  spacingRightX: number
   y: number
   pitchYMap: Record<Pitch, number>
   noteHeads: NoteHeadLayout[]
@@ -157,6 +158,7 @@ export type MeasureLayout = {
   showEndTimeSignature: boolean
   includeMeasureStartDecorations: boolean
   noteStartX: number
+  noteEndX: number
   formatWidth: number
   overlayRect: {
     x: number

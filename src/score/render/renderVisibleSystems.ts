@@ -18,11 +18,162 @@ import { getLayoutNoteKey } from '../layout/renderPosition'
 import { buildMeasureOverlayRect } from '../layout/viewport'
 import { clamp } from '../math'
 import { drawMeasureToContext } from './drawMeasure'
-import type { MeasureLayout, MeasurePair, NoteLayout, Selection, TimeSignature } from '../types'
+import type { MeasureLayout, MeasurePair, NoteLayout, ScoreNote, Selection, StaffKind, TimeSignature } from '../types'
 
-const MEASURE_RIGHT_EDGE_GUARD_PX = 3
-const OVERFLOW_RECOVERY_PADDING_PX = 8
+const MEASURE_RIGHT_EDGE_GUARD_PX = 0
+const OVERFLOW_RECOVERY_PADDING_PX = 0
 const OVERFLOW_ANALYSIS_MAX_PASSES = 6
+
+type FrozenMeasureSpacing = {
+  staticNoteXById: Map<string, number>
+  staticAccidentalRightXById: Map<string, Map<number, number>>
+}
+
+function getPitchAccidentalToken(pitch: string): string | null {
+  const [note] = pitch.split('/')
+  const accidental = note.slice(1)
+  return accidental.length > 0 ? accidental : null
+}
+
+function getVisibleAccidentalKeysForNote(note: ScoreNote): Set<number> {
+  const visible = new Set<number>()
+  const rootAccidental = note.accidental !== undefined ? note.accidental : getPitchAccidentalToken(note.pitch)
+  if (rootAccidental) visible.add(0)
+
+  note.chordPitches?.forEach((pitch, chordIndex) => {
+    const chordAccidental =
+      note.chordAccidentals?.[chordIndex] !== undefined
+        ? note.chordAccidentals[chordIndex]
+        : getPitchAccidentalToken(pitch)
+    if (chordAccidental) visible.add(chordIndex + 1)
+  })
+
+  return visible
+}
+
+function tryBuildFrozenMeasureSpacing(params: {
+  pairIndex: number
+  measure: MeasurePair
+  previousNoteLayoutsByPair: Map<number, NoteLayout[]> | null | undefined
+}): FrozenMeasureSpacing | null {
+  const { pairIndex, measure, previousNoteLayoutsByPair } = params
+  const previousLayouts = previousNoteLayoutsByPair?.get(pairIndex)
+  if (!previousLayouts || previousLayouts.length === 0) return null
+
+  const previousByNoteKey = new Map<string, NoteLayout>()
+  previousLayouts.forEach((layout) => {
+    previousByNoteKey.set(getLayoutNoteKey(layout.staff, layout.id), layout)
+  })
+
+  const staticNoteXById = new Map<string, number>()
+  const staticAccidentalRightXById = new Map<string, Map<number, number>>()
+
+  const collectStaff = (staff: StaffKind, notes: ScoreNote[]): boolean => {
+    for (const note of notes) {
+      const noteKey = getLayoutNoteKey(staff, note.id)
+      const previousLayout = previousByNoteKey.get(noteKey)
+      if (!previousLayout) return false
+
+      const currentVisibleAccidentalKeys = getVisibleAccidentalKeysForNote(note)
+      const previousVisibleAccidentalKeys = new Set<number>()
+      Object.keys(previousLayout.accidentalRightXByKeyIndex).forEach((rawKeyIndex) => {
+        const keyIndex = Number(rawKeyIndex)
+        if (Number.isFinite(keyIndex)) {
+          previousVisibleAccidentalKeys.add(keyIndex)
+        }
+      })
+      // Freeze spacing only for measures with no visible accidentals.
+      // If accidentals are present, allow full re-layout to avoid overflow at barlines.
+      if (currentVisibleAccidentalKeys.size > 0 || previousVisibleAccidentalKeys.size > 0) {
+        return false
+      }
+
+      staticNoteXById.set(noteKey, previousLayout.x)
+      const previousAccidentalMap = new Map<number, number>()
+      Object.keys(previousLayout.accidentalRightXByKeyIndex).forEach((rawKeyIndex) => {
+        const keyIndex = Number(rawKeyIndex)
+        const rightX = previousLayout.accidentalRightXByKeyIndex[keyIndex]
+        if (Number.isFinite(keyIndex) && Number.isFinite(rightX)) {
+          previousAccidentalMap.set(keyIndex, rightX)
+        }
+      })
+      if (previousAccidentalMap.size > 0) {
+        staticAccidentalRightXById.set(noteKey, previousAccidentalMap)
+      }
+    }
+    return true
+  }
+
+  if (!collectStaff('treble', measure.treble)) return null
+  if (!collectStaff('bass', measure.bass)) return null
+
+  const expectedCount = measure.treble.length + measure.bass.length
+  if (staticNoteXById.size !== expectedCount) return null
+
+  return { staticNoteXById, staticAccidentalRightXById }
+}
+
+function findPairIndexForSelection(
+  selection: Selection | null,
+  previousNoteLayoutsByPair: Map<number, NoteLayout[]> | null | undefined,
+): number | null {
+  if (!selection || !previousNoteLayoutsByPair || previousNoteLayoutsByPair.size === 0) return null
+  for (const [pairIndex, layouts] of previousNoteLayoutsByPair.entries()) {
+    for (const layout of layouts) {
+      if (layout.staff === selection.staff && layout.id === selection.noteId) {
+        return pairIndex
+      }
+    }
+  }
+  return null
+}
+
+function getLayoutSpacingRightX(layout: NoteLayout): number {
+  if (Number.isFinite(layout.spacingRightX)) {
+    return layout.spacingRightX
+  }
+
+  return Number.isFinite(layout.rightX) ? layout.rightX : layout.x
+}
+
+function getMeasureSpacingRightEdge(layouts: NoteLayout[]): number {
+  if (layouts.length === 0) return Number.NEGATIVE_INFINITY
+
+  let maxSpacingRightX = Number.NEGATIVE_INFINITY
+  for (const layout of layouts) {
+    const spacingRightX = getLayoutSpacingRightX(layout)
+    if (spacingRightX > maxSpacingRightX) maxSpacingRightX = spacingRightX
+  }
+
+  return maxSpacingRightX
+}
+
+function distributeByFloats(floatWidths: number[], targetTotal: number): number[] {
+  const widths = floatWidths.map((value) => Math.floor(value))
+  let remainder = targetTotal - widths.reduce((sum, width) => sum + width, 0)
+  const byFraction = floatWidths
+    .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
+    .sort((left, right) => right.fraction - left.fraction)
+
+  for (let i = 0; i < byFraction.length && remainder > 0; i += 1) {
+    widths[byFraction[i].index] += 1
+    remainder -= 1
+  }
+
+  return widths
+}
+
+function normalizeMinimumWidthsToSystem(minimumWidths: number[], totalWidth: number): number[] {
+  const safeTotal = Math.max(minimumWidths.length, Math.floor(totalWidth))
+  const sanitized = minimumWidths.map((width) => {
+    if (!Number.isFinite(width)) return 1
+    return Math.max(1, Math.floor(width))
+  })
+  const minimumTotal = sanitized.reduce((sum, width) => sum + width, 0)
+  if (minimumTotal <= safeTotal) return sanitized
+  const scaled = sanitized.map((width) => (safeTotal * width) / minimumTotal)
+  return distributeByFloats(scaled, safeTotal)
+}
 
 export function renderVisibleSystems(params: {
   context: ReturnType<Renderer['getContext']>
@@ -36,6 +187,7 @@ export function renderVisibleSystems(params: {
   measureTimeSignaturesFromImport: TimeSignature[] | null
   activeSelection: Selection | null
   draggingSelection: Selection | null
+  previousNoteLayoutsByPair?: Map<number, NoteLayout[]> | null
 }): {
   nextLayouts: NoteLayout[]
   nextLayoutsByPair: Map<number, NoteLayout[]>
@@ -54,6 +206,7 @@ export function renderVisibleSystems(params: {
     measureTimeSignaturesFromImport,
     activeSelection,
     draggingSelection,
+    previousNoteLayoutsByPair = null,
   } = params
 
   const nextLayouts: NoteLayout[] = []
@@ -137,9 +290,24 @@ export function renderVisibleSystems(params: {
         includeMeasureStartDecorations,
       }
     })
+    const freezeSelection = draggingSelection
+    const frozenPairIndex = findPairIndexForSelection(freezeSelection, previousNoteLayoutsByPair)
+    const frozenSpacingByPairIndex = new Map<number, FrozenMeasureSpacing>()
+    systemMeta.forEach((entry) => {
+      if (entry.pairIndex !== frozenPairIndex) return
+      const frozen = tryBuildFrozenMeasureSpacing({
+        pairIndex: entry.pairIndex,
+        measure: entry.measure,
+        previousNoteLayoutsByPair,
+      })
+      if (frozen) {
+        frozenSpacingByPairIndex.set(entry.pairIndex, frozen)
+      }
+    })
     const measureDemands = systemMeta.map((entry) =>
       getMeasureLayoutDemand(
         entry.measure,
+        entry.isSystemStart,
         entry.showKeySignature,
         entry.showTimeSignature,
         entry.showEndTimeSignature,
@@ -164,9 +332,13 @@ export function renderVisibleSystems(params: {
           noteStartProbe.addTimeSignature(`${entry.timeSignature.beats}/${entry.timeSignature.beatType}`)
         }
       }
+      if (entry.showEndTimeSignature) {
+        noteStartProbe.setEndTimeSignature(`${entry.nextTimeSignature.beats}/${entry.nextTimeSignature.beatType}`)
+      }
       const noteStartX = noteStartProbe.getNoteStartX()
-      const formatWidth = Math.max(80, noteStartProbe.getNoteEndX() - noteStartX - 8)
-      return { noteStartX, formatWidth }
+      const noteEndX = noteStartProbe.getNoteEndX()
+      const formatWidth = Math.max(80, noteEndX - noteStartX - 8)
+      return { noteStartX, noteEndX, formatWidth }
     }
 
     const analyzeOverflowMinimumWidths = (
@@ -181,7 +353,8 @@ export function renderVisibleSystems(params: {
         const measureWidth = candidateWidths[indexInSystem] ?? Math.floor(systemUsableWidth / systemMeasures.length)
         const measureX = analysisCursorX
         analysisCursorX += measureWidth
-        const { formatWidth } = buildMeasureProbe(entry, measureX, measureWidth)
+        if (frozenSpacingByPairIndex.has(entry.pairIndex)) return
+        const { noteEndX, formatWidth } = buildMeasureProbe(entry, measureX, measureWidth)
         const measureNoteLayouts = drawMeasureToContext({
           context,
           measure: entry.measure,
@@ -204,12 +377,9 @@ export function renderVisibleSystems(params: {
           formatWidthOverride: formatWidth,
         })
 
-        let maxHeadX = Number.NEGATIVE_INFINITY
-        for (const layout of measureNoteLayouts) {
-          if (layout.rightX > maxHeadX) maxHeadX = layout.rightX
-        }
+        const maxHeadX = getMeasureSpacingRightEdge(measureNoteLayouts)
         if (!Number.isFinite(maxHeadX)) return
-        const rightBoundary = measureX + measureWidth - MEASURE_RIGHT_EDGE_GUARD_PX
+        const rightBoundary = noteEndX - MEASURE_RIGHT_EDGE_GUARD_PX
         const overflow = maxHeadX - rightBoundary
         if (overflow <= 0) return
         const requiredWidth = Math.ceil(measureWidth + overflow + OVERFLOW_RECOVERY_PADDING_PX)
@@ -221,6 +391,102 @@ export function renderVisibleSystems(params: {
       return { nextMinimums, hasIncrease }
     }
 
+    const rebalanceMeasureWidthsBySpacing = (
+      candidateWidths: number[],
+      currentMinimums: number[],
+    ): { nextWidths: number[]; hasChange: boolean } => {
+      const nextWidths = [...candidateWidths]
+      const computeDeltas = (widths: number[]): number[] => {
+        const deltas = new Array<number>(systemMeta.length).fill(0)
+        let analysisCursorX = STAFF_X
+
+        systemMeta.forEach((entry, indexInSystem) => {
+          const measureWidth = widths[indexInSystem] ?? Math.floor(systemUsableWidth / systemMeasures.length)
+          const measureX = analysisCursorX
+          analysisCursorX += measureWidth
+          if (frozenSpacingByPairIndex.has(entry.pairIndex)) {
+            deltas[indexInSystem] = 0
+            return
+          }
+          const { noteEndX, formatWidth } = buildMeasureProbe(entry, measureX, measureWidth)
+          const measureNoteLayouts = drawMeasureToContext({
+            context,
+            measure: entry.measure,
+            pairIndex: entry.pairIndex,
+            measureX,
+            measureWidth,
+            trebleY,
+            bassY,
+            isSystemStart: entry.isSystemStart,
+            keyFifths: entry.keyFifths,
+            showKeySignature: entry.showKeySignature,
+            timeSignature: entry.timeSignature,
+            showTimeSignature: entry.showTimeSignature,
+            endTimeSignature: entry.nextTimeSignature,
+            showEndTimeSignature: entry.showEndTimeSignature,
+            activeSelection: null,
+            draggingSelection: null,
+            collectLayouts: true,
+            skipPainting: true,
+            formatWidthOverride: formatWidth,
+          })
+          const spacingRightEdge = getMeasureSpacingRightEdge(measureNoteLayouts)
+          if (!Number.isFinite(spacingRightEdge)) {
+            deltas[indexInSystem] = 0
+            return
+          }
+          const rightBoundary = noteEndX - MEASURE_RIGHT_EDGE_GUARD_PX
+          deltas[indexInSystem] = spacingRightEdge - rightBoundary
+        })
+
+        return deltas
+      }
+
+      let hasChange = false
+      const maxIterations = Math.max(8, systemMeta.length * 3)
+      for (let iteration = 0; iteration < maxIterations; iteration += 1) {
+        const deltas = computeDeltas(nextWidths)
+        let receiverIndex = -1
+        let receiverDelta = 0
+        for (let index = 0; index < deltas.length; index += 1) {
+          const delta = deltas[index]
+          if (delta > receiverDelta) {
+            receiverDelta = delta
+            receiverIndex = index
+          }
+        }
+        if (receiverIndex < 0 || receiverDelta <= 0) break
+        const need = Math.ceil(receiverDelta + OVERFLOW_RECOVERY_PADDING_PX)
+        if (need <= 0) break
+
+        let donorIndex = -1
+        let donorAvailable = 0
+        for (let index = 0; index < deltas.length; index += 1) {
+          if (index === receiverIndex) continue
+          const delta = deltas[index]
+          if (!(delta < -OVERFLOW_RECOVERY_PADDING_PX)) continue
+          const spare = Math.max(0, Math.floor(-delta - OVERFLOW_RECOVERY_PADDING_PX))
+          if (spare <= 0) continue
+          const minimum = Math.max(1, Math.floor(currentMinimums[index] ?? 1))
+          const reducible = Math.max(0, (nextWidths[index] ?? 0) - minimum)
+          const available = Math.min(spare, reducible)
+          if (available > donorAvailable) {
+            donorAvailable = available
+            donorIndex = index
+          }
+        }
+
+        if (donorIndex < 0 || donorAvailable <= 0) break
+        const transfer = Math.min(need, donorAvailable)
+        if (transfer <= 0) break
+        nextWidths[receiverIndex] = (nextWidths[receiverIndex] ?? 0) + transfer
+        nextWidths[donorIndex] = Math.max(1, (nextWidths[donorIndex] ?? 0) - transfer)
+        hasChange = true
+      }
+
+      return { nextWidths, hasChange }
+    }
+
     const probeWidth = Math.max(140, Math.floor(systemUsableWidth / Math.max(1, systemMeasures.length)))
     const baseMinimumWidths = systemMeta.map((entry) => {
       const { noteStartX } = buildMeasureProbe(entry, STAFF_X, probeWidth)
@@ -230,14 +496,20 @@ export function renderVisibleSystems(params: {
       return Math.max(1, Math.ceil(decorationWidth + 24))
     })
 
-    let enforcedMinimumWidths = [...baseMinimumWidths]
+    let enforcedMinimumWidths = normalizeMinimumWidthsToSystem(baseMinimumWidths, systemUsableWidth)
     let measureWidths = allocateMeasureWidthsByDemand(measureDemands, systemUsableWidth, enforcedMinimumWidths)
 
     for (let pass = 0; pass < OVERFLOW_ANALYSIS_MAX_PASSES; pass += 1) {
       const { nextMinimums, hasIncrease } = analyzeOverflowMinimumWidths(measureWidths, enforcedMinimumWidths)
       if (!hasIncrease) break
-      enforcedMinimumWidths = nextMinimums
+      enforcedMinimumWidths = normalizeMinimumWidthsToSystem(nextMinimums, systemUsableWidth)
       measureWidths = allocateMeasureWidthsByDemand(measureDemands, systemUsableWidth, enforcedMinimumWidths)
+    }
+
+    for (let pass = 0; pass < OVERFLOW_ANALYSIS_MAX_PASSES; pass += 1) {
+      const { nextWidths, hasChange } = rebalanceMeasureWidthsBySpacing(measureWidths, enforcedMinimumWidths)
+      if (!hasChange) break
+      measureWidths = nextWidths
     }
 
     let measureCursorX = STAFF_X
@@ -245,7 +517,8 @@ export function renderVisibleSystems(params: {
       const measureWidth = measureWidths[indexInSystem] ?? Math.floor(systemUsableWidth / systemMeasures.length)
       const measureX = measureCursorX
       measureCursorX += measureWidth
-      const { noteStartX, formatWidth } = buildMeasureProbe(entry, measureX, measureWidth)
+      const { noteStartX, noteEndX, formatWidth } = buildMeasureProbe(entry, measureX, measureWidth)
+      const frozenSpacing = frozenSpacingByPairIndex.get(entry.pairIndex) ?? null
       const measureNoteLayouts = drawMeasureToContext({
         context,
         measure: entry.measure,
@@ -264,6 +537,8 @@ export function renderVisibleSystems(params: {
         activeSelection,
         draggingSelection,
         formatWidthOverride: formatWidth,
+        staticNoteXById: frozenSpacing?.staticNoteXById ?? null,
+        staticAccidentalRightXById: frozenSpacing?.staticAccidentalRightXById ?? null,
       })
 
       nextLayouts.push(...measureNoteLayouts)
@@ -311,6 +586,7 @@ export function renderVisibleSystems(params: {
         showEndTimeSignature: entry.showEndTimeSignature,
         includeMeasureStartDecorations: entry.includeMeasureStartDecorations,
         noteStartX,
+        noteEndX,
         formatWidth,
         overlayRect,
       })

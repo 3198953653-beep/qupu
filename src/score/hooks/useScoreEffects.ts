@@ -195,6 +195,7 @@ export function useScoreRenderEffect(params: {
       rendererSizeRef.current = { width: scoreWidth, height: scoreHeight }
     }
     const context = renderer.getContext()
+    const previousNoteLayoutsByPair = noteLayoutsByPairRef.current
     const { nextLayouts, nextLayoutsByPair, nextLayoutsByKey, nextMeasureLayouts } = renderVisibleSystems({
       context,
       measurePairs,
@@ -207,6 +208,7 @@ export function useScoreRenderEffect(params: {
       measureTimeSignaturesFromImport,
       activeSelection,
       draggingSelection,
+      previousNoteLayoutsByPair,
     })
 
     noteLayoutsRef.current = nextLayouts

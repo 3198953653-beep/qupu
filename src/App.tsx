@@ -97,11 +97,9 @@ function App() {
   const [musicXmlMetadataFromImport, setMusicXmlMetadataFromImport] = useState<MusicXmlMetadata | null>(null)
   const [currentPage, setCurrentPage] = useState(0)
   const [dragDebugReport, setDragDebugReport] = useState<string>('')
+  const [measureEdgeDebugReport, setMeasureEdgeDebugReport] = useState<string>('')
   const [autoScaleEnabled, setAutoScaleEnabled] = useState(false)
   const [manualScalePercent, setManualScalePercent] = useState(100)
-  const [requiredMeasureWidthCacheByMeasure] = useState(
-    () => new WeakMap<MeasurePair, Map<string, number>>(),
-  )
 
   const scoreRef = useRef<HTMLCanvasElement | null>(null)
   const scoreOverlayRef = useRef<HTMLCanvasElement | null>(null)
@@ -164,38 +162,10 @@ function App() {
         systemUsableWidth,
         measureKeyFifthsFromImport,
         measureTimeSignaturesFromImport,
-        getRequiredMeasureWidth: (context) => {
-          const cacheKey = [
-            context.isSystemStart ? 1 : 0,
-            context.showKeySignature ? 1 : 0,
-            context.showTimeSignature ? 1 : 0,
-            context.showEndTimeSignature ? 1 : 0,
-            context.keyFifths,
-            context.timeSignature.beats,
-            context.timeSignature.beatType,
-            context.nextTimeSignature.beats,
-            context.nextTimeSignature.beatType,
-          ].join('|')
-          const measureCache = requiredMeasureWidthCacheByMeasure.get(context.measure)
-          const cached = measureCache?.get(cacheKey)
-          if (cached !== undefined) return cached
-          const width = estimateRequiredMeasureWidth(context)
-          if (measureCache) {
-            measureCache.set(cacheKey, width)
-          } else {
-            requiredMeasureWidthCacheByMeasure.set(context.measure, new Map([[cacheKey, width]]))
-          }
-          return width
-        },
+        getRequiredMeasureWidth: estimateRequiredMeasureWidth,
       })
     },
-    [
-      measurePairs,
-      systemUsableWidth,
-      measureKeyFifthsFromImport,
-      measureTimeSignaturesFromImport,
-      requiredMeasureWidthCacheByMeasure,
-    ],
+    [measurePairs, systemUsableWidth, measureKeyFifthsFromImport, measureTimeSignaturesFromImport],
   )
   const systemCount = Math.max(1, systemRanges.length)
   const systemsPerPage = Math.max(
@@ -371,6 +341,102 @@ function App() {
   const goToPrevPage = () => setCurrentPage((page) => Math.max(0, Math.min(page, pageCount - 1) - 1))
   const goToNextPage = () => setCurrentPage((page) => Math.min(pageCount - 1, Math.max(0, page) + 1))
   const goToPage = (pageIndex: number) => setCurrentPage(Math.max(0, Math.min(pageCount - 1, pageIndex)))
+  const formatDebugCoord = (value: number | null | undefined): string => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return 'null'
+    return value.toFixed(3)
+  }
+  const dumpMeasureEdgeDebugReport = () => {
+    const measureLayouts = measureLayoutsRef.current
+    const noteLayoutsByPair = noteLayoutsByPairRef.current
+    const totalMeasureCount = measurePairsRef.current.length
+    const renderedPairIndices = [...measureLayouts.keys()].sort((left, right) => left - right)
+    const notRenderedCount = Math.max(0, totalMeasureCount - renderedPairIndices.length)
+    const lines: string[] = [
+      `generatedAt: ${new Date().toISOString()}`,
+      `totalMeasureCount: ${totalMeasureCount}`,
+      `renderedMeasureCount: ${renderedPairIndices.length}`,
+      `notRenderedMeasureCount: ${notRenderedCount}`,
+      `visibleSystemRange: ${visibleSystemRange.start}..${visibleSystemRange.end}`,
+      '',
+      'rows:',
+    ]
+
+    let overflowCount = 0
+    renderedPairIndices.forEach((pairIndex) => {
+      const measureLayout = measureLayouts.get(pairIndex)
+      if (!measureLayout) return
+
+      const pairLayouts = noteLayoutsByPair.get(pairIndex) ?? []
+      const measureEndBarX = measureLayout.measureX + measureLayout.measureWidth
+      const noteRightLimitX = Number.isFinite(measureLayout.noteEndX) ? measureLayout.noteEndX : measureEndBarX
+      const guardEndX = noteRightLimitX
+
+      if (pairLayouts.length === 0) {
+        lines.push(
+          `- pair ${pairIndex}: no-note-layout measureEndBarX=${formatDebugCoord(measureEndBarX)} noteRightLimitX=${formatDebugCoord(noteRightLimitX)}`,
+        )
+        return
+      }
+
+      let rightMostHeadX = Number.NEGATIVE_INFINITY
+      pairLayouts.forEach((layout) => {
+        if (layout.x > rightMostHeadX) rightMostHeadX = layout.x
+      })
+
+      const tailTolerancePx = 0.5
+      const tailCandidates = pairLayouts.filter((layout) => layout.x >= rightMostHeadX - tailTolerancePx)
+      const lastHeadLayout =
+        tailCandidates.reduce<NoteLayout | null>((best, layout) => {
+          if (!best || layout.x > best.x) return layout
+          return best
+        }, null) ?? null
+      const lastHeadRightX =
+        lastHeadLayout && lastHeadLayout.noteHeads.length > 0
+          ? lastHeadLayout.noteHeads.reduce((maxX, head) => Math.max(maxX, head.x + 9), Number.NEGATIVE_INFINITY)
+          : Number.NaN
+      const lastVisualLayout =
+        tailCandidates.reduce<NoteLayout | null>((best, layout) => {
+          if (!best || layout.rightX > best.rightX) return layout
+          return best
+        }, null) ?? null
+
+      const headDelta = lastHeadRightX - noteRightLimitX
+      const visualDelta = (lastVisualLayout?.rightX ?? Number.NaN) - noteRightLimitX
+      const spacingDelta = (lastVisualLayout?.spacingRightX ?? Number.NaN) - noteRightLimitX
+      const barlineHeadDelta = lastHeadRightX - measureEndBarX
+      const guardDelta = (lastVisualLayout?.rightX ?? Number.NaN) - guardEndX
+      const hasVisualOverflow = Number.isFinite(visualDelta) && visualDelta > 0
+      if (hasVisualOverflow) overflowCount += 1
+
+      lines.push(
+        [
+          `- pair ${pairIndex}:`,
+          `lastHead=${lastHeadLayout ? `${lastHeadLayout.staff}:${lastHeadLayout.id}` : 'n/a'}`,
+          `lastVisual=${lastVisualLayout ? `${lastVisualLayout.staff}:${lastVisualLayout.id}` : 'n/a'}`,
+          `lastHeadX=${formatDebugCoord(lastHeadLayout?.x)}`,
+          `lastHeadRightX=${formatDebugCoord(lastHeadRightX)}`,
+          `lastVisualRightX=${formatDebugCoord(lastVisualLayout?.rightX)}`,
+          `lastSpacingRightX=${formatDebugCoord(lastVisualLayout?.spacingRightX)}`,
+          `measureEndBarX=${formatDebugCoord(measureEndBarX)}`,
+          `noteRightLimitX=${formatDebugCoord(noteRightLimitX)}`,
+          `headDelta=${formatDebugCoord(headDelta)}`,
+          `barlineHeadDelta=${formatDebugCoord(barlineHeadDelta)}`,
+          `visualDelta=${formatDebugCoord(visualDelta)}`,
+          `spacingDelta=${formatDebugCoord(spacingDelta)}`,
+          `guardDelta=${formatDebugCoord(guardDelta)}`,
+          `overflow=${hasVisualOverflow ? 'YES' : 'NO'}`,
+        ].join(' '),
+      )
+    })
+
+    lines.splice(4, 0, `renderedOverflowCount(visualDelta>0): ${overflowCount}`)
+    const report = lines.join('\n')
+    setMeasureEdgeDebugReport(report)
+    console.log(report)
+  }
+  const clearMeasureEdgeDebugReport = () => {
+    setMeasureEdgeDebugReport('')
+  }
 
   return (
     <main className="app-shell">
@@ -431,6 +497,9 @@ function App() {
         dragDebugReport={dragDebugReport}
         onDumpDragLog={dumpDragDebugReport}
         onClearDragLog={clearDragDebugReport}
+        measureEdgeDebugReport={measureEdgeDebugReport}
+        onDumpMeasureEdgeLog={dumpMeasureEdgeDebugReport}
+        onClearMeasureEdgeLog={clearMeasureEdgeDebugReport}
       />
 
       {isImportLoading && (
