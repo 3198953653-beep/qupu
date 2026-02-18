@@ -17,6 +17,7 @@ import {
   getLayoutNoteKey,
   getRenderedNoteVisualX,
 } from '../layout/renderPosition'
+import { applyUnifiedTimeAxisSpacing } from '../layout/timeAxisSpacing'
 import { getStepOctaveAlterFromPitch } from '../pitchMath'
 import { buildPitchLineMap, createPianoPitches, getPitchLine, getStrictStemDirection } from '../pitchUtils'
 import type { RenderedNoteKey } from '../accidentals'
@@ -25,7 +26,6 @@ import type {
   DragDebugSnapshot,
   DragDebugStaticRecord,
   MeasurePair,
-  NoteDuration,
   NoteLayout,
   Pitch,
   ScoreNote,
@@ -40,18 +40,6 @@ const PITCH_LINE_MAP: Record<StaffKind, Record<Pitch, number>> = {
   bass: buildPitchLineMap('bass', PITCHES),
 }
 const VALID_BEAM_DURATIONS = ['4', '8', '16', '32', '64'] as const
-const DURATION_BEATS: Record<NoteDuration, number> = {
-  w: 4,
-  h: 2,
-  q: 1,
-  qd: 1.5,
-  '8': 0.5,
-  '8d': 0.75,
-  '16': 0.25,
-  '16d': 0.375,
-  '32': 0.125,
-  '32d': 0.1875,
-}
 export type DrawMeasureParams = {
   context: ReturnType<Renderer['getContext']>
   measure: MeasurePair
@@ -368,46 +356,13 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
 
   new Formatter().joinVoices([trebleVoice]).joinVoices([bassVoice]).format([trebleVoice, bassVoice], formatWidth)
 
-  const hasVisibleAccidental = (rendered: { renderedKeys: RenderedNoteKey[] }[]): boolean =>
-    rendered.some((entry) => entry.renderedKeys.some((key) => Boolean(key.accidental)))
-
-  // Keep the rhythmic time-axis stable when no visible accidentals are present.
-  // This avoids pitch-dependent horizontal jitter from VexFlow minimum-width heuristics.
-  const shouldUseStableTimeGrid =
-    (!staticNoteXById || staticNoteXById.size === 0) &&
-    !hasVisibleAccidental(trebleRendered) &&
-    !hasVisibleAccidental(bassRendered)
-
-  if (shouldUseStableTimeGrid) {
-    const noteStartX = trebleStave.getNoteStartX()
-    const usableGridWidth = Math.max(1, formatWidth - 12)
-    const applyStableTimeGrid = (
-      sourceNotes: ScoreNote[],
-      rendered: Array<{ vexNote: StaveNote }>,
-    ) => {
-      const totalBeatsByNotes = sourceNotes.reduce((sum, note) => sum + (DURATION_BEATS[note.duration] ?? 1), 0)
-      const totalBeats = Math.max(timeSignature.beats, totalBeatsByNotes, 0.0001)
-      let elapsedBeats = 0
-      sourceNotes.forEach((note, noteIndex) => {
-        const vexNote = rendered[noteIndex]?.vexNote
-        if (vexNote) {
-          const ratio = Math.max(0, Math.min(1, elapsedBeats / totalBeats))
-          const targetX = noteStartX + ratio * usableGridWidth
-          const currentX = getRenderedNoteVisualX(vexNote)
-          if (Number.isFinite(currentX)) {
-            const delta = targetX - currentX
-            if (Math.abs(delta) >= 0.001) {
-              vexNote.setXShift(vexNote.getXShift() + delta)
-            }
-          }
-        }
-        elapsedBeats += DURATION_BEATS[note.duration] ?? 1
-      })
-    }
-
-    applyStableTimeGrid(measure.treble, trebleRendered)
-    applyStableTimeGrid(measure.bass, bassRendered)
-  }
+  applyUnifiedTimeAxisSpacing({
+    measure,
+    noteStartX: trebleStave.getNoteStartX(),
+    formatWidth,
+    trebleRendered,
+    bassRendered,
+  })
 
   if (staticNoteXById && staticNoteXById.size > 0) {
     const alignRenderedX = (staff: StaffKind, sourceNotes: ScoreNote[], rendered: { vexNote: StaveNote }[]) => {
