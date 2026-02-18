@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as Tone from 'tone'
 import { Renderer } from 'vexflow'
 import './App.css'
@@ -14,7 +14,6 @@ import {
   SYSTEM_HEIGHT,
 } from './score/constants'
 import { buildAdaptiveSystemRanges, toDisplayDuration } from './score/layout/demand'
-import { estimateRequiredMeasureWidth } from './score/layout/requiredWidth'
 import { useDragHandlers } from './score/dragHandlers'
 import { useEditorHandlers } from './score/editorHandlers'
 import {
@@ -80,6 +79,32 @@ function clampScalePercent(value: number): number {
   return Math.max(55, Math.min(130, Math.round(value)))
 }
 
+type FirstMeasureNoteDebugRow = {
+  staff: 'treble' | 'bass'
+  noteId: string
+  noteIndex: number
+  keyIndex: number
+  pitch: Pitch
+  noteX: number | null
+  noteRightX: number | null
+  spacingRightX: number | null
+  headX: number | null
+  headY: number | null
+  pitchY: number | null
+}
+
+type FirstMeasureSnapshot = {
+  stage: string
+  pairIndex: number
+  generatedAt: string
+  measureX: number | null
+  measureWidth: number | null
+  measureEndBarX: number | null
+  noteStartX: number | null
+  noteEndX: number | null
+  rows: FirstMeasureNoteDebugRow[]
+}
+
 function App() {
   const [notes, setNotes] = useState<ScoreNote[]>(INITIAL_NOTES)
   const [bassNotes, setBassNotes] = useState<ScoreNote[]>(INITIAL_BASS_NOTES)
@@ -130,6 +155,14 @@ function App() {
   const measureTimeSignaturesFromImportRef = useRef<TimeSignature[] | null>(null)
   const musicXmlMetadataFromImportRef = useRef<MusicXmlMetadata | null>(null)
   const importedNoteLookupRef = useRef<Map<string, ImportedNoteLocation>>(new Map())
+  const firstMeasureBaselineRef = useRef<FirstMeasureSnapshot | null>(null)
+  const firstMeasureDragContextRef = useRef<{
+    noteId: string
+    staff: Selection['staff']
+    keyIndex: number
+    pairIndex: number
+  } | null>(null)
+  const firstMeasureDebugRafRef = useRef<number | null>(null)
   const measurePairs = useMemo(
     () => measurePairsFromImport ?? buildMeasurePairs(notes, bassNotes),
     [measurePairsFromImport, notes, bassNotes],
@@ -162,7 +195,6 @@ function App() {
         systemUsableWidth,
         measureKeyFifthsFromImport,
         measureTimeSignaturesFromImport,
-        getRequiredMeasureWidth: estimateRequiredMeasureWidth,
       })
     },
     [measurePairs, systemUsableWidth, measureKeyFifthsFromImport, measureTimeSignaturesFromImport],
@@ -345,6 +377,145 @@ function App() {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 'null'
     return value.toFixed(3)
   }
+  const finiteOrNull = (value: number | null | undefined): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return null
+    return value
+  }
+  const getPitchForKeyIndex = (note: ScoreNote, keyIndex: number): Pitch => {
+    if (keyIndex <= 0) return note.pitch
+    return note.chordPitches?.[keyIndex - 1] ?? note.pitch
+  }
+  const captureFirstMeasureSnapshot = (stage: string): FirstMeasureSnapshot | null => {
+    const pairIndex = 0
+    const measure = measurePairsRef.current[pairIndex]
+    if (!measure) return null
+    const layouts = noteLayoutsByPairRef.current.get(pairIndex) ?? []
+    const layoutByNoteKey = new Map<string, NoteLayout>()
+    layouts.forEach((layout) => {
+      layoutByNoteKey.set(`${layout.staff}:${layout.id}`, layout)
+    })
+    const measureLayout = measureLayoutsRef.current.get(pairIndex) ?? null
+    const rows: FirstMeasureNoteDebugRow[] = []
+    const pushRows = (staff: 'treble' | 'bass', notes: ScoreNote[]) => {
+      notes.forEach((note, noteIndex) => {
+        const layout = layoutByNoteKey.get(`${staff}:${note.id}`)
+        const keyCount = 1 + (note.chordPitches?.length ?? 0)
+        for (let keyIndex = 0; keyIndex < keyCount; keyIndex += 1) {
+          const pitch = getPitchForKeyIndex(note, keyIndex)
+          const head = layout?.noteHeads.find((item) => item.keyIndex === keyIndex)
+          rows.push({
+            staff,
+            noteId: note.id,
+            noteIndex,
+            keyIndex,
+            pitch,
+            noteX: finiteOrNull(layout?.x),
+            noteRightX: finiteOrNull(layout?.rightX),
+            spacingRightX: finiteOrNull(layout?.spacingRightX),
+            headX: finiteOrNull(head?.x),
+            headY: finiteOrNull(head?.y),
+            pitchY: finiteOrNull(layout?.pitchYMap[pitch]),
+          })
+        }
+      })
+    }
+    pushRows('treble', measure.treble)
+    pushRows('bass', measure.bass)
+    return {
+      stage,
+      pairIndex,
+      generatedAt: new Date().toISOString(),
+      measureX: finiteOrNull(measureLayout?.measureX),
+      measureWidth: finiteOrNull(measureLayout?.measureWidth),
+      measureEndBarX: finiteOrNull(
+        measureLayout ? measureLayout.measureX + measureLayout.measureWidth : null,
+      ),
+      noteStartX: finiteOrNull(measureLayout?.noteStartX),
+      noteEndX: finiteOrNull(measureLayout?.noteEndX),
+      rows,
+    }
+  }
+  const buildFirstMeasureDiffReport = (
+    beforeSnapshot: FirstMeasureSnapshot,
+    afterSnapshot: FirstMeasureSnapshot,
+  ): string => {
+    const afterByRowKey = new Map<string, FirstMeasureNoteDebugRow>()
+    afterSnapshot.rows.forEach((row) => {
+      afterByRowKey.set(`${row.staff}:${row.noteId}:${row.keyIndex}`, row)
+    })
+    const lines: string[] = [
+      `generatedAt: ${new Date().toISOString()}`,
+      `debugTarget: first-measure(pair=0)`,
+      `dragged: ${
+        firstMeasureDragContextRef.current
+          ? `${firstMeasureDragContextRef.current.staff}:${firstMeasureDragContextRef.current.noteId}[key=${firstMeasureDragContextRef.current.keyIndex}] pair=${firstMeasureDragContextRef.current.pairIndex}`
+          : 'unknown'
+      }`,
+      `dragPreviewFrameCount: ${dragDebugFramesRef.current.length}`,
+      `baselineStage: ${beforeSnapshot.stage} at ${beforeSnapshot.generatedAt}`,
+      `releaseStage: ${afterSnapshot.stage} at ${afterSnapshot.generatedAt}`,
+      `baseline measureX=${formatDebugCoord(beforeSnapshot.measureX)} measureWidth=${formatDebugCoord(beforeSnapshot.measureWidth)} measureEndBarX=${formatDebugCoord(beforeSnapshot.measureEndBarX)} noteStartX=${formatDebugCoord(beforeSnapshot.noteStartX)} noteEndX=${formatDebugCoord(beforeSnapshot.noteEndX)}`,
+      `release  measureX=${formatDebugCoord(afterSnapshot.measureX)} measureWidth=${formatDebugCoord(afterSnapshot.measureWidth)} measureEndBarX=${formatDebugCoord(afterSnapshot.measureEndBarX)} noteStartX=${formatDebugCoord(afterSnapshot.noteStartX)} noteEndX=${formatDebugCoord(afterSnapshot.noteEndX)}`,
+      '',
+      'rows (before -> after | delta):',
+    ]
+    beforeSnapshot.rows.forEach((beforeRow) => {
+      const rowKey = `${beforeRow.staff}:${beforeRow.noteId}:${beforeRow.keyIndex}`
+      const afterRow = afterByRowKey.get(rowKey)
+      const delta = (afterValue: number | null, beforeValue: number | null): string => {
+        if (typeof afterValue !== 'number' || typeof beforeValue !== 'number') return 'null'
+        return (afterValue - beforeValue).toFixed(3)
+      }
+      lines.push(
+        [
+          `- ${beforeRow.staff} note=${beforeRow.noteId} idx=${beforeRow.noteIndex} key=${beforeRow.keyIndex} pitch=${beforeRow.pitch}:`,
+          `noteX ${formatDebugCoord(beforeRow.noteX)} -> ${formatDebugCoord(afterRow?.noteX)} (d=${delta(afterRow?.noteX ?? null, beforeRow.noteX)})`,
+          `headX ${formatDebugCoord(beforeRow.headX)} -> ${formatDebugCoord(afterRow?.headX)} (d=${delta(afterRow?.headX ?? null, beforeRow.headX)})`,
+          `headY ${formatDebugCoord(beforeRow.headY)} -> ${formatDebugCoord(afterRow?.headY)} (d=${delta(afterRow?.headY ?? null, beforeRow.headY)})`,
+          `pitchY ${formatDebugCoord(beforeRow.pitchY)} -> ${formatDebugCoord(afterRow?.pitchY)} (d=${delta(afterRow?.pitchY ?? null, beforeRow.pitchY)})`,
+          `rightX ${formatDebugCoord(beforeRow.noteRightX)} -> ${formatDebugCoord(afterRow?.noteRightX)} (d=${delta(afterRow?.noteRightX ?? null, beforeRow.noteRightX)})`,
+          `spacingRightX ${formatDebugCoord(beforeRow.spacingRightX)} -> ${formatDebugCoord(afterRow?.spacingRightX)} (d=${delta(afterRow?.spacingRightX ?? null, beforeRow.spacingRightX)})`,
+        ].join(' '),
+      )
+    })
+    return lines.join('\n')
+  }
+  const onBeginDragWithFirstMeasureDebug: typeof beginDrag = (event) => {
+    beginDrag(event)
+    const drag = dragRef.current
+    if (!drag) return
+    firstMeasureDragContextRef.current = {
+      noteId: drag.noteId,
+      staff: drag.staff,
+      keyIndex: drag.keyIndex,
+      pairIndex: drag.pairIndex,
+    }
+    firstMeasureBaselineRef.current = captureFirstMeasureSnapshot('before-drag')
+  }
+  const onEndDragWithFirstMeasureDebug: typeof endDrag = (event) => {
+    const dragging = dragRef.current
+    endDrag(event)
+    if (!dragging) return
+    const beforeSnapshot = firstMeasureBaselineRef.current
+    if (!beforeSnapshot) return
+    if (firstMeasureDebugRafRef.current !== null) {
+      window.cancelAnimationFrame(firstMeasureDebugRafRef.current)
+      firstMeasureDebugRafRef.current = null
+    }
+    firstMeasureDebugRafRef.current = window.requestAnimationFrame(() => {
+      firstMeasureDebugRafRef.current = window.requestAnimationFrame(() => {
+        const afterSnapshot = captureFirstMeasureSnapshot('after-drag-release')
+        if (afterSnapshot) {
+          const report = buildFirstMeasureDiffReport(beforeSnapshot, afterSnapshot)
+          setMeasureEdgeDebugReport(report)
+          console.log(report)
+        }
+        firstMeasureBaselineRef.current = null
+        firstMeasureDragContextRef.current = null
+        firstMeasureDebugRafRef.current = null
+      })
+    })
+  }
   const dumpMeasureEdgeDebugReport = () => {
     const measureLayouts = measureLayoutsRef.current
     const noteLayoutsByPair = noteLayoutsByPairRef.current
@@ -438,6 +609,14 @@ function App() {
     setMeasureEdgeDebugReport('')
   }
 
+  useEffect(() => {
+    return () => {
+      if (firstMeasureDebugRafRef.current !== null) {
+        window.cancelAnimationFrame(firstMeasureDebugRafRef.current)
+      }
+    }
+  }, [])
+
   return (
     <main className="app-shell">
       <section className="hero">
@@ -484,9 +663,9 @@ function App() {
         draggingSelection={draggingSelection}
         scoreRef={scoreRef}
         scoreOverlayRef={scoreOverlayRef}
-        onBeginDrag={beginDrag}
+        onBeginDrag={onBeginDragWithFirstMeasureDebug}
         onSurfacePointerMove={onSurfacePointerMove}
-        onEndDrag={endDrag}
+        onEndDrag={onEndDragWithFirstMeasureDebug}
         selectedStaffLabel={activeSelection.staff === 'treble' ? 'Treble' : 'Bass'}
         selectedPitchLabel={toDisplayPitch(currentSelectionPitch)}
         selectedDurationLabel={toDisplayDuration(currentSelection.duration)}

@@ -35,20 +35,41 @@ function getPitchAccidentalToken(pitch: string): string | null {
   return accidental.length > 0 ? accidental : null
 }
 
-function getVisibleAccidentalKeysForNote(note: ScoreNote): Set<number> {
-  const visible = new Set<number>()
+function getVisibleAccidentalKeySetFromNote(note: ScoreNote): Set<number> {
+  const keys = new Set<number>()
   const rootAccidental = note.accidental !== undefined ? note.accidental : getPitchAccidentalToken(note.pitch)
-  if (rootAccidental) visible.add(0)
+  if (rootAccidental) keys.add(0)
 
-  note.chordPitches?.forEach((pitch, chordIndex) => {
+  note.chordPitches?.forEach((chordPitch, chordIndex) => {
     const chordAccidental =
       note.chordAccidentals?.[chordIndex] !== undefined
         ? note.chordAccidentals[chordIndex]
-        : getPitchAccidentalToken(pitch)
-    if (chordAccidental) visible.add(chordIndex + 1)
+        : getPitchAccidentalToken(chordPitch)
+    if (chordAccidental) keys.add(chordIndex + 1)
   })
 
-  return visible
+  return keys
+}
+
+function getVisibleAccidentalKeySetFromLayout(layout: NoteLayout): Set<number> {
+  const keys = new Set<number>()
+  Object.keys(layout.accidentalRightXByKeyIndex).forEach((rawKeyIndex) => {
+    const keyIndex = Number(rawKeyIndex)
+    const rightX = layout.accidentalRightXByKeyIndex[keyIndex]
+    if (!Number.isFinite(keyIndex) || !Number.isFinite(rightX)) return
+    keys.add(keyIndex)
+  })
+  return keys
+}
+
+function hasAccidentalPresenceDelta(note: ScoreNote, previousLayout: NoteLayout): boolean {
+  const currentVisibleKeys = getVisibleAccidentalKeySetFromNote(note)
+  const previousVisibleKeys = getVisibleAccidentalKeySetFromLayout(previousLayout)
+  if (currentVisibleKeys.size !== previousVisibleKeys.size) return true
+  for (const keyIndex of currentVisibleKeys) {
+    if (!previousVisibleKeys.has(keyIndex)) return true
+  }
+  return false
 }
 
 function tryBuildFrozenMeasureSpacing(params: {
@@ -74,19 +95,10 @@ function tryBuildFrozenMeasureSpacing(params: {
       const previousLayout = previousByNoteKey.get(noteKey)
       if (!previousLayout) return false
 
-      const currentVisibleAccidentalKeys = getVisibleAccidentalKeysForNote(note)
-      const previousVisibleAccidentalKeys = new Set<number>()
-      Object.keys(previousLayout.accidentalRightXByKeyIndex).forEach((rawKeyIndex) => {
-        const keyIndex = Number(rawKeyIndex)
-        if (Number.isFinite(keyIndex)) {
-          previousVisibleAccidentalKeys.add(keyIndex)
-        }
-      })
-      // Freeze spacing only for measures with no visible accidentals.
-      // If accidentals are present, allow full re-layout to avoid overflow at barlines.
-      if (currentVisibleAccidentalKeys.size > 0 || previousVisibleAccidentalKeys.size > 0) {
-        return false
-      }
+      // Freeze only when accidental visibility did not change (add/remove).
+      // Accidental type changes (# -> n) are allowed and considered no-presence-change.
+      // Matching uses noteId+keyIndex, so dragged-note pitch moves won't break pairing.
+      if (hasAccidentalPresenceDelta(note, previousLayout)) return false
 
       staticNoteXById.set(noteKey, previousLayout.x)
       const previousAccidentalMap = new Map<number, number>()
@@ -290,7 +302,9 @@ export function renderVisibleSystems(params: {
         includeMeasureStartDecorations,
       }
     })
-    const freezeSelection = draggingSelection
+    // Apply spacing freeze while dragging and on immediate post-release render,
+    // by falling back to activeSelection when draggingSelection is null.
+    const freezeSelection = draggingSelection ?? activeSelection
     const frozenPairIndex = findPairIndexForSelection(freezeSelection, previousNoteLayoutsByPair)
     const frozenSpacingByPairIndex = new Map<number, FrozenMeasureSpacing>()
     systemMeta.forEach((entry) => {
