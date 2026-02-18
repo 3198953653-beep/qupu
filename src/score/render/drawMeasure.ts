@@ -41,6 +41,7 @@ const PITCH_LINE_MAP: Record<StaffKind, Record<Pitch, number>> = {
   bass: buildPitchLineMap('bass', PITCHES),
 }
 const VALID_BEAM_DURATIONS = ['4', '8', '16', '32', '64'] as const
+const ACCIDENTAL_HEAD_CLEARANCE_PX = 2
 export type DrawMeasureParams = {
   context: ReturnType<Renderer['getContext']>
   measure: MeasurePair
@@ -389,83 +390,94 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     alignRenderedX('bass', measure.bass, bassRendered)
   }
 
-  if (staticAccidentalRightXById && staticAccidentalRightXById.size > 0) {
-    const alignRenderedAccidentalOffset = (
-      staff: StaffKind,
-      sourceNotes: ScoreNote[],
-      rendered: { vexNote: StaveNote; renderedKeys: RenderedNoteKey[] }[],
-    ) => {
-      sourceNotes.forEach((sourceNote, noteIndex) => {
-        const renderedEntry = rendered[noteIndex]
-        if (!renderedEntry) return
-        const layoutKey = getLayoutNoteKey(staff, sourceNote.id)
-        const targetByKeyIndex = staticAccidentalRightXById.get(layoutKey)
-        const noteBaseX = staticNoteXById?.get(layoutKey) ?? getRenderedNoteVisualX(renderedEntry.vexNote)
-        const accidentalModifiers = renderedEntry.vexNote
-          .getModifiersByType(Accidental.CATEGORY)
-          .map((modifier) => modifier as Accidental)
+  const alignRenderedAccidentalOffset = (
+    staff: StaffKind,
+    sourceNotes: ScoreNote[],
+    rendered: { vexNote: StaveNote; renderedKeys: RenderedNoteKey[] }[],
+  ) => {
+    sourceNotes.forEach((sourceNote, noteIndex) => {
+      const renderedEntry = rendered[noteIndex]
+      if (!renderedEntry) return
+      const layoutKey = getLayoutNoteKey(staff, sourceNote.id)
+      const targetByKeyIndex = staticAccidentalRightXById?.get(layoutKey)
+      const noteBaseX = staticNoteXById?.get(layoutKey) ?? getRenderedNoteVisualX(renderedEntry.vexNote)
+      const accidentalModifiers = renderedEntry.vexNote
+        .getModifiersByType(Accidental.CATEGORY)
+        .map((modifier) => modifier as Accidental)
 
-        renderedEntry.renderedKeys.forEach((renderedKey, renderedIndex) => {
-          if (!renderedKey.accidental) return
-          const rowKey = `${layoutKey}|${renderedKey.keyIndex}`
-          const modifier = accidentalModifiers.find((item) => item.getIndex() === renderedIndex)
-          if (!modifier) {
-            accidentalLockByRowKey.set(rowKey, {
-              targetRightX: null,
-              applied: false,
-              reason: 'no-modifier',
-            })
-            return
-          }
+      renderedEntry.renderedKeys.forEach((renderedKey, renderedIndex) => {
+        if (!renderedKey.accidental) return
+        const rowKey = `${layoutKey}|${renderedKey.keyIndex}`
+        const modifier = accidentalModifiers.find((item) => item.getIndex() === renderedIndex)
+        if (!modifier) {
+          accidentalLockByRowKey.set(rowKey, {
+            targetRightX: null,
+            applied: false,
+            reason: 'no-modifier',
+          })
+          return
+        }
 
-          const targetedX = targetByKeyIndex?.get(renderedKey.keyIndex)
-          const fallbackTarget = Number.isFinite(noteBaseX) ? noteBaseX + PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX : null
-          const targetRightX =
-            typeof targetedX === 'number' && Number.isFinite(targetedX)
-              ? targetedX
-              : fallbackTarget
-          if (targetRightX === null) {
-            accidentalLockByRowKey.set(rowKey, {
-              targetRightX: null,
-              applied: false,
-              reason: 'no-target',
-            })
-            return
-          }
+        const headXRaw = renderedEntry.vexNote.noteHeads[renderedIndex]?.getAbsoluteX()
+        const headX =
+          Number.isFinite(headXRaw) && Math.abs(headXRaw) > 0.0001
+            ? headXRaw
+            : noteBaseX
+        const widthRaw = modifier.getWidth()
+        const modifierWidth = Number.isFinite(widthRaw) ? widthRaw : null
+        const targetByHead =
+          typeof headX === 'number' && Number.isFinite(headX) && modifierWidth !== null
+            ? headX - modifierWidth - ACCIDENTAL_HEAD_CLEARANCE_PX
+            : null
 
-          const currentRightX = getAccidentalVisualX(renderedEntry.vexNote, modifier, renderedIndex)
-          if (currentRightX === null) {
-            accidentalLockByRowKey.set(rowKey, {
-              targetRightX,
-              applied: false,
-              reason: 'invalid-current-x',
-            })
-            return
-          }
+        const targetedX = targetByKeyIndex?.get(renderedKey.keyIndex)
+        const fallbackTarget =
+          targetByHead ?? (Number.isFinite(noteBaseX) ? noteBaseX + PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX : null)
+        const targetRightX =
+          typeof targetedX === 'number' && Number.isFinite(targetedX)
+            ? targetedX
+            : fallbackTarget
+        if (targetRightX === null) {
+          accidentalLockByRowKey.set(rowKey, {
+            targetRightX: null,
+            applied: false,
+            reason: 'no-target',
+          })
+          return
+        }
 
-          const delta = targetRightX - currentRightX
-          if (Math.abs(delta) >= 0.001) {
-            addModifierXShift(modifier, delta)
-          }
-
-          const alignedRightX = getAccidentalVisualX(renderedEntry.vexNote, modifier, renderedIndex)
-          if (alignedRightX !== null) {
-            previewAccidentalByRowKey.set(rowKey, alignedRightX)
-          } else {
-            previewAccidentalByRowKey.set(rowKey, targetRightX)
-          }
+        const currentRightX = getAccidentalVisualX(renderedEntry.vexNote, modifier, renderedIndex)
+        if (currentRightX === null) {
           accidentalLockByRowKey.set(rowKey, {
             targetRightX,
-            applied: true,
-            reason: Math.abs(delta) >= 0.001 ? 'native-aligned' : 'native-already-aligned',
+            applied: false,
+            reason: 'invalid-current-x',
           })
+          return
+        }
+
+        const delta = targetRightX - currentRightX
+        if (Math.abs(delta) >= 0.001) {
+          addModifierXShift(modifier, delta)
+        }
+
+        const alignedRightX = getAccidentalVisualX(renderedEntry.vexNote, modifier, renderedIndex)
+        if (alignedRightX !== null) {
+          previewAccidentalByRowKey.set(rowKey, alignedRightX)
+        } else {
+          previewAccidentalByRowKey.set(rowKey, targetRightX)
+        }
+        accidentalLockByRowKey.set(rowKey, {
+          targetRightX,
+          applied: true,
+          reason: Math.abs(delta) >= 0.001 ? 'native-aligned' : 'native-already-aligned',
         })
       })
-    }
-
-    alignRenderedAccidentalOffset('treble', measure.treble, trebleRendered)
-    alignRenderedAccidentalOffset('bass', measure.bass, bassRendered)
+    })
   }
+
+  alignRenderedAccidentalOffset('treble', measure.treble, trebleRendered)
+  alignRenderedAccidentalOffset('bass', measure.bass, bassRendered)
 
   if (debugCapture) {
     const rows: DragDebugRow[] = []
