@@ -1,6 +1,6 @@
-import type { StaveNote } from 'vexflow'
+import { Accidental, type StaveNote } from 'vexflow'
 import { DURATION_TICKS } from '../constants'
-import { getRenderedNoteVisualX } from './renderPosition'
+import { getAccidentalVisualX, getRenderedNoteVisualX } from './renderPosition'
 import type { MeasurePair, ScoreNote } from '../types'
 
 type RenderedStaffNote = {
@@ -40,6 +40,8 @@ const DEFAULT_COMPACT_TAIL_ANCHOR_TICKS = 4
 const UNIFORM_TICK_SPACING_START_GUARD_PX = 0
 const UNIFORM_TICK_SPACING_END_GUARD_PX = -2
 const UNIFORM_EDGE_GAP_RATIO = 0.82
+const UNIFORM_DELTA_FLOOR_RATIO = 1
+const ACCIDENTAL_PREALLOCATED_CLEARANCE_PX = 2
 const MIN_GAP_BEATS = 1 / 32
 const GAP_GAMMA = 0.72
 const GAP_BASE_WEIGHT = 0.45
@@ -113,6 +115,26 @@ function getNoteHorizontalExtents(vexNote: StaveNote): { leftExtent: number; rig
     rightExtent = Math.max(DEFAULT_NOTE_HEAD_WIDTH_PX, DEFAULT_NOTE_HEAD_WIDTH_PX + rightDisplacedHeadPx)
   }
 
+  const noteHeadX = getRenderedNoteVisualX(vexNote)
+  if (Number.isFinite(noteHeadX)) {
+    let accidentalMinX = Number.POSITIVE_INFINITY
+    vexNote.getModifiersByType(Accidental.CATEGORY).forEach((modifier) => {
+      const accidental = modifier as Accidental
+      const renderedIndex = accidental.getIndex()
+      if (typeof renderedIndex !== 'number' || !Number.isFinite(renderedIndex)) return
+      const accidentalX = getAccidentalVisualX(vexNote, accidental, renderedIndex)
+      if (typeof accidentalX === 'number' && Number.isFinite(accidentalX)) {
+        accidentalMinX = Math.min(accidentalMinX, accidentalX)
+      }
+    })
+    if (Number.isFinite(accidentalMinX)) {
+      leftExtent = Math.max(
+        leftExtent,
+        noteHeadX - accidentalMinX + ACCIDENTAL_PREALLOCATED_CLEARANCE_PX,
+      )
+    }
+  }
+
   return { leftExtent, rightExtent }
 }
 
@@ -168,6 +190,13 @@ export type UniformTickTimeline = {
   domainSpanTicks: number
 }
 
+type UniformTimelineWeightMap = {
+  timeline: UniformTickTimeline
+  orderedTicks: number[]
+  cumulativeWeightByTick: Map<number, number>
+  totalWeight: number
+}
+
 export function getUniformTickTimeline(noteOnsets: number[], measureTicks: number): UniformTickTimeline {
   const safeMeasureTicks = Math.max(1, measureTicks)
   const sortedOnsets = [...new Set(noteOnsets.filter((value) => Number.isFinite(value)))].sort((left, right) => left - right)
@@ -219,7 +248,55 @@ export function getMeasureUniformTimelineTicks(measure: MeasurePair, measureTick
 function mapTickGapToWeight(deltaTicks: number, config: TimeAxisSpacingConfig): number {
   const beats = deltaTicks / TICKS_PER_QUARTER
   const compressed = Math.pow(Math.max(config.minGapBeats, beats), config.gapGamma)
-  return config.gapBaseWeight + compressed
+  return compressed + config.gapBaseWeight * beats
+}
+
+function buildUniformTimelineWeightMap(
+  noteOnsets: number[],
+  measureTicks: number,
+  config: TimeAxisSpacingConfig,
+): UniformTimelineWeightMap {
+  const timeline = getUniformTickTimeline(noteOnsets, measureTicks)
+  const orderedTicks = [
+    timeline.domainStartTicks,
+    ...[...new Set(noteOnsets)].filter((tick) => Number.isFinite(tick) && tick >= timeline.domainStartTicks && tick <= timeline.domainEndTicks),
+    timeline.domainEndTicks,
+  ].sort((left, right) => left - right)
+
+  const cumulativeWeightByTick = new Map<number, number>()
+  if (orderedTicks.length === 0) {
+    return {
+      timeline,
+      orderedTicks: [],
+      cumulativeWeightByTick,
+      totalWeight: 1,
+    }
+  }
+
+  cumulativeWeightByTick.set(orderedTicks[0], 0)
+  let cumulativeWeight = 0
+  for (let i = 1; i < orderedTicks.length; i += 1) {
+    const deltaTicks = Math.max(1, orderedTicks[i] - orderedTicks[i - 1])
+    cumulativeWeight += mapTickGapToWeight(deltaTicks, config)
+    cumulativeWeightByTick.set(orderedTicks[i], cumulativeWeight)
+  }
+
+  return {
+    timeline,
+    orderedTicks,
+    cumulativeWeightByTick,
+    totalWeight: Math.max(0.0001, cumulativeWeight),
+  }
+}
+
+export function getMeasureUniformTimelineWeightSpan(
+  measure: MeasurePair,
+  measureTicks: number,
+  spacingConfig: TimeAxisSpacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
+): number {
+  const onsets = collectMeasureOnsetTicks(measure)
+  const weightMap = buildUniformTimelineWeightMap(onsets, measureTicks, spacingConfig)
+  return Math.max(0.0001, weightMap.totalWeight)
 }
 
 export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingParams): void {
@@ -313,13 +390,76 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
   const targetXByOnset = new Map<number, number>()
 
   if (uniformSpacingByTicks) {
-    const timeline = getUniformTickTimeline(noteOnsets, measureTotalTicks)
+    const timelineWeightMap = buildUniformTimelineWeightMap(noteOnsets, measureTotalTicks, spacingConfig)
     const spanWidth = Math.max(1, axisEnd - axisStart)
     noteOnsets.forEach((onset) => {
-      const clamped = Math.max(timeline.domainStartTicks, Math.min(timeline.domainEndTicks, onset))
-      const ratio = (clamped - timeline.domainStartTicks) / timeline.domainSpanTicks
+      const cumulativeWeight = timelineWeightMap.cumulativeWeightByTick.get(onset)
+      if (cumulativeWeight === undefined) return
+      const ratio = cumulativeWeight / timelineWeightMap.totalWeight
       targetXByOnset.set(onset, axisStart + spanWidth * ratio)
     })
+
+    if (noteOnsets.length > 1) {
+      const onsetSequence = noteOnsets
+      const basePositions = onsetSequence.map((onset) => targetXByOnset.get(onset) ?? axisStart)
+      const leftExtents = onsetSequence.map((onset) =>
+        (refsByOnset.get(onset) ?? []).reduce((max, ref) => Math.max(max, ref.leftExtent), 0),
+      )
+      const rightExtents = onsetSequence.map((onset) => {
+        const list = refsByOnset.get(onset) ?? []
+        if (list.length === 0) return DEFAULT_NOTE_HEAD_WIDTH_PX
+        return list.reduce((max, ref) => Math.max(max, ref.rightExtent), DEFAULT_NOTE_HEAD_WIDTH_PX)
+      })
+      const baseGapByDeltaTicks = new Map<number, number>()
+      const requiredMinGapBySegment = new Map<number, number>()
+      for (let i = 1; i < onsetSequence.length; i += 1) {
+        const deltaTicks = Math.max(1, onsetSequence[i] - onsetSequence[i - 1])
+        const baseGap = Math.max(0.001, basePositions[i] - basePositions[i - 1])
+        const minGap =
+          rightExtents[i - 1] +
+          leftExtents[i] +
+          spacingConfig.interOnsetPaddingPx
+
+        const currentBaseGap = baseGapByDeltaTicks.get(deltaTicks) ?? 0
+        if (baseGap > currentBaseGap) {
+          baseGapByDeltaTicks.set(deltaTicks, baseGap)
+        }
+        requiredMinGapBySegment.set(i, minGap)
+      }
+      const floorGapByDeltaTicks = new Map<number, number>()
+      baseGapByDeltaTicks.forEach((baseGap, deltaTicks) => {
+        floorGapByDeltaTicks.set(deltaTicks, baseGap * UNIFORM_DELTA_FLOOR_RATIO)
+      })
+
+      const adjustedPositions = [...basePositions]
+      for (let i = 1; i < onsetSequence.length; i += 1) {
+        const deltaTicks = Math.max(1, onsetSequence[i] - onsetSequence[i - 1])
+        const floorGap = floorGapByDeltaTicks.get(deltaTicks) ?? 0
+        const segmentMinGap = requiredMinGapBySegment.get(i) ?? 0
+        const targetMinGap = Math.max(floorGap, segmentMinGap)
+        const minAllowed = adjustedPositions[i - 1] + targetMinGap
+        if (adjustedPositions[i] < minAllowed) {
+          adjustedPositions[i] = minAllowed
+        }
+      }
+
+      const hasAdjustedGap = adjustedPositions.some((x, index) => Math.abs(x - basePositions[index]) > 0.001)
+      if (hasAdjustedGap) {
+        const overflow = adjustedPositions[adjustedPositions.length - 1] - axisEnd
+        if (overflow > 0) {
+          const availableLeftShift = Math.max(0, adjustedPositions[0] - axisStart)
+          const shift = Math.min(overflow, availableLeftShift)
+          if (shift > 0) {
+            for (let i = 0; i < adjustedPositions.length; i += 1) {
+              adjustedPositions[i] -= shift
+            }
+          }
+        }
+        onsetSequence.forEach((onset, index) => {
+          targetXByOnset.set(onset, adjustedPositions[index])
+        })
+      }
+    }
   } else {
 
     if (axisEnd <= axisStart) {

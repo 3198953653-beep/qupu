@@ -16,13 +16,14 @@ import { buildMeasureOverlayRect } from '../layout/viewport'
 import { clamp } from '../math'
 import { drawMeasureToContext } from './drawMeasure'
 import {
-  getMeasureUniformTimelineTicks,
+  getMeasureUniformTimelineWeightSpan,
   getUniformTickSpacingPadding,
   type TimeAxisSpacingConfig,
 } from '../layout/timeAxisSpacing'
 import type { MeasureLayout, MeasurePair, NoteLayout, ScoreNote, Selection, StaffKind, TimeSignature } from '../types'
 
 const OVERFLOW_ANALYSIS_MAX_PASSES = 6
+const OVERFLOW_RECOVERY_PAD_PX = 2
 
 type FrozenMeasureSpacing = {
   baselineMeasureX: number
@@ -292,8 +293,12 @@ export function renderVisibleSystems(params: {
     const measureTicksBySystem = systemMeta.map((entry) =>
       Math.max(1, Math.round(entry.timeSignature.beats * TICKS_PER_BEAT * (4 / entry.timeSignature.beatType))),
     )
-    const measureTimelineTicksBySystem = systemMeta.map((entry, indexInSystem) =>
-      getMeasureUniformTimelineTicks(entry.measure, measureTicksBySystem[indexInSystem] ?? 1),
+    const measureTimelineWeightsBySystem = systemMeta.map((entry, indexInSystem) =>
+      getMeasureUniformTimelineWeightSpan(
+        entry.measure,
+        measureTicksBySystem[indexInSystem] ?? 1,
+        timeAxisSpacingConfig,
+      ),
     )
     const probeGeometryCache = new Map<string, { noteStartOffset: number; noteEndOffset: number; formatWidth: number }>()
     const getMeasureProbeGeometry = (entry: (typeof systemMeta)[number], measureWidth: number) => {
@@ -359,8 +364,8 @@ export function renderVisibleSystems(params: {
         leftAxisInset + rightAxisInset,
       )
     })
-    const totalTimelineTicks = measureTimelineTicksBySystem.reduce((sum, ticks) => sum + ticks, 0)
-    const safeTotalTimelineTicks = Math.max(1, totalTimelineTicks)
+    const totalTimelineWeight = measureTimelineWeightsBySystem.reduce((sum, weight) => sum + weight, 0)
+    const safeTotalTimelineWeight = Math.max(0.0001, totalTimelineWeight)
 
     const buildMeasureWidthsFromFixed = (fixed: number[]): number[] => {
       const fixedTotal = fixed.reduce((sum, width) => sum + width, 0)
@@ -370,7 +375,7 @@ export function renderVisibleSystems(params: {
       const flexWidth = systemUsableWidth - fixedTotal
       return fixed.map(
         (fixedWidth, index) =>
-          fixedWidth + (flexWidth * (measureTimelineTicksBySystem[index] ?? 1)) / safeTotalTimelineTicks,
+          fixedWidth + (flexWidth * (measureTimelineWeightsBySystem[index] ?? 0.0001)) / safeTotalTimelineWeight,
       )
     }
 
@@ -429,7 +434,7 @@ export function renderVisibleSystems(params: {
       systemMeta.forEach((entry, indexInSystem) => {
         const overflow = getMeasureSpacingDelta(entry, measureWidths[indexInSystem] ?? 1)
         if (overflow === null || overflow <= 0.001) return
-        fixedWidths[indexInSystem] = fixedWidths[indexInSystem] + overflow
+        fixedWidths[indexInSystem] = fixedWidths[indexInSystem] + overflow + OVERFLOW_RECOVERY_PAD_PX
         changed = true
       })
       if (!changed) break
