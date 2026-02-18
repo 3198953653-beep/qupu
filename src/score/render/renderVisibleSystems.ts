@@ -7,22 +7,21 @@ import {
   SYSTEM_GAP_Y,
   SYSTEM_HEIGHT,
   SYSTEM_TREBLE_OFFSET_Y,
+  TICKS_PER_BEAT,
 } from '../constants'
 import { getKeySignatureSpecFromFifths } from '../accidentals'
-import {
-  allocateMeasureWidthsByDemand,
-  getMeasureLayoutDemand,
-  type SystemMeasureRange,
-} from '../layout/demand'
+import { type SystemMeasureRange } from '../layout/demand'
 import { getLayoutNoteKey } from '../layout/renderPosition'
 import { buildMeasureOverlayRect } from '../layout/viewport'
 import { clamp } from '../math'
 import { drawMeasureToContext } from './drawMeasure'
-import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
+import {
+  getMeasureUniformTimelineTicks,
+  getUniformTickSpacingPadding,
+  type TimeAxisSpacingConfig,
+} from '../layout/timeAxisSpacing'
 import type { MeasureLayout, MeasurePair, NoteLayout, ScoreNote, Selection, StaffKind, TimeSignature } from '../types'
 
-const MEASURE_RIGHT_EDGE_GUARD_PX = 0
-const OVERFLOW_RECOVERY_PADDING_PX = 0
 const OVERFLOW_ANALYSIS_MAX_PASSES = 6
 
 type FrozenMeasureSpacing = {
@@ -134,47 +133,17 @@ function getLayoutSpacingRightX(layout: NoteLayout): number {
   if (Number.isFinite(layout.spacingRightX)) {
     return layout.spacingRightX
   }
-
   return Number.isFinite(layout.rightX) ? layout.rightX : layout.x
 }
 
 function getMeasureSpacingRightEdge(layouts: NoteLayout[]): number {
   if (layouts.length === 0) return Number.NEGATIVE_INFINITY
-
   let maxSpacingRightX = Number.NEGATIVE_INFINITY
   for (const layout of layouts) {
     const spacingRightX = getLayoutSpacingRightX(layout)
     if (spacingRightX > maxSpacingRightX) maxSpacingRightX = spacingRightX
   }
-
   return maxSpacingRightX
-}
-
-function distributeByFloats(floatWidths: number[], targetTotal: number): number[] {
-  const widths = floatWidths.map((value) => Math.floor(value))
-  let remainder = targetTotal - widths.reduce((sum, width) => sum + width, 0)
-  const byFraction = floatWidths
-    .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
-    .sort((left, right) => right.fraction - left.fraction)
-
-  for (let i = 0; i < byFraction.length && remainder > 0; i += 1) {
-    widths[byFraction[i].index] += 1
-    remainder -= 1
-  }
-
-  return widths
-}
-
-function normalizeMinimumWidthsToSystem(minimumWidths: number[], totalWidth: number): number[] {
-  const safeTotal = Math.max(minimumWidths.length, Math.floor(totalWidth))
-  const sanitized = minimumWidths.map((width) => {
-    if (!Number.isFinite(width)) return 1
-    return Math.max(1, Math.floor(width))
-  })
-  const minimumTotal = sanitized.reduce((sum, width) => sum + width, 0)
-  if (minimumTotal <= safeTotal) return sanitized
-  const scaled = sanitized.map((width) => (safeTotal * width) / minimumTotal)
-  return distributeByFloats(scaled, safeTotal)
 }
 
 export function renderVisibleSystems(params: {
@@ -285,6 +254,8 @@ export function renderVisibleSystems(params: {
       const previousKeyFifths = pairIndex > 0 ? (measureKeyFifthsFromImport?.[pairIndex - 1] ?? 0) : keyFifths
       const showKeySignature = isSystemStart || keyFifths !== previousKeyFifths
       const includeMeasureStartDecorations = !isSystemStart && (showKeySignature || showTimeSignature)
+      const preferMeasureStartBarlineAxis = !isSystemStart && !showKeySignature && !showTimeSignature
+      const preferMeasureEndBarlineAxis = !showEndTimeSignature
       return {
         pairIndex,
         measure,
@@ -296,6 +267,8 @@ export function renderVisibleSystems(params: {
         nextTimeSignature,
         showEndTimeSignature,
         includeMeasureStartDecorations,
+        preferMeasureStartBarlineAxis,
+        preferMeasureEndBarlineAxis,
       }
     })
     // Apply spacing freeze while dragging; optionally allow post-release freeze
@@ -316,19 +289,16 @@ export function renderVisibleSystems(params: {
         frozenSpacingByPairIndex.set(entry.pairIndex, frozen)
       }
     })
-    const measureDemands = systemMeta.map((entry) =>
-      getMeasureLayoutDemand(
-        entry.measure,
-        entry.isSystemStart,
-        entry.showKeySignature,
-        entry.showTimeSignature,
-        entry.showEndTimeSignature,
-      ),
+    const measureTicksBySystem = systemMeta.map((entry) =>
+      Math.max(1, Math.round(entry.timeSignature.beats * TICKS_PER_BEAT * (4 / entry.timeSignature.beatType))),
+    )
+    const measureTimelineTicksBySystem = systemMeta.map((entry, indexInSystem) =>
+      getMeasureUniformTimelineTicks(entry.measure, measureTicksBySystem[indexInSystem] ?? 1),
     )
     const probeGeometryCache = new Map<string, { noteStartOffset: number; noteEndOffset: number; formatWidth: number }>()
     const getMeasureProbeGeometry = (entry: (typeof systemMeta)[number], measureWidth: number) => {
-      const safeWidth = Math.max(1, Math.floor(measureWidth))
-      const cacheKey = `${entry.pairIndex}|${safeWidth}`
+      const safeWidth = Math.max(1, Number(measureWidth.toFixed(3)))
+      const cacheKey = `${entry.pairIndex}|${safeWidth.toFixed(3)}`
       const cached = probeGeometryCache.get(cacheKey)
       if (cached) return cached
 
@@ -363,22 +333,56 @@ export function renderVisibleSystems(params: {
 
     const buildMeasureProbe = (entry: (typeof systemMeta)[number], measureX: number, measureWidth: number) => {
       const geometry = getMeasureProbeGeometry(entry, measureWidth)
+      const measureEndX = measureX + measureWidth
+      const noteEndX = measureX + geometry.noteEndOffset
       return {
         noteStartX: measureX + geometry.noteStartOffset,
-        noteEndX: measureX + geometry.noteEndOffset,
+        noteEndX,
+        spacingRightLimitX: entry.preferMeasureEndBarlineAxis ? measureEndX : noteEndX,
         formatWidth: geometry.formatWidth,
       }
     }
+    const probeWidth = Math.max(140, Math.floor(systemUsableWidth / Math.max(1, systemMeasures.length)))
+    const uniformTickPadding = getUniformTickSpacingPadding(timeAxisSpacingConfig)
+    let fixedWidths = systemMeta.map((entry) => {
+      const geometry = getMeasureProbeGeometry(entry, probeWidth)
+      const leftDecorationWidth = Math.max(0, geometry.noteStartOffset)
+      const rightDecorationWidth = Math.max(0, probeWidth - geometry.noteEndOffset)
+      const leftAxisInset =
+        (entry.preferMeasureStartBarlineAxis ? 0 : leftDecorationWidth) + uniformTickPadding.startPadPx
+      const rightAxisInset = entry.preferMeasureEndBarlineAxis
+        ? uniformTickPadding.endPadPx
+        : rightDecorationWidth + 8 + uniformTickPadding.endPadPx
+      // Keep fixed cost aligned with drawMeasure's axis start/end behavior.
+      return Math.max(
+        1,
+        leftAxisInset + rightAxisInset,
+      )
+    })
+    const totalTimelineTicks = measureTimelineTicksBySystem.reduce((sum, ticks) => sum + ticks, 0)
+    const safeTotalTimelineTicks = Math.max(1, totalTimelineTicks)
+
+    const buildMeasureWidthsFromFixed = (fixed: number[]): number[] => {
+      const fixedTotal = fixed.reduce((sum, width) => sum + width, 0)
+      if (fixedTotal >= systemUsableWidth) {
+        return fixed.map((width) => (systemUsableWidth * width) / Math.max(1, fixedTotal))
+      }
+      const flexWidth = systemUsableWidth - fixedTotal
+      return fixed.map(
+        (fixedWidth, index) =>
+          fixedWidth + (flexWidth * (measureTimelineTicksBySystem[index] ?? 1)) / safeTotalTimelineTicks,
+      )
+    }
+
     const spacingProbeDeltaCache = new Map<string, number | null>()
     const getMeasureSpacingDelta = (entry: (typeof systemMeta)[number], measureWidth: number): number | null => {
-      const safeMeasureWidth = Math.max(1, Math.floor(measureWidth))
-      const cacheKey = `${entry.pairIndex}|${safeMeasureWidth}`
+      const safeMeasureWidth = Math.max(1, Number(measureWidth.toFixed(3)))
+      const cacheKey = `${entry.pairIndex}|${safeMeasureWidth.toFixed(3)}`
       if (spacingProbeDeltaCache.has(cacheKey)) {
         return spacingProbeDeltaCache.get(cacheKey) ?? null
       }
-
       const probeMeasureX = STAFF_X
-      const { noteEndX, formatWidth } = buildMeasureProbe(entry, probeMeasureX, safeMeasureWidth)
+      const { spacingRightLimitX, formatWidth } = buildMeasureProbe(entry, probeMeasureX, safeMeasureWidth)
       const frozenSpacing = frozenSpacingByPairIndex.get(entry.pairIndex) ?? null
       const translatedFrozenSpacing =
         frozenSpacing !== null ? translateFrozenSpacingToMeasureX(frozenSpacing, probeMeasureX) : null
@@ -406,135 +410,30 @@ export function renderVisibleSystems(params: {
         staticNoteXById: translatedFrozenSpacing?.staticNoteXById ?? null,
         staticAccidentalRightXById: translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
         layoutDetail: 'spacing-only',
+        preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
+        preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
       })
-
       const spacingRightEdge = getMeasureSpacingRightEdge(measureNoteLayouts)
       if (!Number.isFinite(spacingRightEdge)) {
         spacingProbeDeltaCache.set(cacheKey, null)
         return null
       }
-      const rightBoundary = noteEndX - MEASURE_RIGHT_EDGE_GUARD_PX
-      const delta = spacingRightEdge - rightBoundary
+      const delta = spacingRightEdge - spacingRightLimitX
       spacingProbeDeltaCache.set(cacheKey, delta)
       return delta
     }
 
-    const analyzeOverflowMinimumWidths = (
-      candidateWidths: number[],
-      currentMinimums: number[],
-    ): { nextMinimums: number[]; hasIncrease: boolean } => {
-      const nextMinimums = [...currentMinimums]
-      let hasIncrease = false
-
+    let measureWidths = buildMeasureWidthsFromFixed(fixedWidths)
+    for (let pass = 0; pass < OVERFLOW_ANALYSIS_MAX_PASSES; pass += 1) {
+      let changed = false
       systemMeta.forEach((entry, indexInSystem) => {
-        const measureWidth = Math.max(
-          1,
-          Math.floor(candidateWidths[indexInSystem] ?? Math.floor(systemUsableWidth / systemMeasures.length)),
-        )
-        const overflow = getMeasureSpacingDelta(entry, measureWidth)
-        if (overflow === null) return
-        if (overflow <= 0) return
-        const requiredWidth = Math.ceil(measureWidth + overflow + OVERFLOW_RECOVERY_PADDING_PX)
-        if (requiredWidth <= nextMinimums[indexInSystem]) return
-        nextMinimums[indexInSystem] = requiredWidth
-        hasIncrease = true
+        const overflow = getMeasureSpacingDelta(entry, measureWidths[indexInSystem] ?? 1)
+        if (overflow === null || overflow <= 0.001) return
+        fixedWidths[indexInSystem] = fixedWidths[indexInSystem] + overflow
+        changed = true
       })
-
-      return { nextMinimums, hasIncrease }
-    }
-
-    const rebalanceMeasureWidthsBySpacing = (
-      candidateWidths: number[],
-      currentMinimums: number[],
-    ): { nextWidths: number[]; hasChange: boolean } => {
-      const nextWidths = [...candidateWidths]
-      const computeDeltas = (widths: number[]): number[] => {
-        const deltas = new Array<number>(systemMeta.length).fill(0)
-
-        systemMeta.forEach((entry, indexInSystem) => {
-          const measureWidth = Math.max(
-            1,
-            Math.floor(widths[indexInSystem] ?? Math.floor(systemUsableWidth / systemMeasures.length)),
-          )
-          const delta = getMeasureSpacingDelta(entry, measureWidth)
-          if (delta === null) {
-            deltas[indexInSystem] = 0
-            return
-          }
-          deltas[indexInSystem] = delta
-        })
-
-        return deltas
-      }
-
-      let hasChange = false
-      const maxIterations = Math.max(8, systemMeta.length * 3)
-      for (let iteration = 0; iteration < maxIterations; iteration += 1) {
-        const deltas = computeDeltas(nextWidths)
-        let receiverIndex = -1
-        let receiverDelta = 0
-        for (let index = 0; index < deltas.length; index += 1) {
-          const delta = deltas[index]
-          if (delta > receiverDelta) {
-            receiverDelta = delta
-            receiverIndex = index
-          }
-        }
-        if (receiverIndex < 0 || receiverDelta <= 0) break
-        const need = Math.ceil(receiverDelta + OVERFLOW_RECOVERY_PADDING_PX)
-        if (need <= 0) break
-
-        let donorIndex = -1
-        let donorAvailable = 0
-        for (let index = 0; index < deltas.length; index += 1) {
-          if (index === receiverIndex) continue
-          const delta = deltas[index]
-          if (!(delta < -OVERFLOW_RECOVERY_PADDING_PX)) continue
-          const spare = Math.max(0, Math.floor(-delta - OVERFLOW_RECOVERY_PADDING_PX))
-          if (spare <= 0) continue
-          const minimum = Math.max(1, Math.floor(currentMinimums[index] ?? 1))
-          const reducible = Math.max(0, (nextWidths[index] ?? 0) - minimum)
-          const available = Math.min(spare, reducible)
-          if (available > donorAvailable) {
-            donorAvailable = available
-            donorIndex = index
-          }
-        }
-
-        if (donorIndex < 0 || donorAvailable <= 0) break
-        const transfer = Math.min(need, donorAvailable)
-        if (transfer <= 0) break
-        nextWidths[receiverIndex] = (nextWidths[receiverIndex] ?? 0) + transfer
-        nextWidths[donorIndex] = Math.max(1, (nextWidths[donorIndex] ?? 0) - transfer)
-        hasChange = true
-      }
-
-      return { nextWidths, hasChange }
-    }
-
-    const probeWidth = Math.max(140, Math.floor(systemUsableWidth / Math.max(1, systemMeasures.length)))
-    const baseMinimumWidths = systemMeta.map((entry) => {
-      const { noteStartX } = buildMeasureProbe(entry, STAFF_X, probeWidth)
-      const decorationWidth = Math.max(0, noteStartX - STAFF_X)
-      // Keep only structural left decoration space in the base minimum.
-      // Real per-measure note width is raised by overflow analysis below.
-      return Math.max(1, Math.ceil(decorationWidth + 24))
-    })
-
-    let enforcedMinimumWidths = normalizeMinimumWidthsToSystem(baseMinimumWidths, systemUsableWidth)
-    let measureWidths = allocateMeasureWidthsByDemand(measureDemands, systemUsableWidth, enforcedMinimumWidths)
-
-    for (let pass = 0; pass < OVERFLOW_ANALYSIS_MAX_PASSES; pass += 1) {
-      const { nextMinimums, hasIncrease } = analyzeOverflowMinimumWidths(measureWidths, enforcedMinimumWidths)
-      if (!hasIncrease) break
-      enforcedMinimumWidths = normalizeMinimumWidthsToSystem(nextMinimums, systemUsableWidth)
-      measureWidths = allocateMeasureWidthsByDemand(measureDemands, systemUsableWidth, enforcedMinimumWidths)
-    }
-
-    for (let pass = 0; pass < OVERFLOW_ANALYSIS_MAX_PASSES; pass += 1) {
-      const { nextWidths, hasChange } = rebalanceMeasureWidthsBySpacing(measureWidths, enforcedMinimumWidths)
-      if (!hasChange) break
-      measureWidths = nextWidths
+      if (!changed) break
+      measureWidths = buildMeasureWidthsFromFixed(fixedWidths)
     }
 
     let measureCursorX = STAFF_X
@@ -567,6 +466,8 @@ export function renderVisibleSystems(params: {
         timeAxisSpacingConfig,
         staticNoteXById: translatedFrozenSpacing?.staticNoteXById ?? null,
         staticAccidentalRightXById: translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
+        preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
+        preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
       })
 
       nextLayouts.push(...measureNoteLayouts)

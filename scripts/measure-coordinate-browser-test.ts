@@ -9,6 +9,12 @@ type ImportFeedback = {
   progress?: number | null
 }
 
+type DebugScaleConfig = {
+  autoScaleEnabled: boolean
+  manualScalePercent: number
+  scoreScale: number
+}
+
 type TimeAxisPoint = {
   pointIndex: number
   onsetTicksInMeasure: number
@@ -37,6 +43,11 @@ type DumpNoteRow = {
 type MeasureDumpRow = {
   pairIndex: number
   rendered: boolean
+  measureStartBarX?: number | null
+  measureEndBarX?: number | null
+  noteStartX?: number | null
+  noteEndX?: number | null
+  maxSpacingRightX?: number | null
   systemTop: number | null
   timeAxisTicksPerBeat: number | null
   timeAxisPoints: TimeAxisPoint[]
@@ -71,11 +82,40 @@ type MeasureGapStats = {
   eighthGaps: GapSample[]
 }
 
+type DurationUniformitySample = {
+  pairIndex: number
+  staff: 'treble' | 'bass'
+  fromOnsetTicksInMeasure: number
+  toOnsetTicksInMeasure: number
+  deltaTicks: number
+  gapPx: number
+}
+
+type BarlineEdgeSample = {
+  pairIndex: number
+  firstOnsetTicksInMeasure: number
+  secondOnsetTicksInMeasure: number
+  lastPrevOnsetTicksInMeasure: number
+  lastOnsetTicksInMeasure: number
+  firstEdgeGapPx: number
+  firstInternalGapPx: number
+  firstEdgeRatio: number
+  lastEdgeGapPx: number
+  lastInternalGapPx: number
+  lastEdgeRatio: number
+  pass: boolean
+}
+
 const DEV_HOST = '127.0.0.1'
 const DEV_PORT = 4173
 const DEV_URL = `http://${DEV_HOST}:${DEV_PORT}`
 const GAP_COMPARE_EPSILON = 0.001
 const TICK_COMPARE_EPSILON = 0.0001
+const DURATION_UNIFORMITY_EPSILON_PX = 0.01
+const EDGE_GAP_RATIO_MIN = 0.55
+const EDGE_GAP_RATIO_MAX = 0.98
+const DEFAULT_MANUAL_SCALE_PERCENT = 100
+const DEFAULT_AUTO_SCALE_ENABLED = false
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -119,6 +159,60 @@ function stopDevServer(server: ChildProcess): Promise<void> {
     setTimeout(() => {
       if (server.exitCode === null) server.kill('SIGKILL')
     }, 2500)
+  })
+}
+
+async function waitForDebugApi(page: import('playwright').Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const api = (window as unknown as { __scoreDebug?: Record<string, unknown> }).__scoreDebug
+    return (
+      !!api &&
+      typeof api.importMusicXmlText === 'function' &&
+      typeof api.getImportFeedback === 'function' &&
+      typeof api.getPaging === 'function' &&
+      typeof api.goToPage === 'function' &&
+      typeof api.dumpAllMeasureCoordinates === 'function' &&
+      typeof api.getScaleConfig === 'function' &&
+      typeof api.setAutoScaleEnabled === 'function' &&
+      typeof api.setManualScalePercent === 'function'
+    )
+  })
+}
+
+async function setScoreScale(
+  page: import('playwright').Page,
+  params: { autoScaleEnabled: boolean; manualScalePercent: number },
+): Promise<DebugScaleConfig> {
+  await page.evaluate(({ enabled, percent }) => {
+    const api = (window as unknown as {
+      __scoreDebug: {
+        setAutoScaleEnabled: (next: boolean) => void
+        setManualScalePercent: (next: number) => void
+      }
+    }).__scoreDebug
+    api.setAutoScaleEnabled(enabled)
+    api.setManualScalePercent(percent)
+  }, { enabled: params.autoScaleEnabled, percent: params.manualScalePercent })
+  await page.waitForFunction(
+    ({ enabled, percent }) => {
+      const api = (window as unknown as {
+        __scoreDebug: {
+          getScaleConfig: () => { autoScaleEnabled: boolean; manualScalePercent: number }
+        }
+      }).__scoreDebug
+      const next = api.getScaleConfig()
+      return next.autoScaleEnabled === enabled && Math.abs(next.manualScalePercent - percent) < 0.001
+    },
+    { enabled: params.autoScaleEnabled, percent: params.manualScalePercent },
+  )
+  await page.waitForTimeout(120)
+  return page.evaluate(() => {
+    const api = (window as unknown as {
+      __scoreDebug: {
+        getScaleConfig: () => { autoScaleEnabled: boolean; manualScalePercent: number; scoreScale: number }
+      }
+    }).__scoreDebug
+    return api.getScaleConfig()
   })
 }
 
@@ -180,6 +274,261 @@ function getMeasureGapStats(row: MeasureDumpRow): MeasureGapStats {
   })
 
   return { quarterGaps, eighthGaps }
+}
+
+function buildLineDurationUniformity(rows: MergedMeasureDumpRow[]) {
+  const grouped = new Map<
+    string,
+    {
+      lineKey: string
+      pageIndex: number
+      systemTop: number | null
+      samplesByDeltaTicks: Map<number, DurationUniformitySample[]>
+    }
+  >()
+
+  rows.forEach((row) => {
+    if (!row.rendered || row.renderedPageIndex === null) return
+    const normalizedSystemTop = roundOrNull(row.systemTop, 3)
+    const lineKey = `${row.renderedPageIndex}|${normalizedSystemTop ?? `pair-${row.pairIndex}`}`
+    const entry = grouped.get(lineKey) ?? {
+      lineKey,
+      pageIndex: row.renderedPageIndex,
+      systemTop: normalizedSystemTop,
+      samplesByDeltaTicks: new Map<number, DurationUniformitySample[]>(),
+    }
+
+    ;(['treble', 'bass'] as const).forEach((staff) => {
+      const staffNotes = row.notes
+        .filter((note) => note.staff === staff && typeof note.onsetTicksInMeasure === 'number')
+        .sort((left, right) => {
+          const leftOnset = left.onsetTicksInMeasure as number
+          const rightOnset = right.onsetTicksInMeasure as number
+          if (leftOnset !== rightOnset) return leftOnset - rightOnset
+          return left.noteIndex - right.noteIndex
+        })
+      for (let i = 1; i < staffNotes.length; i += 1) {
+        const previous = staffNotes[i - 1]
+        const next = staffNotes[i]
+        if (!Number.isFinite(previous.x) || !Number.isFinite(next.x)) continue
+        const deltaTicks = Math.round((next.onsetTicksInMeasure as number) - (previous.onsetTicksInMeasure as number))
+        if (!Number.isFinite(deltaTicks) || deltaTicks <= 0) continue
+        const gapPx = next.x - previous.x
+        if (!Number.isFinite(gapPx) || gapPx <= 0) continue
+        const bucket = entry.samplesByDeltaTicks.get(deltaTicks) ?? []
+        bucket.push({
+          pairIndex: row.pairIndex,
+          staff,
+          fromOnsetTicksInMeasure: previous.onsetTicksInMeasure as number,
+          toOnsetTicksInMeasure: next.onsetTicksInMeasure as number,
+          deltaTicks,
+          gapPx,
+        })
+        entry.samplesByDeltaTicks.set(deltaTicks, bucket)
+      }
+    })
+    grouped.set(lineKey, entry)
+  })
+
+  const lines = [...grouped.values()]
+    .sort((left, right) => {
+      if (left.pageIndex !== right.pageIndex) return left.pageIndex - right.pageIndex
+      if (left.systemTop === null && right.systemTop !== null) return 1
+      if (left.systemTop !== null && right.systemTop === null) return -1
+      if (left.systemTop !== null && right.systemTop !== null) return left.systemTop - right.systemTop
+      return left.lineKey.localeCompare(right.lineKey)
+    })
+    .map((line) => {
+      const durationRows = [...line.samplesByDeltaTicks.entries()]
+        .sort((left, right) => left[0] - right[0])
+        .map(([deltaTicks, samples]) => {
+          const minGapPx = samples.reduce((minValue, sample) => Math.min(minValue, sample.gapPx), Number.POSITIVE_INFINITY)
+          const maxGapPx = samples.reduce((maxValue, sample) => Math.max(maxValue, sample.gapPx), Number.NEGATIVE_INFINITY)
+          const rangePx = maxGapPx - minGapPx
+          const pass = samples.length <= 1 || rangePx <= DURATION_UNIFORMITY_EPSILON_PX
+          return {
+            deltaTicks,
+            sampleCount: samples.length,
+            minGapPx: roundOrNull(minGapPx, 3),
+            maxGapPx: roundOrNull(maxGapPx, 3),
+            rangePx: roundOrNull(rangePx, 4),
+            pass,
+            samplePreview: samples.slice(0, 8).map((sample) => ({
+              pairIndex: sample.pairIndex,
+              staff: sample.staff,
+              fromOnsetTicksInMeasure: sample.fromOnsetTicksInMeasure,
+              toOnsetTicksInMeasure: sample.toOnsetTicksInMeasure,
+              gapPx: roundOrNull(sample.gapPx, 3),
+            })),
+          }
+        })
+      const comparableDurations = durationRows.filter((item) => item.sampleCount > 1)
+      const pass = comparableDurations.every((item) => item.pass)
+      return {
+        lineKey: line.lineKey,
+        pageIndex: line.pageIndex,
+        systemTop: line.systemTop,
+        comparedDurationCount: comparableDurations.length,
+        pass,
+        durationRows,
+      }
+    })
+
+  const comparableLines = lines.filter((line) => line.comparedDurationCount > 0)
+  const failedLines = comparableLines.filter((line) => !line.pass)
+  return {
+    comparedLineCount: comparableLines.length,
+    failedLineCount: failedLines.length,
+    passed: failedLines.length === 0,
+    lines,
+    failedLines,
+  }
+}
+
+function buildLineBarlineEdgeAnalysis(rows: MergedMeasureDumpRow[]) {
+  const grouped = new Map<
+    string,
+    {
+      lineKey: string
+      pageIndex: number
+      systemTop: number | null
+      samples: BarlineEdgeSample[]
+    }
+  >()
+
+  rows.forEach((row) => {
+    if (!row.rendered || row.renderedPageIndex === null) return
+    if (
+      typeof row.measureStartBarX !== 'number' ||
+      !Number.isFinite(row.measureStartBarX) ||
+      typeof row.measureEndBarX !== 'number' ||
+      !Number.isFinite(row.measureEndBarX)
+    ) {
+      return
+    }
+    const noteStartOffset =
+      typeof row.noteStartX === 'number' && Number.isFinite(row.noteStartX)
+        ? row.noteStartX - row.measureStartBarX
+        : null
+    const noteEndInset =
+      typeof row.noteEndX === 'number' && Number.isFinite(row.noteEndX)
+        ? row.measureEndBarX - row.noteEndX
+        : null
+    // Skip system-start measures with clef/key/time decorations, where barline-to-note
+    // includes decoration width and is not directly comparable to onset gaps.
+    if (noteStartOffset !== null && noteStartOffset > 12) return
+    if (noteEndInset !== null && noteEndInset > 12) return
+
+    const points = row.timeAxisPoints
+      .slice()
+      .filter((point) => typeof point.x === 'number' && Number.isFinite(point.x))
+      .sort((left, right) => left.onsetTicksInMeasure - right.onsetTicksInMeasure)
+    if (points.length < 2) return
+
+    const firstPoint = points[0]
+    const secondPoint = points[1]
+    const previousLastPoint = points[points.length - 2]
+    const lastPoint = points[points.length - 1]
+    if (
+      firstPoint.x === null ||
+      secondPoint.x === null ||
+      previousLastPoint.x === null ||
+      lastPoint.x === null
+    ) {
+      return
+    }
+
+    const firstInternalGapPx = secondPoint.x - firstPoint.x
+    const lastInternalGapPx = lastPoint.x - previousLastPoint.x
+    if (!Number.isFinite(firstInternalGapPx) || firstInternalGapPx <= 0) return
+    if (!Number.isFinite(lastInternalGapPx) || lastInternalGapPx <= 0) return
+
+    const firstEdgeGapPx = firstPoint.x - row.measureStartBarX
+    const rightSpacingBoundary =
+      typeof row.maxSpacingRightX === 'number' && Number.isFinite(row.maxSpacingRightX)
+        ? row.maxSpacingRightX
+        : lastPoint.x + 9
+    const lastEdgeGapPx = row.measureEndBarX - rightSpacingBoundary
+    if (!Number.isFinite(firstEdgeGapPx) || firstEdgeGapPx <= 0) return
+    if (!Number.isFinite(lastEdgeGapPx) || lastEdgeGapPx <= 0) return
+
+    const firstEdgeRatio = firstEdgeGapPx / firstInternalGapPx
+    const lastEdgeRatio = lastEdgeGapPx / lastInternalGapPx
+    const pass =
+      firstEdgeRatio >= EDGE_GAP_RATIO_MIN &&
+      firstEdgeRatio <= EDGE_GAP_RATIO_MAX &&
+      lastEdgeRatio >= EDGE_GAP_RATIO_MIN &&
+      lastEdgeRatio <= EDGE_GAP_RATIO_MAX
+
+    const normalizedSystemTop = roundOrNull(row.systemTop, 3)
+    const lineKey = `${row.renderedPageIndex}|${normalizedSystemTop ?? `pair-${row.pairIndex}`}`
+    const entry = grouped.get(lineKey) ?? {
+      lineKey,
+      pageIndex: row.renderedPageIndex,
+      systemTop: normalizedSystemTop,
+      samples: [],
+    }
+    entry.samples.push({
+      pairIndex: row.pairIndex,
+      firstOnsetTicksInMeasure: firstPoint.onsetTicksInMeasure,
+      secondOnsetTicksInMeasure: secondPoint.onsetTicksInMeasure,
+      lastPrevOnsetTicksInMeasure: previousLastPoint.onsetTicksInMeasure,
+      lastOnsetTicksInMeasure: lastPoint.onsetTicksInMeasure,
+      firstEdgeGapPx,
+      firstInternalGapPx,
+      firstEdgeRatio,
+      lastEdgeGapPx,
+      lastInternalGapPx,
+      lastEdgeRatio,
+      pass,
+    })
+    grouped.set(lineKey, entry)
+  })
+
+  const lines = [...grouped.values()]
+    .sort((left, right) => {
+      if (left.pageIndex !== right.pageIndex) return left.pageIndex - right.pageIndex
+      if (left.systemTop === null && right.systemTop !== null) return 1
+      if (left.systemTop !== null && right.systemTop === null) return -1
+      if (left.systemTop !== null && right.systemTop !== null) return left.systemTop - right.systemTop
+      return left.lineKey.localeCompare(right.lineKey)
+    })
+    .map((line) => {
+      const sampleCount = line.samples.length
+      const failedSamples = line.samples.filter((sample) => !sample.pass)
+      return {
+        lineKey: line.lineKey,
+        pageIndex: line.pageIndex,
+        systemTop: line.systemTop,
+        sampleCount,
+        failedSampleCount: failedSamples.length,
+        pass: sampleCount > 0 ? failedSamples.length === 0 : true,
+        samples: line.samples.slice(0, 16).map((sample) => ({
+          pairIndex: sample.pairIndex,
+          firstOnsetTicksInMeasure: sample.firstOnsetTicksInMeasure,
+          secondOnsetTicksInMeasure: sample.secondOnsetTicksInMeasure,
+          lastPrevOnsetTicksInMeasure: sample.lastPrevOnsetTicksInMeasure,
+          lastOnsetTicksInMeasure: sample.lastOnsetTicksInMeasure,
+          firstEdgeGapPx: roundOrNull(sample.firstEdgeGapPx, 3),
+          firstInternalGapPx: roundOrNull(sample.firstInternalGapPx, 3),
+          firstEdgeRatio: roundOrNull(sample.firstEdgeRatio, 4),
+          lastEdgeGapPx: roundOrNull(sample.lastEdgeGapPx, 3),
+          lastInternalGapPx: roundOrNull(sample.lastInternalGapPx, 3),
+          lastEdgeRatio: roundOrNull(sample.lastEdgeRatio, 4),
+          pass: sample.pass,
+        })),
+      }
+    })
+
+  const comparableLines = lines.filter((line) => line.sampleCount > 0)
+  const failedLines = comparableLines.filter((line) => !line.pass)
+  return {
+    comparedLineCount: comparableLines.length,
+    failedLineCount: failedLines.length,
+    passed: failedLines.length === 0,
+    lines,
+    failedLines,
+  }
 }
 
 function buildLineSpacingAnalysis(rows: MergedMeasureDumpRow[]) {
@@ -364,6 +713,17 @@ function buildFirstVsSecondMeasureComparison(rows: MergedMeasureDumpRow[]) {
 async function main() {
   const xmlPath = process.argv[2] ?? 'C:\\Users\\76743\\Desktop\\1234.musicxml'
   const outputPath = process.argv[3] ?? path.resolve('debug', 'measure-coordinate-report.browser.json')
+  const manualScalePercentRaw = process.argv[4]
+  const autoScaleEnabledRaw = process.argv[5]
+  const manualScalePercent =
+    manualScalePercentRaw !== undefined ? Number(manualScalePercentRaw) : DEFAULT_MANUAL_SCALE_PERCENT
+  if (!Number.isFinite(manualScalePercent) || manualScalePercent <= 0) {
+    throw new Error(`Invalid manual scale percent: ${manualScalePercentRaw}`)
+  }
+  const autoScaleEnabled =
+    autoScaleEnabledRaw !== undefined
+      ? ['1', 'true', 'yes', 'on'].includes(autoScaleEnabledRaw.trim().toLowerCase())
+      : DEFAULT_AUTO_SCALE_ENABLED
   const xmlText = await readFile(xmlPath, 'utf8')
 
   const devServer = startDevServer()
@@ -384,10 +744,7 @@ async function main() {
     const page = await browser.newPage({ viewport: { width: 1800, height: 1200 } })
 
     await page.goto(DEV_URL, { waitUntil: 'domcontentloaded' })
-    await page.waitForFunction(() => {
-      const api = (window as unknown as { __scoreDebug?: Record<string, unknown> }).__scoreDebug
-      return !!api && typeof api.importMusicXmlText === 'function'
-    })
+    await waitForDebugApi(page)
 
     await page.evaluate((xml) => {
       const api = (window as unknown as { __scoreDebug: { importMusicXmlText: (text: string) => void } }).__scoreDebug
@@ -410,6 +767,7 @@ async function main() {
     if (feedback.kind !== 'success') {
       throw new Error(`MusicXML import failed: ${feedback.message}`)
     }
+    const scale = await setScoreScale(page, { autoScaleEnabled, manualScalePercent })
 
     const paging = await page.evaluate(() => {
       const api =
@@ -474,16 +832,21 @@ async function main() {
 
     const overflowRows = mergedRows.filter((row) => typeof row.overflowVsNoteEndX === 'number' && row.overflowVsNoteEndX > 0)
     const lineSpacingAnalysis = buildLineSpacingAnalysis(mergedRows)
+    const lineDurationUniformity = buildLineDurationUniformity(mergedRows)
+    const lineBarlineEdgeAnalysis = buildLineBarlineEdgeAnalysis(mergedRows)
     const firstVsSecondMeasureComparison = buildFirstVsSecondMeasureComparison(mergedRows)
     const report = {
       generatedAt: new Date().toISOString(),
       xmlPath,
+      scale,
       pageCount: paging.pageCount,
       totalMeasureCount: latestDump.totalMeasureCount,
       renderedMeasureCount: mergedRows.filter((row) => row.rendered).length,
       overflowMeasureCount: overflowRows.length,
       gapOrderingRule: 'Within the same line: quarter gap should be greater than eighth gap (4th > 8th).',
       lineSpacingAnalysis,
+      lineDurationUniformity,
+      lineBarlineEdgeAnalysis,
       firstVsSecondMeasureComparison,
       overflowPairs: overflowRows.map((row) => ({
         pairIndex: row.pairIndex,
@@ -497,11 +860,20 @@ async function main() {
     await writeFile(outputPath, JSON.stringify(report, null, 2), 'utf8')
 
     console.log(`Generated: ${outputPath}`)
+    console.log(`Scale: auto=${String(scale.autoScaleEnabled)}, manual=${scale.manualScalePercent.toFixed(2)}%`)
     console.log(`Measures rendered: ${report.renderedMeasureCount}/${report.totalMeasureCount}`)
     console.log(`Overflow measures: ${report.overflowMeasureCount}`)
     console.log(
       `Line spacing ordering (quarter > eighth): ${lineSpacingAnalysis.passed ? 'PASS' : 'FAIL'} ` +
       `(compared=${lineSpacingAnalysis.comparedLineCount}, failed=${lineSpacingAnalysis.failedLineCount})`,
+    )
+    console.log(
+      `Line duration uniformity (same deltaTicks equal gap): ${lineDurationUniformity.passed ? 'PASS' : 'FAIL'} ` +
+      `(compared=${lineDurationUniformity.comparedLineCount}, failed=${lineDurationUniformity.failedLineCount})`,
+    )
+    console.log(
+      `Line edge-gap rule (barline edge slightly < inner onset gap): ${lineBarlineEdgeAnalysis.passed ? 'PASS' : 'FAIL'} ` +
+      `(compared=${lineBarlineEdgeAnalysis.comparedLineCount}, failed=${lineBarlineEdgeAnalysis.failedLineCount})`,
     )
     if (firstVsSecondMeasureComparison.comparable) {
       console.log(
@@ -517,6 +889,30 @@ async function main() {
         console.log(
           `Failed line ${line.lineKey}: minQuarter=${line.minQuarterGapPx}, maxEighth=${line.maxEighthGapPx}, pairs=${line.pairIndices.join(',')}`,
         )
+      })
+    }
+    if (!lineDurationUniformity.passed) {
+      lineDurationUniformity.failedLines.slice(0, 5).forEach((line) => {
+        const failedDurations = line.durationRows.filter((item) => !item.pass && item.sampleCount > 1)
+        failedDurations.slice(0, 6).forEach((duration) => {
+          console.log(
+            `Failed uniformity line ${line.lineKey}: deltaTicks=${duration.deltaTicks}, range=${duration.rangePx}, min=${duration.minGapPx}, max=${duration.maxGapPx}`,
+          )
+        })
+      })
+    }
+    if (!lineBarlineEdgeAnalysis.passed) {
+      lineBarlineEdgeAnalysis.failedLines.slice(0, 5).forEach((line) => {
+        line.samples
+          .filter((sample) => !sample.pass)
+          .slice(0, 8)
+          .forEach((sample) => {
+            console.log(
+              `Failed edge line ${line.lineKey} pair=${sample.pairIndex}: ` +
+                `left=${sample.firstEdgeGapPx}/${sample.firstInternalGapPx} (r=${sample.firstEdgeRatio}), ` +
+                `right=${sample.lastEdgeGapPx}/${sample.lastInternalGapPx} (r=${sample.lastEdgeRatio})`,
+            )
+          })
       })
     }
 

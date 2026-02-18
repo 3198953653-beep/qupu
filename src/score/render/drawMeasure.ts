@@ -1,5 +1,5 @@
 import { Accidental, BarlineType, Beam, Dot, Formatter, Fraction, Renderer, Stave, StaveConnector, StaveNote, Voice } from 'vexflow'
-import { PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX } from '../constants'
+import { PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX, TICKS_PER_BEAT } from '../constants'
 import {
   buildRenderedNoteKeys,
   getAccidentalStateKey,
@@ -71,6 +71,8 @@ export type DrawMeasureParams = {
   skipPainting?: boolean
   staticNoteXById?: Map<string, number> | null
   staticAccidentalRightXById?: Map<string, Map<number, number>> | null
+  preferMeasureBarlineAxis?: boolean
+  preferMeasureEndBarlineAxis?: boolean
   debugCapture?: {
     frame: number
     draggedNoteId: string
@@ -110,6 +112,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     skipPainting = false,
     staticNoteXById = null,
     staticAccidentalRightXById = null,
+    preferMeasureBarlineAxis = !isSystemStart && !showKeySignature && !showTimeSignature,
+    preferMeasureEndBarlineAxis = !showEndTimeSignature,
     debugCapture = null,
   } = params
   const isSpacingOnlyLayout = layoutDetail === 'spacing-only'
@@ -370,6 +374,14 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     trebleRendered,
     bassRendered,
     spacingConfig: timeAxisSpacingConfig,
+    measureTicks: Math.max(1, Math.round(timeSignature.beats * TICKS_PER_BEAT * (4 / timeSignature.beatType))),
+    sparseTailAnchorMode: 'none',
+    compactTailAnchorTicks: 4,
+    uniformSpacingByTicks: true,
+    measureStartBarX: measureX,
+    measureEndBarX: measureX + measureWidth,
+    preferMeasureBarlineAxis,
+    preferMeasureEndBarlineAxis,
   })
 
   if (staticNoteXById && staticNoteXById.size > 0) {

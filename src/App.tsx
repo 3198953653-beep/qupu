@@ -784,12 +784,12 @@ function App() {
         maxVisualRightX,
         maxSpacingRightX,
         overflowVsNoteEndX:
-          measureLayout && typeof maxVisualRightX === 'number'
-            ? Number((maxVisualRightX - measureLayout.noteEndX).toFixed(3))
+          measureLayout && typeof maxSpacingRightX === 'number'
+            ? Number((maxSpacingRightX - measureLayout.noteEndX).toFixed(3))
             : null,
         overflowVsMeasureEndBarX:
-          measureLayout && typeof maxVisualRightX === 'number'
-            ? Number((maxVisualRightX - (measureLayout.measureX + measureLayout.measureWidth)).toFixed(3))
+          measureLayout && typeof maxSpacingRightX === 'number'
+            ? Number((maxSpacingRightX - (measureLayout.measureX + measureLayout.measureWidth)).toFixed(3))
             : null,
         notes: layoutRows,
       }
