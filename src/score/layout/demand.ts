@@ -10,6 +10,9 @@ const ADAPTIVE_MEASURE_BASE_WIDTH_PX = 34
 const ADAPTIVE_DEMAND_TO_WIDTH_FACTOR = 6.4
 const ADAPTIVE_MEASURE_MIN_WIDTH_PX = 92
 const ADAPTIVE_MEASURE_SAFETY_PX = 10
+const ADAPTIVE_SYSTEM_OCCUPANCY_TARGET = 0.9
+const ADAPTIVE_SYSTEM_OCCUPANCY_MIN = 0.62
+const ADAPTIVE_SYSTEM_REBALANCE_PASSES = 16
 
 const DEFAULT_TIME_SIGNATURE: TimeSignature = { beats: 4, beatType: 4 }
 
@@ -174,6 +177,44 @@ export function buildAdaptiveSystemRanges(params: {
     return hasTimeSignatureChanged(timeSignature, resolvedTimeSignatures[index - 1])
   })
 
+  const getRequiredWidthForMeasure = (pairIndex: number, isSystemStart: boolean, isSystemEnd: boolean): number => {
+    const showKeySignature = isSystemStart || keyChangeFlags[pairIndex]
+    const showTimeSignature = timeChangeFlags[pairIndex]
+    const hasNextMeasure = pairIndex + 1 < measurePairs.length
+    const showEndTimeSignature =
+      isSystemEnd &&
+      hasNextMeasure &&
+      hasTimeSignatureChanged(resolvedTimeSignatures[pairIndex + 1], resolvedTimeSignatures[pairIndex])
+    const nextTimeSignature =
+      hasNextMeasure
+        ? resolvedTimeSignatures[pairIndex + 1]
+        : resolvedTimeSignatures[pairIndex]
+    const requiredWidthByEstimator = getRequiredMeasureWidth?.({
+      pairIndex,
+      measure: measurePairs[pairIndex],
+      isSystemStart,
+      keyFifths: resolvedKeyFifths[pairIndex],
+      showKeySignature,
+      timeSignature: resolvedTimeSignatures[pairIndex],
+      showTimeSignature,
+      nextTimeSignature,
+      showEndTimeSignature,
+    })
+    const demandWidth =
+      requiredWidthByEstimator && Number.isFinite(requiredWidthByEstimator)
+        ? requiredWidthByEstimator
+        : estimateAdaptiveMeasureWidth(
+          getMeasureLayoutDemandFromNoteDemand(
+            noteDemands[pairIndex],
+            isSystemStart,
+            showKeySignature,
+            showTimeSignature,
+            showEndTimeSignature,
+          ),
+          )
+    return Math.min(safeSystemUsableWidth, Math.max(1, Math.ceil(demandWidth)))
+  }
+
   const ranges: SystemMeasureRange[] = []
   let startPairIndex = 0
 
@@ -183,40 +224,7 @@ export function buildAdaptiveSystemRanges(params: {
 
     while (endPairIndexExclusive < measurePairs.length) {
       const pairIndex = endPairIndexExclusive
-      const isSystemStart = pairIndex === startPairIndex
-      const showKeySignature = isSystemStart || keyChangeFlags[pairIndex]
-      const showTimeSignature = timeChangeFlags[pairIndex]
-      const showPotentialEndTimeSignature =
-        pairIndex + 1 < measurePairs.length &&
-        hasTimeSignatureChanged(resolvedTimeSignatures[pairIndex + 1], resolvedTimeSignatures[pairIndex])
-      const nextTimeSignature =
-        pairIndex + 1 < measurePairs.length
-          ? resolvedTimeSignatures[pairIndex + 1]
-          : resolvedTimeSignatures[pairIndex]
-      const requiredWidthByEstimator = getRequiredMeasureWidth?.({
-        pairIndex,
-        measure: measurePairs[pairIndex],
-        isSystemStart,
-        keyFifths: resolvedKeyFifths[pairIndex],
-        showKeySignature,
-        timeSignature: resolvedTimeSignatures[pairIndex],
-        showTimeSignature,
-        nextTimeSignature,
-        showEndTimeSignature: showPotentialEndTimeSignature,
-      })
-      const demandWidth =
-        requiredWidthByEstimator && Number.isFinite(requiredWidthByEstimator)
-          ? requiredWidthByEstimator
-          : estimateAdaptiveMeasureWidth(
-            getMeasureLayoutDemandFromNoteDemand(
-              noteDemands[pairIndex],
-              isSystemStart,
-              showKeySignature,
-              showTimeSignature,
-              showPotentialEndTimeSignature,
-            ),
-            )
-      const requiredWidth = Math.min(safeSystemUsableWidth, Math.max(1, Math.ceil(demandWidth)))
+      const requiredWidth = getRequiredWidthForMeasure(pairIndex, pairIndex === startPairIndex, true)
       const wouldOverflow = pairIndex > startPairIndex && usedWidth + requiredWidth > safeSystemUsableWidth
       if (wouldOverflow) break
       usedWidth += requiredWidth
@@ -231,7 +239,94 @@ export function buildAdaptiveSystemRanges(params: {
     startPairIndex = endPairIndexExclusive
   }
 
-  return ranges
+  if (ranges.length <= 1) return ranges
+
+  type MutableRange = {
+    startPairIndex: number
+    endPairIndexExclusive: number
+  }
+
+  const mutableRanges: MutableRange[] = ranges.map((range) => ({ ...range }))
+
+  const getSystemUsedWidth = (start: number, endExclusive: number): number => {
+    let usedWidth = 0
+    for (let pairIndex = start; pairIndex < endExclusive; pairIndex += 1) {
+      const isSystemStart = pairIndex === start
+      const isSystemEnd = pairIndex === endExclusive - 1
+      usedWidth += getRequiredWidthForMeasure(pairIndex, isSystemStart, isSystemEnd)
+    }
+    return usedWidth
+  }
+
+  const getSystemPenalty = (start: number, endExclusive: number): number => {
+    const measureCount = endExclusive - start
+    if (measureCount <= 0) return Number.POSITIVE_INFINITY
+    const occupancy = getSystemUsedWidth(start, endExclusive) / safeSystemUsableWidth
+    let penalty = Math.abs(occupancy - ADAPTIVE_SYSTEM_OCCUPANCY_TARGET)
+    if (occupancy > 1) {
+      penalty += (occupancy - 1) * 10
+    }
+    if (occupancy < ADAPTIVE_SYSTEM_OCCUPANCY_MIN) {
+      penalty += (ADAPTIVE_SYSTEM_OCCUPANCY_MIN - occupancy) * 2
+    }
+    if (measureCount === 1) {
+      penalty += 0.15
+    }
+    return penalty
+  }
+
+  const evaluateAdjacentPenalty = (leftStart: number, boundary: number, rightEndExclusive: number): number => {
+    if (boundary <= leftStart || boundary >= rightEndExclusive) return Number.POSITIVE_INFINITY
+    const leftUsed = getSystemUsedWidth(leftStart, boundary)
+    const rightUsed = getSystemUsedWidth(boundary, rightEndExclusive)
+    const leftOcc = leftUsed / safeSystemUsableWidth
+    const rightOcc = rightUsed / safeSystemUsableWidth
+    if (leftOcc > 1 || rightOcc > 1) return Number.POSITIVE_INFINITY
+    const occupancyGapPenalty = Math.abs(leftOcc - rightOcc) * 0.6
+    return getSystemPenalty(leftStart, boundary) + getSystemPenalty(boundary, rightEndExclusive) + occupancyGapPenalty
+  }
+
+  const maxPasses = Math.max(1, Math.min(ADAPTIVE_SYSTEM_REBALANCE_PASSES, measurePairs.length))
+  for (let pass = 0; pass < maxPasses; pass += 1) {
+    let changed = false
+
+    for (let index = 0; index < mutableRanges.length - 1; index += 1) {
+      const leftRange = mutableRanges[index]
+      const rightRange = mutableRanges[index + 1]
+      const leftStart = leftRange.startPairIndex
+      const rightEndExclusive = rightRange.endPairIndexExclusive
+      const currentBoundary = leftRange.endPairIndexExclusive
+
+      const candidateBoundaries = [currentBoundary]
+      if (currentBoundary - leftStart > 1) {
+        candidateBoundaries.push(currentBoundary - 1)
+      }
+      if (rightEndExclusive - currentBoundary > 1) {
+        candidateBoundaries.push(currentBoundary + 1)
+      }
+
+      let bestBoundary = currentBoundary
+      let bestPenalty = evaluateAdjacentPenalty(leftStart, currentBoundary, rightEndExclusive)
+      candidateBoundaries.forEach((candidateBoundary) => {
+        if (candidateBoundary === currentBoundary) return
+        const penalty = evaluateAdjacentPenalty(leftStart, candidateBoundary, rightEndExclusive)
+        if (penalty + 0.01 < bestPenalty) {
+          bestPenalty = penalty
+          bestBoundary = candidateBoundary
+        }
+      })
+
+      if (bestBoundary !== currentBoundary) {
+        leftRange.endPairIndexExclusive = bestBoundary
+        rightRange.startPairIndex = bestBoundary
+        changed = true
+      }
+    }
+
+    if (!changed) break
+  }
+
+  return mutableRanges
 }
 
 function distributeWidthsByFloats(floatWidths: number[], targetTotal: number): number[] {
