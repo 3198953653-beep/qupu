@@ -47,6 +47,11 @@ export function ScoreControls(props: {
     onManualScalePercentChange,
   } = props
 
+  const handleScaleValue = (rawValue: string) => {
+    const next = Number(rawValue)
+    onManualScalePercentChange(next)
+  }
+
   return (
     <>
       <section className="control-row">
@@ -74,7 +79,8 @@ export function ScoreControls(props: {
           step={1}
           value={manualScalePercent}
           disabled={autoScaleEnabled}
-          onChange={(event) => onManualScalePercentChange(Number(event.target.value))}
+          onInput={(event) => handleScaleValue((event.target as HTMLInputElement).value)}
+          onChange={(event) => handleScaleValue(event.target.value)}
         />
         <input
           className="scale-percent-input"
@@ -84,7 +90,8 @@ export function ScoreControls(props: {
           step={1}
           value={manualScalePercent}
           disabled={autoScaleEnabled}
-          onChange={(event) => onManualScalePercentChange(Number(event.target.value))}
+          onInput={(event) => handleScaleValue((event.target as HTMLInputElement).value)}
+          onChange={(event) => handleScaleValue(event.target.value)}
         />
         <span className="scale-percent-label">%</span>
       </section>

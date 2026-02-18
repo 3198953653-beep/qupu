@@ -200,6 +200,7 @@ export function renderVisibleSystems(params: {
   activeSelection: Selection | null
   draggingSelection: Selection | null
   previousNoteLayoutsByPair?: Map<number, NoteLayout[]> | null
+  allowSelectionFreezeWhenNotDragging?: boolean
 }): {
   nextLayouts: NoteLayout[]
   nextLayoutsByPair: Map<number, NoteLayout[]>
@@ -219,6 +220,7 @@ export function renderVisibleSystems(params: {
     activeSelection,
     draggingSelection,
     previousNoteLayoutsByPair = null,
+    allowSelectionFreezeWhenNotDragging = true,
   } = params
 
   const nextLayouts: NoteLayout[] = []
@@ -302,9 +304,10 @@ export function renderVisibleSystems(params: {
         includeMeasureStartDecorations,
       }
     })
-    // Apply spacing freeze while dragging and on immediate post-release render,
-    // by falling back to activeSelection when draggingSelection is null.
-    const freezeSelection = draggingSelection ?? activeSelection
+    // Apply spacing freeze while dragging; optionally allow post-release freeze
+    // when geometry is unchanged (caller controls this flag).
+    const freezeSelection =
+      draggingSelection ?? (allowSelectionFreezeWhenNotDragging ? activeSelection : null)
     const frozenPairIndex = findPairIndexForSelection(freezeSelection, previousNoteLayoutsByPair)
     const frozenSpacingByPairIndex = new Map<number, FrozenMeasureSpacing>()
     systemMeta.forEach((entry) => {
