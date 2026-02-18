@@ -66,6 +66,7 @@ export type DrawMeasureParams = {
   freezePreviewAccidentalLayout?: boolean
   formatWidthOverride?: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
+  layoutDetail?: 'full' | 'spacing-only'
   skipPainting?: boolean
   staticNoteXById?: Map<string, number> | null
   staticAccidentalRightXById?: Map<string, Map<number, number>> | null
@@ -104,11 +105,13 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     freezePreviewAccidentalLayout = false,
     formatWidthOverride,
     timeAxisSpacingConfig,
+    layoutDetail = 'full',
     skipPainting = false,
     staticNoteXById = null,
     staticAccidentalRightXById = null,
     debugCapture = null,
   } = params
+  const isSpacingOnlyLayout = layoutDetail === 'spacing-only'
   const noteLayouts: NoteLayout[] = []
   const timeSignatureLabel = `${timeSignature.beats}/${timeSignature.beatType}`
   const endTimeSignatureLabel =
@@ -530,8 +533,12 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   }
 
 
-  const trebleBeams = Beam.generateBeams(trebleVexNotes, { groups: [new Fraction(1, 4)] })
-  const bassBeams = Beam.generateBeams(bassVexNotes, { groups: [new Fraction(1, 4)] })
+  const trebleBeams: Beam[] = isSpacingOnlyLayout
+    ? []
+    : Beam.generateBeams(trebleVexNotes, { groups: [new Fraction(1, 4)] })
+  const bassBeams: Beam[] = isSpacingOnlyLayout
+    ? []
+    : Beam.generateBeams(bassVexNotes, { groups: [new Fraction(1, 4)] })
   if (!skipPainting) {
     trebleVoice.draw(context, trebleStave)
     bassVoice.draw(context, bassStave)
@@ -616,24 +623,26 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
 
   const treblePitchYMap = {} as Record<Pitch, number>
   const bassPitchYMap = {} as Record<Pitch, number>
-  for (const pitch of PITCHES) {
-    treblePitchYMap[pitch] = trebleStave.getYForNote(PITCH_LINE_MAP.treble[pitch])
-    bassPitchYMap[pitch] = bassStave.getYForNote(PITCH_LINE_MAP.bass[pitch])
+  if (!isSpacingOnlyLayout) {
+    for (const pitch of PITCHES) {
+      treblePitchYMap[pitch] = trebleStave.getYForNote(PITCH_LINE_MAP.treble[pitch])
+      bassPitchYMap[pitch] = bassStave.getYForNote(PITCH_LINE_MAP.bass[pitch])
+    }
+
+    const trebleExtraPitches = new Set<Pitch>()
+    const bassExtraPitches = new Set<Pitch>()
+    trebleRendered.forEach(({ renderedKeys }) => renderedKeys.forEach((entry) => trebleExtraPitches.add(entry.pitch)))
+    bassRendered.forEach(({ renderedKeys }) => renderedKeys.forEach((entry) => bassExtraPitches.add(entry.pitch)))
+
+    trebleExtraPitches.forEach((pitch) => {
+      if (treblePitchYMap[pitch] !== undefined) return
+      treblePitchYMap[pitch] = trebleStave.getYForNote(getPitchLine('treble', pitch))
+    })
+    bassExtraPitches.forEach((pitch) => {
+      if (bassPitchYMap[pitch] !== undefined) return
+      bassPitchYMap[pitch] = bassStave.getYForNote(getPitchLine('bass', pitch))
+    })
   }
-
-  const trebleExtraPitches = new Set<Pitch>()
-  const bassExtraPitches = new Set<Pitch>()
-  trebleRendered.forEach(({ renderedKeys }) => renderedKeys.forEach((entry) => trebleExtraPitches.add(entry.pitch)))
-  bassRendered.forEach(({ renderedKeys }) => renderedKeys.forEach((entry) => bassExtraPitches.add(entry.pitch)))
-
-  trebleExtraPitches.forEach((pitch) => {
-    if (treblePitchYMap[pitch] !== undefined) return
-    treblePitchYMap[pitch] = trebleStave.getYForNote(getPitchLine('treble', pitch))
-  })
-  bassExtraPitches.forEach((pitch) => {
-    if (bassPitchYMap[pitch] !== undefined) return
-    bassPitchYMap[pitch] = bassStave.getYForNote(getPitchLine('bass', pitch))
-  })
 
   noteLayouts.push(
     ...trebleRendered.map(({ vexNote, renderedKeys }, noteIndex) => {
@@ -658,8 +667,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         keyIndex: entry.keyIndex,
       }))
       const rootHead = noteHeads.find((head) => head.keyIndex === 0) ?? noteHeads[0]
-      const noteRightX = getRenderedNoteRightX(vexNote, noteHeads)
       const noteSpacingRightX = getRenderedNoteSpacingRightX(vexNote, noteHeads)
+      const noteRightX = isSpacingOnlyLayout ? noteSpacingRightX : getRenderedNoteRightX(vexNote, noteHeads)
       return {
         id: measure.treble[noteIndex].id,
         staff: 'treble' as const,
@@ -698,8 +707,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         keyIndex: entry.keyIndex,
       }))
       const rootHead = noteHeads.find((head) => head.keyIndex === 0) ?? noteHeads[0]
-      const noteRightX = getRenderedNoteRightX(vexNote, noteHeads)
       const noteSpacingRightX = getRenderedNoteSpacingRightX(vexNote, noteHeads)
+      const noteRightX = isSpacingOnlyLayout ? noteSpacingRightX : getRenderedNoteRightX(vexNote, noteHeads)
       return {
         id: measure.bass[noteIndex].id,
         staff: 'bass' as const,
@@ -716,15 +725,17 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     }),
   )
 
-  const beamRightX = getMaxBeamRightX([...trebleBeams, ...bassBeams])
-  if (Number.isFinite(beamRightX) && noteLayouts.length > 0) {
-    let rightMostLayoutIndex = 0
-    for (let i = 1; i < noteLayouts.length; i += 1) {
-      if (noteLayouts[i].rightX > noteLayouts[rightMostLayoutIndex].rightX) {
-        rightMostLayoutIndex = i
+  if (!isSpacingOnlyLayout) {
+    const beamRightX = getMaxBeamRightX([...trebleBeams, ...bassBeams])
+    if (Number.isFinite(beamRightX) && noteLayouts.length > 0) {
+      let rightMostLayoutIndex = 0
+      for (let i = 1; i < noteLayouts.length; i += 1) {
+        if (noteLayouts[i].rightX > noteLayouts[rightMostLayoutIndex].rightX) {
+          rightMostLayoutIndex = i
+        }
       }
+      noteLayouts[rightMostLayoutIndex].rightX = Math.max(noteLayouts[rightMostLayoutIndex].rightX, beamRightX)
     }
-    noteLayouts[rightMostLayoutIndex].rightX = Math.max(noteLayouts[rightMostLayoutIndex].rightX, beamRightX)
   }
 
   return noteLayouts

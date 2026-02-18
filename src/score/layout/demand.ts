@@ -215,6 +215,23 @@ export function buildAdaptiveSystemRanges(params: {
     return Math.min(safeSystemUsableWidth, Math.max(1, Math.ceil(demandWidth)))
   }
 
+  // Precompute width under the four boundary roles so rebalancing can evaluate
+  // many candidate line-break boundaries in O(1) per query.
+  const requiredWidthSingle = new Array<number>(measurePairs.length)
+  const requiredWidthStartOnly = new Array<number>(measurePairs.length)
+  const requiredWidthEndOnly = new Array<number>(measurePairs.length)
+  const requiredWidthMiddle = new Array<number>(measurePairs.length)
+  for (let pairIndex = 0; pairIndex < measurePairs.length; pairIndex += 1) {
+    requiredWidthSingle[pairIndex] = getRequiredWidthForMeasure(pairIndex, true, true)
+    requiredWidthStartOnly[pairIndex] = getRequiredWidthForMeasure(pairIndex, true, false)
+    requiredWidthEndOnly[pairIndex] = getRequiredWidthForMeasure(pairIndex, false, true)
+    requiredWidthMiddle[pairIndex] = getRequiredWidthForMeasure(pairIndex, false, false)
+  }
+  const middleWidthPrefix = new Array<number>(measurePairs.length + 1).fill(0)
+  for (let pairIndex = 0; pairIndex < measurePairs.length; pairIndex += 1) {
+    middleWidthPrefix[pairIndex + 1] = middleWidthPrefix[pairIndex] + requiredWidthMiddle[pairIndex]
+  }
+
   const ranges: SystemMeasureRange[] = []
   let startPairIndex = 0
 
@@ -224,7 +241,8 @@ export function buildAdaptiveSystemRanges(params: {
 
     while (endPairIndexExclusive < measurePairs.length) {
       const pairIndex = endPairIndexExclusive
-      const requiredWidth = getRequiredWidthForMeasure(pairIndex, pairIndex === startPairIndex, true)
+      const requiredWidth =
+        pairIndex === startPairIndex ? requiredWidthSingle[pairIndex] : requiredWidthEndOnly[pairIndex]
       const wouldOverflow = pairIndex > startPairIndex && usedWidth + requiredWidth > safeSystemUsableWidth
       if (wouldOverflow) break
       usedWidth += requiredWidth
@@ -247,14 +265,26 @@ export function buildAdaptiveSystemRanges(params: {
   }
 
   const mutableRanges: MutableRange[] = ranges.map((range) => ({ ...range }))
+  const systemWidthCache = new Map<string, number>()
 
   const getSystemUsedWidth = (start: number, endExclusive: number): number => {
+    const cacheKey = `${start}:${endExclusive}`
+    const cached = systemWidthCache.get(cacheKey)
+    if (cached !== undefined) return cached
+
+    const measureCount = endExclusive - start
+    if (measureCount <= 0) return 0
+
     let usedWidth = 0
-    for (let pairIndex = start; pairIndex < endExclusive; pairIndex += 1) {
-      const isSystemStart = pairIndex === start
-      const isSystemEnd = pairIndex === endExclusive - 1
-      usedWidth += getRequiredWidthForMeasure(pairIndex, isSystemStart, isSystemEnd)
+    if (measureCount === 1) {
+      usedWidth = requiredWidthSingle[start]
+    } else {
+      usedWidth = requiredWidthStartOnly[start] + requiredWidthEndOnly[endExclusive - 1]
+      if (measureCount > 2) {
+        usedWidth += middleWidthPrefix[endExclusive - 1] - middleWidthPrefix[start + 1]
+      }
     }
+    systemWidthCache.set(cacheKey, usedWidth)
     return usedWidth
   }
 

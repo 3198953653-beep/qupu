@@ -396,6 +396,7 @@ export function renderVisibleSystems(params: {
           skipPainting: true,
           formatWidthOverride: formatWidth,
           timeAxisSpacingConfig,
+          layoutDetail: 'spacing-only',
         })
 
         const maxHeadX = getMeasureSpacingRightEdge(measureNoteLayouts)
@@ -451,6 +452,7 @@ export function renderVisibleSystems(params: {
             skipPainting: true,
             formatWidthOverride: formatWidth,
             timeAxisSpacingConfig,
+            layoutDetail: 'spacing-only',
           })
           const spacingRightEdge = getMeasureSpacingRightEdge(measureNoteLayouts)
           if (!Number.isFinite(spacingRightEdge)) {
