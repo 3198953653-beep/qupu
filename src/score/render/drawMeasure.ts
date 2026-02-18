@@ -548,6 +548,36 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
 
   if (!collectLayouts) return noteLayouts
 
+  if (isSpacingOnlyLayout) {
+    const buildMinimalLayouts = (
+      staff: StaffKind,
+      sourceNotes: ScoreNote[],
+      rendered: { vexNote: StaveNote }[],
+    ): NoteLayout[] =>
+      sourceNotes.map((sourceNote, noteIndex) => {
+        const vexNote = rendered[noteIndex]?.vexNote
+        const x = vexNote ? getRenderedNoteVisualX(vexNote) : 0
+        const spacingRightX = vexNote ? getRenderedNoteVisualX(vexNote) + 9 : x
+        return {
+          id: sourceNote.id,
+          staff,
+          pairIndex,
+          noteIndex,
+          x,
+          rightX: spacingRightX,
+          spacingRightX,
+          y: 0,
+          pitchYMap: {},
+          noteHeads: [],
+          accidentalRightXByKeyIndex: {},
+        }
+      })
+
+    noteLayouts.push(...buildMinimalLayouts('treble', measure.treble, trebleRendered))
+    noteLayouts.push(...buildMinimalLayouts('bass', measure.bass, bassRendered))
+    return noteLayouts
+  }
+
   const getRenderedNoteRightX = (
     vexNote: StaveNote,
     noteHeads: Array<{ x: number }>,

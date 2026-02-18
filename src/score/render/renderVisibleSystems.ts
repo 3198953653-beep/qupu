@@ -333,8 +333,14 @@ export function renderVisibleSystems(params: {
         entry.showEndTimeSignature,
       ),
     )
-    const buildMeasureProbe = (entry: (typeof systemMeta)[number], measureX: number, measureWidth: number) => {
-      const noteStartProbe = new Stave(measureX, trebleY, measureWidth)
+    const probeGeometryCache = new Map<string, { noteStartOffset: number; noteEndOffset: number; formatWidth: number }>()
+    const getMeasureProbeGeometry = (entry: (typeof systemMeta)[number], measureWidth: number) => {
+      const safeWidth = Math.max(1, Math.floor(measureWidth))
+      const cacheKey = `${entry.pairIndex}|${safeWidth}`
+      const cached = probeGeometryCache.get(cacheKey)
+      if (cached) return cached
+
+      const noteStartProbe = new Stave(0, trebleY, safeWidth)
       if (entry.isSystemStart) {
         noteStartProbe.addClef('treble')
         if (entry.showKeySignature) {
@@ -355,10 +361,21 @@ export function renderVisibleSystems(params: {
       if (entry.showEndTimeSignature) {
         noteStartProbe.setEndTimeSignature(`${entry.nextTimeSignature.beats}/${entry.nextTimeSignature.beatType}`)
       }
-      const noteStartX = noteStartProbe.getNoteStartX()
-      const noteEndX = noteStartProbe.getNoteEndX()
-      const formatWidth = Math.max(80, noteEndX - noteStartX - 8)
-      return { noteStartX, noteEndX, formatWidth }
+      const noteStartOffset = noteStartProbe.getNoteStartX()
+      const noteEndOffset = noteStartProbe.getNoteEndX()
+      const formatWidth = Math.max(80, noteEndOffset - noteStartOffset - 8)
+      const geometry = { noteStartOffset, noteEndOffset, formatWidth }
+      probeGeometryCache.set(cacheKey, geometry)
+      return geometry
+    }
+
+    const buildMeasureProbe = (entry: (typeof systemMeta)[number], measureX: number, measureWidth: number) => {
+      const geometry = getMeasureProbeGeometry(entry, measureWidth)
+      return {
+        noteStartX: measureX + geometry.noteStartOffset,
+        noteEndX: measureX + geometry.noteEndOffset,
+        formatWidth: geometry.formatWidth,
+      }
     }
     const spacingProbeDeltaCache = new Map<string, number | null>()
     const getMeasureSpacingDelta = (entry: (typeof systemMeta)[number], measureWidth: number): number | null => {
