@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as Tone from 'tone'
 import { Renderer } from 'vexflow'
 import './App.css'
@@ -170,6 +170,7 @@ function App() {
     pairIndex: number
   } | null>(null)
   const firstMeasureDebugRafRef = useRef<number | null>(null)
+  const importFeedbackRef = useRef<ImportFeedback>(importFeedback)
   const measurePairs = useMemo(
     () => measurePairsFromImport ?? buildMeasurePairs(notes, bassNotes),
     [measurePairsFromImport, notes, bassNotes],
@@ -322,6 +323,7 @@ function App() {
 
   const {
     playScore,
+    importMusicXmlText,
     importMusicXmlFromTextarea,
     openMusicXmlFilePicker,
     onMusicXmlFileChange,
@@ -379,9 +381,15 @@ function App() {
   const isImportLoading = importFeedback.kind === 'loading'
   const importProgressPercent =
     typeof importFeedback.progress === 'number' ? Math.max(0, Math.min(100, importFeedback.progress)) : null
+  useEffect(() => {
+    importFeedbackRef.current = importFeedback
+  }, [importFeedback])
   const goToPrevPage = () => setCurrentPage((page) => Math.max(0, Math.min(page, pageCount - 1) - 1))
   const goToNextPage = () => setCurrentPage((page) => Math.min(pageCount - 1, Math.max(0, page) + 1))
-  const goToPage = (pageIndex: number) => setCurrentPage(Math.max(0, Math.min(pageCount - 1, pageIndex)))
+  const goToPage = useCallback(
+    (pageIndex: number) => setCurrentPage(Math.max(0, Math.min(pageCount - 1, pageIndex))),
+    [pageCount],
+  )
   const formatDebugCoord = (value: number | null | undefined): string => {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 'null'
     return value.toFixed(3)
@@ -618,6 +626,86 @@ function App() {
     setMeasureEdgeDebugReport('')
   }
 
+  const dumpAllMeasureCoordinateReport = useCallback(() => {
+    const measureLayouts = measureLayoutsRef.current
+    const noteLayoutsByPair = noteLayoutsByPairRef.current
+    const pairs = measurePairsRef.current
+    const rows = pairs.map((pair, pairIndex) => {
+      const measureLayout = measureLayouts.get(pairIndex) ?? null
+      const pairLayouts = noteLayoutsByPair.get(pairIndex) ?? []
+      const layoutRows = pairLayouts
+        .slice()
+        .sort((left, right) => {
+          if (left.staff !== right.staff) return left.staff.localeCompare(right.staff)
+          if (left.noteIndex !== right.noteIndex) return left.noteIndex - right.noteIndex
+          return left.x - right.x
+        })
+        .map((layout) => {
+          const sourceNote = layout.staff === 'treble' ? pair.treble[layout.noteIndex] : pair.bass[layout.noteIndex]
+          return {
+            staff: layout.staff,
+            noteId: layout.id,
+            noteIndex: layout.noteIndex,
+            pitch: sourceNote?.pitch ?? null,
+            duration: sourceNote?.duration ?? null,
+            x: layout.x,
+            rightX: layout.rightX,
+            spacingRightX: layout.spacingRightX,
+            noteHeads: layout.noteHeads.map((head) => ({
+              keyIndex: head.keyIndex,
+              pitch: head.pitch,
+              x: head.x,
+              y: head.y,
+            })),
+            accidentalCoords: Object.entries(layout.accidentalRightXByKeyIndex)
+              .map(([rawKeyIndex, rightX]) => ({
+                keyIndex: Number(rawKeyIndex),
+                rightX,
+              }))
+              .filter((entry) => Number.isFinite(entry.keyIndex) && Number.isFinite(entry.rightX))
+              .sort((left, right) => left.keyIndex - right.keyIndex),
+          }
+        })
+
+      const maxVisualRightX =
+        layoutRows.length > 0 ? layoutRows.reduce((maxX, row) => Math.max(maxX, row.rightX), Number.NEGATIVE_INFINITY) : null
+      const maxSpacingRightX =
+        layoutRows.length > 0
+          ? layoutRows.reduce((maxX, row) => Math.max(maxX, row.spacingRightX), Number.NEGATIVE_INFINITY)
+          : null
+
+      return {
+        pairIndex,
+        rendered: measureLayout !== null,
+        measureX: measureLayout?.measureX ?? null,
+        measureWidth: measureLayout?.measureWidth ?? null,
+        measureStartBarX: measureLayout?.measureX ?? null,
+        measureEndBarX: measureLayout ? measureLayout.measureX + measureLayout.measureWidth : null,
+        noteStartX: measureLayout?.noteStartX ?? null,
+        noteEndX: measureLayout?.noteEndX ?? null,
+        maxVisualRightX,
+        maxSpacingRightX,
+        overflowVsNoteEndX:
+          measureLayout && typeof maxVisualRightX === 'number'
+            ? Number((maxVisualRightX - measureLayout.noteEndX).toFixed(3))
+            : null,
+        overflowVsMeasureEndBarX:
+          measureLayout && typeof maxVisualRightX === 'number'
+            ? Number((maxVisualRightX - (measureLayout.measureX + measureLayout.measureWidth)).toFixed(3))
+            : null,
+        notes: layoutRows,
+      }
+    })
+
+    return {
+      generatedAt: new Date().toISOString(),
+      totalMeasureCount: pairs.length,
+      renderedMeasureCount: rows.filter((row) => row.rendered).length,
+      visibleSystemRange: { ...visibleSystemRange },
+      rows,
+    }
+  }, [visibleSystemRange])
+
   useEffect(() => {
     return () => {
       if (firstMeasureDebugRafRef.current !== null) {
@@ -625,6 +713,38 @@ function App() {
       }
     }
   }, [])
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    const debugApi = {
+      importMusicXmlText: (xmlText: string) => {
+        importMusicXmlText(xmlText)
+      },
+      getImportFeedback: () => importFeedbackRef.current,
+      dumpAllMeasureCoordinates: () => dumpAllMeasureCoordinateReport(),
+      getPaging: () => ({
+        currentPage: safeCurrentPage,
+        pageCount,
+        systemsPerPage,
+        visibleSystemRange: { ...visibleSystemRange },
+      }),
+      goToPage: (pageIndex: number) => {
+        goToPage(pageIndex)
+      },
+    }
+    ;(window as unknown as { __scoreDebug?: typeof debugApi }).__scoreDebug = debugApi
+    return () => {
+      delete (window as unknown as { __scoreDebug?: typeof debugApi }).__scoreDebug
+    }
+  }, [
+    importMusicXmlText,
+    dumpAllMeasureCoordinateReport,
+    goToPage,
+    pageCount,
+    safeCurrentPage,
+    systemsPerPage,
+    visibleSystemRange,
+  ])
 
   return (
     <main className="app-shell">

@@ -56,21 +56,33 @@ function getTickDuration(note: ScoreNote): number {
   return Math.max(1, ticks)
 }
 
-function getNoteHorizontalExtents(vexNote: StaveNote, headX: number): { leftExtent: number; rightExtent: number } {
+function getNoteHorizontalExtents(vexNote: StaveNote): { leftExtent: number; rightExtent: number } {
   let leftExtent = 0
   let rightExtent = DEFAULT_NOTE_HEAD_WIDTH_PX
 
-  const bbox = vexNote.getBoundingBox()
-  if (!bbox) return { leftExtent, rightExtent }
+  const metrics = (vexNote as unknown as {
+    getMetrics?: () => {
+      notePx?: number
+      modLeftPx?: number
+      modRightPx?: number
+      leftDisplacedHeadPx?: number
+      rightDisplacedHeadPx?: number
+    }
+  }).getMetrics?.()
 
-  const bboxLeft = bbox.getX()
-  const bboxRight = bbox.getX() + bbox.getW()
-  if (!Number.isFinite(bboxLeft) || !Number.isFinite(bboxRight)) {
-    return { leftExtent, rightExtent }
+  if (metrics) {
+    const notePx = Number.isFinite(metrics.notePx) ? (metrics.notePx as number) : DEFAULT_NOTE_HEAD_WIDTH_PX
+    const modLeftPx = Number.isFinite(metrics.modLeftPx) ? (metrics.modLeftPx as number) : 0
+    const modRightPx = Number.isFinite(metrics.modRightPx) ? (metrics.modRightPx as number) : 0
+    const leftDisplacedHeadPx = Number.isFinite(metrics.leftDisplacedHeadPx) ? (metrics.leftDisplacedHeadPx as number) : 0
+    const rightDisplacedHeadPx = Number.isFinite(metrics.rightDisplacedHeadPx)
+      ? (metrics.rightDisplacedHeadPx as number)
+      : 0
+
+    leftExtent = Math.max(0, modLeftPx, leftDisplacedHeadPx)
+    rightExtent = Math.max(DEFAULT_NOTE_HEAD_WIDTH_PX, notePx + modRightPx + rightDisplacedHeadPx)
   }
 
-  leftExtent = Math.max(0, headX - bboxLeft)
-  rightExtent = Math.max(DEFAULT_NOTE_HEAD_WIDTH_PX, bboxRight - headX)
   return { leftExtent, rightExtent }
 }
 
@@ -84,7 +96,7 @@ function buildTimeAxisRefs(notes: ScoreNote[], rendered: RenderedStaffNote[]): T
     if (renderedEntry) {
       const headX = getRenderedNoteVisualX(renderedEntry.vexNote)
       if (Number.isFinite(headX)) {
-        const extents = getNoteHorizontalExtents(renderedEntry.vexNote, headX)
+        const extents = getNoteHorizontalExtents(renderedEntry.vexNote)
         refs.push({
           onsetTicks: cursorTicks,
           vexNote: renderedEntry.vexNote,
