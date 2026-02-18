@@ -18,6 +18,7 @@ import {
   getRenderedNoteVisualX,
 } from '../layout/renderPosition'
 import { applyUnifiedTimeAxisSpacing } from '../layout/timeAxisSpacing'
+import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
 import { getStepOctaveAlterFromPitch } from '../pitchMath'
 import { buildPitchLineMap, createPianoPitches, getPitchLine, getStrictStemDirection } from '../pitchUtils'
 import type { RenderedNoteKey } from '../accidentals'
@@ -64,6 +65,7 @@ export type DrawMeasureParams = {
   noteStartXOverride?: number
   freezePreviewAccidentalLayout?: boolean
   formatWidthOverride?: number
+  timeAxisSpacingConfig?: TimeAxisSpacingConfig
   skipPainting?: boolean
   staticNoteXById?: Map<string, number> | null
   staticAccidentalRightXById?: Map<string, Map<number, number>> | null
@@ -101,6 +103,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     noteStartXOverride,
     freezePreviewAccidentalLayout = false,
     formatWidthOverride,
+    timeAxisSpacingConfig,
     skipPainting = false,
     staticNoteXById = null,
     staticAccidentalRightXById = null,
@@ -362,6 +365,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     formatWidth,
     trebleRendered,
     bassRendered,
+    spacingConfig: timeAxisSpacingConfig,
   })
 
   if (staticNoteXById && staticNoteXById.size > 0) {

@@ -14,6 +14,7 @@ import {
 } from './dragPreviewController'
 import { flushPendingDragFrame, scheduleDragCommitFrame } from './dragScheduler'
 import { flattenBassFromPairs, flattenTrebleFromPairs } from './scoreOps'
+import type { TimeAxisSpacingConfig } from './layout/timeAxisSpacing'
 import type { Renderer } from 'vexflow'
 import type { HitGridIndex } from './layout/hitTest'
 import type {
@@ -63,6 +64,7 @@ export function useDragHandlers(params: {
   previewStartThresholdPx: number
   backend: number
   scoreScale: number
+  timeAxisSpacingConfig?: TimeAxisSpacingConfig
 }): {
   clearDragOverlay: () => void
   dumpDragDebugReport: () => void
@@ -110,6 +112,7 @@ export function useDragHandlers(params: {
     previewStartThresholdPx,
     backend,
     scoreScale,
+    timeAxisSpacingConfig,
   } = params
 
   const clearDragOverlay = () => {
@@ -141,6 +144,7 @@ export function useDragHandlers(params: {
         overlayLastRectRef,
         backend,
         scoreScale,
+        timeAxisSpacingConfig,
       },
     })
   }
@@ -161,6 +165,7 @@ export function useDragHandlers(params: {
         overlayLastRectRef,
         backend,
         scoreScale,
+        timeAxisSpacingConfig,
       },
       dragDebugFramesRef,
     })

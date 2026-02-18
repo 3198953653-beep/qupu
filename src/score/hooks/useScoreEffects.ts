@@ -8,6 +8,7 @@ import { renderVisibleSystems } from '../render/renderVisibleSystems'
 import { syncBassNotesToTreble } from '../scoreOps'
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
 import type { HitGridIndex } from '../layout/hitTest'
+import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
 import type {
   DragState,
   MeasureLayout,
@@ -157,6 +158,7 @@ export function useScoreRenderEffect(params: {
   hitGridRef: MutableRefObject<HitGridIndex | null>
   measureLayoutsRef: MutableRefObject<Map<number, MeasureLayout>>
   backend: number
+  timeAxisSpacingConfig?: TimeAxisSpacingConfig
 }): void {
   const {
     scoreRef,
@@ -178,6 +180,7 @@ export function useScoreRenderEffect(params: {
     hitGridRef,
     measureLayoutsRef,
     backend,
+    timeAxisSpacingConfig,
   } = params
   const lastScoreSizeRef = useRef<{ width: number; height: number } | null>(null)
 
@@ -215,6 +218,7 @@ export function useScoreRenderEffect(params: {
       draggingSelection,
       previousNoteLayoutsByPair,
       allowSelectionFreezeWhenNotDragging: !scoreSizeChanged,
+      timeAxisSpacingConfig,
     })
 
     noteLayoutsRef.current = nextLayouts
@@ -243,6 +247,7 @@ export function useScoreRenderEffect(params: {
     hitGridRef,
     measureLayoutsRef,
     backend,
+    timeAxisSpacingConfig,
   ])
 }
 

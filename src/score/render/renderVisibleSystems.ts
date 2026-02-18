@@ -18,6 +18,7 @@ import { getLayoutNoteKey } from '../layout/renderPosition'
 import { buildMeasureOverlayRect } from '../layout/viewport'
 import { clamp } from '../math'
 import { drawMeasureToContext } from './drawMeasure'
+import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
 import type { MeasureLayout, MeasurePair, NoteLayout, ScoreNote, Selection, StaffKind, TimeSignature } from '../types'
 
 const MEASURE_RIGHT_EDGE_GUARD_PX = 0
@@ -201,6 +202,7 @@ export function renderVisibleSystems(params: {
   draggingSelection: Selection | null
   previousNoteLayoutsByPair?: Map<number, NoteLayout[]> | null
   allowSelectionFreezeWhenNotDragging?: boolean
+  timeAxisSpacingConfig?: TimeAxisSpacingConfig
 }): {
   nextLayouts: NoteLayout[]
   nextLayoutsByPair: Map<number, NoteLayout[]>
@@ -221,6 +223,7 @@ export function renderVisibleSystems(params: {
     draggingSelection,
     previousNoteLayoutsByPair = null,
     allowSelectionFreezeWhenNotDragging = true,
+    timeAxisSpacingConfig,
   } = params
 
   const nextLayouts: NoteLayout[] = []
@@ -392,6 +395,7 @@ export function renderVisibleSystems(params: {
           collectLayouts: true,
           skipPainting: true,
           formatWidthOverride: formatWidth,
+          timeAxisSpacingConfig,
         })
 
         const maxHeadX = getMeasureSpacingRightEdge(measureNoteLayouts)
@@ -446,6 +450,7 @@ export function renderVisibleSystems(params: {
             collectLayouts: true,
             skipPainting: true,
             formatWidthOverride: formatWidth,
+            timeAxisSpacingConfig,
           })
           const spacingRightEdge = getMeasureSpacingRightEdge(measureNoteLayouts)
           if (!Number.isFinite(spacingRightEdge)) {
@@ -554,6 +559,7 @@ export function renderVisibleSystems(params: {
         activeSelection,
         draggingSelection,
         formatWidthOverride: formatWidth,
+        timeAxisSpacingConfig,
         staticNoteXById: frozenSpacing?.staticNoteXById ?? null,
         staticAccidentalRightXById: frozenSpacing?.staticAccidentalRightXById ?? null,
       })

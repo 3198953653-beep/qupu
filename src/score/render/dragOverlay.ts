@@ -1,6 +1,7 @@
 import type { MutableRefObject } from 'react'
 import { getLayoutNoteKey } from '../layout/renderPosition'
 import { paintOverlayMeasure } from './overlayPaint'
+import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
 import type { DragDebugSnapshot, DragState, MeasureLayout, MeasurePair, NoteLayout, Selection } from '../types'
 
 export function drawSelectionMeasureOverlay(params: {
@@ -11,6 +12,7 @@ export function drawSelectionMeasureOverlay(params: {
   ensureOverlayCanvasForRect: (rect: MeasureLayout['overlayRect']) => { x: number; y: number; width: number; height: number } | null
   getOverlayContext: () => ReturnType<import('vexflow').Renderer['getContext']> | null
   clearDragOverlay: () => void
+  timeAxisSpacingConfig?: TimeAxisSpacingConfig
 }): void {
   const {
     selection,
@@ -20,6 +22,7 @@ export function drawSelectionMeasureOverlay(params: {
     ensureOverlayCanvasForRect,
     getOverlayContext,
     clearDragOverlay,
+    timeAxisSpacingConfig,
   } = params
 
   const selectedKey = getLayoutNoteKey(selection.staff, selection.noteId)
@@ -67,6 +70,7 @@ export function drawSelectionMeasureOverlay(params: {
       suppressSystemDecorations: true,
       noteStartXOverride: measureLayout.noteStartX,
       formatWidthOverride: measureLayout.formatWidth,
+      timeAxisSpacingConfig,
     },
   })
 }
@@ -80,6 +84,7 @@ export function drawDragMeasurePreview(params: {
   ensureOverlayCanvasForRect: (rect: MeasureLayout['overlayRect']) => { x: number; y: number; width: number; height: number } | null
   getOverlayContext: () => ReturnType<import('vexflow').Renderer['getContext']> | null
   dragDebugFramesRef: MutableRefObject<DragDebugSnapshot[]>
+  timeAxisSpacingConfig?: TimeAxisSpacingConfig
 }): void {
   const {
     drag,
@@ -90,6 +95,7 @@ export function drawDragMeasurePreview(params: {
     ensureOverlayCanvasForRect,
     getOverlayContext,
     dragDebugFramesRef,
+    timeAxisSpacingConfig,
   } = params
 
   const dragWithLayout = ensureDragLayoutCache(drag)
@@ -137,6 +143,7 @@ export function drawDragMeasurePreview(params: {
       noteStartXOverride: measureLayout.noteStartX,
       freezePreviewAccidentalLayout: false,
       formatWidthOverride: measureLayout.formatWidth,
+      timeAxisSpacingConfig,
       staticNoteXById: dragWithLayout.staticNoteXById,
       staticAccidentalRightXById: dragWithLayout.previewAccidentalRightXById,
       debugCapture: {

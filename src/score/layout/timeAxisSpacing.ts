@@ -20,8 +20,7 @@ type ApplyUnifiedTimeAxisSpacingParams = {
   formatWidth: number
   trebleRendered: RenderedStaffNote[]
   bassRendered: RenderedStaffNote[]
-  leftEdgePaddingPx?: number
-  rightEdgePaddingPx?: number
+  spacingConfig?: TimeAxisSpacingConfig
 }
 
 const MIN_RENDER_WIDTH_PX = 1
@@ -32,6 +31,24 @@ const TICKS_PER_QUARTER = 16
 const MIN_GAP_BEATS = 1 / 32
 const GAP_GAMMA = 0.72
 const GAP_BASE_WEIGHT = 0.45
+
+export type TimeAxisSpacingConfig = {
+  minGapBeats: number
+  gapGamma: number
+  gapBaseWeight: number
+  leftEdgePaddingPx: number
+  rightEdgePaddingPx: number
+  interOnsetPaddingPx: number
+}
+
+export const DEFAULT_TIME_AXIS_SPACING_CONFIG: TimeAxisSpacingConfig = {
+  minGapBeats: MIN_GAP_BEATS,
+  gapGamma: GAP_GAMMA,
+  gapBaseWeight: GAP_BASE_WEIGHT,
+  leftEdgePaddingPx: DEFAULT_LEFT_EDGE_PADDING_PX,
+  rightEdgePaddingPx: DEFAULT_RIGHT_EDGE_PADDING_PX,
+  interOnsetPaddingPx: 1,
+}
 
 function getTickDuration(note: ScoreNote): number {
   const ticks = DURATION_TICKS[note.duration]
@@ -82,10 +99,10 @@ function buildTimeAxisRefs(notes: ScoreNote[], rendered: RenderedStaffNote[]): T
   return refs
 }
 
-function mapTickGapToWeight(deltaTicks: number): number {
+function mapTickGapToWeight(deltaTicks: number, config: TimeAxisSpacingConfig): number {
   const beats = deltaTicks / TICKS_PER_QUARTER
-  const compressed = Math.pow(Math.max(MIN_GAP_BEATS, beats), GAP_GAMMA)
-  return GAP_BASE_WEIGHT + compressed
+  const compressed = Math.pow(Math.max(config.minGapBeats, beats), config.gapGamma)
+  return config.gapBaseWeight + compressed
 }
 
 export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingParams): void {
@@ -95,8 +112,7 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     formatWidth,
     trebleRendered,
     bassRendered,
-    leftEdgePaddingPx = DEFAULT_LEFT_EDGE_PADDING_PX,
-    rightEdgePaddingPx = DEFAULT_RIGHT_EDGE_PADDING_PX,
+    spacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
   } = params
 
   const refs = [
@@ -124,8 +140,8 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
   const lastRightExtent = lastOnsetRefs.reduce((max, ref) => Math.max(max, ref.rightExtent), DEFAULT_NOTE_HEAD_WIDTH_PX)
 
   const usableFormatWidth = Math.max(MIN_RENDER_WIDTH_PX, formatWidth)
-  const startPad = Math.max(1, firstLeftExtent + leftEdgePaddingPx)
-  const endPad = Math.max(1, lastRightExtent + rightEdgePaddingPx)
+  const startPad = Math.max(1, firstLeftExtent + spacingConfig.leftEdgePaddingPx)
+  const endPad = Math.max(1, lastRightExtent + spacingConfig.rightEdgePaddingPx)
   const axisStart = noteStartX + startPad
   const axisEnd = noteStartX + usableFormatWidth - endPad
 
@@ -143,7 +159,7 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     const gapWeights: number[] = []
     for (let i = 1; i < onsetTicks.length; i += 1) {
       const deltaTicks = Math.max(1, onsetTicks[i] - onsetTicks[i - 1])
-      gapWeights.push(mapTickGapToWeight(deltaTicks))
+      gapWeights.push(mapTickGapToWeight(deltaTicks, spacingConfig))
     }
     const totalWeight = gapWeights.reduce((sum, value) => sum + value, 0)
     if (totalWeight <= 0) {
@@ -160,6 +176,64 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
         targetXByOnset.set(onsetTicks[i], axisStart + spanWidth * ratio)
       }
     }
+  }
+
+  if (onsetTicks.length > 1) {
+    const basePositions = onsetTicks.map((onset) => targetXByOnset.get(onset) ?? axisStart)
+    const leftExtents = onsetTicks.map((onset) =>
+      (refsByOnset.get(onset) ?? []).reduce((max, ref) => Math.max(max, ref.leftExtent), 0),
+    )
+    const rightExtents = onsetTicks.map((onset) =>
+      (refsByOnset.get(onset) ?? []).reduce((max, ref) => Math.max(max, ref.rightExtent), DEFAULT_NOTE_HEAD_WIDTH_PX),
+    )
+    const minGaps = onsetTicks.slice(1).map((_, index) => {
+      const glyphGap = rightExtents[index] + leftExtents[index + 1] + spacingConfig.interOnsetPaddingPx
+      return Math.max(1, glyphGap)
+    })
+    const spanWidth = Math.max(1, axisEnd - axisStart)
+    const minGapTotal = minGaps.reduce((sum, value) => sum + value, 0)
+    const gapScale = minGapTotal > spanWidth ? spanWidth / minGapTotal : 1
+    const scaledMinGaps = minGaps.map((value) => value * gapScale)
+    const constrained = [...basePositions]
+
+    for (let i = 1; i < constrained.length; i += 1) {
+      const minAllowed = constrained[i - 1] + scaledMinGaps[i - 1]
+      if (constrained[i] < minAllowed) {
+        constrained[i] = minAllowed
+      }
+    }
+
+    const overflow = constrained[constrained.length - 1] - axisEnd
+    if (overflow > 0) {
+      for (let i = 0; i < constrained.length; i += 1) {
+        constrained[i] -= overflow
+      }
+    }
+
+    for (let i = constrained.length - 2; i >= 0; i -= 1) {
+      const maxAllowed = constrained[i + 1] - scaledMinGaps[i]
+      if (constrained[i] > maxAllowed) {
+        constrained[i] = maxAllowed
+      }
+    }
+
+    const underflow = axisStart - constrained[0]
+    if (underflow > 0) {
+      for (let i = 0; i < constrained.length; i += 1) {
+        constrained[i] += underflow
+      }
+    }
+
+    for (let i = 1; i < constrained.length; i += 1) {
+      const minAllowed = constrained[i - 1] + scaledMinGaps[i - 1]
+      if (constrained[i] < minAllowed) {
+        constrained[i] = minAllowed
+      }
+    }
+
+    onsetTicks.forEach((onset, index) => {
+      targetXByOnset.set(onset, constrained[index])
+    })
   }
 
   refs.forEach((ref) => {

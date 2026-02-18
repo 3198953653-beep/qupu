@@ -23,6 +23,17 @@ export function ScoreControls(props: {
   onToggleAutoScale: () => void
   manualScalePercent: number
   onManualScalePercentChange: (nextPercent: number) => void
+  spacingGapGamma: number
+  spacingBaseWeight: number
+  spacingMinGapBeats: number
+  spacingLeftEdgePaddingPx: number
+  spacingRightEdgePaddingPx: number
+  onSpacingMinGapBeatsChange: (nextValue: number) => void
+  onSpacingGapGammaChange: (nextValue: number) => void
+  onSpacingBaseWeightChange: (nextValue: number) => void
+  onSpacingLeftEdgePaddingPxChange: (nextValue: number) => void
+  onSpacingRightEdgePaddingPxChange: (nextValue: number) => void
+  onResetSpacingConfig: () => void
 }) {
   const {
     isPlaying,
@@ -45,11 +56,26 @@ export function ScoreControls(props: {
     onToggleAutoScale,
     manualScalePercent,
     onManualScalePercentChange,
+    spacingGapGamma,
+    spacingBaseWeight,
+    spacingMinGapBeats,
+    spacingLeftEdgePaddingPx,
+    spacingRightEdgePaddingPx,
+    onSpacingMinGapBeatsChange,
+    onSpacingGapGammaChange,
+    onSpacingBaseWeightChange,
+    onSpacingLeftEdgePaddingPxChange,
+    onSpacingRightEdgePaddingPxChange,
+    onResetSpacingConfig,
   } = props
 
   const handleScaleValue = (rawValue: string) => {
     const next = Number(rawValue)
     onManualScalePercentChange(next)
+  }
+  const handleFloatValue = (rawValue: string, onChange: (nextValue: number) => void) => {
+    const next = Number(rawValue)
+    onChange(next)
   }
 
   return (
@@ -94,6 +120,133 @@ export function ScoreControls(props: {
           onChange={(event) => handleScaleValue(event.target.value)}
         />
         <span className="scale-percent-label">%</span>
+      </section>
+
+      <section className="spacing-panel">
+        <div className="spacing-header">
+          <h3>Spacing Tuning</h3>
+          <button type="button" className="spacing-reset-btn" onClick={onResetSpacingConfig}>
+            Reset
+          </button>
+        </div>
+        <div className="spacing-grid">
+          <label htmlFor="spacing-min-gap-range">Min Gap (beats)</label>
+          <input
+            id="spacing-min-gap-range"
+            type="range"
+            min={0.01}
+            max={0.25}
+            step={0.005}
+            value={spacingMinGapBeats}
+            onInput={(event) =>
+              handleFloatValue((event.target as HTMLInputElement).value, onSpacingMinGapBeatsChange)
+            }
+            onChange={(event) => handleFloatValue(event.target.value, onSpacingMinGapBeatsChange)}
+          />
+          <input
+            type="number"
+            min={0.01}
+            max={0.25}
+            step={0.005}
+            value={spacingMinGapBeats}
+            onInput={(event) =>
+              handleFloatValue((event.target as HTMLInputElement).value, onSpacingMinGapBeatsChange)
+            }
+            onChange={(event) => handleFloatValue(event.target.value, onSpacingMinGapBeatsChange)}
+          />
+
+          <label htmlFor="spacing-gamma-range">Gap Gamma</label>
+          <input
+            id="spacing-gamma-range"
+            type="range"
+            min={0.55}
+            max={1}
+            step={0.01}
+            value={spacingGapGamma}
+            onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onSpacingGapGammaChange)}
+            onChange={(event) => handleFloatValue(event.target.value, onSpacingGapGammaChange)}
+          />
+          <input
+            type="number"
+            min={0.55}
+            max={1}
+            step={0.01}
+            value={spacingGapGamma}
+            onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onSpacingGapGammaChange)}
+            onChange={(event) => handleFloatValue(event.target.value, onSpacingGapGammaChange)}
+          />
+
+          <label htmlFor="spacing-base-range">Gap Base</label>
+          <input
+            id="spacing-base-range"
+            type="range"
+            min={0.1}
+            max={1.2}
+            step={0.01}
+            value={spacingBaseWeight}
+            onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onSpacingBaseWeightChange)}
+            onChange={(event) => handleFloatValue(event.target.value, onSpacingBaseWeightChange)}
+          />
+          <input
+            type="number"
+            min={0.1}
+            max={1.2}
+            step={0.01}
+            value={spacingBaseWeight}
+            onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onSpacingBaseWeightChange)}
+            onChange={(event) => handleFloatValue(event.target.value, onSpacingBaseWeightChange)}
+          />
+
+          <label htmlFor="spacing-left-pad-range">Left Edge Pad</label>
+          <input
+            id="spacing-left-pad-range"
+            type="range"
+            min={0}
+            max={24}
+            step={1}
+            value={spacingLeftEdgePaddingPx}
+            onInput={(event) =>
+              handleFloatValue((event.target as HTMLInputElement).value, onSpacingLeftEdgePaddingPxChange)
+            }
+            onChange={(event) => handleFloatValue(event.target.value, onSpacingLeftEdgePaddingPxChange)}
+          />
+          <input
+            type="number"
+            min={0}
+            max={24}
+            step={1}
+            value={spacingLeftEdgePaddingPx}
+            onInput={(event) =>
+              handleFloatValue((event.target as HTMLInputElement).value, onSpacingLeftEdgePaddingPxChange)
+            }
+            onChange={(event) => handleFloatValue(event.target.value, onSpacingLeftEdgePaddingPxChange)}
+          />
+
+          <label htmlFor="spacing-right-pad-range">Right Edge Pad</label>
+          <input
+            id="spacing-right-pad-range"
+            type="range"
+            min={0}
+            max={24}
+            step={1}
+            value={spacingRightEdgePaddingPx}
+            onInput={(event) =>
+              handleFloatValue((event.target as HTMLInputElement).value, onSpacingRightEdgePaddingPxChange)
+            }
+            onChange={(event) => handleFloatValue(event.target.value, onSpacingRightEdgePaddingPxChange)}
+          />
+          <input
+            type="number"
+            min={0}
+            max={24}
+            step={1}
+            value={spacingRightEdgePaddingPx}
+            onInput={(event) =>
+              handleFloatValue((event.target as HTMLInputElement).value, onSpacingRightEdgePaddingPxChange)
+            }
+            onChange={(event) => handleFloatValue(event.target.value, onSpacingRightEdgePaddingPxChange)}
+          />
+        </div>
       </section>
 
       <section className="import-panel">

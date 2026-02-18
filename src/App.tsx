@@ -14,6 +14,7 @@ import {
   SYSTEM_HEIGHT,
 } from './score/constants'
 import { buildAdaptiveSystemRanges, toDisplayDuration } from './score/layout/demand'
+import { DEFAULT_TIME_AXIS_SPACING_CONFIG } from './score/layout/timeAxisSpacing'
 import { useDragHandlers } from './score/dragHandlers'
 import { useEditorHandlers } from './score/editorHandlers'
 import {
@@ -79,6 +80,11 @@ function clampScalePercent(value: number): number {
   return Math.max(55, Math.min(130, Math.round(value)))
 }
 
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min
+  return Math.max(min, Math.min(max, value))
+}
+
 type FirstMeasureNoteDebugRow = {
   staff: 'treble' | 'bass'
   noteId: string
@@ -125,6 +131,7 @@ function App() {
   const [measureEdgeDebugReport, setMeasureEdgeDebugReport] = useState<string>('')
   const [autoScaleEnabled, setAutoScaleEnabled] = useState(false)
   const [manualScalePercent, setManualScalePercent] = useState(100)
+  const [timeAxisSpacingConfig, setTimeAxisSpacingConfig] = useState(DEFAULT_TIME_AXIS_SPACING_CONFIG)
 
   const scoreRef = useRef<HTMLCanvasElement | null>(null)
   const scoreOverlayRef = useRef<HTMLCanvasElement | null>(null)
@@ -253,6 +260,7 @@ function App() {
     hitGridRef,
     measureLayoutsRef,
     backend: SCORE_RENDER_BACKEND,
+    timeAxisSpacingConfig,
   })
 
   useSynthLifecycle({
@@ -309,6 +317,7 @@ function App() {
     previewStartThresholdPx: PREVIEW_START_THRESHOLD_PX,
     backend: SCORE_RENDER_BACKEND,
     scoreScale,
+    timeAxisSpacingConfig,
   })
 
   const {
@@ -637,6 +646,42 @@ function App() {
         onToggleAutoScale={() => setAutoScaleEnabled((enabled) => !enabled)}
         manualScalePercent={safeManualScalePercent}
         onManualScalePercentChange={(nextPercent) => setManualScalePercent(clampScalePercent(nextPercent))}
+        spacingGapGamma={timeAxisSpacingConfig.gapGamma}
+        spacingBaseWeight={timeAxisSpacingConfig.gapBaseWeight}
+        spacingMinGapBeats={timeAxisSpacingConfig.minGapBeats}
+        spacingLeftEdgePaddingPx={timeAxisSpacingConfig.leftEdgePaddingPx}
+        spacingRightEdgePaddingPx={timeAxisSpacingConfig.rightEdgePaddingPx}
+        onSpacingMinGapBeatsChange={(nextValue) =>
+          setTimeAxisSpacingConfig((current) => ({
+            ...current,
+            minGapBeats: clampNumber(nextValue, 0.01, 0.25),
+          }))
+        }
+        onSpacingGapGammaChange={(nextValue) =>
+          setTimeAxisSpacingConfig((current) => ({
+            ...current,
+            gapGamma: clampNumber(nextValue, 0.55, 1),
+          }))
+        }
+        onSpacingBaseWeightChange={(nextValue) =>
+          setTimeAxisSpacingConfig((current) => ({
+            ...current,
+            gapBaseWeight: clampNumber(nextValue, 0.1, 1.2),
+          }))
+        }
+        onSpacingLeftEdgePaddingPxChange={(nextValue) =>
+          setTimeAxisSpacingConfig((current) => ({
+            ...current,
+            leftEdgePaddingPx: Math.round(clampNumber(nextValue, 0, 24)),
+          }))
+        }
+        onSpacingRightEdgePaddingPxChange={(nextValue) =>
+          setTimeAxisSpacingConfig((current) => ({
+            ...current,
+            rightEdgePaddingPx: Math.round(clampNumber(nextValue, 0, 24)),
+          }))
+        }
+        onResetSpacingConfig={() => setTimeAxisSpacingConfig(DEFAULT_TIME_AXIS_SPACING_CONFIG)}
         onOpenMusicXmlFilePicker={openMusicXmlFilePicker}
         onLoadSampleMusicXml={loadSampleMusicXml}
         onExportMusicXmlFile={exportMusicXmlFile}
