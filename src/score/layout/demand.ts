@@ -7,11 +7,12 @@ const MEASURE_END_TIME_SIGNATURE_DEMAND = 1.6
 const MEASURE_SYSTEM_START_CLEF_DEMAND = 3.5
 
 const ADAPTIVE_MEASURE_BASE_WIDTH_PX = 34
-const ADAPTIVE_DEMAND_TO_WIDTH_FACTOR = 6.4
-const ADAPTIVE_MEASURE_MIN_WIDTH_PX = 92
+const ADAPTIVE_DEMAND_TO_WIDTH_FACTOR = 5.8
+const ADAPTIVE_MEASURE_MIN_WIDTH_PX = 86
 const ADAPTIVE_MEASURE_SAFETY_PX = 10
 const ADAPTIVE_SYSTEM_OCCUPANCY_TARGET = 0.9
-const ADAPTIVE_SYSTEM_OCCUPANCY_MIN = 0.62
+const ADAPTIVE_SYSTEM_OCCUPANCY_LOW = 0.86
+const ADAPTIVE_SYSTEM_OCCUPANCY_HIGH = 0.95
 const ADAPTIVE_SYSTEM_REBALANCE_PASSES = 16
 const DEMAND_MIN_GAP_BEATS = 1 / 32
 const DEMAND_GAP_GAMMA = 1
@@ -290,12 +291,16 @@ export function buildAdaptiveSystemRanges(params: {
     const measureCount = endExclusive - start
     if (measureCount <= 0) return Number.POSITIVE_INFINITY
     const occupancy = getSystemUsedWidth(start, endExclusive) / safeSystemUsableWidth
-    let penalty = Math.abs(occupancy - ADAPTIVE_SYSTEM_OCCUPANCY_TARGET)
+    const overDensePenalty =
+      measureCount === 1 ? 0 : Math.max(0, occupancy - ADAPTIVE_SYSTEM_OCCUPANCY_HIGH) * 4
+    const underDensePenalty = Math.max(0, ADAPTIVE_SYSTEM_OCCUPANCY_LOW - occupancy) * 3
+    const inBandBias =
+      occupancy >= ADAPTIVE_SYSTEM_OCCUPANCY_LOW && occupancy <= ADAPTIVE_SYSTEM_OCCUPANCY_HIGH
+        ? Math.abs(occupancy - ADAPTIVE_SYSTEM_OCCUPANCY_TARGET) * 0.12
+        : 0
+    let penalty = overDensePenalty + underDensePenalty + inBandBias
     if (occupancy > 1) {
       penalty += (occupancy - 1) * 10
-    }
-    if (occupancy < ADAPTIVE_SYSTEM_OCCUPANCY_MIN) {
-      penalty += (ADAPTIVE_SYSTEM_OCCUPANCY_MIN - occupancy) * 2
     }
     if (measureCount === 1) {
       penalty += 0.15
@@ -310,7 +315,7 @@ export function buildAdaptiveSystemRanges(params: {
     const leftOcc = leftUsed / safeSystemUsableWidth
     const rightOcc = rightUsed / safeSystemUsableWidth
     if (leftOcc > 1 || rightOcc > 1) return Number.POSITIVE_INFINITY
-    const occupancyGapPenalty = Math.abs(leftOcc - rightOcc) * 0.6
+    const occupancyGapPenalty = Math.abs(leftOcc - rightOcc) * 0.45
     return getSystemPenalty(leftStart, boundary) + getSystemPenalty(boundary, rightEndExclusive) + occupancyGapPenalty
   }
 

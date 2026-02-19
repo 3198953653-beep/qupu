@@ -256,6 +256,11 @@ function mapTickGapToWeight(deltaTicks: number, config: TimeAxisSpacingConfig): 
   return compressed + config.gapBaseWeight * beats
 }
 
+function getShortDurationGapBoostPx(deltaTicks: number): number {
+  if (deltaTicks <= 2) return 1.2
+  return 0
+}
+
 function buildUniformTimelineWeightMap(
   noteOnsets: number[],
   measureTicks: number,
@@ -433,7 +438,8 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
         const minGap =
           rightExtents[i - 1] +
           leftExtents[i] +
-          spacingConfig.interOnsetPaddingPx
+          spacingConfig.interOnsetPaddingPx +
+          getShortDurationGapBoostPx(deltaTicks)
 
         const currentBaseGap = baseGapByDeltaTicks.get(deltaTicks) ?? 0
         if (baseGap > currentBaseGap) {
@@ -549,8 +555,9 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
         return list.reduce((max, ref) => Math.max(max, ref.rightExtent), DEFAULT_NOTE_HEAD_WIDTH_PX)
       })
       const minGaps = onsetTicks.slice(1).map((_, index) => {
+        const deltaTicks = Math.max(1, onsetTicks[index + 1] - onsetTicks[index])
         const glyphGap = rightExtents[index] + leftExtents[index + 1] + spacingConfig.interOnsetPaddingPx
-        return Math.max(1, glyphGap)
+        return Math.max(1, glyphGap + getShortDurationGapBoostPx(deltaTicks))
       })
       const spanWidth = Math.max(1, axisEnd - axisStart)
       const minGapTotal = minGaps.reduce((sum, value) => sum + value, 0)
