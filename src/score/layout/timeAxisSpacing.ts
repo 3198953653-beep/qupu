@@ -46,6 +46,9 @@ const ACCIDENTAL_PREALLOCATED_CLEARANCE_PX = 2
 const MIN_GAP_BEATS = 1 / 32
 const GAP_GAMMA = 0.7
 const GAP_BASE_WEIGHT = 0.45
+const GLOBAL_GAP_SCALE_PER_PX = 0.08
+const GLOBAL_GAP_MIN_ADD_PER_PX = 0.2
+const DURATION_RATIO_WEIGHT_BLEND = 0.35
 
 export type TimeAxisSpacingConfig = {
   minGapBeats: number
@@ -271,7 +274,14 @@ export function getMeasureUniformTimelineTicks(measure: MeasurePair, measureTick
 function mapTickGapToWeight(deltaTicks: number, config: TimeAxisSpacingConfig): number {
   const beats = deltaTicks / TICKS_PER_QUARTER
   const compressed = Math.pow(Math.max(config.minGapBeats, beats), config.gapGamma)
-  return compressed + config.gapBaseWeight * beats
+  const baseWeight = compressed + config.gapBaseWeight * beats
+  // Duration ratio must always influence timeline spacing, even when min-gap constraints
+  // are not active, so each ratio slider visibly reflows the staff.
+  const durationRatio = getNormalizedDurationGapRatioByDeltaTicks(deltaTicks, config.durationGapRatios)
+  const blendedDurationRatio = 1 + (durationRatio - 1) * DURATION_RATIO_WEIGHT_BLEND
+  // Global gap size scales all durations together without changing ratios.
+  const globalGapScale = 1 + Math.max(0, config.baseMinGap32Px) * GLOBAL_GAP_SCALE_PER_PX
+  return baseWeight * blendedDurationRatio * globalGapScale
 }
 
 function getDurationGapRatioByDeltaTicks(deltaTicks: number, ratios: DurationGapRatioConfig): number {
@@ -300,9 +310,23 @@ function getDurationGapRatioByDeltaTicks(deltaTicks: number, ratios: DurationGap
   return anchors[anchors.length - 1].ratio
 }
 
+function getDurationRatioMean(ratios: DurationGapRatioConfig): number {
+  const mean =
+    (ratios.thirtySecond + ratios.sixteenth + ratios.eighth + ratios.quarter + ratios.half) / 5
+  return Math.max(0.0001, mean)
+}
+
+function getNormalizedDurationGapRatioByDeltaTicks(
+  deltaTicks: number,
+  ratios: DurationGapRatioConfig,
+): number {
+  const rawRatio = getDurationGapRatioByDeltaTicks(deltaTicks, ratios)
+  return rawRatio / getDurationRatioMean(ratios)
+}
+
 function getDurationAddedMinGapPx(deltaTicks: number, spacingConfig: TimeAxisSpacingConfig): number {
-  const ratio = getDurationGapRatioByDeltaTicks(deltaTicks, spacingConfig.durationGapRatios)
-  return Math.max(0, spacingConfig.baseMinGap32Px) * ratio
+  void deltaTicks
+  return Math.max(0, spacingConfig.baseMinGap32Px) * GLOBAL_GAP_MIN_ADD_PER_PX
 }
 
 function buildUniformTimelineWeightMap(

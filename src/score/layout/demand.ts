@@ -105,10 +105,17 @@ function getDurationGapRatioByTicks(deltaTicks: number, ratios: DurationGapRatio
   return anchors[anchors.length - 1].ratio
 }
 
+function getDurationRatioMean(ratios: DurationGapRatios): number {
+  const mean =
+    (ratios.thirtySecond + ratios.sixteenth + ratios.eighth + ratios.quarter + ratios.half) / 5
+  return Math.max(0.0001, mean)
+}
+
 function getDurationGapRatioForNote(note: ScoreNote, spacingConfig: MeasureDemandSpacingConfig | null): number {
   if (!spacingConfig) return 1
   const durationTicks = DURATION_TICKS[note.duration] ?? 16
-  return getDurationGapRatioByTicks(durationTicks, spacingConfig.durationGapRatios)
+  const rawRatio = getDurationGapRatioByTicks(durationTicks, spacingConfig.durationGapRatios)
+  return rawRatio / getDurationRatioMean(spacingConfig.durationGapRatios)
 }
 
 export function getNoteLayoutDemand(note: ScoreNote, spacingConfig: MeasureDemandSpacingConfig | null = null): number {

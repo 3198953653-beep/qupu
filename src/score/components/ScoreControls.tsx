@@ -28,6 +28,7 @@ export function ScoreControls(props: {
   spacingMinGapBeats: number
   spacingLeftEdgePaddingPx: number
   spacingRightEdgePaddingPx: number
+  pageHorizontalPaddingPx: number
   baseMinGap32Px: number
   durationGapRatio32: number
   durationGapRatio16: number
@@ -39,6 +40,7 @@ export function ScoreControls(props: {
   onSpacingBaseWeightChange: (nextValue: number) => void
   onSpacingLeftEdgePaddingPxChange: (nextValue: number) => void
   onSpacingRightEdgePaddingPxChange: (nextValue: number) => void
+  onPageHorizontalPaddingPxChange: (nextValue: number) => void
   onBaseMinGap32PxChange: (nextValue: number) => void
   onDurationGapRatio32Change: (nextValue: number) => void
   onDurationGapRatio16Change: (nextValue: number) => void
@@ -73,6 +75,7 @@ export function ScoreControls(props: {
     spacingMinGapBeats,
     spacingLeftEdgePaddingPx,
     spacingRightEdgePaddingPx,
+    pageHorizontalPaddingPx,
     baseMinGap32Px,
     durationGapRatio32,
     durationGapRatio16,
@@ -84,6 +87,7 @@ export function ScoreControls(props: {
     onSpacingBaseWeightChange,
     onSpacingLeftEdgePaddingPxChange,
     onSpacingRightEdgePaddingPxChange,
+    onPageHorizontalPaddingPxChange,
     onBaseMinGap32PxChange,
     onDurationGapRatio32Change,
     onDurationGapRatio16Change,
@@ -95,6 +99,7 @@ export function ScoreControls(props: {
 
   const [showGlobalGapPanel, setShowGlobalGapPanel] = useState(false)
   const [showDurationRatioPanel, setShowDurationRatioPanel] = useState(false)
+  const [showPageMarginPanel, setShowPageMarginPanel] = useState(false)
 
   const handleScaleValue = (rawValue: string) => {
     const next = Number(rawValue)
@@ -167,6 +172,13 @@ export function ScoreControls(props: {
               onClick={() => setShowDurationRatioPanel((current) => !current)}
             >
               Duration Ratios
+            </button>
+            <button
+              type="button"
+              className={`spacing-toggle-btn ${showPageMarginPanel ? 'active' : ''}`}
+              onClick={() => setShowPageMarginPanel((current) => !current)}
+            >
+              边界距离
             </button>
             <button type="button" className="spacing-reset-btn" onClick={onResetSpacingConfig}>
               Reset
@@ -313,6 +325,35 @@ export function ScoreControls(props: {
               value={baseMinGap32Px}
               onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onBaseMinGap32PxChange)}
               onChange={(event) => handleFloatValue(event.target.value, onBaseMinGap32PxChange)}
+            />
+          </div>
+        )}
+
+        {showPageMarginPanel && (
+          <div className="page-margin-grid">
+            <label htmlFor="page-margin-x-range">左右边距</label>
+            <input
+              id="page-margin-x-range"
+              type="range"
+              min={8}
+              max={120}
+              step={1}
+              value={pageHorizontalPaddingPx}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onPageHorizontalPaddingPxChange)
+              }
+              onChange={(event) => handleFloatValue(event.target.value, onPageHorizontalPaddingPxChange)}
+            />
+            <input
+              type="number"
+              min={8}
+              max={120}
+              step={1}
+              value={pageHorizontalPaddingPx}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onPageHorizontalPaddingPxChange)
+              }
+              onChange={(event) => handleFloatValue(event.target.value, onPageHorizontalPaddingPxChange)}
             />
           </div>
         )}

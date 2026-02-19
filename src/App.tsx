@@ -7,7 +7,6 @@ import {
   A4_PAGE_WIDTH,
   DURATION_TICKS,
   INITIAL_NOTES,
-  SCORE_PAGE_PADDING_X,
   PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX,
   PREVIEW_START_THRESHOLD_PX,
   SCORE_TOP_PADDING,
@@ -55,6 +54,8 @@ import type {
 
 const SCORE_RENDER_BACKEND = Renderer.Backends.CANVAS
 const INSPECTOR_SEQUENCE_PREVIEW_LIMIT = 64
+const MANUAL_SCALE_BASELINE = 0.7
+const DEFAULT_PAGE_HORIZONTAL_PADDING_PX = 86
 
 const PITCHES: Pitch[] = createPianoPitches()
 const INITIAL_BASS_NOTES: ScoreNote[] = buildBassMockNotes(INITIAL_NOTES)
@@ -95,6 +96,10 @@ function clampDurationGapRatio(value: number): number {
 function clampBaseMinGap32Px(value: number): number {
   const clamped = clampNumber(value, 0, 12)
   return Number(clamped.toFixed(2))
+}
+
+function clampPageHorizontalPaddingPx(value: number): number {
+  return Math.round(clampNumber(value, 8, 120))
 }
 
 type FirstMeasureNoteDebugRow = {
@@ -143,6 +148,7 @@ function App() {
   const [measureEdgeDebugReport, setMeasureEdgeDebugReport] = useState<string>('')
   const [autoScaleEnabled, setAutoScaleEnabled] = useState(false)
   const [manualScalePercent, setManualScalePercent] = useState(100)
+  const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
   const [timeAxisSpacingConfig, setTimeAxisSpacingConfig] = useState(DEFAULT_TIME_AXIS_SPACING_CONFIG)
 
   const scoreRef = useRef<HTMLCanvasElement | null>(null)
@@ -191,7 +197,8 @@ function App() {
   const displayScoreHeight = A4_PAGE_HEIGHT
   const autoScoreScale = useMemo(() => getAutoScoreScale(measurePairs.length), [measurePairs.length])
   const safeManualScalePercent = clampScalePercent(manualScalePercent)
-  const scoreScale = autoScaleEnabled ? autoScoreScale : safeManualScalePercent / 100
+  const relativeScale = autoScaleEnabled ? autoScoreScale : safeManualScalePercent / 100
+  const scoreScale = relativeScale * MANUAL_SCALE_BASELINE
   const autoScalePercent = Math.round(scoreScale * 100)
   const scoreWidth = Math.max(1, Math.round(displayScoreWidth / scoreScale))
   const scoreHeight = Math.max(1, Math.round(displayScoreHeight / scoreScale))
@@ -207,7 +214,7 @@ function App() {
     bassNotes.forEach((note, index) => byId.set(note.id, index))
     return byId
   }, [bassNotes])
-  const systemUsableWidth = scoreWidth - SCORE_PAGE_PADDING_X * 2
+  const systemUsableWidth = Math.max(1, scoreWidth - pageHorizontalPaddingPx * 2)
   const systemRanges = useMemo(
     () => {
       return buildAdaptiveSystemRanges({
@@ -221,6 +228,7 @@ function App() {
     [
       measurePairs,
       systemUsableWidth,
+      pageHorizontalPaddingPx,
       measureKeyFifthsFromImport,
       measureTimeSignaturesFromImport,
       timeAxisSpacingConfig,
@@ -280,6 +288,7 @@ function App() {
     hitGridRef,
     measureLayoutsRef,
     backend: SCORE_RENDER_BACKEND,
+    pagePaddingX: pageHorizontalPaddingPx,
     timeAxisSpacingConfig,
   })
 
@@ -900,6 +909,7 @@ function App() {
         spacingMinGapBeats={timeAxisSpacingConfig.minGapBeats}
         spacingLeftEdgePaddingPx={timeAxisSpacingConfig.leftEdgePaddingPx}
         spacingRightEdgePaddingPx={timeAxisSpacingConfig.rightEdgePaddingPx}
+        pageHorizontalPaddingPx={pageHorizontalPaddingPx}
         baseMinGap32Px={timeAxisSpacingConfig.baseMinGap32Px}
         durationGapRatio32={timeAxisSpacingConfig.durationGapRatios.thirtySecond}
         durationGapRatio16={timeAxisSpacingConfig.durationGapRatios.sixteenth}
@@ -935,6 +945,9 @@ function App() {
             ...current,
             rightEdgePaddingPx: Math.round(clampNumber(nextValue, 0, 24)),
           }))
+        }
+        onPageHorizontalPaddingPxChange={(nextValue) =>
+          setPageHorizontalPaddingPx(clampPageHorizontalPaddingPx(nextValue))
         }
         onBaseMinGap32PxChange={(nextValue) =>
           setTimeAxisSpacingConfig((current) => ({
@@ -987,12 +1000,13 @@ function App() {
             },
           }))
         }
-        onResetSpacingConfig={() =>
+        onResetSpacingConfig={() => {
           setTimeAxisSpacingConfig({
             ...DEFAULT_TIME_AXIS_SPACING_CONFIG,
             durationGapRatios: { ...DEFAULT_TIME_AXIS_SPACING_CONFIG.durationGapRatios },
           })
-        }
+          setPageHorizontalPaddingPx(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
+        }}
         onOpenMusicXmlFilePicker={openMusicXmlFilePicker}
         onLoadSampleMusicXml={loadSampleMusicXml}
         onExportMusicXmlFile={exportMusicXmlFile}

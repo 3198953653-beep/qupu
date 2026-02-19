@@ -158,6 +158,7 @@ export function useScoreRenderEffect(params: {
   hitGridRef: MutableRefObject<HitGridIndex | null>
   measureLayoutsRef: MutableRefObject<Map<number, MeasureLayout>>
   backend: number
+  pagePaddingX?: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
 }): void {
   const {
@@ -180,6 +181,7 @@ export function useScoreRenderEffect(params: {
     hitGridRef,
     measureLayoutsRef,
     backend,
+    pagePaddingX,
     timeAxisSpacingConfig,
   } = params
   useEffect(() => {
@@ -215,6 +217,7 @@ export function useScoreRenderEffect(params: {
       previousNoteLayoutsByPair,
       previousMeasureLayouts,
       allowSelectionFreezeWhenNotDragging: false,
+      pagePaddingX,
       timeAxisSpacingConfig,
     })
 
@@ -243,6 +246,7 @@ export function useScoreRenderEffect(params: {
     hitGridRef,
     measureLayoutsRef,
     backend,
+    pagePaddingX,
     timeAxisSpacingConfig,
   ])
 }

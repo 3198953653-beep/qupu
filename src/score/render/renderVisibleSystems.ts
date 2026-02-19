@@ -2,7 +2,6 @@ import { BarlineType, Renderer, Stave } from 'vexflow'
 import {
   SCORE_PAGE_PADDING_X,
   SCORE_TOP_PADDING,
-  STAFF_X,
   SYSTEM_BASS_OFFSET_Y,
   SYSTEM_GAP_Y,
   SYSTEM_HEIGHT,
@@ -162,6 +161,7 @@ export function renderVisibleSystems(params: {
   previousNoteLayoutsByPair?: Map<number, NoteLayout[]> | null
   previousMeasureLayouts?: Map<number, MeasureLayout> | null
   allowSelectionFreezeWhenNotDragging?: boolean
+  pagePaddingX?: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
 }): {
   nextLayouts: NoteLayout[]
@@ -184,6 +184,7 @@ export function renderVisibleSystems(params: {
     previousNoteLayoutsByPair = null,
     previousMeasureLayouts = null,
     allowSelectionFreezeWhenNotDragging = true,
+    pagePaddingX = SCORE_PAGE_PADDING_X,
     timeAxisSpacingConfig,
   } = params
 
@@ -216,7 +217,7 @@ export function renderVisibleSystems(params: {
     const systemTop = SCORE_TOP_PADDING + (systemIndex - renderOriginSystemIndex) * (SYSTEM_HEIGHT + SYSTEM_GAP_Y)
     const trebleY = systemTop + SYSTEM_TREBLE_OFFSET_Y
     const bassY = systemTop + SYSTEM_BASS_OFFSET_Y
-    const systemUsableWidth = scoreWidth - SCORE_PAGE_PADDING_X * 2
+    const systemUsableWidth = Math.max(1, scoreWidth - pagePaddingX * 2)
 
     const systemMeta = systemMeasures.map((measure, indexInSystem) => {
       const pairIndex = start + indexInSystem
@@ -386,7 +387,7 @@ export function renderVisibleSystems(params: {
       if (spacingProbeDeltaCache.has(cacheKey)) {
         return spacingProbeDeltaCache.get(cacheKey) ?? null
       }
-      const probeMeasureX = STAFF_X
+      const probeMeasureX = pagePaddingX
       const { spacingRightLimitX, formatWidth } = buildMeasureProbe(entry, probeMeasureX, safeMeasureWidth)
       const frozenSpacing = frozenSpacingByPairIndex.get(entry.pairIndex) ?? null
       const translatedFrozenSpacing =
@@ -441,7 +442,7 @@ export function renderVisibleSystems(params: {
       measureWidths = buildMeasureWidthsFromFixed(fixedWidths)
     }
 
-    let measureCursorX = STAFF_X
+    let measureCursorX = pagePaddingX
     systemMeta.forEach((entry, indexInSystem) => {
       const measureWidth = measureWidths[indexInSystem] ?? Math.floor(systemUsableWidth / systemMeasures.length)
       const measureX = measureCursorX
