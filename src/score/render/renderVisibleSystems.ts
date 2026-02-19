@@ -471,9 +471,6 @@ export function renderVisibleSystems(params: {
       }
       const probeMeasureX = pagePaddingX
       const { spacingRightLimitX, formatWidth } = buildMeasureProbe(entry, probeMeasureX, safeMeasureWidth)
-      const frozenSpacing = frozenSpacingByPairIndex.get(entry.pairIndex) ?? null
-      const translatedFrozenSpacing =
-        frozenSpacing !== null ? translateFrozenSpacingToMeasureX(frozenSpacing, probeMeasureX) : null
       const measureNoteLayouts = drawMeasureToContext({
         context,
         measure: entry.measure,
@@ -495,8 +492,10 @@ export function renderVisibleSystems(params: {
         skipPainting: true,
         formatWidthOverride: formatWidth,
         timeAxisSpacingConfig: spacingConfig,
-        staticNoteXById: translatedFrozenSpacing?.staticNoteXById ?? null,
-        staticAccidentalRightXById: translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
+        // Width probing must be fully deterministic by score content only.
+        // Do not feed previous-frame frozen spacing into the probe solver.
+        staticNoteXById: null,
+        staticAccidentalRightXById: null,
         // Probe with the same layout path used by final render so spacingRightX
         // and barline fit are computed from identical geometry.
         layoutDetail: 'full',
