@@ -88,7 +88,12 @@ function clampNumber(value: number, min: number, max: number): number {
 }
 
 function clampDurationGapRatio(value: number): number {
-  const clamped = clampNumber(value, 0.6, 2)
+  const clamped = clampNumber(value, 0.5, 4)
+  return Number(clamped.toFixed(2))
+}
+
+function clampBaseMinGap32Px(value: number): number {
+  const clamped = clampNumber(value, 0, 12)
   return Number(clamped.toFixed(2))
 }
 
@@ -210,9 +215,16 @@ function App() {
         systemUsableWidth,
         measureKeyFifthsFromImport,
         measureTimeSignaturesFromImport,
+        timeAxisSpacingConfig,
       })
     },
-    [measurePairs, systemUsableWidth, measureKeyFifthsFromImport, measureTimeSignaturesFromImport],
+    [
+      measurePairs,
+      systemUsableWidth,
+      measureKeyFifthsFromImport,
+      measureTimeSignaturesFromImport,
+      timeAxisSpacingConfig,
+    ],
   )
   const systemCount = Math.max(1, systemRanges.length)
   const systemsPerPage = Math.max(
@@ -888,6 +900,7 @@ function App() {
         spacingMinGapBeats={timeAxisSpacingConfig.minGapBeats}
         spacingLeftEdgePaddingPx={timeAxisSpacingConfig.leftEdgePaddingPx}
         spacingRightEdgePaddingPx={timeAxisSpacingConfig.rightEdgePaddingPx}
+        baseMinGap32Px={timeAxisSpacingConfig.baseMinGap32Px}
         durationGapRatio32={timeAxisSpacingConfig.durationGapRatios.thirtySecond}
         durationGapRatio16={timeAxisSpacingConfig.durationGapRatios.sixteenth}
         durationGapRatio8={timeAxisSpacingConfig.durationGapRatios.eighth}
@@ -921,6 +934,12 @@ function App() {
           setTimeAxisSpacingConfig((current) => ({
             ...current,
             rightEdgePaddingPx: Math.round(clampNumber(nextValue, 0, 24)),
+          }))
+        }
+        onBaseMinGap32PxChange={(nextValue) =>
+          setTimeAxisSpacingConfig((current) => ({
+            ...current,
+            baseMinGap32Px: clampBaseMinGap32Px(nextValue),
           }))
         }
         onDurationGapRatio32Change={(nextValue) =>

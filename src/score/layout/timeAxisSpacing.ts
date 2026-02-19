@@ -54,6 +54,7 @@ export type TimeAxisSpacingConfig = {
   leftEdgePaddingPx: number
   rightEdgePaddingPx: number
   interOnsetPaddingPx: number
+  baseMinGap32Px: number
   durationGapRatios: DurationGapRatioConfig
 }
 
@@ -72,12 +73,13 @@ export const DEFAULT_TIME_AXIS_SPACING_CONFIG: TimeAxisSpacingConfig = {
   leftEdgePaddingPx: DEFAULT_LEFT_EDGE_PADDING_PX,
   rightEdgePaddingPx: DEFAULT_RIGHT_EDGE_PADDING_PX,
   interOnsetPaddingPx: 1,
+  baseMinGap32Px: 0,
   durationGapRatios: {
-    thirtySecond: 1.12,
-    sixteenth: 1,
-    eighth: 1,
-    quarter: 1,
-    half: 1,
+    thirtySecond: 1,
+    sixteenth: 1.2,
+    eighth: 1.45,
+    quarter: 1.85,
+    half: 2.35,
   },
 }
 
@@ -269,9 +271,7 @@ export function getMeasureUniformTimelineTicks(measure: MeasurePair, measureTick
 function mapTickGapToWeight(deltaTicks: number, config: TimeAxisSpacingConfig): number {
   const beats = deltaTicks / TICKS_PER_QUARTER
   const compressed = Math.pow(Math.max(config.minGapBeats, beats), config.gapGamma)
-  const baseWeight = compressed + config.gapBaseWeight * beats
-  const ratio = getDurationGapRatioByDeltaTicks(deltaTicks, config.durationGapRatios)
-  return baseWeight * ratio
+  return compressed + config.gapBaseWeight * beats
 }
 
 function getDurationGapRatioByDeltaTicks(deltaTicks: number, ratios: DurationGapRatioConfig): number {
@@ -298,6 +298,11 @@ function getDurationGapRatioByDeltaTicks(deltaTicks: number, ratios: DurationGap
     }
   }
   return anchors[anchors.length - 1].ratio
+}
+
+function getDurationAddedMinGapPx(deltaTicks: number, spacingConfig: TimeAxisSpacingConfig): number {
+  const ratio = getDurationGapRatioByDeltaTicks(deltaTicks, spacingConfig.durationGapRatios)
+  return Math.max(0, spacingConfig.baseMinGap32Px) * ratio
 }
 
 function buildUniformTimelineWeightMap(
@@ -477,7 +482,8 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
         const minGap =
           rightExtents[i - 1] +
           leftExtents[i] +
-          spacingConfig.interOnsetPaddingPx
+          spacingConfig.interOnsetPaddingPx +
+          getDurationAddedMinGapPx(deltaTicks, spacingConfig)
 
         const currentBaseGap = baseGapByDeltaTicks.get(deltaTicks) ?? 0
         if (baseGap > currentBaseGap) {
@@ -593,8 +599,9 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
         return list.reduce((max, ref) => Math.max(max, ref.rightExtent), DEFAULT_NOTE_HEAD_WIDTH_PX)
       })
       const minGaps = onsetTicks.slice(1).map((_, index) => {
+        const deltaTicks = Math.max(1, onsetTicks[index + 1] - onsetTicks[index])
         const glyphGap = rightExtents[index] + leftExtents[index + 1] + spacingConfig.interOnsetPaddingPx
-        return Math.max(1, glyphGap)
+        return Math.max(1, glyphGap + getDurationAddedMinGapPx(deltaTicks, spacingConfig))
       })
       const spanWidth = Math.max(1, axisEnd - axisStart)
       const minGapTotal = minGaps.reduce((sum, value) => sum + value, 0)

@@ -28,6 +28,7 @@ export function ScoreControls(props: {
   spacingMinGapBeats: number
   spacingLeftEdgePaddingPx: number
   spacingRightEdgePaddingPx: number
+  baseMinGap32Px: number
   durationGapRatio32: number
   durationGapRatio16: number
   durationGapRatio8: number
@@ -38,6 +39,7 @@ export function ScoreControls(props: {
   onSpacingBaseWeightChange: (nextValue: number) => void
   onSpacingLeftEdgePaddingPxChange: (nextValue: number) => void
   onSpacingRightEdgePaddingPxChange: (nextValue: number) => void
+  onBaseMinGap32PxChange: (nextValue: number) => void
   onDurationGapRatio32Change: (nextValue: number) => void
   onDurationGapRatio16Change: (nextValue: number) => void
   onDurationGapRatio8Change: (nextValue: number) => void
@@ -71,6 +73,7 @@ export function ScoreControls(props: {
     spacingMinGapBeats,
     spacingLeftEdgePaddingPx,
     spacingRightEdgePaddingPx,
+    baseMinGap32Px,
     durationGapRatio32,
     durationGapRatio16,
     durationGapRatio8,
@@ -81,6 +84,7 @@ export function ScoreControls(props: {
     onSpacingBaseWeightChange,
     onSpacingLeftEdgePaddingPxChange,
     onSpacingRightEdgePaddingPxChange,
+    onBaseMinGap32PxChange,
     onDurationGapRatio32Change,
     onDurationGapRatio16Change,
     onDurationGapRatio8Change,
@@ -88,12 +92,15 @@ export function ScoreControls(props: {
     onDurationGapRatio2Change,
     onResetSpacingConfig,
   } = props
+
+  const [showGlobalGapPanel, setShowGlobalGapPanel] = useState(false)
   const [showDurationRatioPanel, setShowDurationRatioPanel] = useState(false)
 
   const handleScaleValue = (rawValue: string) => {
     const next = Number(rawValue)
     onManualScalePercentChange(next)
   }
+
   const handleFloatValue = (rawValue: string, onChange: (nextValue: number) => void) => {
     const next = Number(rawValue)
     onChange(next)
@@ -149,10 +156,17 @@ export function ScoreControls(props: {
           <div className="spacing-header-actions">
             <button
               type="button"
+              className={`spacing-toggle-btn ${showGlobalGapPanel ? 'active' : ''}`}
+              onClick={() => setShowGlobalGapPanel((current) => !current)}
+            >
+              Gap Size
+            </button>
+            <button
+              type="button"
               className={`spacing-toggle-btn ${showDurationRatioPanel ? 'active' : ''}`}
               onClick={() => setShowDurationRatioPanel((current) => !current)}
             >
-              间距比例
+              Duration Ratios
             </button>
             <button type="button" className="spacing-reset-btn" onClick={onResetSpacingConfig}>
               Reset
@@ -278,26 +292,55 @@ export function ScoreControls(props: {
           />
         </div>
 
+        {showGlobalGapPanel && (
+          <div className="duration-base-grid">
+            <label htmlFor="duration-base-gap-32">Global Gap Size</label>
+            <input
+              id="duration-base-gap-32"
+              type="range"
+              min={0}
+              max={12}
+              step={0.1}
+              value={baseMinGap32Px}
+              onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onBaseMinGap32PxChange)}
+              onChange={(event) => handleFloatValue(event.target.value, onBaseMinGap32PxChange)}
+            />
+            <input
+              type="number"
+              min={0}
+              max={12}
+              step={0.1}
+              value={baseMinGap32Px}
+              onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onBaseMinGap32PxChange)}
+              onChange={(event) => handleFloatValue(event.target.value, onBaseMinGap32PxChange)}
+            />
+          </div>
+        )}
+
         {showDurationRatioPanel && (
           <div className="duration-ratio-grid">
             <label htmlFor="duration-ratio-32">32nd Ratio</label>
             <input
               id="duration-ratio-32"
               type="range"
-              min={0.6}
-              max={2}
+              min={0.5}
+              max={4}
               step={0.01}
               value={durationGapRatio32}
-              onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio32Change)}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio32Change)
+              }
               onChange={(event) => handleFloatValue(event.target.value, onDurationGapRatio32Change)}
             />
             <input
               type="number"
-              min={0.6}
-              max={2}
+              min={0.5}
+              max={4}
               step={0.01}
               value={durationGapRatio32}
-              onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio32Change)}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio32Change)
+              }
               onChange={(event) => handleFloatValue(event.target.value, onDurationGapRatio32Change)}
             />
 
@@ -305,20 +348,24 @@ export function ScoreControls(props: {
             <input
               id="duration-ratio-16"
               type="range"
-              min={0.6}
-              max={2}
+              min={0.5}
+              max={4}
               step={0.01}
               value={durationGapRatio16}
-              onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio16Change)}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio16Change)
+              }
               onChange={(event) => handleFloatValue(event.target.value, onDurationGapRatio16Change)}
             />
             <input
               type="number"
-              min={0.6}
-              max={2}
+              min={0.5}
+              max={4}
               step={0.01}
               value={durationGapRatio16}
-              onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio16Change)}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio16Change)
+              }
               onChange={(event) => handleFloatValue(event.target.value, onDurationGapRatio16Change)}
             />
 
@@ -326,20 +373,24 @@ export function ScoreControls(props: {
             <input
               id="duration-ratio-8"
               type="range"
-              min={0.6}
-              max={2}
+              min={0.5}
+              max={4}
               step={0.01}
               value={durationGapRatio8}
-              onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio8Change)}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio8Change)
+              }
               onChange={(event) => handleFloatValue(event.target.value, onDurationGapRatio8Change)}
             />
             <input
               type="number"
-              min={0.6}
-              max={2}
+              min={0.5}
+              max={4}
               step={0.01}
               value={durationGapRatio8}
-              onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio8Change)}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio8Change)
+              }
               onChange={(event) => handleFloatValue(event.target.value, onDurationGapRatio8Change)}
             />
 
@@ -347,20 +398,24 @@ export function ScoreControls(props: {
             <input
               id="duration-ratio-4"
               type="range"
-              min={0.6}
-              max={2}
+              min={0.5}
+              max={4}
               step={0.01}
               value={durationGapRatio4}
-              onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio4Change)}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio4Change)
+              }
               onChange={(event) => handleFloatValue(event.target.value, onDurationGapRatio4Change)}
             />
             <input
               type="number"
-              min={0.6}
-              max={2}
+              min={0.5}
+              max={4}
               step={0.01}
               value={durationGapRatio4}
-              onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio4Change)}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio4Change)
+              }
               onChange={(event) => handleFloatValue(event.target.value, onDurationGapRatio4Change)}
             />
 
@@ -368,20 +423,24 @@ export function ScoreControls(props: {
             <input
               id="duration-ratio-2"
               type="range"
-              min={0.6}
-              max={2}
+              min={0.5}
+              max={4}
               step={0.01}
               value={durationGapRatio2}
-              onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio2Change)}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio2Change)
+              }
               onChange={(event) => handleFloatValue(event.target.value, onDurationGapRatio2Change)}
             />
             <input
               type="number"
-              min={0.6}
-              max={2}
+              min={0.5}
+              max={4}
               step={0.01}
               value={durationGapRatio2}
-              onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio2Change)}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onDurationGapRatio2Change)
+              }
               onChange={(event) => handleFloatValue(event.target.value, onDurationGapRatio2Change)}
             />
           </div>

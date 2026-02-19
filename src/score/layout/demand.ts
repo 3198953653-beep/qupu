@@ -1,4 +1,4 @@
-import { DURATION_BEATS, DURATION_LABEL } from '../constants'
+import { DURATION_BEATS, DURATION_LABEL, DURATION_TICKS } from '../constants'
 import type { MeasurePair, NoteDuration, NoteDurationBase, ScoreNote, TimeSignature } from '../types'
 
 const MEASURE_KEY_SIGNATURE_DEMAND = 2.2
@@ -18,6 +18,7 @@ const DEMAND_MIN_GAP_BEATS = 1 / 32
 const DEMAND_GAP_GAMMA = 1
 const DEMAND_GAP_BASE_WEIGHT = 0.3
 const NOTE_DEMAND_SCALE = 2
+const DEMAND_BASE_MIN_GAP_SCALE = 0.16
 
 const DEFAULT_TIME_SIGNATURE: TimeSignature = { beats: 4, beatType: 4 }
 
@@ -36,6 +37,19 @@ export type MeasureRequiredWidthContext = {
   showTimeSignature: boolean
   nextTimeSignature: TimeSignature
   showEndTimeSignature: boolean
+}
+
+type DurationGapRatios = {
+  thirtySecond: number
+  sixteenth: number
+  eighth: number
+  quarter: number
+  half: number
+}
+
+type MeasureDemandSpacingConfig = {
+  baseMinGap32Px: number
+  durationGapRatios: DurationGapRatios
 }
 
 export function toDisplayDuration(duration: NoteDuration): string {
@@ -65,24 +79,66 @@ function mapBeatsToDemand(beats: number): number {
   return DEMAND_GAP_BASE_WEIGHT + compressed
 }
 
-export function getNoteLayoutDemand(note: ScoreNote): number {
+function getDurationGapRatioByTicks(deltaTicks: number, ratios: DurationGapRatios): number {
+  const anchors: Array<{ ticks: number; ratio: number }> = [
+    { ticks: 2, ratio: ratios.thirtySecond },
+    { ticks: 4, ratio: ratios.sixteenth },
+    { ticks: 8, ratio: ratios.eighth },
+    { ticks: 16, ratio: ratios.quarter },
+    { ticks: 32, ratio: ratios.half },
+  ]
+  const safeTicks = Math.max(1, deltaTicks)
+  if (safeTicks <= anchors[0].ticks) return anchors[0].ratio
+  if (safeTicks >= anchors[anchors.length - 1].ticks) return anchors[anchors.length - 1].ratio
+  for (let i = 1; i < anchors.length; i += 1) {
+    const left = anchors[i - 1]
+    const right = anchors[i]
+    if (safeTicks === right.ticks) return right.ratio
+    if (safeTicks < right.ticks) {
+      const leftLog = Math.log2(left.ticks)
+      const rightLog = Math.log2(right.ticks)
+      const tickLog = Math.log2(safeTicks)
+      const blend = (tickLog - leftLog) / Math.max(0.0001, rightLog - leftLog)
+      return left.ratio + (right.ratio - left.ratio) * blend
+    }
+  }
+  return anchors[anchors.length - 1].ratio
+}
+
+function getDurationGapRatioForNote(note: ScoreNote, spacingConfig: MeasureDemandSpacingConfig | null): number {
+  if (!spacingConfig) return 1
+  const durationTicks = DURATION_TICKS[note.duration] ?? 16
+  return getDurationGapRatioByTicks(durationTicks, spacingConfig.durationGapRatios)
+}
+
+export function getNoteLayoutDemand(note: ScoreNote, spacingConfig: MeasureDemandSpacingConfig | null = null): number {
   const durationBeats = DURATION_BEATS[note.duration] ?? 1
   const durationWeight = mapBeatsToDemand(durationBeats)
+  const durationGapRatio = getDurationGapRatioForNote(note, spacingConfig)
+  const addedBaseGapDemand =
+    spacingConfig !== null
+      ? Math.max(0, spacingConfig.baseMinGap32Px) * durationGapRatio * DEMAND_BASE_MIN_GAP_SCALE
+      : 0
   const chordSize = 1 + (note.chordPitches?.length ?? 0)
   const chordSpreadBonus = chordSize > 1 ? (chordSize - 1) * 0.35 : 0
   // Keep measure demand stable for pitch-only edits so local pitch drags
   // do not reflow unrelated measures on the same system.
   // Accidental width is handled by per-measure overflow probing.
-  return durationWeight * chordSize + chordSpreadBonus
+  return durationWeight * chordSize + chordSpreadBonus + addedBaseGapDemand
 }
 
-export function getStaffLayoutDemand(notes: ScoreNote[]): number {
+export function getStaffLayoutDemand(notes: ScoreNote[], spacingConfig: MeasureDemandSpacingConfig | null = null): number {
   if (notes.length === 0) return 1
-  return notes.reduce((sum, note) => sum + getNoteLayoutDemand(note), 0)
+  return notes.reduce((sum, note) => sum + getNoteLayoutDemand(note, spacingConfig), 0)
 }
 
-export function getMeasureNoteLayoutDemand(measure: MeasurePair): number {
-  const rawDemand = getStaffLayoutDemand(measure.treble) + getStaffLayoutDemand(measure.bass)
+export function getMeasureNoteLayoutDemand(
+  measure: MeasurePair,
+  spacingConfig: MeasureDemandSpacingConfig | null = null,
+): number {
+  const rawDemand =
+    getStaffLayoutDemand(measure.treble, spacingConfig) +
+    getStaffLayoutDemand(measure.bass, spacingConfig)
   return Math.max(1, rawDemand * NOTE_DEMAND_SCALE)
 }
 
@@ -143,6 +199,7 @@ export function buildAdaptiveSystemRanges(params: {
   systemUsableWidth: number
   measureKeyFifthsFromImport: number[] | null
   measureTimeSignaturesFromImport: TimeSignature[] | null
+  timeAxisSpacingConfig?: MeasureDemandSpacingConfig | null
   getRequiredMeasureWidth?: ((context: MeasureRequiredWidthContext) => number) | null
 }): SystemMeasureRange[] {
   const {
@@ -150,13 +207,14 @@ export function buildAdaptiveSystemRanges(params: {
     systemUsableWidth,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
+    timeAxisSpacingConfig = null,
     getRequiredMeasureWidth = null,
   } = params
 
   if (measurePairs.length === 0) return []
 
   const safeSystemUsableWidth = Math.max(1, Math.floor(systemUsableWidth))
-  const noteDemands = measurePairs.map((measure) => getMeasureNoteLayoutDemand(measure))
+  const noteDemands = measurePairs.map((measure) => getMeasureNoteLayoutDemand(measure, timeAxisSpacingConfig))
   const resolvedKeyFifths = new Array<number>(measurePairs.length).fill(0)
   const resolvedTimeSignatures = new Array<TimeSignature>(measurePairs.length).fill(DEFAULT_TIME_SIGNATURE)
 
