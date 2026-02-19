@@ -581,7 +581,15 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       sourceNotes.map((sourceNote, noteIndex) => {
         const vexNote = rendered[noteIndex]?.vexNote
         const x = vexNote ? getRenderedNoteVisualX(vexNote) : 0
-        const spacingRightX = vexNote ? getRenderedNoteVisualX(vexNote) + 9 : x
+        let spacingRightX = vexNote ? getRenderedNoteVisualX(vexNote) + 9 : x
+        if (vexNote) {
+          if (vexNote.hasStem()) {
+            const stemX = vexNote.getStemX()
+            if (Number.isFinite(stemX)) {
+              spacingRightX = Math.max(spacingRightX, stemX + 1)
+            }
+          }
+        }
         return {
           id: sourceNote.id,
           staff,
@@ -626,9 +634,6 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       rightFromMetrics = Number.NEGATIVE_INFINITY
     }
 
-    const tieRightXRaw = vexNote.getTieRightX()
-    const rightFromTie = Number.isFinite(tieRightXRaw) ? tieRightXRaw : Number.NEGATIVE_INFINITY
-
     let rightFromStem = Number.NEGATIVE_INFINITY
     if (vexNote.hasStem()) {
       const stemX = vexNote.getStemX()
@@ -637,7 +642,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       }
     }
 
-    const computedRightX = Math.max(fallbackRightX, rightFromBBox, rightFromMetrics, rightFromTie, rightFromStem)
+    const computedRightX = Math.max(fallbackRightX, rightFromBBox, rightFromMetrics, rightFromStem)
     return Number.isFinite(computedRightX) ? computedRightX : fallbackRightX
   }
 
@@ -649,10 +654,15 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       (maxX, head) => Math.max(maxX, head.x + 9),
       getRenderedNoteVisualX(vexNote) + 9,
     )
-    // Use the note-head edge as spacing boundary.
-    // VexFlow's modRightPx may change with stem/beam internals and can cause
-    // pitch-only edits to trigger false overflow reflow.
-    return Number.isFinite(fallbackHeadRightX) ? fallbackHeadRightX : getRenderedNoteVisualX(vexNote) + 9
+    let stemRightX = Number.NEGATIVE_INFINITY
+    if (vexNote.hasStem()) {
+      const stemX = vexNote.getStemX()
+      if (Number.isFinite(stemX)) {
+        stemRightX = stemX + 1
+      }
+    }
+    const spacingRightX = Math.max(fallbackHeadRightX, stemRightX)
+    return Number.isFinite(spacingRightX) ? spacingRightX : getRenderedNoteVisualX(vexNote) + 9
   }
 
   const getMaxBeamRightX = (beams: Beam[]): number => {

@@ -38,12 +38,13 @@ const DEFAULT_NOTE_HEAD_WIDTH_PX = 9
 const TICKS_PER_QUARTER = 16
 const DEFAULT_COMPACT_TAIL_ANCHOR_TICKS = 4
 const UNIFORM_TICK_SPACING_START_GUARD_PX = 0
-const UNIFORM_TICK_SPACING_END_GUARD_PX = -2
-const UNIFORM_EDGE_GAP_RATIO = 0.82
+const UNIFORM_TICK_SPACING_END_GUARD_PX = 0
+const UNIFORM_TIMELINE_EDGE_TICK_RATIO = 0.82
+const UNIFORM_BARLINE_EDGE_GAP_RATIO = 0.82
 const UNIFORM_DELTA_FLOOR_RATIO = 1
 const ACCIDENTAL_PREALLOCATED_CLEARANCE_PX = 2
 const MIN_GAP_BEATS = 1 / 32
-const GAP_GAMMA = 0.72
+const GAP_GAMMA = 0.7
 const GAP_BASE_WEIGHT = 0.45
 
 export type TimeAxisSpacingConfig = {
@@ -107,16 +108,20 @@ function getNoteHorizontalExtents(vexNote: StaveNote): { leftExtent: number; rig
       ? (metrics.rightDisplacedHeadPx as number)
       : 0
 
-    // Keep spacing extent stable for equal rhythmic values:
-    // use only displaced note-head geometry and ignore modifier/stem width.
-    // This prevents pitch drags (crossing stem direction or accidental state)
-    // from perturbing equal-duration onset gaps.
+    // Keep extents anchored to note-head geometry and explicit stem geometry.
     leftExtent = Math.max(0, leftDisplacedHeadPx)
     rightExtent = Math.max(DEFAULT_NOTE_HEAD_WIDTH_PX, DEFAULT_NOTE_HEAD_WIDTH_PX + rightDisplacedHeadPx)
   }
 
   const noteHeadX = getRenderedNoteVisualX(vexNote)
   if (Number.isFinite(noteHeadX)) {
+    if (vexNote.hasStem()) {
+      const stemX = vexNote.getStemX()
+      if (Number.isFinite(stemX)) {
+        rightExtent = Math.max(rightExtent, stemX + 1 - noteHeadX)
+      }
+    }
+
     let accidentalMinX = Number.POSITIVE_INFINITY
     vexNote.getModifiersByType(Accidental.CATEGORY).forEach((modifier) => {
       const accidental = modifier as Accidental
@@ -223,8 +228,8 @@ export function getUniformTickTimeline(noteOnsets: number[], measureTicks: numbe
   const trailingGapTicks =
     trailingToMeasureEndTicks > 0 ? Math.max(1, trailingToMeasureEndTicks) : lastBackwardGapTicks
 
-  const startEdgeTicks = Math.max(1, firstForwardGapTicks * UNIFORM_EDGE_GAP_RATIO)
-  const endEdgeTicks = Math.max(1, trailingGapTicks * UNIFORM_EDGE_GAP_RATIO)
+  const startEdgeTicks = Math.max(0, firstForwardGapTicks * UNIFORM_TIMELINE_EDGE_TICK_RATIO)
+  const endEdgeTicks = Math.max(0, trailingGapTicks * UNIFORM_TIMELINE_EDGE_TICK_RATIO)
   const domainStartTicks = firstOnsetTicks - startEdgeTicks
   const domainEndTicks = lastOnsetTicks + endEdgeTicks
   const domainSpanTicks = Math.max(1, domainEndTicks - domainStartTicks)
@@ -258,9 +263,13 @@ function buildUniformTimelineWeightMap(
 ): UniformTimelineWeightMap {
   const timeline = getUniformTickTimeline(noteOnsets, measureTicks)
   const orderedTicks = [
-    timeline.domainStartTicks,
-    ...[...new Set(noteOnsets)].filter((tick) => Number.isFinite(tick) && tick >= timeline.domainStartTicks && tick <= timeline.domainEndTicks),
-    timeline.domainEndTicks,
+    ...new Set([
+      timeline.domainStartTicks,
+      ...[...new Set(noteOnsets)].filter(
+        (tick) => Number.isFinite(tick) && tick >= timeline.domainStartTicks && tick <= timeline.domainEndTicks,
+      ),
+      timeline.domainEndTicks,
+    ]),
   ].sort((left, right) => left - right)
 
   const cumulativeWeightByTick = new Map<number, number>()
@@ -368,24 +377,30 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
 
   const usableFormatWidth = Math.max(MIN_RENDER_WIDTH_PX, formatWidth)
   const uniformPadding = getUniformTickSpacingPadding(spacingConfig)
+  const defaultAxisBoundaryStart = noteStartX
+  const defaultAxisBoundaryEnd = noteStartX + usableFormatWidth
+  const barlineAxisBoundaryStart =
+    typeof measureStartBarX === 'number' && Number.isFinite(measureStartBarX)
+      ? measureStartBarX
+      : defaultAxisBoundaryStart
+  const barlineAxisBoundaryEnd =
+    typeof measureEndBarX === 'number' && Number.isFinite(measureEndBarX)
+      ? measureEndBarX
+      : defaultAxisBoundaryEnd
+  const axisBoundaryStart =
+    uniformSpacingByTicks && preferMeasureBarlineAxis ? barlineAxisBoundaryStart : defaultAxisBoundaryStart
+  const axisBoundaryEnd =
+    uniformSpacingByTicks && preferMeasureEndBarlineAxis ? barlineAxisBoundaryEnd : defaultAxisBoundaryEnd
+
   const startPad = uniformSpacingByTicks
-    ? uniformPadding.startPadPx
+    ? Math.max(uniformPadding.startPadPx, firstLeftExtent + spacingConfig.leftEdgePaddingPx)
     : Math.max(1, firstLeftExtent + spacingConfig.leftEdgePaddingPx)
   const endPad = uniformSpacingByTicks
-    ? uniformPadding.endPadPx
+    ? Math.max(uniformPadding.endPadPx, lastRightExtent + spacingConfig.rightEdgePaddingPx)
     : Math.max(1, lastRightExtent + spacingConfig.rightEdgePaddingPx)
-  const defaultAxisStart = noteStartX + startPad
-  const defaultAxisEnd = noteStartX + usableFormatWidth - endPad
-  const barlineAxisStart =
-    typeof measureStartBarX === 'number' && Number.isFinite(measureStartBarX)
-      ? measureStartBarX + startPad
-      : defaultAxisStart
-  const barlineAxisEnd =
-    typeof measureEndBarX === 'number' && Number.isFinite(measureEndBarX)
-      ? measureEndBarX - endPad
-      : defaultAxisEnd
-  const axisStart = uniformSpacingByTicks && preferMeasureBarlineAxis ? barlineAxisStart : defaultAxisStart
-  const axisEnd = uniformSpacingByTicks && preferMeasureEndBarlineAxis ? barlineAxisEnd : defaultAxisEnd
+
+  const axisStart = axisBoundaryStart + startPad
+  const axisEnd = axisBoundaryEnd - endPad
 
   const targetXByOnset = new Map<number, number>()
 
@@ -455,6 +470,36 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
             }
           }
         }
+
+        if (adjustedPositions.length > 1) {
+          const lastIndex = adjustedPositions.length - 1
+          const firstInternalGap = Math.max(0, adjustedPositions[1] - adjustedPositions[0])
+          const lastInternalGap = Math.max(0, adjustedPositions[lastIndex] - adjustedPositions[lastIndex - 1])
+          const currentRightEdgeGap = axisBoundaryEnd - (adjustedPositions[lastIndex] + lastRightExtent)
+          const targetRightEdgeGap = Math.max(
+            spacingConfig.rightEdgePaddingPx,
+            lastInternalGap * UNIFORM_BARLINE_EDGE_GAP_RATIO,
+          )
+
+          if (currentRightEdgeGap < targetRightEdgeGap - 0.001) {
+            const currentLeftEdgeGap = adjustedPositions[0] - axisBoundaryStart - firstLeftExtent
+            const targetLeftEdgeFloor = preferMeasureBarlineAxis
+              ? Math.max(
+                spacingConfig.leftEdgePaddingPx,
+                firstInternalGap * UNIFORM_BARLINE_EDGE_GAP_RATIO,
+              )
+              : spacingConfig.leftEdgePaddingPx
+            const availableLeftShift = Math.max(0, currentLeftEdgeGap - targetLeftEdgeFloor)
+            const neededShift = targetRightEdgeGap - currentRightEdgeGap
+            const shift = Math.min(neededShift, availableLeftShift)
+            if (shift > 0) {
+              for (let i = 0; i < adjustedPositions.length; i += 1) {
+                adjustedPositions[i] -= shift
+              }
+            }
+          }
+        }
+
         onsetSequence.forEach((onset, index) => {
           targetXByOnset.set(onset, adjustedPositions[index])
         })
