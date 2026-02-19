@@ -11,6 +11,7 @@ import type { HitGridIndex } from '../layout/hitTest'
 import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
 import type {
   DragState,
+  LayoutReflowHint,
   MeasureLayout,
   MeasurePair,
   MusicXmlMetadata,
@@ -152,6 +153,8 @@ export function useScoreRenderEffect(params: {
   measureTimeSignaturesFromImport: TimeSignature[] | null
   activeSelection?: Selection | null
   draggingSelection?: Selection | null
+  layoutReflowHintRef?: MutableRefObject<LayoutReflowHint | null>
+  layoutStabilityKey?: string
   noteLayoutsRef: MutableRefObject<NoteLayout[]>
   noteLayoutsByPairRef: MutableRefObject<Map<number, NoteLayout[]>>
   noteLayoutByKeyRef: MutableRefObject<Map<string, NoteLayout>>
@@ -175,6 +178,8 @@ export function useScoreRenderEffect(params: {
     measureTimeSignaturesFromImport,
     activeSelection = null,
     draggingSelection = null,
+    layoutReflowHintRef,
+    layoutStabilityKey,
     noteLayoutsRef,
     noteLayoutsByPairRef,
     noteLayoutByKeyRef,
@@ -201,6 +206,7 @@ export function useScoreRenderEffect(params: {
     const context = renderer.getContext()
     const previousNoteLayoutsByPair = noteLayoutsByPairRef.current
     const previousMeasureLayouts = measureLayoutsRef.current
+    const layoutReflowHint = layoutReflowHintRef?.current ?? null
 
     const { nextLayouts, nextLayoutsByPair, nextLayoutsByKey, nextMeasureLayouts } = renderVisibleSystems({
       context,
@@ -214,13 +220,14 @@ export function useScoreRenderEffect(params: {
       measureTimeSignaturesFromImport,
       activeSelection,
       draggingSelection,
+      layoutReflowHint,
+      layoutStabilityKey,
       previousNoteLayoutsByPair,
       previousMeasureLayouts,
       allowSelectionFreezeWhenNotDragging: false,
       pagePaddingX,
       timeAxisSpacingConfig,
     })
-
     noteLayoutsRef.current = nextLayouts
     noteLayoutsByPairRef.current = nextLayoutsByPair
     noteLayoutByKeyRef.current = nextLayoutsByKey
@@ -240,6 +247,8 @@ export function useScoreRenderEffect(params: {
     measureTimeSignaturesFromImport,
     activeSelection,
     draggingSelection,
+    layoutReflowHintRef,
+    layoutStabilityKey,
     noteLayoutsRef,
     noteLayoutsByPairRef,
     noteLayoutByKeyRef,

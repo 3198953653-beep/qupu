@@ -41,6 +41,7 @@ import type {
   DragState,
   ImportFeedback,
   ImportedNoteLocation,
+  LayoutReflowHint,
   MeasureLayout,
   MeasurePair,
   MusicXmlMetadata,
@@ -194,6 +195,7 @@ function App() {
   } | null>(null)
   const firstMeasureDebugRafRef = useRef<number | null>(null)
   const importFeedbackRef = useRef<ImportFeedback>(importFeedback)
+  const layoutReflowHintRef = useRef<LayoutReflowHint | null>(null)
   const measurePairs = useMemo(
     () => measurePairsFromImport ?? buildMeasurePairs(notes, bassNotes),
     [measurePairsFromImport, notes, bassNotes],
@@ -251,6 +253,41 @@ function App() {
     const end = Math.min(systemCount - 1, start + systemsPerPage - 1)
     return { start, end }
   }, [safeCurrentPage, systemCount, systemsPerPage])
+  const layoutStabilityKey = useMemo(() => {
+    const systemRangeKey = systemRanges.map((range) => `${range.startPairIndex}-${range.endPairIndexExclusive}`).join(',')
+    const spacingKey = [
+      timeAxisSpacingConfig.minGapBeats,
+      timeAxisSpacingConfig.gapGamma,
+      timeAxisSpacingConfig.gapBaseWeight,
+      timeAxisSpacingConfig.leftEdgePaddingPx,
+      timeAxisSpacingConfig.rightEdgePaddingPx,
+      timeAxisSpacingConfig.interOnsetPaddingPx,
+      timeAxisSpacingConfig.baseMinGap32Px,
+      timeAxisSpacingConfig.durationGapRatios.thirtySecond,
+      timeAxisSpacingConfig.durationGapRatios.sixteenth,
+      timeAxisSpacingConfig.durationGapRatios.eighth,
+      timeAxisSpacingConfig.durationGapRatios.quarter,
+      timeAxisSpacingConfig.durationGapRatios.half,
+    ].join(',')
+    return `${scoreWidth}|${scoreHeight}|${pageHorizontalPaddingPx}|${systemRangeKey}|${spacingKey}`
+  }, [
+    scoreWidth,
+    scoreHeight,
+    pageHorizontalPaddingPx,
+    systemRanges,
+    timeAxisSpacingConfig.minGapBeats,
+    timeAxisSpacingConfig.gapGamma,
+    timeAxisSpacingConfig.gapBaseWeight,
+    timeAxisSpacingConfig.leftEdgePaddingPx,
+    timeAxisSpacingConfig.rightEdgePaddingPx,
+    timeAxisSpacingConfig.interOnsetPaddingPx,
+    timeAxisSpacingConfig.baseMinGap32Px,
+    timeAxisSpacingConfig.durationGapRatios.thirtySecond,
+    timeAxisSpacingConfig.durationGapRatios.sixteenth,
+    timeAxisSpacingConfig.durationGapRatios.eighth,
+    timeAxisSpacingConfig.durationGapRatios.quarter,
+    timeAxisSpacingConfig.durationGapRatios.half,
+  ])
 
   useImportedRefsSync({
     measurePairsFromImport,
@@ -287,6 +324,8 @@ function App() {
     measureTimeSignaturesFromImport,
     activeSelection: globalSelectionHighlight,
     draggingSelection: null,
+    layoutReflowHintRef,
+    layoutStabilityKey,
     noteLayoutsRef,
     noteLayoutsByPairRef,
     noteLayoutByKeyRef,
@@ -336,6 +375,10 @@ function App() {
     overlayRendererSizeRef,
     overlayLastRectRef,
     setDragDebugReport,
+    setLayoutReflowHint: (hint) => {
+      const decoratedHint = hint ? { ...hint, layoutStabilityKey } : null
+      layoutReflowHintRef.current = decoratedHint
+    },
     setMeasurePairsFromImport,
     setNotes,
     setBassNotes,

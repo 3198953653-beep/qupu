@@ -8,7 +8,46 @@ import { createDragStateFromHit, resolveCurrentNoteForHit, resolveKeyFifthsForPa
 import { getNearestPitchByY } from './pitchUtils'
 import { flattenBassFromPairs, flattenTrebleFromPairs, updateMeasurePairPitchAt, updateMeasurePairsPitch } from './scoreOps'
 import type { HitNote } from './layout/hitTest'
-import type { DragState, ImportedNoteLocation, MeasureLayout, MeasurePair, Pitch, ScoreNote, Selection } from './types'
+import type { DragState, ImportedNoteLocation, LayoutReflowHint, MeasureLayout, MeasurePair, Pitch, ScoreNote, Selection } from './types'
+
+function normalizeAccidentalSymbol(accidental: string | null | undefined): string {
+  return accidental ?? ''
+}
+
+function buildStaffAccidentalLayoutSignature(notes: ScoreNote[]): string {
+  return notes
+    .map((note, noteIndex) => {
+      const root = normalizeAccidentalSymbol(note.accidental)
+      const chord = note.chordPitches?.map((_, chordIndex) => normalizeAccidentalSymbol(note.chordAccidentals?.[chordIndex])).join(',') ?? ''
+      return `${noteIndex}:${root}|${chord}`
+    })
+    .join(';')
+}
+
+function hasMeasureAccidentalLayoutChanged(beforePair: MeasurePair | undefined, afterPair: MeasurePair | undefined): boolean {
+  if (!beforePair || !afterPair) return true
+  const beforeTreble = buildStaffAccidentalLayoutSignature(beforePair.treble)
+  const afterTreble = buildStaffAccidentalLayoutSignature(afterPair.treble)
+  if (beforeTreble !== afterTreble) return true
+  const beforeBass = buildStaffAccidentalLayoutSignature(beforePair.bass)
+  const afterBass = buildStaffAccidentalLayoutSignature(afterPair.bass)
+  return beforeBass !== afterBass
+}
+
+function buildLayoutReflowHint(params: {
+  pairIndex: number
+  sourcePairs: MeasurePair[]
+  normalizedPairs: MeasurePair[]
+}): LayoutReflowHint {
+  const { pairIndex, sourcePairs, normalizedPairs } = params
+  const accidentalLayoutChanged = hasMeasureAccidentalLayoutChanged(sourcePairs[pairIndex], normalizedPairs[pairIndex])
+  return {
+    pairIndex,
+    scoreContentChanged: normalizedPairs !== sourcePairs,
+    accidentalLayoutChanged,
+    shouldReflow: accidentalLayoutChanged,
+  }
+}
 
 export function buildDragStateForHit(params: {
   hit: HitNote
@@ -106,29 +145,41 @@ export function commitDragPitchToScoreData(params: {
   currentPairs: MeasurePair[]
   importedKeyFifths: number[] | null
 }):
-  | { normalizedPairs: MeasurePair[]; fromImported: true }
-  | { normalizedPairs: MeasurePair[]; trebleNotes: ScoreNote[]; bassNotes: ScoreNote[]; fromImported: false } {
+  | { normalizedPairs: MeasurePair[]; fromImported: true; layoutReflowHint: LayoutReflowHint }
+  | { normalizedPairs: MeasurePair[]; trebleNotes: ScoreNote[]; bassNotes: ScoreNote[]; fromImported: false; layoutReflowHint: LayoutReflowHint } {
   const { drag, pitch, importedPairs, importedNoteLookup, currentPairs, importedKeyFifths } = params
 
   if (importedPairs) {
+    const sourcePairs = importedPairs
     const location = importedNoteLookup.get(drag.noteId)
     const updated = location
-      ? updateMeasurePairPitchAt(importedPairs, location, pitch, drag.keyIndex)
-      : updateMeasurePairsPitch(importedPairs, drag.noteId, pitch, drag.keyIndex)
+      ? updateMeasurePairPitchAt(sourcePairs, location, pitch, drag.keyIndex)
+      : updateMeasurePairsPitch(sourcePairs, drag.noteId, pitch, drag.keyIndex)
     const normalizeIndex = location?.pairIndex ?? drag.pairIndex
     const normalizedPairs = normalizeMeasurePairAt(updated, normalizeIndex, importedKeyFifths)
     return {
       normalizedPairs,
       fromImported: true,
+      layoutReflowHint: buildLayoutReflowHint({
+        pairIndex: normalizeIndex,
+        sourcePairs,
+        normalizedPairs,
+      }),
     }
   }
 
-  const updated = updateMeasurePairsPitch(currentPairs, drag.noteId, pitch, drag.keyIndex)
+  const sourcePairs = currentPairs
+  const updated = updateMeasurePairsPitch(sourcePairs, drag.noteId, pitch, drag.keyIndex)
   const normalizedPairs = normalizeMeasurePairAt(updated, drag.pairIndex, null)
   return {
     normalizedPairs,
     trebleNotes: flattenTrebleFromPairs(normalizedPairs),
     bassNotes: flattenBassFromPairs(normalizedPairs),
     fromImported: false,
+    layoutReflowHint: buildLayoutReflowHint({
+      pairIndex: drag.pairIndex,
+      sourcePairs,
+      normalizedPairs,
+    }),
   }
 }

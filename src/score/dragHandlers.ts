@@ -21,6 +21,7 @@ import type {
   DragDebugSnapshot,
   DragState,
   ImportedNoteLocation,
+  LayoutReflowHint,
   MeasureLayout,
   MeasurePair,
   NoteLayout,
@@ -49,6 +50,7 @@ export function useDragHandlers(params: {
   overlayRendererSizeRef: MutableRefObject<{ width: number; height: number }>
   overlayLastRectRef: MutableRefObject<MeasureLayout['overlayRect'] | null>
   setDragDebugReport: StateSetter<string>
+  setLayoutReflowHint: (hint: LayoutReflowHint | null) => void
   setMeasurePairsFromImport: StateSetter<MeasurePair[] | null>
   setNotes: StateSetter<ScoreNote[]>
   setBassNotes: StateSetter<ScoreNote[]>
@@ -97,6 +99,7 @@ export function useDragHandlers(params: {
     overlayRendererSizeRef,
     overlayLastRectRef,
     setDragDebugReport,
+    setLayoutReflowHint,
     setMeasurePairsFromImport,
     setNotes,
     setBassNotes,
@@ -189,6 +192,11 @@ export function useDragHandlers(params: {
       currentPairs: measurePairsRef.current,
       importedKeyFifths: measureKeyFifthsFromImportRef.current,
     })
+    if (result.layoutReflowHint.scoreContentChanged) {
+      setLayoutReflowHint(result.layoutReflowHint)
+    } else {
+      setLayoutReflowHint(null)
+    }
     if (result.fromImported) {
       measurePairsFromImportRef.current = result.normalizedPairs
       setMeasurePairsFromImport(result.normalizedPairs)

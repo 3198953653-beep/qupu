@@ -21,7 +21,7 @@ import {
   getUniformTickSpacingPadding,
   type TimeAxisSpacingConfig,
 } from '../layout/timeAxisSpacing'
-import type { MeasureLayout, MeasurePair, NoteLayout, ScoreNote, Selection, StaffKind, TimeSignature } from '../types'
+import type { LayoutReflowHint, MeasureLayout, MeasurePair, NoteLayout, ScoreNote, Selection, StaffKind, TimeSignature } from '../types'
 
 const OVERFLOW_ANALYSIS_MAX_PASSES = 6
 const OVERFLOW_RECOVERY_PAD_PX = 2
@@ -139,6 +139,34 @@ function findPairIndexForSelection(
   return null
 }
 
+type StableMeasureFrame = {
+  measureX: number
+  measureWidth: number
+  noteStartX: number
+  noteEndX: number
+  formatWidth: number
+}
+
+function collectStableSystemMeasureFrames(
+  systemMeta: Array<{ pairIndex: number }>,
+  previousMeasureLayouts: Map<number, MeasureLayout> | null | undefined,
+): StableMeasureFrame[] | null {
+  if (!previousMeasureLayouts) return null
+  const frames: StableMeasureFrame[] = []
+  for (const entry of systemMeta) {
+    const previousLayout = previousMeasureLayouts.get(entry.pairIndex)
+    if (!previousLayout) return null
+    frames.push({
+      measureX: previousLayout.measureX,
+      measureWidth: previousLayout.measureWidth,
+      noteStartX: previousLayout.noteStartX,
+      noteEndX: previousLayout.noteEndX,
+      formatWidth: previousLayout.formatWidth,
+    })
+  }
+  return frames
+}
+
 function getLayoutSpacingRightX(layout: NoteLayout): number {
   if (Number.isFinite(layout.spacingRightX)) {
     return layout.spacingRightX
@@ -187,6 +215,8 @@ export function renderVisibleSystems(params: {
   previousNoteLayoutsByPair?: Map<number, NoteLayout[]> | null
   previousMeasureLayouts?: Map<number, MeasureLayout> | null
   allowSelectionFreezeWhenNotDragging?: boolean
+  layoutReflowHint?: LayoutReflowHint | null
+  layoutStabilityKey?: string
   pagePaddingX?: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
 }): {
@@ -210,6 +240,8 @@ export function renderVisibleSystems(params: {
     previousNoteLayoutsByPair = null,
     previousMeasureLayouts = null,
     allowSelectionFreezeWhenNotDragging = true,
+    layoutReflowHint = null,
+    layoutStabilityKey = '',
     pagePaddingX = SCORE_PAGE_PADDING_X,
     timeAxisSpacingConfig,
   } = params
@@ -318,6 +350,108 @@ export function renderVisibleSystems(params: {
         frozenSpacingByPairIndex.set(entry.pairIndex, frozen)
       }
     })
+
+    const shouldSkipSystemReflow =
+      layoutReflowHint !== null &&
+      layoutReflowHint.layoutStabilityKey === layoutStabilityKey &&
+      !layoutReflowHint.shouldReflow &&
+      systemMeta.some((entry) => entry.pairIndex === layoutReflowHint.pairIndex)
+    const stableSystemFrames = shouldSkipSystemReflow
+      ? collectStableSystemMeasureFrames(systemMeta, previousMeasureLayouts)
+      : null
+    if (stableSystemFrames) {
+      systemMeta.forEach((entry, indexInSystem) => {
+        const stableFrame = stableSystemFrames[indexInSystem]
+        const measureX = stableFrame.measureX
+        const measureWidth = stableFrame.measureWidth
+        const noteStartX = stableFrame.noteStartX
+        const noteEndX = stableFrame.noteEndX
+        const formatWidth = stableFrame.formatWidth
+        const frozenSpacing = tryBuildFrozenMeasureSpacing({
+          pairIndex: entry.pairIndex,
+          measure: entry.measure,
+          previousNoteLayoutsByPair,
+          previousMeasureLayouts,
+        })
+        const translatedFrozenSpacing =
+          frozenSpacing !== null ? translateFrozenSpacingToMeasureX(frozenSpacing, measureX) : null
+        const measureNoteLayouts = drawMeasureToContext({
+          context,
+          measure: entry.measure,
+          pairIndex: entry.pairIndex,
+          measureX,
+          measureWidth,
+          trebleY,
+          bassY,
+          isSystemStart: entry.isSystemStart,
+          keyFifths: entry.keyFifths,
+          showKeySignature: entry.showKeySignature,
+          timeSignature: entry.timeSignature,
+          showTimeSignature: entry.showTimeSignature,
+          endTimeSignature: entry.nextTimeSignature,
+          showEndTimeSignature: entry.showEndTimeSignature,
+          activeSelection,
+          draggingSelection,
+          formatWidthOverride: formatWidth,
+          timeAxisSpacingConfig: spacingConfig,
+          staticNoteXById: translatedFrozenSpacing?.staticNoteXById ?? null,
+          staticAccidentalRightXById: translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
+          preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
+          preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
+        })
+
+        nextLayouts.push(...measureNoteLayouts)
+        const pairLayouts = nextLayoutsByPair.get(entry.pairIndex)
+        if (pairLayouts) {
+          pairLayouts.push(...measureNoteLayouts)
+        } else {
+          nextLayoutsByPair.set(entry.pairIndex, [...measureNoteLayouts])
+        }
+        measureNoteLayouts.forEach((layout) => {
+          nextLayoutsByKey.set(getLayoutNoteKey(layout.staff, layout.id), layout)
+        })
+
+        let minNoteX = Number.POSITIVE_INFINITY
+        let maxNoteX = Number.NEGATIVE_INFINITY
+        for (const layout of measureNoteLayouts) {
+          if (layout.x < minNoteX) minNoteX = layout.x
+          if (layout.rightX > maxNoteX) maxNoteX = layout.rightX
+        }
+        const overlayRect = buildMeasureOverlayRect(
+          minNoteX,
+          maxNoteX,
+          noteStartX,
+          measureX,
+          measureWidth,
+          systemTop,
+          scoreWidth,
+          scoreHeight,
+          entry.isSystemStart,
+          entry.includeMeasureStartDecorations,
+        )
+        nextMeasureLayouts.set(entry.pairIndex, {
+          pairIndex: entry.pairIndex,
+          measureX,
+          measureWidth,
+          trebleY,
+          bassY,
+          systemTop,
+          isSystemStart: entry.isSystemStart,
+          keyFifths: entry.keyFifths,
+          showKeySignature: entry.showKeySignature,
+          timeSignature: entry.timeSignature,
+          showTimeSignature: entry.showTimeSignature,
+          endTimeSignature: entry.nextTimeSignature,
+          showEndTimeSignature: entry.showEndTimeSignature,
+          includeMeasureStartDecorations: entry.includeMeasureStartDecorations,
+          noteStartX,
+          noteEndX,
+          formatWidth,
+          overlayRect,
+        })
+      })
+      continue
+    }
     const measureTicksBySystem = systemMeta.map((entry) =>
       Math.max(1, Math.round(entry.timeSignature.beats * TICKS_PER_BEAT * (4 / entry.timeSignature.beatType))),
     )

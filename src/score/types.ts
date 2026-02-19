@@ -182,3 +182,11 @@ export type ImportedNoteLocation = {
   noteIndex: number
   staff: StaffKind
 }
+
+export type LayoutReflowHint = {
+  pairIndex: number
+  scoreContentChanged: boolean
+  accidentalLayoutChanged: boolean
+  shouldReflow: boolean
+  layoutStabilityKey?: string
+}
