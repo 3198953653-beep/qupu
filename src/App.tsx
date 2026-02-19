@@ -280,8 +280,6 @@ function App() {
     renderOriginSystemIndex: visibleSystemRange.start,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
-    activeSelection,
-    draggingSelection,
     noteLayoutsRef,
     noteLayoutsByPairRef,
     noteLayoutByKeyRef,

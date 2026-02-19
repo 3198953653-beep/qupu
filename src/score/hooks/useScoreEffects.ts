@@ -150,8 +150,6 @@ export function useScoreRenderEffect(params: {
   renderOriginSystemIndex: number
   measureKeyFifthsFromImport: number[] | null
   measureTimeSignaturesFromImport: TimeSignature[] | null
-  activeSelection: Selection | null
-  draggingSelection: Selection | null
   noteLayoutsRef: MutableRefObject<NoteLayout[]>
   noteLayoutsByPairRef: MutableRefObject<Map<number, NoteLayout[]>>
   noteLayoutByKeyRef: MutableRefObject<Map<string, NoteLayout>>
@@ -173,8 +171,6 @@ export function useScoreRenderEffect(params: {
     renderOriginSystemIndex,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
-    activeSelection,
-    draggingSelection,
     noteLayoutsRef,
     noteLayoutsByPairRef,
     noteLayoutByKeyRef,
@@ -212,8 +208,11 @@ export function useScoreRenderEffect(params: {
       renderOriginSystemIndex,
       measureKeyFifthsFromImport,
       measureTimeSignaturesFromImport,
-      activeSelection,
-      draggingSelection,
+      // Selection/drag highlighting is handled by the overlay path.
+      // Keep main score reflow independent from pointer selection state
+      // to avoid drag-start latency from full-system re-render.
+      activeSelection: null,
+      draggingSelection: null,
       previousNoteLayoutsByPair,
       previousMeasureLayouts,
       allowSelectionFreezeWhenNotDragging: false,
@@ -238,8 +237,6 @@ export function useScoreRenderEffect(params: {
     renderOriginSystemIndex,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
-    activeSelection,
-    draggingSelection,
     noteLayoutsRef,
     noteLayoutsByPairRef,
     noteLayoutByKeyRef,
