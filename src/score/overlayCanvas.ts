@@ -2,6 +2,31 @@ import { Renderer } from 'vexflow'
 import type { MutableRefObject } from 'react'
 import type { MeasureLayout } from './types'
 
+function getElementTransformScale(element: HTMLElement): { x: number; y: number } | null {
+  const transform = window.getComputedStyle(element).transform
+  if (!transform || transform === 'none') return null
+
+  const matrix3dMatch = transform.match(/^matrix3d\((.+)\)$/)
+  if (matrix3dMatch) {
+    const parts = matrix3dMatch[1]?.split(',').map((item) => Number(item.trim())) ?? []
+    if (parts.length === 16 && Number.isFinite(parts[0]) && Number.isFinite(parts[5])) {
+      return { x: parts[0], y: parts[5] }
+    }
+    return null
+  }
+
+  const matrixMatch = transform.match(/^matrix\((.+)\)$/)
+  if (matrixMatch) {
+    const parts = matrixMatch[1]?.split(',').map((item) => Number(item.trim())) ?? []
+    if (parts.length === 6 && Number.isFinite(parts[0]) && Number.isFinite(parts[3])) {
+      return { x: parts[0], y: parts[3] }
+    }
+    return null
+  }
+
+  return null
+}
+
 export function clearOverlayCanvas(
   overlay: HTMLCanvasElement | null,
   overlayLastRectRef: MutableRefObject<MeasureLayout['overlayRect'] | null>,
@@ -16,22 +41,36 @@ export function clearOverlayCanvas(
 
 export function ensureOverlayCanvasForRect(params: {
   overlay: HTMLCanvasElement | null
+  surface?: HTMLCanvasElement | null
   rect: MeasureLayout['overlayRect']
   overlayRendererRef: MutableRefObject<Renderer | null>
   overlayRendererSizeRef: MutableRefObject<{ width: number; height: number }>
   overlayLastRectRef: MutableRefObject<MeasureLayout['overlayRect'] | null>
   scoreScale?: number
 }): { x: number; y: number; width: number; height: number } | null {
-  const { overlay, rect, overlayRendererRef, overlayRendererSizeRef, overlayLastRectRef, scoreScale = 1 } = params
+  const { overlay, surface = null, rect, overlayRendererRef, overlayRendererSizeRef, overlayLastRectRef, scoreScale = 1 } = params
   if (!overlay) return null
 
   const nextWidth = Math.max(1, Math.ceil(rect.width))
   const nextHeight = Math.max(1, Math.ceil(rect.height))
-  const nextLeft = Math.floor(rect.x)
-  const nextTop = Math.floor(rect.y)
-  const safeScale = Number.isFinite(scoreScale) && scoreScale > 0 ? scoreScale : 1
-  const displayLeft = Math.floor(nextLeft * safeScale)
-  const displayTop = Math.floor(nextTop * safeScale)
+  const nextLeft = Number.isFinite(rect.x) ? rect.x : 0
+  const nextTop = Number.isFinite(rect.y) ? rect.y : 0
+  const fallbackScale = Number.isFinite(scoreScale) && scoreScale > 0 ? scoreScale : 1
+  let effectiveScaleX = fallbackScale
+  let effectiveScaleY = fallbackScale
+  if (surface) {
+    const transformScale = getElementTransformScale(surface)
+    if (transformScale) {
+      if (Number.isFinite(transformScale.x) && transformScale.x > 0) {
+        effectiveScaleX = transformScale.x
+      }
+      if (Number.isFinite(transformScale.y) && transformScale.y > 0) {
+        effectiveScaleY = transformScale.y
+      }
+    }
+  }
+  const displayLeft = nextLeft * effectiveScaleX
+  const displayTop = nextTop * effectiveScaleY
 
   if (overlay.width !== nextWidth || overlay.height !== nextHeight) {
     overlay.width = nextWidth

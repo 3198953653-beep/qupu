@@ -80,6 +80,7 @@ export type DragDebugStaticRecord = {
   noteIndex: number
   noteX: number
   headXByKeyIndex: Map<number, number>
+  headYByKeyIndex: Map<number, number>
   accidentalRightXByKeyIndex: Map<number, number>
 }
 
@@ -97,6 +98,9 @@ export type DragDebugRow = {
   headXStatic: number | null
   headXPreview: number | null
   headXDelta: number | null
+  headYStatic: number | null
+  headYPreview: number | null
+  headYDelta: number | null
   accidentalRightXStatic: number | null
   accidentalRightXPreview: number | null
   accidentalRightXDelta: number | null

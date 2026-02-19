@@ -20,9 +20,13 @@ export function buildDragDebugStaticByNoteKey(
   pairLayouts.forEach((layout) => {
     const noteKey = getLayoutNoteKey(layout.staff, layout.id)
     const headXByKeyIndex = new Map<number, number>()
+    const headYByKeyIndex = new Map<number, number>()
     layout.noteHeads.forEach((head) => {
       if (!Number.isFinite(head.keyIndex) || !Number.isFinite(head.x)) return
       headXByKeyIndex.set(head.keyIndex, head.x)
+      if (Number.isFinite(head.y)) {
+        headYByKeyIndex.set(head.keyIndex, head.y)
+      }
     })
     const accidentalRightXByKeyIndex = new Map<number, number>()
     Object.entries(layout.accidentalRightXByKeyIndex).forEach(([keyIndexText, rightX]) => {
@@ -36,6 +40,7 @@ export function buildDragDebugStaticByNoteKey(
       noteIndex: layout.noteIndex,
       noteX: layout.x,
       headXByKeyIndex,
+      headYByKeyIndex,
       accidentalRightXByKeyIndex,
     })
   })

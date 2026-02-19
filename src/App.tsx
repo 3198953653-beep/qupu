@@ -857,6 +857,62 @@ function App() {
         setManualScalePercent(clampScalePercent(nextPercent))
       },
       dumpAllMeasureCoordinates: () => dumpAllMeasureCoordinateReport(),
+      getDragPreviewFrames: () =>
+        dragDebugFramesRef.current.map((frame) => ({
+          ...frame,
+          rows: frame.rows.map((row) => ({ ...row })),
+        })),
+      getDragSessionState: () => {
+        const drag = dragRef.current
+        if (!drag) return null
+        return {
+          noteId: drag.noteId,
+          staff: drag.staff,
+          keyIndex: drag.keyIndex,
+          pairIndex: drag.pairIndex,
+          noteIndex: drag.noteIndex,
+          pitch: drag.pitch,
+          previewStarted: drag.previewStarted,
+        }
+      },
+      getOverlayDebugInfo: () => {
+        const overlay = scoreOverlayRef.current
+        const surface = scoreRef.current
+        if (!overlay || !surface) return null
+        const overlayClientRect = overlay.getBoundingClientRect()
+        const surfaceClientRect = surface.getBoundingClientRect()
+        return {
+          scoreScale,
+          overlayRectInScore: overlayLastRectRef.current
+            ? { ...overlayLastRectRef.current }
+            : null,
+          overlayElement: {
+            width: overlay.width,
+            height: overlay.height,
+            styleLeft: overlay.style.left,
+            styleTop: overlay.style.top,
+            styleWidth: overlay.style.width,
+            styleHeight: overlay.style.height,
+            display: overlay.style.display,
+          },
+          overlayClientRect: {
+            left: overlayClientRect.left,
+            top: overlayClientRect.top,
+            width: overlayClientRect.width,
+            height: overlayClientRect.height,
+          },
+          surfaceElement: {
+            width: surface.width,
+            height: surface.height,
+          },
+          surfaceClientRect: {
+            left: surfaceClientRect.left,
+            top: surfaceClientRect.top,
+            width: surfaceClientRect.width,
+            height: surfaceClientRect.height,
+          },
+        }
+      },
       getPaging: () => ({
         currentPage: safeCurrentPage,
         pageCount,
@@ -880,6 +936,11 @@ function App() {
     safeManualScalePercent,
     autoScaleEnabled,
     scoreScale,
+    dragDebugFramesRef,
+    dragRef,
+    scoreOverlayRef,
+    scoreRef,
+    overlayLastRectRef,
     systemsPerPage,
     visibleSystemRange,
   ])

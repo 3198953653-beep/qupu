@@ -29,6 +29,7 @@ const EMPTY_DRAG_REPORT_MESSAGE = 'No drag preview frames captured yet. Drag a n
 
 type OverlayRuntime = {
   overlay: HTMLCanvasElement | null
+  surface: HTMLCanvasElement | null
   overlayRendererRef: MutableRefObject<Renderer | null>
   overlayRendererSizeRef: MutableRefObject<{ width: number; height: number }>
   overlayLastRectRef: MutableRefObject<MeasureLayout['overlayRect'] | null>
@@ -45,6 +46,7 @@ function buildOverlayAccessors(runtime: OverlayRuntime) {
     ensureRect: (rect: MeasureLayout['overlayRect']) =>
       ensureOverlayCanvasForRectHelper({
         overlay: runtime.overlay,
+        surface: runtime.surface,
         rect,
         overlayRendererRef: runtime.overlayRendererRef,
         overlayRendererSizeRef: runtime.overlayRendererSizeRef,

@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test:coords:browser": "tsx scripts/measure-coordinate-browser-test.ts",
     "test:coords:browser:drag-m2": "tsx scripts/measure-2-drag-coordinate-browser-test.ts",
+    "test:coords:browser:drag-local": "tsx scripts/drag-local-redraw-coordinate-browser-test.ts",
     "test:spacing:suite": "tsx scripts/spacing-suite-browser-test.ts"
   },
   "dependencies": {

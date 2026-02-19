@@ -415,7 +415,9 @@ export function renderVisibleSystems(params: {
         timeAxisSpacingConfig,
         staticNoteXById: translatedFrozenSpacing?.staticNoteXById ?? null,
         staticAccidentalRightXById: translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
-        layoutDetail: 'spacing-only',
+        // Probe with the same layout path used by final render so spacingRightX
+        // and barline fit are computed from identical geometry.
+        layoutDetail: 'full',
         preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
         preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
       })

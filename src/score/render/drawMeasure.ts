@@ -513,6 +513,9 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           const headXPreview =
             rawHeadXPreview !== null && Math.abs(rawHeadXPreview) > 0.0001 ? rawHeadXPreview : noteXPreview
           const headXStatic = finiteOrNull(staticRecord?.headXByKeyIndex.get(renderedKey.keyIndex))
+          const rawHeadYPreview = finiteOrNull(renderedEntry.vexNote.getYs()[renderedIndex] ?? renderedEntry.vexNote.getYs()[0])
+          const headYPreview = rawHeadYPreview
+          const headYStatic = finiteOrNull(staticRecord?.headYByKeyIndex.get(renderedKey.keyIndex))
           const previewByLock = finiteOrNull(previewAccidentalByRowKey.get(`${noteKey}|${renderedKey.keyIndex}`))
           const accidentalRightXPreview =
             previewByLock ?? finiteOrNull(accidentalPreviewByRenderedIndex.get(renderedIndex))
@@ -533,6 +536,9 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
             headXStatic,
             headXPreview,
             headXDelta: deltaOrNull(headXPreview, headXStatic),
+            headYStatic,
+            headYPreview,
+            headYDelta: deltaOrNull(headYPreview, headYStatic),
             accidentalRightXStatic,
             accidentalRightXPreview,
             accidentalRightXDelta: deltaOrNull(accidentalRightXPreview, accidentalRightXStatic),

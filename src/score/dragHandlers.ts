@@ -139,6 +139,7 @@ export function useDragHandlers(params: {
       measurePairs: measurePairsRef.current,
       overlayRuntime: {
         overlay: scoreOverlayRef.current,
+        surface: scoreRef.current,
         overlayRendererRef,
         overlayRendererSizeRef,
         overlayLastRectRef,
@@ -160,6 +161,7 @@ export function useDragHandlers(params: {
       measurePairs: measurePairsRef.current,
       overlayRuntime: {
         overlay: scoreOverlayRef.current,
+        surface: scoreRef.current,
         overlayRendererRef,
         overlayRendererSizeRef,
         overlayLastRectRef,
