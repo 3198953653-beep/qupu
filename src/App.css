@@ -120,6 +120,12 @@
   gap: 0.6rem;
 }
 
+.spacing-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
 .spacing-reset-btn {
   border: 1px solid #c3d2db;
   background: #ffffff;
@@ -128,6 +134,22 @@
   font-weight: 600;
   padding: 0.3rem 0.65rem;
   font-size: 0.78rem;
+}
+
+.spacing-toggle-btn {
+  border: 1px solid #9fb6c4;
+  background: #ffffff;
+  color: #1d4e67;
+  border-radius: 10px;
+  font-weight: 600;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.78rem;
+}
+
+.spacing-toggle-btn.active {
+  border-color: #2f89ba;
+  background: #e8f5fc;
+  color: #0f5f88;
 }
 
 .spacing-grid {
@@ -144,6 +166,31 @@
 }
 
 .spacing-grid input[type='number'] {
+  width: 78px;
+  border: 1px solid #c6d4dd;
+  border-radius: 8px;
+  padding: 0.3rem 0.4rem;
+  background: #ffffff;
+  color: #123246;
+  font-size: 0.84rem;
+}
+
+.duration-ratio-grid {
+  display: grid;
+  grid-template-columns: 120px minmax(180px, 1fr) 78px;
+  gap: 0.45rem 0.6rem;
+  align-items: center;
+  border-top: 1px dashed #c5d7e2;
+  padding-top: 0.55rem;
+}
+
+.duration-ratio-grid label {
+  color: #20445a;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.duration-ratio-grid input[type='number'] {
   width: 78px;
   border: 1px solid #c6d4dd;
   border-radius: 8px;

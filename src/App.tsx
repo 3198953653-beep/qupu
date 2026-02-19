@@ -87,6 +87,11 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
+function clampDurationGapRatio(value: number): number {
+  const clamped = clampNumber(value, 0.6, 2)
+  return Number(clamped.toFixed(2))
+}
+
 type FirstMeasureNoteDebugRow = {
   staff: 'treble' | 'bass'
   noteId: string
@@ -883,6 +888,11 @@ function App() {
         spacingMinGapBeats={timeAxisSpacingConfig.minGapBeats}
         spacingLeftEdgePaddingPx={timeAxisSpacingConfig.leftEdgePaddingPx}
         spacingRightEdgePaddingPx={timeAxisSpacingConfig.rightEdgePaddingPx}
+        durationGapRatio32={timeAxisSpacingConfig.durationGapRatios.thirtySecond}
+        durationGapRatio16={timeAxisSpacingConfig.durationGapRatios.sixteenth}
+        durationGapRatio8={timeAxisSpacingConfig.durationGapRatios.eighth}
+        durationGapRatio4={timeAxisSpacingConfig.durationGapRatios.quarter}
+        durationGapRatio2={timeAxisSpacingConfig.durationGapRatios.half}
         onSpacingMinGapBeatsChange={(nextValue) =>
           setTimeAxisSpacingConfig((current) => ({
             ...current,
@@ -913,7 +923,57 @@ function App() {
             rightEdgePaddingPx: Math.round(clampNumber(nextValue, 0, 24)),
           }))
         }
-        onResetSpacingConfig={() => setTimeAxisSpacingConfig(DEFAULT_TIME_AXIS_SPACING_CONFIG)}
+        onDurationGapRatio32Change={(nextValue) =>
+          setTimeAxisSpacingConfig((current) => ({
+            ...current,
+            durationGapRatios: {
+              ...current.durationGapRatios,
+              thirtySecond: clampDurationGapRatio(nextValue),
+            },
+          }))
+        }
+        onDurationGapRatio16Change={(nextValue) =>
+          setTimeAxisSpacingConfig((current) => ({
+            ...current,
+            durationGapRatios: {
+              ...current.durationGapRatios,
+              sixteenth: clampDurationGapRatio(nextValue),
+            },
+          }))
+        }
+        onDurationGapRatio8Change={(nextValue) =>
+          setTimeAxisSpacingConfig((current) => ({
+            ...current,
+            durationGapRatios: {
+              ...current.durationGapRatios,
+              eighth: clampDurationGapRatio(nextValue),
+            },
+          }))
+        }
+        onDurationGapRatio4Change={(nextValue) =>
+          setTimeAxisSpacingConfig((current) => ({
+            ...current,
+            durationGapRatios: {
+              ...current.durationGapRatios,
+              quarter: clampDurationGapRatio(nextValue),
+            },
+          }))
+        }
+        onDurationGapRatio2Change={(nextValue) =>
+          setTimeAxisSpacingConfig((current) => ({
+            ...current,
+            durationGapRatios: {
+              ...current.durationGapRatios,
+              half: clampDurationGapRatio(nextValue),
+            },
+          }))
+        }
+        onResetSpacingConfig={() =>
+          setTimeAxisSpacingConfig({
+            ...DEFAULT_TIME_AXIS_SPACING_CONFIG,
+            durationGapRatios: { ...DEFAULT_TIME_AXIS_SPACING_CONFIG.durationGapRatios },
+          })
+        }
         onOpenMusicXmlFilePicker={openMusicXmlFilePicker}
         onLoadSampleMusicXml={loadSampleMusicXml}
         onExportMusicXmlFile={exportMusicXmlFile}
