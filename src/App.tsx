@@ -134,6 +134,11 @@ function App() {
   const [rhythmPreset, setRhythmPreset] = useState<RhythmPresetId>('quarter')
   const [activeSelection, setActiveSelection] = useState<Selection>({ noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 })
   const [draggingSelection, setDraggingSelection] = useState<Selection | null>(null)
+  const [globalSelectionHighlight, setGlobalSelectionHighlight] = useState<Selection>({
+    noteId: INITIAL_NOTES[0].id,
+    staff: 'treble',
+    keyIndex: 0,
+  })
   const [isPlaying, setIsPlaying] = useState(false)
   const [musicXmlInput, setMusicXmlInput] = useState<string>('')
   const [importFeedback, setImportFeedback] = useState<ImportFeedback>({ kind: 'idle', message: '' })
@@ -280,6 +285,8 @@ function App() {
     renderOriginSystemIndex: visibleSystemRange.start,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
+    activeSelection: globalSelectionHighlight,
+    draggingSelection: null,
     noteLayoutsRef,
     noteLayoutsByPairRef,
     noteLayoutByKeyRef,
@@ -346,6 +353,20 @@ function App() {
     scoreScale,
     timeAxisSpacingConfig,
   })
+
+  useEffect(() => {
+    if (draggingSelection) return
+    setGlobalSelectionHighlight((current) => {
+      if (
+        current.noteId === activeSelection.noteId &&
+        current.staff === activeSelection.staff &&
+        current.keyIndex === activeSelection.keyIndex
+      ) {
+        return current
+      }
+      return activeSelection
+    })
+  }, [activeSelection, draggingSelection])
 
   const {
     playScore,
