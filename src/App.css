@@ -623,9 +623,10 @@
   background: #ffffff;
   box-shadow: 0 24px 50px -28px rgba(8, 24, 38, 0.95);
   padding: 0.85rem;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 0.6rem;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  min-height: 0;
 }
 
 .osmd-preview-header {
@@ -651,6 +652,65 @@
   font-size: 0.82rem;
 }
 
+.osmd-preview-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+}
+
+.osmd-preview-pagination button {
+  border: 1px solid #c3d2db;
+  background: #ffffff;
+  color: #123246;
+  border-radius: 10px;
+  font-weight: 600;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.82rem;
+}
+
+.osmd-preview-pagination button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.osmd-preview-pagination span {
+  color: #20445a;
+  font-size: 0.88rem;
+  font-weight: 600;
+  min-width: 72px;
+  text-align: center;
+}
+
+.osmd-preview-zoom {
+  display: grid;
+  grid-template-columns: 72px minmax(180px, 1fr) 72px 18px;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.osmd-preview-zoom label {
+  color: #20445a;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.osmd-preview-zoom input[type='number'] {
+  width: 72px;
+  border: 1px solid #c6d4dd;
+  border-radius: 8px;
+  padding: 0.25rem 0.35rem;
+  background: #ffffff;
+  color: #123246;
+  font-size: 0.85rem;
+}
+
+.osmd-preview-zoom span {
+  color: #20445a;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
 .osmd-preview-status,
 .osmd-preview-error {
   margin: 0;
@@ -671,11 +731,36 @@
   background: #f7fbff;
   overflow: auto;
   padding: 0.7rem;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.osmd-preview-paper-frame {
+  background: #ffffff;
+  border: 1px solid #cad7e0;
+  box-sizing: border-box;
+  position: relative;
+  overflow: hidden;
+}
+
+.osmd-preview-paper-frame::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-top: 1px solid #d6e1e9;
+  pointer-events: none;
 }
 
 .osmd-preview-surface {
   min-height: 240px;
   background: #ffffff;
+  margin: 0 auto;
+  transform-origin: top left;
 }
 
 @media (max-width: 700px) {

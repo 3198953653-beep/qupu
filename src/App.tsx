@@ -76,6 +76,7 @@ const MAX_CANVAS_RENDER_DIM_PX = 32760
 const HORIZONTAL_RENDER_BUFFER_PX = 1200
 const HORIZONTAL_RENDER_EDGE_BUFFER_MEASURES = 1
 const DEFAULT_TIME_SIGNATURE: TimeSignature = { beats: 4, beatType: 4 }
+const OSMD_PREVIEW_ZOOM_DEBOUNCE_MS = 120
 
 const PITCHES: Pitch[] = createPianoPitches()
 const INITIAL_BASS_NOTES: ScoreNote[] = buildBassMockNotes(INITIAL_NOTES)
@@ -122,6 +123,16 @@ function clampPageHorizontalPaddingPx(value: number): number {
   return Math.round(clampNumber(value, 8, 120))
 }
 
+function clampOsmdPreviewZoomPercent(value: number): number {
+  if (!Number.isFinite(value)) return 100
+  return Math.max(35, Math.min(160, Math.round(value)))
+}
+
+function clampOsmdPreviewPaperScalePercent(value: number): number {
+  if (!Number.isFinite(value)) return 100
+  return Math.max(50, Math.min(180, Math.round(value)))
+}
+
 function hasTimeSignatureChanged(current: TimeSignature, previous: TimeSignature): boolean {
   return current.beats !== previous.beats || current.beatType !== previous.beatType
 }
@@ -136,6 +147,26 @@ function countAccidentalsForMeasure(measure: MeasurePair): number {
   const trebleCount = measure.treble.reduce((sum, note) => sum + countAccidentalsForNote(note), 0)
   const bassCount = measure.bass.reduce((sum, note) => sum + countAccidentalsForNote(note), 0)
   return trebleCount + bassCount
+}
+
+function collectOsmdPreviewPages(container: HTMLElement): HTMLElement[] {
+  const directChildren = Array.from(container.children).filter((child): child is HTMLElement => child instanceof HTMLElement)
+  const directPages = directChildren.filter((child) => {
+    const tag = child.tagName.toLowerCase()
+    if (tag === 'svg' || tag === 'canvas') return true
+    if (tag !== 'div') return false
+    return Boolean(child.querySelector('svg, canvas'))
+  })
+  if (directPages.length > 0) return directPages
+  return Array.from(container.querySelectorAll('svg, canvas')).filter((child): child is HTMLElement => child instanceof HTMLElement)
+}
+
+function applyOsmdPreviewPageVisibility(pages: HTMLElement[], pageIndex: number): void {
+  if (pages.length <= 1) return
+  const safeIndex = Math.max(0, Math.min(pages.length - 1, pageIndex))
+  pages.forEach((page, index) => {
+    page.style.display = index === safeIndex ? '' : 'none'
+  })
 }
 
 type FirstMeasureNoteDebugRow = {
@@ -191,6 +222,11 @@ function App() {
   const [osmdPreviewXml, setOsmdPreviewXml] = useState<string>('')
   const [osmdPreviewStatusText, setOsmdPreviewStatusText] = useState<string>('')
   const [osmdPreviewError, setOsmdPreviewError] = useState<string>('')
+  const [osmdPreviewPageIndex, setOsmdPreviewPageIndex] = useState(0)
+  const [osmdPreviewPageCount, setOsmdPreviewPageCount] = useState(1)
+  const [osmdPreviewZoomPercent, setOsmdPreviewZoomPercent] = useState(66)
+  const [osmdPreviewZoomDraftPercent, setOsmdPreviewZoomDraftPercent] = useState(66)
+  const [osmdPreviewPaperScalePercent, setOsmdPreviewPaperScalePercent] = useState(100)
   const [horizontalViewportXRange, setHorizontalViewportXRange] = useState<{ startX: number; endX: number }>({
     startX: 0,
     endX: A4_PAGE_WIDTH,
@@ -200,6 +236,13 @@ function App() {
   const scoreOverlayRef = useRef<HTMLCanvasElement | null>(null)
   const scoreScrollRef = useRef<HTMLDivElement | null>(null)
   const osmdPreviewContainerRef = useRef<HTMLDivElement | null>(null)
+  const osmdPreviewPagesRef = useRef<HTMLElement[]>([])
+  const osmdPreviewInstanceRef = useRef<{
+    Zoom: number
+    render: () => void
+    GraphicSheet?: { MusicPages?: unknown[] }
+  } | null>(null)
+  const osmdPreviewZoomCommitTimerRef = useRef<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const synthRef = useRef<Tone.PolySynth | null>(null)
 
@@ -727,9 +770,17 @@ function App() {
     [pageCount],
   )
   const closeOsmdPreview = useCallback(() => {
+    if (osmdPreviewZoomCommitTimerRef.current !== null) {
+      window.clearTimeout(osmdPreviewZoomCommitTimerRef.current)
+      osmdPreviewZoomCommitTimerRef.current = null
+    }
     setIsOsmdPreviewOpen(false)
     setOsmdPreviewStatusText('')
     setOsmdPreviewError('')
+    setOsmdPreviewPageIndex(0)
+    setOsmdPreviewPageCount(1)
+    osmdPreviewPagesRef.current = []
+    osmdPreviewInstanceRef.current = null
   }, [])
   const openOsmdPreview = useCallback(() => {
     const { xmlText } = buildMusicXmlExportPayload({
@@ -742,8 +793,55 @@ function App() {
     setOsmdPreviewXml(xmlText)
     setOsmdPreviewStatusText('正在生成OSMD预览...')
     setOsmdPreviewError('')
+    setOsmdPreviewPageIndex(0)
+    setOsmdPreviewPageCount(1)
     setIsOsmdPreviewOpen(true)
   }, [measurePairs])
+  const goToPrevOsmdPreviewPage = useCallback(() => {
+    setOsmdPreviewPageIndex((current) => Math.max(0, current - 1))
+  }, [])
+  const goToNextOsmdPreviewPage = useCallback(() => {
+    setOsmdPreviewPageIndex((current) => Math.min(Math.max(0, osmdPreviewPageCount - 1), current + 1))
+  }, [osmdPreviewPageCount])
+  const commitOsmdPreviewZoomPercent = useCallback((nextValue: number) => {
+    const clamped = clampOsmdPreviewZoomPercent(nextValue)
+    if (osmdPreviewZoomCommitTimerRef.current !== null) {
+      window.clearTimeout(osmdPreviewZoomCommitTimerRef.current)
+      osmdPreviewZoomCommitTimerRef.current = null
+    }
+    setOsmdPreviewZoomDraftPercent(clamped)
+    setOsmdPreviewZoomPercent((current) => (current === clamped ? current : clamped))
+  }, [])
+  const scheduleOsmdPreviewZoomPercentCommit = useCallback((nextValue: number) => {
+    const clamped = clampOsmdPreviewZoomPercent(nextValue)
+    setOsmdPreviewZoomDraftPercent(clamped)
+    if (osmdPreviewZoomCommitTimerRef.current !== null) {
+      window.clearTimeout(osmdPreviewZoomCommitTimerRef.current)
+    }
+    osmdPreviewZoomCommitTimerRef.current = window.setTimeout(() => {
+      osmdPreviewZoomCommitTimerRef.current = null
+      setOsmdPreviewZoomPercent((current) => (current === clamped ? current : clamped))
+    }, OSMD_PREVIEW_ZOOM_DEBOUNCE_MS)
+  }, [])
+  const onOsmdPreviewPaperScalePercentChange = useCallback((nextValue: number) => {
+    setOsmdPreviewPaperScalePercent(clampOsmdPreviewPaperScalePercent(nextValue))
+  }, [])
+
+  useEffect(() => {
+    setOsmdPreviewZoomDraftPercent((current) => {
+      const clamped = clampOsmdPreviewZoomPercent(osmdPreviewZoomPercent)
+      return current === clamped ? current : clamped
+    })
+  }, [osmdPreviewZoomPercent])
+
+  useEffect(() => {
+    return () => {
+      if (osmdPreviewZoomCommitTimerRef.current !== null) {
+        window.clearTimeout(osmdPreviewZoomCommitTimerRef.current)
+        osmdPreviewZoomCommitTimerRef.current = null
+      }
+    }
+  }, [])
 
   useEffect(() => {
     if (!isOsmdPreviewOpen) return
@@ -780,14 +878,26 @@ function App() {
         if (canceled) return
 
         const osmd = new osmdModule.OpenSheetMusicDisplay(container, {
-          autoResize: true,
+          autoResize: false,
           backend: 'svg',
           drawTitle: true,
+          pageFormat: 'A4_P',
+          drawMeasureNumbers: true,
+          drawMeasureNumbersOnlyAtSystemStart: true,
+          useXMLMeasureNumbers: true,
         })
         await osmd.load(osmdPreviewXml)
         if (canceled) return
+        osmd.Zoom = clampOsmdPreviewZoomPercent(osmdPreviewZoomPercent) / 100
         osmd.render()
         if (canceled) return
+        osmdPreviewInstanceRef.current = osmd
+        const renderedPages = collectOsmdPreviewPages(container)
+        osmdPreviewPagesRef.current = renderedPages
+        const graphicPageCount = osmd.GraphicSheet?.MusicPages?.length ?? 0
+        const nextPageCount = Math.max(1, renderedPages.length, graphicPageCount)
+        setOsmdPreviewPageCount(nextPageCount)
+        applyOsmdPreviewPageVisibility(renderedPages, 0)
         setOsmdPreviewStatusText('')
       } catch (error) {
         if (canceled) return
@@ -801,12 +911,45 @@ function App() {
 
     return () => {
       canceled = true
+      osmdPreviewInstanceRef.current = null
+      osmdPreviewPagesRef.current = []
       const container = osmdPreviewContainerRef.current
       if (container) {
         container.innerHTML = ''
       }
     }
   }, [isOsmdPreviewOpen, osmdPreviewXml])
+
+  useEffect(() => {
+    setOsmdPreviewPageIndex((current) => Math.max(0, Math.min(current, osmdPreviewPageCount - 1)))
+  }, [osmdPreviewPageCount])
+
+  useEffect(() => {
+    if (!isOsmdPreviewOpen) return
+    const osmd = osmdPreviewInstanceRef.current
+    if (!osmd) return
+    const nextZoom = clampOsmdPreviewZoomPercent(osmdPreviewZoomPercent) / 100
+    if (Math.abs(osmd.Zoom - nextZoom) < 1e-6) return
+    osmd.Zoom = nextZoom
+    osmd.render()
+    const container = osmdPreviewContainerRef.current
+    if (!container) return
+    const renderedPages = collectOsmdPreviewPages(container)
+    osmdPreviewPagesRef.current = renderedPages
+    const graphicPageCount = osmd.GraphicSheet?.MusicPages?.length ?? 0
+    const nextPageCount = Math.max(1, renderedPages.length, graphicPageCount)
+    setOsmdPreviewPageCount(nextPageCount)
+    applyOsmdPreviewPageVisibility(renderedPages, osmdPreviewPageIndex)
+  }, [isOsmdPreviewOpen, osmdPreviewZoomPercent, osmdPreviewPageIndex])
+
+  useEffect(() => {
+    applyOsmdPreviewPageVisibility(osmdPreviewPagesRef.current, osmdPreviewPageIndex)
+  }, [osmdPreviewPageIndex, osmdPreviewPageCount])
+
+  const safeOsmdPreviewPaperScalePercent = clampOsmdPreviewPaperScalePercent(osmdPreviewPaperScalePercent)
+  const osmdPreviewPaperScale = safeOsmdPreviewPaperScalePercent / 100
+  const osmdPreviewPaperWidthPx = A4_PAGE_WIDTH * osmdPreviewPaperScale
+  const osmdPreviewPaperHeightPx = A4_PAGE_HEIGHT * osmdPreviewPaperScale
 
   const scoreSurfaceOffsetXPx = isHorizontalView ? horizontalRenderOffsetX * scoreScaleX : 0
   const formatDebugCoord = (value: number | null | undefined): string => {
@@ -1546,10 +1689,101 @@ function App() {
               <h3>OSMD预览</h3>
               <button type="button" onClick={closeOsmdPreview}>关闭</button>
             </div>
+            <div className="osmd-preview-pagination">
+              <button type="button" onClick={goToPrevOsmdPreviewPage} disabled={osmdPreviewPageIndex <= 0}>
+                上一页
+              </button>
+              <span>{`${Math.min(osmdPreviewPageCount, osmdPreviewPageIndex + 1)} / ${osmdPreviewPageCount}`}</span>
+              <button
+                type="button"
+                onClick={goToNextOsmdPreviewPage}
+                disabled={osmdPreviewPageIndex >= osmdPreviewPageCount - 1}
+              >
+                下一页
+              </button>
+            </div>
+            <div className="osmd-preview-zoom">
+              <label htmlFor="osmd-preview-zoom-range">音符缩放</label>
+              <input
+                id="osmd-preview-zoom-range"
+                type="range"
+                min={35}
+                max={160}
+                step={1}
+                value={osmdPreviewZoomDraftPercent}
+                onInput={(event) =>
+                  scheduleOsmdPreviewZoomPercentCommit(Number((event.target as HTMLInputElement).value))
+                }
+                onPointerUp={(event) => commitOsmdPreviewZoomPercent(Number((event.target as HTMLInputElement).value))}
+                onKeyUp={(event) => {
+                  if (event.key !== 'Enter') return
+                  commitOsmdPreviewZoomPercent(Number((event.target as HTMLInputElement).value))
+                }}
+              />
+              <input
+                type="number"
+                min={35}
+                max={160}
+                step={1}
+                value={osmdPreviewZoomDraftPercent}
+                onInput={(event) =>
+                  scheduleOsmdPreviewZoomPercentCommit(Number((event.target as HTMLInputElement).value))
+                }
+                onBlur={(event) => commitOsmdPreviewZoomPercent(Number((event.target as HTMLInputElement).value))}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter') return
+                  commitOsmdPreviewZoomPercent(Number((event.target as HTMLInputElement).value))
+                }}
+              />
+              <span>%</span>
+            </div>
+            <div className="osmd-preview-zoom">
+              <label htmlFor="osmd-preview-paper-scale-range">纸张缩放</label>
+              <input
+                id="osmd-preview-paper-scale-range"
+                type="range"
+                min={50}
+                max={180}
+                step={1}
+                value={safeOsmdPreviewPaperScalePercent}
+                onInput={(event) =>
+                  onOsmdPreviewPaperScalePercentChange(Number((event.target as HTMLInputElement).value))
+                }
+                onChange={(event) => onOsmdPreviewPaperScalePercentChange(Number(event.target.value))}
+              />
+              <input
+                type="number"
+                min={50}
+                max={180}
+                step={1}
+                value={safeOsmdPreviewPaperScalePercent}
+                onInput={(event) =>
+                  onOsmdPreviewPaperScalePercentChange(Number((event.target as HTMLInputElement).value))
+                }
+                onChange={(event) => onOsmdPreviewPaperScalePercentChange(Number(event.target.value))}
+              />
+              <span>%</span>
+            </div>
             {osmdPreviewStatusText && <p className="osmd-preview-status">{osmdPreviewStatusText}</p>}
             {osmdPreviewError && <p className="osmd-preview-error">{osmdPreviewError}</p>}
             <div className="osmd-preview-body">
-              <div ref={osmdPreviewContainerRef} className="osmd-preview-surface" />
+              <div
+                className="osmd-preview-paper-frame"
+                style={{
+                  width: `${osmdPreviewPaperWidthPx}px`,
+                  height: `${osmdPreviewPaperHeightPx}px`,
+                }}
+              >
+                <div
+                  ref={osmdPreviewContainerRef}
+                  className="osmd-preview-surface"
+                  style={{
+                    width: `${A4_PAGE_WIDTH}px`,
+                    height: `${A4_PAGE_HEIGHT}px`,
+                    transform: `scale(${osmdPreviewPaperScale})`,
+                  }}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -1559,6 +1793,8 @@ function App() {
 }
 
 export default App
+
+
 
 
 

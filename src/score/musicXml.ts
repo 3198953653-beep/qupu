@@ -483,6 +483,7 @@ export function buildMusicXmlFromMeasurePairs(params: {
 
   let previousDivisions = -1
   let previousFifths = Number.NaN
+  let previousTime: TimeSignature | null = null
 
   measurePairs.forEach((pair, measureIndex) => {
     const divisions = pickDivisions(measureIndex)
@@ -490,7 +491,11 @@ export function buildMusicXmlFromMeasurePairs(params: {
     const time = pickTime(measureIndex)
     const shouldWriteDivisions = measureIndex === 0 || divisions !== previousDivisions
     const shouldWriteKey = measureIndex === 0 || fifths !== previousFifths
-    const shouldWriteTime = true
+    const shouldWriteTime =
+      measureIndex === 0 ||
+      previousTime === null ||
+      time.beats !== previousTime.beats ||
+      time.beatType !== previousTime.beatType
 
     lines.push(`  <measure number="${measureIndex + 1}">`)
     if (shouldWriteDivisions || shouldWriteKey || shouldWriteTime || measureIndex === 0) {
@@ -547,6 +552,7 @@ export function buildMusicXmlFromMeasurePairs(params: {
     lines.push('  </measure>')
     previousDivisions = divisions
     previousFifths = fifths
+    previousTime = time
   })
 
   lines.push(' </part>')
