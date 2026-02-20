@@ -558,7 +558,7 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
   const doc = new DOMParser().parseFromString(xml, 'application/xml')
   const parseError = doc.querySelector('parsererror')
   if (parseError) {
-    throw new Error('Failed to parse MusicXML. Check XML format.')
+    throw new Error('解析乐谱失败，请检查文件格式。')
   }
   const metadata = parseMusicXmlMetadata(doc)
   const rawMeasureLimit = options?.measureLimit
@@ -569,7 +569,7 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
 
   const partNodes = Array.from(doc.getElementsByTagName('part'))
   if (partNodes.length === 0) {
-    throw new Error('No <part> node found in this MusicXML file.')
+    throw new Error('该乐谱文件中未找到 <part> 节点。')
   }
 
   const measureSlots: {

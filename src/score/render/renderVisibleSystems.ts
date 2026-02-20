@@ -21,7 +21,17 @@ import {
   getUniformTickSpacingPadding,
   type TimeAxisSpacingConfig,
 } from '../layout/timeAxisSpacing'
-import type { LayoutReflowHint, MeasureLayout, MeasurePair, NoteLayout, ScoreNote, Selection, StaffKind, TimeSignature } from '../types'
+import type {
+  LayoutReflowHint,
+  MeasureLayout,
+  MeasurePair,
+  NoteLayout,
+  ScoreNote,
+  Selection,
+  SpacingLayoutMode,
+  StaffKind,
+  TimeSignature,
+} from '../types'
 
 const OVERFLOW_ANALYSIS_MAX_PASSES = 6
 const OVERFLOW_RECOVERY_PAD_PX = 2
@@ -219,6 +229,7 @@ export function renderVisibleSystems(params: {
   layoutStabilityKey?: string
   pagePaddingX?: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
+  spacingLayoutMode?: SpacingLayoutMode
 }): {
   nextLayouts: NoteLayout[]
   nextLayoutsByPair: Map<number, NoteLayout[]>
@@ -244,6 +255,7 @@ export function renderVisibleSystems(params: {
     layoutStabilityKey = '',
     pagePaddingX = SCORE_PAGE_PADDING_X,
     timeAxisSpacingConfig,
+    spacingLayoutMode = 'custom',
   } = params
   const spacingConfig = timeAxisSpacingConfig ?? DEFAULT_TIME_AXIS_SPACING_CONFIG
 
@@ -394,6 +406,7 @@ export function renderVisibleSystems(params: {
           draggingSelection,
           formatWidthOverride: formatWidth,
           timeAxisSpacingConfig: spacingConfig,
+          spacingLayoutMode,
           staticNoteXById: translatedFrozenSpacing?.staticNoteXById ?? null,
           staticAccidentalRightXById: translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
           preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
@@ -626,6 +639,7 @@ export function renderVisibleSystems(params: {
         skipPainting: true,
         formatWidthOverride: formatWidth,
         timeAxisSpacingConfig: spacingConfig,
+        spacingLayoutMode,
         // Width probing must be fully deterministic by score content only.
         // Do not feed previous-frame frozen spacing into the probe solver.
         staticNoteXById: null,
@@ -767,6 +781,7 @@ export function renderVisibleSystems(params: {
         draggingSelection,
         formatWidthOverride: formatWidth,
         timeAxisSpacingConfig: spacingConfig,
+        spacingLayoutMode,
         staticNoteXById: translatedFrozenSpacing?.staticNoteXById ?? null,
         staticAccidentalRightXById: translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
         preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,

@@ -28,6 +28,7 @@ import type {
   Pitch,
   ScoreNote,
   Selection,
+  SpacingLayoutMode,
 } from './types'
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>
@@ -67,6 +68,7 @@ export function useDragHandlers(params: {
   backend: number
   scoreScale: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
+  spacingLayoutMode?: SpacingLayoutMode
 }): {
   clearDragOverlay: () => void
   dumpDragDebugReport: () => void
@@ -116,6 +118,7 @@ export function useDragHandlers(params: {
     backend,
     scoreScale,
     timeAxisSpacingConfig,
+    spacingLayoutMode = 'custom',
   } = params
 
   const clearDragOverlay = () => {
@@ -149,6 +152,7 @@ export function useDragHandlers(params: {
         backend,
         scoreScale,
         timeAxisSpacingConfig,
+        spacingLayoutMode,
       },
     })
   }
@@ -171,6 +175,7 @@ export function useDragHandlers(params: {
         backend,
         scoreScale,
         timeAxisSpacingConfig,
+        spacingLayoutMode,
       },
       dragDebugFramesRef,
     })

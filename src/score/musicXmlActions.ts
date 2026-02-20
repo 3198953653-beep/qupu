@@ -70,10 +70,10 @@ function ensureMusicXmlImportWorker(): Worker | null {
       }
     }
     worker.onmessageerror = () => {
-      handleWorkerFatalError('MusicXML worker message decoding failed.')
+      handleWorkerFatalError('乐谱后台线程消息解析失败。')
     }
     worker.onerror = () => {
-      handleWorkerFatalError('MusicXML worker failed.')
+      handleWorkerFatalError('乐谱后台线程执行失败。')
     }
     musicXmlImportWorker = worker
     return worker
@@ -98,7 +98,7 @@ function parseMusicXmlOnMainThreadAsync(xmlText: string): Promise<ImportResult> 
       try {
         resolve(parseMusicXml(xmlText))
       } catch (error) {
-        reject(error instanceof Error ? error : new Error('Failed to import MusicXML.'))
+        reject(error instanceof Error ? error : new Error('导入乐谱失败。'))
       }
     }, 0)
   })
@@ -151,7 +151,7 @@ function estimateMeasureCount(xmlText: string): number {
 }
 
 function buildImportSuccessMessage(imported: ImportResult): string {
-  return `Imported ${imported.measurePairs.length} measures: treble ${imported.trebleNotes.length} notes, bass ${imported.bassNotes.length} notes.`
+  return `导入成功：${imported.measurePairs.length} 个小节，高音 ${imported.trebleNotes.length} 个音符，低音 ${imported.bassNotes.length} 个音符。`
 }
 
 function scheduleAfterNextPaint(task: () => void): void {
@@ -254,7 +254,7 @@ export function importMusicXmlTextAndApply(params: {
   } = params
   const content = xmlText.trim()
   if (!content) {
-    setImportFeedback({ kind: 'error', message: 'Paste MusicXML text first, then import.' })
+    setImportFeedback({ kind: 'error', message: '请先粘贴乐谱文本，再执行导入。' })
     return
   }
   const requestIsLatest = isRequestLatest ?? (() => true)
@@ -268,20 +268,20 @@ export function importMusicXmlTextAndApply(params: {
     flushSync(() => {
       setImportFeedback({
         kind: 'loading',
-        message: `Loading ${estimatedMeasureCount > 0 ? `${estimatedMeasureCount} measures` : 'score'}...`,
+        message: `正在加载 ${estimatedMeasureCount > 0 ? `${estimatedMeasureCount} 个小节` : '乐谱'}...`,
         progress: 10,
       })
     })
 
     const runFullImport = () => {
       if (!requestIsLatest()) return
-      setLoadingFeedback('Parsing full score...', 45)
+      setLoadingFeedback('正在解析完整乐谱...', 45)
       const parseStartAt = typeof performance !== 'undefined' ? performance.now() : 0
       void parseMusicXmlInWorker(content)
         .then((imported) => {
           if (!requestIsLatest()) return
           const parseDurationMs = typeof performance !== 'undefined' ? performance.now() - parseStartAt : 0
-          setLoadingFeedback('Applying score...', 88)
+          setLoadingFeedback('正在应用乐谱...', 88)
           const applyStartAt = typeof performance !== 'undefined' ? performance.now() : 0
           startTransition(() => {
             setIsRhythmLinked(false)
@@ -303,7 +303,7 @@ export function importMusicXmlTextAndApply(params: {
         })
         .catch((error) => {
           if (!requestIsLatest()) return
-          const message = error instanceof Error ? error.message : 'Failed to import MusicXML.'
+          const message = error instanceof Error ? error.message : '导入乐谱失败。'
           setImportFeedback({ kind: 'error', message })
         })
     }
@@ -311,7 +311,7 @@ export function importMusicXmlTextAndApply(params: {
     scheduleAfterNextPaint(runFullImport)
   } catch (error) {
     if (!requestIsLatest()) return
-    const message = error instanceof Error ? error.message : 'Failed to import MusicXML.'
+    const message = error instanceof Error ? error.message : '导入乐谱失败。'
     setImportFeedback({ kind: 'error', message })
   }
 }

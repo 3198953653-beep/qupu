@@ -69,16 +69,16 @@ export const DURATION_TONE: Record<NoteDuration, string> = {
 }
 
 export const DURATION_LABEL: Record<NoteDuration, string> = {
-  w: 'Whole',
-  h: 'Half',
-  qd: 'Dotted Quarter',
-  q: 'Quarter',
-  '8': 'Eighth',
-  '16d': 'Dotted Sixteenth',
-  '16': 'Sixteenth',
-  '32': 'Thirty-second',
-  '8d': 'Dotted Eighth',
-  '32d': 'Dotted Thirty-second',
+  w: '全音符',
+  h: '二分音符',
+  qd: '附点四分音符',
+  q: '四分音符',
+  '8': '八分音符',
+  '16d': '附点十六分音符',
+  '16': '十六分音符',
+  '32': '三十二分音符',
+  '8d': '附点八分音符',
+  '32d': '附点三十二分音符',
 }
 
 export const DURATION_MUSIC_XML: Record<NoteDuration, { type: string; dots: number }> = {
@@ -116,21 +116,21 @@ export const ACCIDENTAL_TO_MUSIC_XML: Record<string, string> = {
 }
 
 export const RHYTHM_PRESETS: { id: RhythmPresetId; label: string; pattern: NoteDuration[] }[] = [
-  { id: 'quarter', label: 'Quarter Pulse', pattern: ['q', 'q', 'q', 'q'] },
-  { id: 'twoEighth', label: '2x Eighth Pattern', pattern: ['8', '8', '8', '8', '8', '8', '8', '8'] },
+  { id: 'quarter', label: '四分脉冲', pattern: ['q', 'q', 'q', 'q'] },
+  { id: 'twoEighth', label: '双八分型', pattern: ['8', '8', '8', '8', '8', '8', '8', '8'] },
   {
     id: 'fourSixteenth',
-    label: '4x Sixteenth Pattern',
+    label: '四连十六分型',
     pattern: ['16', '16', '16', '16', '16', '16', '16', '16', '16', '16', '16', '16', '16', '16', '16', '16'],
   },
   {
     id: 'eightSixteenth',
-    label: '8-16-16 Pattern',
+    label: '8-16-16 组合',
     pattern: ['8', '16', '16', '8', '16', '16', '8', '16', '16', '8', '16', '16'],
   },
   {
     id: 'shortDotted',
-    label: 'Short Dotted Pattern',
+    label: '短附点型',
     pattern: ['8d', '16', '8d', '16', '8d', '16', '8d', '16'],
   },
 ]

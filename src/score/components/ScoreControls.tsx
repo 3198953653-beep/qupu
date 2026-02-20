@@ -7,6 +7,8 @@ export function ScoreControls(props: {
   onPlayScore: () => void
   onRunAiDraft: () => void
   onReset: () => void
+  isHorizontalView: boolean
+  onToggleHorizontalView: () => void
   onOpenMusicXmlFilePicker: () => void
   onLoadSampleMusicXml: () => void
   onExportMusicXmlFile: () => void
@@ -54,6 +56,8 @@ export function ScoreControls(props: {
     onPlayScore,
     onRunAiDraft,
     onReset,
+    isHorizontalView,
+    onToggleHorizontalView,
     onOpenMusicXmlFilePicker,
     onLoadSampleMusicXml,
     onExportMusicXmlFile,
@@ -115,21 +119,20 @@ export function ScoreControls(props: {
     <>
       <section className="control-row">
         <button type="button" onClick={onPlayScore} disabled={isPlaying}>
-          {isPlaying ? 'Playing...' : 'Play Measure'}
+          {isPlaying ? '播放中...' : '播放小节'}
         </button>
-        <button type="button" onClick={onRunAiDraft}>
-          AI Draft
-        </button>
-        <button type="button" onClick={onReset}>
-          Reset
+        <button type="button" onClick={onRunAiDraft}>智能草稿</button>
+        <button type="button" onClick={onReset}>重置</button>
+        <button type="button" onClick={onToggleHorizontalView}>
+          {isHorizontalView ? '横向视图：开（原版排版）' : '横向视图：关'}
         </button>
         <button type="button" onClick={onToggleAutoScale}>
-          {autoScaleEnabled ? `Auto Scale On (${autoScalePercent}%)` : 'Auto Scale Off'}
+          {autoScaleEnabled ? `自动缩放：开（${autoScalePercent}%）` : '自动缩放：关'}
         </button>
       </section>
 
       <section className="scale-row">
-        <label htmlFor="manual-scale-range">Manual Zoom</label>
+        <label htmlFor="manual-scale-range">手动缩放</label>
         <input
           id="manual-scale-range"
           type="range"
@@ -157,22 +160,18 @@ export function ScoreControls(props: {
 
       <section className="spacing-panel">
         <div className="spacing-header">
-          <h3>Spacing Tuning</h3>
+          <h3>间距调节</h3>
           <div className="spacing-header-actions">
             <button
               type="button"
               className={`spacing-toggle-btn ${showGlobalGapPanel ? 'active' : ''}`}
               onClick={() => setShowGlobalGapPanel((current) => !current)}
-            >
-              Gap Size
-            </button>
+            >间距大小</button>
             <button
               type="button"
               className={`spacing-toggle-btn ${showDurationRatioPanel ? 'active' : ''}`}
               onClick={() => setShowDurationRatioPanel((current) => !current)}
-            >
-              Duration Ratios
-            </button>
+            >时值比例</button>
             <button
               type="button"
               className={`spacing-toggle-btn ${showPageMarginPanel ? 'active' : ''}`}
@@ -180,13 +179,11 @@ export function ScoreControls(props: {
             >
               边界距离
             </button>
-            <button type="button" className="spacing-reset-btn" onClick={onResetSpacingConfig}>
-              Reset
-            </button>
+            <button type="button" className="spacing-reset-btn" onClick={onResetSpacingConfig}>重置</button>
           </div>
         </div>
         <div className="spacing-grid">
-          <label htmlFor="spacing-min-gap-range">Min Gap (beats)</label>
+          <label htmlFor="spacing-min-gap-range">最小间距（拍）</label>
           <input
             id="spacing-min-gap-range"
             type="range"
@@ -211,7 +208,7 @@ export function ScoreControls(props: {
             onChange={(event) => handleFloatValue(event.target.value, onSpacingMinGapBeatsChange)}
           />
 
-          <label htmlFor="spacing-gamma-range">Gap Gamma</label>
+          <label htmlFor="spacing-gamma-range">间距指数</label>
           <input
             id="spacing-gamma-range"
             type="range"
@@ -232,7 +229,7 @@ export function ScoreControls(props: {
             onChange={(event) => handleFloatValue(event.target.value, onSpacingGapGammaChange)}
           />
 
-          <label htmlFor="spacing-base-range">Gap Base</label>
+          <label htmlFor="spacing-base-range">间距基值</label>
           <input
             id="spacing-base-range"
             type="range"
@@ -253,7 +250,7 @@ export function ScoreControls(props: {
             onChange={(event) => handleFloatValue(event.target.value, onSpacingBaseWeightChange)}
           />
 
-          <label htmlFor="spacing-left-pad-range">Left Edge Pad</label>
+          <label htmlFor="spacing-left-pad-range">左边缘留白</label>
           <input
             id="spacing-left-pad-range"
             type="range"
@@ -278,7 +275,7 @@ export function ScoreControls(props: {
             onChange={(event) => handleFloatValue(event.target.value, onSpacingLeftEdgePaddingPxChange)}
           />
 
-          <label htmlFor="spacing-right-pad-range">Right Edge Pad</label>
+          <label htmlFor="spacing-right-pad-range">右边缘留白</label>
           <input
             id="spacing-right-pad-range"
             type="range"
@@ -306,7 +303,7 @@ export function ScoreControls(props: {
 
         {showGlobalGapPanel && (
           <div className="duration-base-grid">
-            <label htmlFor="duration-base-gap-32">Global Gap Size</label>
+            <label htmlFor="duration-base-gap-32">全局间距大小</label>
             <input
               id="duration-base-gap-32"
               type="range"
@@ -360,7 +357,7 @@ export function ScoreControls(props: {
 
         {showDurationRatioPanel && (
           <div className="duration-ratio-grid">
-            <label htmlFor="duration-ratio-32">32nd Ratio</label>
+            <label htmlFor="duration-ratio-32">32 分音符比例</label>
             <input
               id="duration-ratio-32"
               type="range"
@@ -385,7 +382,7 @@ export function ScoreControls(props: {
               onChange={(event) => handleFloatValue(event.target.value, onDurationGapRatio32Change)}
             />
 
-            <label htmlFor="duration-ratio-16">16th Ratio</label>
+            <label htmlFor="duration-ratio-16">16 分音符比例</label>
             <input
               id="duration-ratio-16"
               type="range"
@@ -410,7 +407,7 @@ export function ScoreControls(props: {
               onChange={(event) => handleFloatValue(event.target.value, onDurationGapRatio16Change)}
             />
 
-            <label htmlFor="duration-ratio-8">8th Ratio</label>
+            <label htmlFor="duration-ratio-8">8 分音符比例</label>
             <input
               id="duration-ratio-8"
               type="range"
@@ -435,7 +432,7 @@ export function ScoreControls(props: {
               onChange={(event) => handleFloatValue(event.target.value, onDurationGapRatio8Change)}
             />
 
-            <label htmlFor="duration-ratio-4">Quarter Ratio</label>
+            <label htmlFor="duration-ratio-4">4 分音符比例</label>
             <input
               id="duration-ratio-4"
               type="range"
@@ -460,7 +457,7 @@ export function ScoreControls(props: {
               onChange={(event) => handleFloatValue(event.target.value, onDurationGapRatio4Change)}
             />
 
-            <label htmlFor="duration-ratio-2">Half Ratio</label>
+            <label htmlFor="duration-ratio-2">2 分音符比例</label>
             <input
               id="duration-ratio-2"
               type="range"
@@ -490,18 +487,10 @@ export function ScoreControls(props: {
 
       <section className="import-panel">
         <div className="import-actions">
-          <button type="button" onClick={onOpenMusicXmlFilePicker}>
-            Load MusicXML File
-          </button>
-          <button type="button" onClick={onLoadSampleMusicXml}>
-            Load Sample XML
-          </button>
-          <button type="button" onClick={onExportMusicXmlFile}>
-            Export MusicXML
-          </button>
-          <button type="button" onClick={onImportMusicXmlFromTextarea}>
-            Import XML Text
-          </button>
+          <button type="button" onClick={onOpenMusicXmlFilePicker}>加载乐谱文件</button>
+          <button type="button" onClick={onLoadSampleMusicXml}>加载示例乐谱</button>
+          <button type="button" onClick={onExportMusicXmlFile}>导出乐谱文件</button>
+          <button type="button" onClick={onImportMusicXmlFromTextarea}>导入文本</button>
         </div>
 
         <input
@@ -516,7 +505,7 @@ export function ScoreControls(props: {
           className="xml-input"
           value={musicXmlInput}
           onChange={(event) => onMusicXmlInputChange(event.target.value)}
-          placeholder="Paste MusicXML text here, then click Import XML Text."
+          placeholder="在此粘贴乐谱文本，然后点击“导入文本”。"
           spellCheck={false}
         />
 
@@ -556,3 +545,6 @@ export function ScoreControls(props: {
     </>
   )
 }
+
+
+

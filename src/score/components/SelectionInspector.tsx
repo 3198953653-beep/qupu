@@ -31,47 +31,47 @@ export function SelectionInspector(props: {
 
   return (
     <div className="inspector">
-      <h2>Selected Note</h2>
+      <h2>当前音符</h2>
       <p>
-        Staff: <strong>{selectedStaffLabel}</strong>
+        谱表：<strong>{selectedStaffLabel}</strong>
       </p>
       <p>
-        Pitch: <strong>{selectedPitchLabel}</strong>
+        音高：<strong>{selectedPitchLabel}</strong>
       </p>
       <p>
-        Duration: <strong>{selectedDurationLabel}</strong>
+        时值：<strong>{selectedDurationLabel}</strong>
       </p>
       <p>
-        Position: <strong>{selectedPosition}</strong> / {selectedPoolSize}
+        位置：<strong>{selectedPosition}</strong> / {selectedPoolSize}
       </p>
-      <p className="sequence">Treble: {trebleSequenceText}</p>
-      <p className="sequence">Bass: {bassSequenceText}</p>
+      <p className="sequence">高音谱表：{trebleSequenceText}</p>
+      <p className="sequence">低音谱表：{bassSequenceText}</p>
       <div className="debug-tools">
         <button type="button" onClick={onDumpDragLog}>
-          Dump Drag Log
+          导出拖拽日志
         </button>
         <button type="button" onClick={onClearDragLog}>
-          Clear Drag Log
+          清空拖拽日志
         </button>
         <button type="button" onClick={onDumpMeasureEdgeLog}>
-          Dump Measure Edge Log
+          导出小节边界日志
         </button>
         <button type="button" onClick={onClearMeasureEdgeLog}>
-          Clear Measure Edge Log
+          清空小节边界日志
         </button>
       </div>
       <textarea
         className="debug-log"
         value={dragDebugReport}
         readOnly
-        placeholder="Drag a note, then click Dump Drag Log."
+        placeholder="先拖动一个音符，再点击“导出拖拽日志”。"
         spellCheck={false}
       />
       <textarea
         className="debug-log"
         value={measureEdgeDebugReport}
         readOnly
-        placeholder="Click Dump Measure Edge Log to inspect each rendered measure's last-note and barline coordinates."
+        placeholder="点击“导出小节边界日志”，查看每个小节最后音符与小节线的坐标。"
         spellCheck={false}
       />
     </div>

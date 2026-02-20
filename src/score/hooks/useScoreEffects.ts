@@ -19,6 +19,7 @@ import type {
   Pitch,
   ScoreNote,
   Selection,
+  SpacingLayoutMode,
   TimeSignature,
 } from '../types'
 
@@ -163,6 +164,7 @@ export function useScoreRenderEffect(params: {
   backend: number
   pagePaddingX?: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
+  spacingLayoutMode?: SpacingLayoutMode
 }): void {
   const {
     scoreRef,
@@ -188,6 +190,7 @@ export function useScoreRenderEffect(params: {
     backend,
     pagePaddingX,
     timeAxisSpacingConfig,
+    spacingLayoutMode = 'custom',
   } = params
   useEffect(() => {
     const root = scoreRef.current
@@ -227,6 +230,7 @@ export function useScoreRenderEffect(params: {
       allowSelectionFreezeWhenNotDragging: false,
       pagePaddingX,
       timeAxisSpacingConfig,
+      spacingLayoutMode,
     })
     noteLayoutsRef.current = nextLayouts
     noteLayoutsByPairRef.current = nextLayoutsByPair
@@ -257,6 +261,7 @@ export function useScoreRenderEffect(params: {
     backend,
     pagePaddingX,
     timeAxisSpacingConfig,
+    spacingLayoutMode,
   ])
 }
 

@@ -50,6 +50,7 @@ import type {
   RhythmPresetId,
   ScoreNote,
   Selection,
+  SpacingLayoutMode,
   TimeSignature,
 } from './score/types'
 
@@ -58,6 +59,8 @@ const INSPECTOR_SEQUENCE_PREVIEW_LIMIT = 64
 const MANUAL_SCALE_BASELINE = 0.7
 const DEFAULT_PAGE_HORIZONTAL_PADDING_PX = 86
 const ENABLE_AUTO_FIRST_MEASURE_DRAG_DEBUG = false
+const HORIZONTAL_VIEW_MEASURE_WIDTH_PX = 220
+const HORIZONTAL_VIEW_HEIGHT_PX = SCORE_TOP_PADDING * 2 + SYSTEM_HEIGHT + 24
 
 const PITCHES: Pitch[] = createPianoPitches()
 const INITIAL_BASS_NOTES: ScoreNote[] = buildBassMockNotes(INITIAL_NOTES)
@@ -67,7 +70,7 @@ function toSequencePreview(notes: ScoreNote[]): string {
     return notes.map((note) => toDisplayPitch(note.pitch)).join('  |  ')
   }
   const preview = notes.slice(0, INSPECTOR_SEQUENCE_PREVIEW_LIMIT).map((note) => toDisplayPitch(note.pitch)).join('  |  ')
-  return `${preview}  |  ... (+${notes.length - INSPECTOR_SEQUENCE_PREVIEW_LIMIT} more)`
+  return `${preview}  |  ...（还剩 ${notes.length - INSPECTOR_SEQUENCE_PREVIEW_LIMIT} 个）`
 }
 
 function getAutoScoreScale(measureCount: number): number {
@@ -150,6 +153,7 @@ function App() {
   const [measureEdgeDebugReport, setMeasureEdgeDebugReport] = useState<string>('')
   const [autoScaleEnabled, setAutoScaleEnabled] = useState(false)
   const [manualScalePercent, setManualScalePercent] = useState(100)
+  const [isHorizontalView, setIsHorizontalView] = useState(false)
   const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
   const [timeAxisSpacingConfig, setTimeAxisSpacingConfig] = useState(DEFAULT_TIME_AXIS_SPACING_CONFIG)
 
@@ -196,8 +200,13 @@ function App() {
     () => measurePairsFromImport ?? buildMeasurePairs(notes, bassNotes),
     [measurePairsFromImport, notes, bassNotes],
   )
-  const displayScoreWidth = A4_PAGE_WIDTH
-  const displayScoreHeight = A4_PAGE_HEIGHT
+  const spacingLayoutMode: SpacingLayoutMode = isHorizontalView ? 'legacy' : 'custom'
+  const displayScoreWidth = useMemo(() => {
+    if (!isHorizontalView) return A4_PAGE_WIDTH
+    const totalMeasureWidth = Math.max(1, measurePairs.length) * HORIZONTAL_VIEW_MEASURE_WIDTH_PX
+    return Math.max(A4_PAGE_WIDTH, pageHorizontalPaddingPx * 2 + totalMeasureWidth)
+  }, [isHorizontalView, measurePairs.length, pageHorizontalPaddingPx])
+  const displayScoreHeight = isHorizontalView ? HORIZONTAL_VIEW_HEIGHT_PX : A4_PAGE_HEIGHT
   const autoScoreScale = useMemo(() => getAutoScoreScale(measurePairs.length), [measurePairs.length])
   const safeManualScalePercent = clampScalePercent(manualScalePercent)
   const relativeScale = autoScaleEnabled ? autoScoreScale : safeManualScalePercent / 100
@@ -220,6 +229,9 @@ function App() {
   const systemUsableWidth = Math.max(1, scoreWidth - pageHorizontalPaddingPx * 2)
   const systemRanges = useMemo(
     () => {
+      if (isHorizontalView) {
+        return [{ startPairIndex: 0, endPairIndexExclusive: measurePairs.length }]
+      }
       return buildAdaptiveSystemRanges({
         measurePairs,
         systemUsableWidth,
@@ -231,6 +243,7 @@ function App() {
     [
       measurePairs,
       systemUsableWidth,
+      isHorizontalView,
       pageHorizontalPaddingPx,
       measureKeyFifthsFromImport,
       measureTimeSignaturesFromImport,
@@ -240,7 +253,9 @@ function App() {
   const systemCount = Math.max(1, systemRanges.length)
   const systemsPerPage = Math.max(
     1,
-    Math.floor((displayScoreHeight - SCORE_TOP_PADDING * 2 + SYSTEM_GAP_Y) / ((SYSTEM_HEIGHT + SYSTEM_GAP_Y) * scoreScale)),
+    isHorizontalView
+      ? systemCount
+      : Math.floor((displayScoreHeight - SCORE_TOP_PADDING * 2 + SYSTEM_GAP_Y) / ((SYSTEM_HEIGHT + SYSTEM_GAP_Y) * scoreScale)),
   )
   const pageCount = Math.max(1, Math.ceil(systemCount / systemsPerPage))
   const safeCurrentPage = Math.min(currentPage, pageCount - 1)
@@ -264,6 +279,7 @@ function App() {
       timeAxisSpacingConfig.durationGapRatios.eighth,
       timeAxisSpacingConfig.durationGapRatios.quarter,
       timeAxisSpacingConfig.durationGapRatios.half,
+      spacingLayoutMode,
     ].join(',')
     return `${scoreWidth}|${scoreHeight}|${pageHorizontalPaddingPx}|${systemRangeKey}|${spacingKey}`
   }, [
@@ -283,7 +299,13 @@ function App() {
     timeAxisSpacingConfig.durationGapRatios.eighth,
     timeAxisSpacingConfig.durationGapRatios.quarter,
     timeAxisSpacingConfig.durationGapRatios.half,
+    spacingLayoutMode,
   ])
+
+  useEffect(() => {
+    if (!isHorizontalView) return
+    setCurrentPage(0)
+  }, [isHorizontalView])
 
   useImportedRefsSync({
     measurePairsFromImport,
@@ -330,6 +352,7 @@ function App() {
     backend: SCORE_RENDER_BACKEND,
     pagePaddingX: pageHorizontalPaddingPx,
     timeAxisSpacingConfig,
+    spacingLayoutMode,
   })
 
   useSynthLifecycle({
@@ -391,6 +414,7 @@ function App() {
     backend: SCORE_RENDER_BACKEND,
     scoreScale,
     timeAxisSpacingConfig,
+    spacingLayoutMode,
   })
 
   const {
@@ -895,6 +919,8 @@ function App() {
         autoScaleEnabled,
         manualScalePercent: safeManualScalePercent,
         scoreScale,
+        isHorizontalView,
+        spacingLayoutMode,
       }),
       setAutoScaleEnabled: (enabled: boolean) => {
         setAutoScaleEnabled(Boolean(enabled))
@@ -982,6 +1008,8 @@ function App() {
     safeManualScalePercent,
     autoScaleEnabled,
     scoreScale,
+    isHorizontalView,
+    spacingLayoutMode,
     dragDebugFramesRef,
     dragRef,
     scoreOverlayRef,
@@ -994,10 +1022,10 @@ function App() {
   return (
     <main className="app-shell">
       <section className="hero">
-        <p className="eyebrow">Interactive Music Score MVP</p>
-        <h1>Real-time Staff Preview + Drag Editing</h1>
+        <p className="eyebrow">交互式乐谱原型版</p>
+        <h1>实时五线谱预览 + 拖拽编辑</h1>
         <p className="subtitle">
-          A4-style score page with line wrapping across all measures. You can import MusicXML and drag notes in treble or bass.
+          A4 样式乐谱页面，自动跨小节换行。可导入乐谱文件，并在高音/低音谱表中拖拽音符。
         </p>
       </section>
 
@@ -1006,6 +1034,8 @@ function App() {
         onPlayScore={playScore}
         onRunAiDraft={runAiDraft}
         onReset={resetScore}
+        isHorizontalView={isHorizontalView}
+        onToggleHorizontalView={() => setIsHorizontalView((current) => !current)}
         autoScaleEnabled={autoScaleEnabled}
         autoScalePercent={autoScalePercent}
         onToggleAutoScale={() => setAutoScaleEnabled((enabled) => !enabled)}
@@ -1132,6 +1162,7 @@ function App() {
         displayScoreWidth={displayScoreWidth}
         displayScoreHeight={displayScoreHeight}
         scoreScale={scoreScale}
+        isHorizontalView={isHorizontalView}
         currentPage={safeCurrentPage}
         pageCount={pageCount}
         onPrevPage={goToPrevPage}
@@ -1143,7 +1174,7 @@ function App() {
         onBeginDrag={onBeginDragWithFirstMeasureDebug}
         onSurfacePointerMove={onSurfacePointerMove}
         onEndDrag={onEndDragWithFirstMeasureDebug}
-        selectedStaffLabel={activeSelection.staff === 'treble' ? 'Treble' : 'Bass'}
+        selectedStaffLabel={activeSelection.staff === 'treble' ? '高音谱表' : '低音谱表'}
         selectedPitchLabel={toDisplayPitch(currentSelectionPitch)}
         selectedDurationLabel={toDisplayDuration(currentSelection.duration)}
         selectedPosition={currentSelectionPosition}
@@ -1159,9 +1190,9 @@ function App() {
       />
 
       {isImportLoading && (
-        <div className="import-modal" role="status" aria-live="polite" aria-label="Import in progress">
+        <div className="import-modal" role="status" aria-live="polite" aria-label="导入进行中">
           <div className="import-modal-card">
-            <h3>Loading Score</h3>
+            <h3>正在加载乐谱</h3>
             <p>{importFeedback.message}</p>
             <div className="import-modal-track">
               <div
@@ -1170,7 +1201,7 @@ function App() {
               />
             </div>
             <p className="import-modal-percent">
-              {importProgressPercent === null ? 'Working...' : `${importProgressPercent}%`}
+              {importProgressPercent === null ? '处理中...' : `${importProgressPercent}%`}
             </p>
           </div>
         </div>

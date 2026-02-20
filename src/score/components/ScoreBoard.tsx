@@ -6,6 +6,7 @@ export function ScoreBoard(props: {
   displayScoreWidth: number
   displayScoreHeight: number
   scoreScale: number
+  isHorizontalView: boolean
   currentPage: number
   pageCount: number
   onPrevPage: () => void
@@ -36,6 +37,7 @@ export function ScoreBoard(props: {
     displayScoreWidth,
     displayScoreHeight,
     scoreScale,
+    isHorizontalView,
     currentPage,
     pageCount,
     onPrevPage,
@@ -64,25 +66,27 @@ export function ScoreBoard(props: {
 
   return (
     <section className="board">
-      <div className="page-nav">
-        <button type="button" onClick={() => onGoToPage(0)} disabled={currentPage <= 0}>
-          First
-        </button>
-        <button type="button" onClick={onPrevPage} disabled={currentPage <= 0}>
-          Prev
-        </button>
-        <p className="page-label">
-          Page <strong>{currentPage + 1}</strong> / {pageCount}
-        </p>
-        <button type="button" onClick={onNextPage} disabled={currentPage >= pageCount - 1}>
-          Next
-        </button>
-        <button type="button" onClick={() => onGoToPage(pageCount - 1)} disabled={currentPage >= pageCount - 1}>
-          Last
-        </button>
-      </div>
-      <div className="score-scroll" ref={scoreScrollRef}>
-        <div className="score-stage" style={{ width: `${displayScoreWidth}px`, height: `${displayScoreHeight}px` }}>
+      {!isHorizontalView && (
+        <div className="page-nav">
+          <button type="button" onClick={() => onGoToPage(0)} disabled={currentPage <= 0}>
+            首页
+          </button>
+          <button type="button" onClick={onPrevPage} disabled={currentPage <= 0}>
+            上一页
+          </button>
+          <p className="page-label">
+            第 <strong>{currentPage + 1}</strong> / {pageCount} 页
+          </p>
+          <button type="button" onClick={onNextPage} disabled={currentPage >= pageCount - 1}>
+            下一页
+          </button>
+          <button type="button" onClick={() => onGoToPage(pageCount - 1)} disabled={currentPage >= pageCount - 1}>
+            末页
+          </button>
+        </div>
+      )}
+      <div className={`score-scroll ${isHorizontalView ? 'horizontal-view' : ''}`} ref={scoreScrollRef}>
+        <div className={`score-stage ${isHorizontalView ? 'horizontal-view' : ''}`} style={{ width: `${displayScoreWidth}px`, height: `${displayScoreHeight}px` }}>
           <canvas
             className={`score-surface ${draggingSelection ? 'is-dragging' : ''}`}
             ref={scoreRef}

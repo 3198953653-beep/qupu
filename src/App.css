@@ -442,6 +442,11 @@
   background: linear-gradient(180deg, #f8fbfd 0%, #eef4f8 100%);
 }
 
+.score-scroll.horizontal-view {
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
 .score-stage {
   position: relative;
   margin: 0 auto;
@@ -451,6 +456,10 @@
   box-shadow: 0 15px 38px -30px rgba(8, 30, 50, 0.9);
   contain: layout paint;
   overflow: hidden;
+}
+
+.score-stage.horizontal-view {
+  margin: 0;
 }
 
 .score-surface {

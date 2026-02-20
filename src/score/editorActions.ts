@@ -28,9 +28,9 @@ const MUSIC_XML_TEXTAREA_MAX_CHARS = 2000
 
 function formatMusicXmlTextareaPreview(xmlText: string): string {
   if (xmlText.length <= MUSIC_XML_TEXTAREA_MAX_CHARS) return xmlText
-  return `<!-- Large MusicXML loaded from file (${xmlText.length.toLocaleString()} chars).
-Preview hidden for performance.
-Re-open the source file if you need full XML text editing. -->`
+  return `<!-- 已从文件加载较大的乐谱文本（${xmlText.length.toLocaleString()} 字符）。
+为保证性能，预览已隐藏。
+如需编辑完整文本，请重新打开源文件。 -->`
 }
 
 export async function playScoreAction(params: {
@@ -82,7 +82,7 @@ export async function handleMusicXmlFileChange(params: {
     setMusicXmlInput(formatMusicXmlTextareaPreview(xmlText))
     importMusicXmlText(xmlText)
   } catch {
-    setImportFeedback({ kind: 'error', message: 'Could not read the selected file.' })
+    setImportFeedback({ kind: 'error', message: '无法读取所选文件。' })
   } finally {
     event.currentTarget.value = ''
   }
@@ -130,7 +130,7 @@ export function exportMusicXmlFileAction(params: {
 
   setImportFeedback({
     kind: 'success',
-    message: `Exported ${measurePairs.length} measures to ${safeName}.musicxml`,
+    message: `已导出 ${measurePairs.length} 个小节到 ${safeName}.musicxml`,
   })
 }
 

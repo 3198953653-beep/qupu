@@ -31,6 +31,7 @@ import type {
   Pitch,
   ScoreNote,
   Selection,
+  SpacingLayoutMode,
   StaffKind,
   TimeSignature,
 } from '../types'
@@ -67,6 +68,7 @@ export type DrawMeasureParams = {
   freezePreviewAccidentalLayout?: boolean
   formatWidthOverride?: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
+  spacingLayoutMode?: SpacingLayoutMode
   layoutDetail?: 'full' | 'spacing-only'
   skipPainting?: boolean
   staticNoteXById?: Map<string, number> | null
@@ -108,6 +110,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     freezePreviewAccidentalLayout = false,
     formatWidthOverride,
     timeAxisSpacingConfig,
+    spacingLayoutMode = 'custom',
     layoutDetail = 'full',
     skipPainting = false,
     staticNoteXById = null,
@@ -367,22 +370,24 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
 
   new Formatter().joinVoices([trebleVoice]).joinVoices([bassVoice]).format([trebleVoice, bassVoice], formatWidth)
 
-  applyUnifiedTimeAxisSpacing({
-    measure,
-    noteStartX: trebleStave.getNoteStartX(),
-    formatWidth,
-    trebleRendered,
-    bassRendered,
-    spacingConfig: timeAxisSpacingConfig,
-    measureTicks: Math.max(1, Math.round(timeSignature.beats * TICKS_PER_BEAT * (4 / timeSignature.beatType))),
-    sparseTailAnchorMode: 'none',
-    compactTailAnchorTicks: 4,
-    uniformSpacingByTicks: true,
-    measureStartBarX: measureX,
-    measureEndBarX: measureX + measureWidth,
-    preferMeasureBarlineAxis,
-    preferMeasureEndBarlineAxis,
-  })
+  if (spacingLayoutMode === 'custom') {
+    applyUnifiedTimeAxisSpacing({
+      measure,
+      noteStartX: trebleStave.getNoteStartX(),
+      formatWidth,
+      trebleRendered,
+      bassRendered,
+      spacingConfig: timeAxisSpacingConfig,
+      measureTicks: Math.max(1, Math.round(timeSignature.beats * TICKS_PER_BEAT * (4 / timeSignature.beatType))),
+      sparseTailAnchorMode: 'none',
+      compactTailAnchorTicks: 4,
+      uniformSpacingByTicks: true,
+      measureStartBarX: measureX,
+      measureEndBarX: measureX + measureWidth,
+      preferMeasureBarlineAxis,
+      preferMeasureEndBarlineAxis,
+    })
+  }
 
   if (staticNoteXById && staticNoteXById.size > 0) {
     const alignRenderedX = (staff: StaffKind, sourceNotes: ScoreNote[], rendered: { vexNote: StaveNote }[]) => {

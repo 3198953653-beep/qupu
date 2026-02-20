@@ -23,6 +23,7 @@ import type {
   MeasurePair,
   NoteLayout,
   Selection,
+  SpacingLayoutMode,
 } from './types'
 
 const EMPTY_DRAG_REPORT_MESSAGE = 'No drag preview frames captured yet. Drag a note first, then click this button again.'
@@ -36,6 +37,7 @@ type OverlayRuntime = {
   backend: number
   scoreScale: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
+  spacingLayoutMode?: SpacingLayoutMode
 }
 
 function buildOverlayAccessors(runtime: OverlayRuntime) {
@@ -118,6 +120,7 @@ export function drawSelectionOverlay(params: {
     getOverlayContext: overlay.getContext,
     clearDragOverlay: overlay.clear,
     timeAxisSpacingConfig: overlayRuntime.timeAxisSpacingConfig,
+    spacingLayoutMode: overlayRuntime.spacingLayoutMode,
   })
 }
 
@@ -161,5 +164,6 @@ export function drawDragPreviewOverlay(params: {
     getOverlayContext: overlay.getContext,
     dragDebugFramesRef,
     timeAxisSpacingConfig: overlayRuntime.timeAxisSpacingConfig,
+    spacingLayoutMode: overlayRuntime.spacingLayoutMode,
   })
 }
