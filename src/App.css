@@ -734,6 +734,16 @@
   background: #ffffff;
   color: #123246;
   font-size: 0.85rem;
+  color-scheme: light;
+  appearance: auto;
+  -webkit-appearance: auto;
+}
+
+.osmd-preview-zoom input[type='number']::-webkit-outer-spin-button,
+.osmd-preview-zoom input[type='number']::-webkit-inner-spin-button {
+  opacity: 1;
+  filter: none;
+  background: transparent;
 }
 
 .osmd-preview-zoom span {
