@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "linkedom": "^0.18.12",
+    "opensheetmusicdisplay": "^1.9.7",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "tone": "^15.1.22",

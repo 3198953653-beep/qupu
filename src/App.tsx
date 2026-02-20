@@ -24,6 +24,7 @@ import {
 import { DEFAULT_TIME_AXIS_SPACING_CONFIG } from './score/layout/timeAxisSpacing'
 import { useDragHandlers } from './score/dragHandlers'
 import { useEditorHandlers } from './score/editorHandlers'
+import { buildMusicXmlExportPayload } from './score/musicXmlActions'
 import {
   useImportedRefsSync,
   useRendererCleanup,
@@ -186,6 +187,10 @@ function App() {
   const [isHorizontalView, setIsHorizontalView] = useState(false)
   const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
   const [timeAxisSpacingConfig, setTimeAxisSpacingConfig] = useState(DEFAULT_TIME_AXIS_SPACING_CONFIG)
+  const [isOsmdPreviewOpen, setIsOsmdPreviewOpen] = useState(false)
+  const [osmdPreviewXml, setOsmdPreviewXml] = useState<string>('')
+  const [osmdPreviewStatusText, setOsmdPreviewStatusText] = useState<string>('')
+  const [osmdPreviewError, setOsmdPreviewError] = useState<string>('')
   const [horizontalViewportXRange, setHorizontalViewportXRange] = useState<{ startX: number; endX: number }>({
     startX: 0,
     endX: A4_PAGE_WIDTH,
@@ -194,6 +199,7 @@ function App() {
   const scoreRef = useRef<HTMLCanvasElement | null>(null)
   const scoreOverlayRef = useRef<HTMLCanvasElement | null>(null)
   const scoreScrollRef = useRef<HTMLDivElement | null>(null)
+  const osmdPreviewContainerRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const synthRef = useRef<Tone.PolySynth | null>(null)
 
@@ -720,6 +726,88 @@ function App() {
     (pageIndex: number) => setCurrentPage(Math.max(0, Math.min(pageCount - 1, pageIndex))),
     [pageCount],
   )
+  const closeOsmdPreview = useCallback(() => {
+    setIsOsmdPreviewOpen(false)
+    setOsmdPreviewStatusText('')
+    setOsmdPreviewError('')
+  }, [])
+  const openOsmdPreview = useCallback(() => {
+    const { xmlText } = buildMusicXmlExportPayload({
+      measurePairs,
+      keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
+      divisionsByMeasure: measureDivisionsFromImportRef.current,
+      timeSignaturesByMeasure: measureTimeSignaturesFromImportRef.current,
+      metadata: musicXmlMetadataFromImportRef.current,
+    })
+    setOsmdPreviewXml(xmlText)
+    setOsmdPreviewStatusText('正在生成OSMD预览...')
+    setOsmdPreviewError('')
+    setIsOsmdPreviewOpen(true)
+  }, [measurePairs])
+
+  useEffect(() => {
+    if (!isOsmdPreviewOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeOsmdPreview()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [closeOsmdPreview, isOsmdPreviewOpen])
+
+  useEffect(() => {
+    if (!isOsmdPreviewOpen) return
+    if (!osmdPreviewXml.trim()) {
+      setOsmdPreviewError('没有可预览的MusicXML数据。')
+      setOsmdPreviewStatusText('')
+      return
+    }
+
+    let canceled = false
+
+    const renderPreview = async () => {
+      try {
+        const container = osmdPreviewContainerRef.current
+        if (!container) return
+        setOsmdPreviewError('')
+        setOsmdPreviewStatusText('正在生成OSMD预览...')
+        container.innerHTML = ''
+
+        const osmdModule = await import('opensheetmusicdisplay')
+        if (canceled) return
+
+        const osmd = new osmdModule.OpenSheetMusicDisplay(container, {
+          autoResize: true,
+          backend: 'svg',
+          drawTitle: true,
+        })
+        await osmd.load(osmdPreviewXml)
+        if (canceled) return
+        osmd.render()
+        if (canceled) return
+        setOsmdPreviewStatusText('')
+      } catch (error) {
+        if (canceled) return
+        setOsmdPreviewStatusText('')
+        const message = error instanceof Error ? error.message : 'OSMD预览渲染失败。'
+        setOsmdPreviewError(message)
+      }
+    }
+
+    void renderPreview()
+
+    return () => {
+      canceled = true
+      const container = osmdPreviewContainerRef.current
+      if (container) {
+        container.innerHTML = ''
+      }
+    }
+  }, [isOsmdPreviewOpen, osmdPreviewXml])
+
   const scoreSurfaceOffsetXPx = isHorizontalView ? horizontalRenderOffsetX * scoreScaleX : 0
   const formatDebugCoord = (value: number | null | undefined): string => {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 'null'
@@ -1388,6 +1476,7 @@ function App() {
         onOpenMusicXmlFilePicker={openMusicXmlFilePicker}
         onLoadSampleMusicXml={loadSampleMusicXml}
         onExportMusicXmlFile={exportMusicXmlFile}
+        onOpenOsmdPreview={openOsmdPreview}
         onImportMusicXmlFromTextarea={importMusicXmlFromTextarea}
         fileInputRef={fileInputRef}
         onMusicXmlFileChange={onMusicXmlFileChange}
@@ -1446,6 +1535,22 @@ function App() {
             <p className="import-modal-percent">
               {importProgressPercent === null ? '处理中...' : `${importProgressPercent}%`}
             </p>
+          </div>
+        </div>
+      )}
+
+      {isOsmdPreviewOpen && (
+        <div className="osmd-preview-modal" role="dialog" aria-modal="true" aria-label="OSMD预览" onClick={closeOsmdPreview}>
+          <div className="osmd-preview-card" onClick={(event) => event.stopPropagation()}>
+            <div className="osmd-preview-header">
+              <h3>OSMD预览</h3>
+              <button type="button" onClick={closeOsmdPreview}>关闭</button>
+            </div>
+            {osmdPreviewStatusText && <p className="osmd-preview-status">{osmdPreviewStatusText}</p>}
+            {osmdPreviewError && <p className="osmd-preview-error">{osmdPreviewError}</p>}
+            <div className="osmd-preview-body">
+              <div ref={osmdPreviewContainerRef} className="osmd-preview-surface" />
+            </div>
           </div>
         </div>
       )}

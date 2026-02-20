@@ -605,6 +605,79 @@
   color: #1c546f;
 }
 
+.osmd-preview-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  background: rgba(6, 18, 28, 0.5);
+  backdrop-filter: blur(2px);
+}
+
+.osmd-preview-card {
+  width: min(1100px, calc(100vw - 2rem));
+  height: min(820px, calc(100vh - 2rem));
+  border-radius: 16px;
+  border: 1px solid #d2e3ec;
+  background: #ffffff;
+  box-shadow: 0 24px 50px -28px rgba(8, 24, 38, 0.95);
+  padding: 0.85rem;
+  display: grid;
+  gap: 0.6rem;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+
+.osmd-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.osmd-preview-header h3 {
+  margin: 0;
+  color: #123246;
+  font-size: 1rem;
+}
+
+.osmd-preview-header button {
+  border: 1px solid #c3d2db;
+  background: #ffffff;
+  color: #123246;
+  border-radius: 10px;
+  font-weight: 600;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.82rem;
+}
+
+.osmd-preview-status,
+.osmd-preview-error {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.osmd-preview-status {
+  color: #1d4e67;
+}
+
+.osmd-preview-error {
+  color: #9f2626;
+}
+
+.osmd-preview-body {
+  border: 1px solid #d7e4eb;
+  border-radius: 12px;
+  background: #f7fbff;
+  overflow: auto;
+  padding: 0.7rem;
+}
+
+.osmd-preview-surface {
+  min-height: 240px;
+  background: #ffffff;
+}
+
 @media (max-width: 700px) {
   .hero {
     padding: 1rem;
