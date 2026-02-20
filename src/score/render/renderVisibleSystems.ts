@@ -275,7 +275,33 @@ export function renderVisibleSystems(params: {
   const maxSystemIndex = systemRanges.length - 1
   const startSystem = clamp(visibleSystemRange.start, 0, maxSystemIndex)
   const endSystem = clamp(visibleSystemRange.end, startSystem, maxSystemIndex)
-  context.clearRect(0, 0, scoreWidth, scoreHeight)
+  const hintPairIndex = layoutReflowHint?.pairIndex ?? null
+  const hintPairVisibleInCurrentWindow =
+    hintPairIndex !== null
+      ? (() => {
+        for (let systemIndex = startSystem; systemIndex <= endSystem; systemIndex += 1) {
+          const range = systemRanges[systemIndex]
+          if (!range) continue
+          if (hintPairIndex >= range.startPairIndex && hintPairIndex < range.endPairIndexExclusive) {
+            return true
+          }
+        }
+        return false
+      })()
+      : false
+  const shouldUseIncrementalPaint =
+    layoutReflowHint !== null &&
+    layoutReflowHint.layoutStabilityKey === layoutStabilityKey &&
+    !layoutReflowHint.shouldReflow &&
+    hintPairIndex !== null &&
+    hintPairVisibleInCurrentWindow &&
+    previousNoteLayoutsByPair !== null &&
+    previousMeasureLayouts !== null
+  let didClearCanvas = false
+  if (!shouldUseIncrementalPaint) {
+    context.clearRect(0, 0, scoreWidth, scoreHeight)
+    didClearCanvas = true
+  }
 
   for (let systemIndex = startSystem; systemIndex <= endSystem; systemIndex += 1) {
     const range = systemRanges[systemIndex]
@@ -368,11 +394,30 @@ export function renderVisibleSystems(params: {
       layoutReflowHint.layoutStabilityKey === layoutStabilityKey &&
       !layoutReflowHint.shouldReflow &&
       systemMeta.some((entry) => entry.pairIndex === layoutReflowHint.pairIndex)
+    const incrementalPairIndex = shouldUseIncrementalPaint ? hintPairIndex : null
     const stableSystemFrames = shouldSkipSystemReflow
       ? collectStableSystemMeasureFrames(systemMeta, previousMeasureLayouts)
       : null
+    if (!stableSystemFrames && !didClearCanvas) {
+      context.clearRect(0, 0, scoreWidth, scoreHeight)
+      didClearCanvas = true
+    }
     if (stableSystemFrames) {
       systemMeta.forEach((entry, indexInSystem) => {
+        if (incrementalPairIndex !== null && entry.pairIndex !== incrementalPairIndex) {
+          const previousLayouts = previousNoteLayoutsByPair?.get(entry.pairIndex)
+          const previousMeasureLayout = previousMeasureLayouts?.get(entry.pairIndex)
+          if (previousLayouts && previousMeasureLayout) {
+            nextLayouts.push(...previousLayouts)
+            nextLayoutsByPair.set(entry.pairIndex, previousLayouts)
+            previousLayouts.forEach((layout) => {
+              nextLayoutsByKey.set(getLayoutNoteKey(layout.staff, layout.id), layout)
+            })
+            nextMeasureLayouts.set(entry.pairIndex, previousMeasureLayout)
+            return
+          }
+        }
+
         const stableFrame = stableSystemFrames[indexInSystem]
         const measureX = stableFrame.measureX
         const measureWidth = stableFrame.measureWidth
@@ -387,6 +432,17 @@ export function renderVisibleSystems(params: {
         })
         const translatedFrozenSpacing =
           frozenSpacing !== null ? translateFrozenSpacingToMeasureX(frozenSpacing, measureX) : null
+        if (incrementalPairIndex !== null) {
+          const previousMeasureLayout = previousMeasureLayouts?.get(entry.pairIndex)
+          const clearRect = previousMeasureLayout?.overlayRect
+          if (clearRect) {
+            context.save()
+            context.clearRect(clearRect.x, clearRect.y, clearRect.width, clearRect.height)
+            context.setFillStyle('#ffffff')
+            context.fillRect(clearRect.x, clearRect.y, clearRect.width, clearRect.height)
+            context.restore()
+          }
+        }
         const measureNoteLayouts = drawMeasureToContext({
           context,
           measure: entry.measure,

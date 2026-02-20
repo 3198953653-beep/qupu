@@ -68,6 +68,7 @@ const ENABLE_AUTO_FIRST_MEASURE_DRAG_DEBUG = false
 const HORIZONTAL_VIEW_MEASURE_WIDTH_PX = 220
 const HORIZONTAL_VIEW_MEASURE_WIDTH_GAIN = 1.4
 const HORIZONTAL_VIEW_HEIGHT_PX = SCORE_TOP_PADDING * 2 + SYSTEM_HEIGHT + 24
+const MAX_CANVAS_RENDER_DIM_PX = 32760
 const DEFAULT_TIME_SIGNATURE: TimeSignature = { beats: 4, beatType: 4 }
 
 const PITCHES: Pitch[] = createPianoPitches()
@@ -267,8 +268,11 @@ function App() {
   const autoScoreScale = useMemo(() => getAutoScoreScale(measurePairs.length), [measurePairs.length])
   const safeManualScalePercent = clampScalePercent(manualScalePercent)
   const relativeScale = autoScaleEnabled ? autoScoreScale : safeManualScalePercent / 100
-  const scoreScale = relativeScale * MANUAL_SCALE_BASELINE
-  const autoScalePercent = Math.round(scoreScale * 100)
+  const baseScoreScale = relativeScale * MANUAL_SCALE_BASELINE
+  const minScaleForCanvasWidth = displayScoreWidth / MAX_CANVAS_RENDER_DIM_PX
+  const minScaleForCanvasHeight = displayScoreHeight / MAX_CANVAS_RENDER_DIM_PX
+  const scoreScale = Math.max(baseScoreScale, minScaleForCanvasWidth, minScaleForCanvasHeight)
+  const autoScalePercent = Math.round(baseScoreScale * 100)
   const scoreWidth = Math.max(1, Math.round(displayScoreWidth / scoreScale))
   const scoreHeight = Math.max(1, Math.round(displayScoreHeight / scoreScale))
   const trebleNoteById = useMemo(() => new Map(notes.map((note) => [note.id, note] as const)), [notes])
@@ -397,7 +401,7 @@ function App() {
     renderOriginSystemIndex: visibleSystemRange.start,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
-    activeSelection,
+    activeSelection: null,
     draggingSelection: null,
     layoutReflowHintRef,
     layoutStabilityKey,
@@ -975,6 +979,7 @@ function App() {
       getScaleConfig: () => ({
         autoScaleEnabled,
         manualScalePercent: safeManualScalePercent,
+        baseScoreScale,
         scoreScale,
         isHorizontalView,
         spacingLayoutMode,
@@ -1064,6 +1069,7 @@ function App() {
     safeCurrentPage,
     safeManualScalePercent,
     autoScaleEnabled,
+    baseScoreScale,
     scoreScale,
     isHorizontalView,
     spacingLayoutMode,
