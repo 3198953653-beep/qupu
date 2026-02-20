@@ -57,6 +57,7 @@ const SCORE_RENDER_BACKEND = Renderer.Backends.CANVAS
 const INSPECTOR_SEQUENCE_PREVIEW_LIMIT = 64
 const MANUAL_SCALE_BASELINE = 0.7
 const DEFAULT_PAGE_HORIZONTAL_PADDING_PX = 86
+const ENABLE_AUTO_FIRST_MEASURE_DRAG_DEBUG = false
 
 const PITCHES: Pitch[] = createPianoPitches()
 const INITIAL_BASS_NOTES: ScoreNote[] = buildBassMockNotes(INITIAL_NOTES)
@@ -135,11 +136,6 @@ function App() {
   const [rhythmPreset, setRhythmPreset] = useState<RhythmPresetId>('quarter')
   const [activeSelection, setActiveSelection] = useState<Selection>({ noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 })
   const [draggingSelection, setDraggingSelection] = useState<Selection | null>(null)
-  const [globalSelectionHighlight, setGlobalSelectionHighlight] = useState<Selection>({
-    noteId: INITIAL_NOTES[0].id,
-    staff: 'treble',
-    keyIndex: 0,
-  })
   const [isPlaying, setIsPlaying] = useState(false)
   const [musicXmlInput, setMusicXmlInput] = useState<string>('')
   const [importFeedback, setImportFeedback] = useState<ImportFeedback>({ kind: 'idle', message: '' })
@@ -322,7 +318,7 @@ function App() {
     renderOriginSystemIndex: visibleSystemRange.start,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
-    activeSelection: globalSelectionHighlight,
+    activeSelection,
     draggingSelection: null,
     layoutReflowHintRef,
     layoutStabilityKey,
@@ -396,20 +392,6 @@ function App() {
     scoreScale,
     timeAxisSpacingConfig,
   })
-
-  useEffect(() => {
-    if (draggingSelection) return
-    setGlobalSelectionHighlight((current) => {
-      if (
-        current.noteId === activeSelection.noteId &&
-        current.staff === activeSelection.staff &&
-        current.keyIndex === activeSelection.keyIndex
-      ) {
-        return current
-      }
-      return activeSelection
-    })
-  }, [activeSelection, draggingSelection])
 
   const {
     playScore,
@@ -589,6 +571,7 @@ function App() {
   }
   const onBeginDragWithFirstMeasureDebug: typeof beginDrag = (event) => {
     beginDrag(event)
+    if (!ENABLE_AUTO_FIRST_MEASURE_DRAG_DEBUG) return
     const drag = dragRef.current
     if (!drag) return
     firstMeasureDragContextRef.current = {
@@ -602,6 +585,7 @@ function App() {
   const onEndDragWithFirstMeasureDebug: typeof endDrag = (event) => {
     const dragging = dragRef.current
     endDrag(event)
+    if (!ENABLE_AUTO_FIRST_MEASURE_DRAG_DEBUG) return
     if (!dragging) return
     const beforeSnapshot = firstMeasureBaselineRef.current
     if (!beforeSnapshot) return
