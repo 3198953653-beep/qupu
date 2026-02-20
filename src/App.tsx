@@ -14,7 +14,13 @@ import {
   SYSTEM_HEIGHT,
   TICKS_PER_BEAT,
 } from './score/constants'
-import { buildAdaptiveSystemRanges, toDisplayDuration } from './score/layout/demand'
+import {
+  buildAdaptiveSystemRanges,
+  estimateAdaptiveMeasureWidth,
+  getMeasureLayoutDemandFromNoteDemand,
+  getMeasureNoteLayoutDemand,
+  toDisplayDuration,
+} from './score/layout/demand'
 import { DEFAULT_TIME_AXIS_SPACING_CONFIG } from './score/layout/timeAxisSpacing'
 import { useDragHandlers } from './score/dragHandlers'
 import { useEditorHandlers } from './score/editorHandlers'
@@ -60,7 +66,9 @@ const MANUAL_SCALE_BASELINE = 0.7
 const DEFAULT_PAGE_HORIZONTAL_PADDING_PX = 86
 const ENABLE_AUTO_FIRST_MEASURE_DRAG_DEBUG = false
 const HORIZONTAL_VIEW_MEASURE_WIDTH_PX = 220
+const HORIZONTAL_VIEW_MEASURE_WIDTH_GAIN = 1.4
 const HORIZONTAL_VIEW_HEIGHT_PX = SCORE_TOP_PADDING * 2 + SYSTEM_HEIGHT + 24
+const DEFAULT_TIME_SIGNATURE: TimeSignature = { beats: 4, beatType: 4 }
 
 const PITCHES: Pitch[] = createPianoPitches()
 const INITIAL_BASS_NOTES: ScoreNote[] = buildBassMockNotes(INITIAL_NOTES)
@@ -105,6 +113,10 @@ function clampBaseMinGap32Px(value: number): number {
 
 function clampPageHorizontalPaddingPx(value: number): number {
   return Math.round(clampNumber(value, 8, 120))
+}
+
+function hasTimeSignatureChanged(current: TimeSignature, previous: TimeSignature): boolean {
+  return current.beats !== previous.beats || current.beatType !== previous.beatType
 }
 
 type FirstMeasureNoteDebugRow = {
@@ -201,11 +213,56 @@ function App() {
     [measurePairsFromImport, notes, bassNotes],
   )
   const spacingLayoutMode: SpacingLayoutMode = isHorizontalView ? 'legacy' : 'custom'
+  const horizontalEstimatedMeasureWidthTotal = useMemo(() => {
+    if (!isHorizontalView) return 0
+    if (measurePairs.length === 0) return HORIZONTAL_VIEW_MEASURE_WIDTH_PX
+
+    let totalWidth = 0
+    let previousKeyFifths = 0
+    let previousTimeSignature = DEFAULT_TIME_SIGNATURE
+
+    for (let pairIndex = 0; pairIndex < measurePairs.length; pairIndex += 1) {
+      const measure = measurePairs[pairIndex]
+      const keyFifths = measureKeyFifthsFromImport?.[pairIndex] ?? previousKeyFifths
+      const timeSignature = measureTimeSignaturesFromImport?.[pairIndex] ?? previousTimeSignature
+      const isSystemStart = pairIndex === 0
+      const showKeySignature = isSystemStart || keyFifths !== previousKeyFifths
+      const showTimeSignature = pairIndex === 0 || hasTimeSignatureChanged(timeSignature, previousTimeSignature)
+      const noteDemand = getMeasureNoteLayoutDemand(measure, {
+        baseMinGap32Px: timeAxisSpacingConfig.baseMinGap32Px,
+        durationGapRatios: timeAxisSpacingConfig.durationGapRatios,
+      })
+      const layoutDemand = getMeasureLayoutDemandFromNoteDemand(
+        noteDemand,
+        isSystemStart,
+        showKeySignature,
+        showTimeSignature,
+        false,
+      )
+      const adaptiveWidth = estimateAdaptiveMeasureWidth(layoutDemand)
+      const estimatedWidth = Math.max(
+        HORIZONTAL_VIEW_MEASURE_WIDTH_PX,
+        Math.round(adaptiveWidth * HORIZONTAL_VIEW_MEASURE_WIDTH_GAIN),
+      )
+      totalWidth += estimatedWidth
+      previousKeyFifths = keyFifths
+      previousTimeSignature = timeSignature
+    }
+
+    return Math.max(HORIZONTAL_VIEW_MEASURE_WIDTH_PX, totalWidth)
+  }, [
+    isHorizontalView,
+    measurePairs,
+    measureKeyFifthsFromImport,
+    measureTimeSignaturesFromImport,
+    timeAxisSpacingConfig.baseMinGap32Px,
+    timeAxisSpacingConfig.durationGapRatios,
+  ])
   const displayScoreWidth = useMemo(() => {
     if (!isHorizontalView) return A4_PAGE_WIDTH
-    const totalMeasureWidth = Math.max(1, measurePairs.length) * HORIZONTAL_VIEW_MEASURE_WIDTH_PX
+    const totalMeasureWidth = horizontalEstimatedMeasureWidthTotal
     return Math.max(A4_PAGE_WIDTH, pageHorizontalPaddingPx * 2 + totalMeasureWidth)
-  }, [isHorizontalView, measurePairs.length, pageHorizontalPaddingPx])
+  }, [isHorizontalView, horizontalEstimatedMeasureWidthTotal, pageHorizontalPaddingPx])
   const displayScoreHeight = isHorizontalView ? HORIZONTAL_VIEW_HEIGHT_PX : A4_PAGE_HEIGHT
   const autoScoreScale = useMemo(() => getAutoScoreScale(measurePairs.length), [measurePairs.length])
   const safeManualScalePercent = clampScalePercent(manualScalePercent)
