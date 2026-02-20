@@ -150,6 +150,10 @@ export function useScoreRenderEffect(params: {
   systemRanges: SystemMeasureRange[]
   visibleSystemRange: { start: number; end: number }
   renderOriginSystemIndex: number
+  visiblePairRange?: { startPairIndex: number; endPairIndexExclusive: number } | null
+  clearViewportXRange?: { startX: number; endX: number } | null
+  measureFramesByPair?: Array<{ measureX: number; measureWidth: number }> | null
+  renderOffsetX?: number
   measureKeyFifthsFromImport: number[] | null
   measureTimeSignaturesFromImport: TimeSignature[] | null
   activeSelection?: Selection | null
@@ -176,6 +180,10 @@ export function useScoreRenderEffect(params: {
     systemRanges,
     visibleSystemRange,
     renderOriginSystemIndex,
+    visiblePairRange = null,
+    clearViewportXRange = null,
+    measureFramesByPair = null,
+    renderOffsetX = 0,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
     activeSelection = null,
@@ -219,6 +227,10 @@ export function useScoreRenderEffect(params: {
       systemRanges,
       visibleSystemRange,
       renderOriginSystemIndex,
+      visiblePairRange,
+      clearViewportXRange,
+      measureFramesByPair,
+      renderOffsetX,
       measureKeyFifthsFromImport,
       measureTimeSignaturesFromImport,
       activeSelection,
@@ -247,6 +259,10 @@ export function useScoreRenderEffect(params: {
     systemRanges,
     visibleSystemRange,
     renderOriginSystemIndex,
+    visiblePairRange,
+    clearViewportXRange,
+    measureFramesByPair,
+    renderOffsetX,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
     activeSelection,

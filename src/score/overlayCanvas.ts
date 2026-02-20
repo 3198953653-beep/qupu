@@ -71,6 +71,8 @@ export function ensureOverlayCanvasForRect(params: {
   }
   const displayLeft = nextLeft * effectiveScaleX
   const displayTop = nextTop * effectiveScaleY
+  const surfaceOffsetLeft = surface ? surface.offsetLeft : 0
+  const surfaceOffsetTop = surface ? surface.offsetTop : 0
 
   if (overlay.width !== nextWidth || overlay.height !== nextHeight) {
     overlay.width = nextWidth
@@ -79,8 +81,8 @@ export function ensureOverlayCanvasForRect(params: {
     overlayRendererSizeRef.current = { width: 0, height: 0 }
   }
 
-  overlay.style.left = `${displayLeft}px`
-  overlay.style.top = `${displayTop}px`
+  overlay.style.left = `${surfaceOffsetLeft + displayLeft}px`
+  overlay.style.top = `${surfaceOffsetTop + displayTop}px`
   overlay.style.width = `${nextWidth}px`
   overlay.style.height = `${nextHeight}px`
   overlay.style.display = 'block'

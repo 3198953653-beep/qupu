@@ -218,6 +218,10 @@ export function renderVisibleSystems(params: {
   systemRanges: SystemMeasureRange[]
   visibleSystemRange: { start: number; end: number }
   renderOriginSystemIndex?: number
+  visiblePairRange?: { startPairIndex: number; endPairIndexExclusive: number } | null
+  clearViewportXRange?: { startX: number; endX: number } | null
+  measureFramesByPair?: Array<{ measureX: number; measureWidth: number }> | null
+  renderOffsetX?: number
   measureKeyFifthsFromImport: number[] | null
   measureTimeSignaturesFromImport: TimeSignature[] | null
   activeSelection: Selection | null
@@ -244,6 +248,10 @@ export function renderVisibleSystems(params: {
     systemRanges,
     visibleSystemRange,
     renderOriginSystemIndex = 0,
+    visiblePairRange = null,
+    clearViewportXRange = null,
+    measureFramesByPair = null,
+    renderOffsetX = 0,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
     activeSelection,
@@ -279,6 +287,13 @@ export function renderVisibleSystems(params: {
   const hintPairVisibleInCurrentWindow =
     hintPairIndex !== null
       ? (() => {
+        if (
+          visiblePairRange &&
+          (hintPairIndex < visiblePairRange.startPairIndex ||
+            hintPairIndex >= visiblePairRange.endPairIndexExclusive)
+        ) {
+          return false
+        }
         for (let systemIndex = startSystem; systemIndex <= endSystem; systemIndex += 1) {
           const range = systemRanges[systemIndex]
           if (!range) continue
@@ -298,27 +313,61 @@ export function renderVisibleSystems(params: {
     previousNoteLayoutsByPair !== null &&
     previousMeasureLayouts !== null
   let didClearCanvas = false
-  if (!shouldUseIncrementalPaint) {
-    context.clearRect(0, 0, scoreWidth, scoreHeight)
+  const clearRenderSurface = () => {
+    if (clearViewportXRange) {
+      const x = Math.max(0, Math.floor(clearViewportXRange.startX))
+      const right = Math.min(scoreWidth, Math.ceil(clearViewportXRange.endX))
+      const width = Math.max(0, right - x)
+      if (width > 0) {
+        context.clearRect(x, 0, width, scoreHeight)
+      }
+    } else {
+      context.clearRect(0, 0, scoreWidth, scoreHeight)
+    }
     didClearCanvas = true
+  }
+  if (!shouldUseIncrementalPaint) {
+    clearRenderSurface()
   }
 
   for (let systemIndex = startSystem; systemIndex <= endSystem; systemIndex += 1) {
     const range = systemRanges[systemIndex]
     if (!range) continue
-    const start = range.startPairIndex
-    const endExclusive = Math.max(start, range.endPairIndexExclusive)
-    const systemMeasures = measurePairs.slice(start, endExclusive)
-    if (systemMeasures.length === 0) continue
+    const systemStartPairIndex = range.startPairIndex
+    const systemEndPairIndexExclusive = Math.max(systemStartPairIndex, range.endPairIndexExclusive)
+    if (systemEndPairIndexExclusive <= systemStartPairIndex) continue
+
+    const renderStartPairIndex = visiblePairRange
+      ? Math.max(systemStartPairIndex, visiblePairRange.startPairIndex)
+      : systemStartPairIndex
+    const renderEndPairIndexExclusive = visiblePairRange
+      ? Math.min(systemEndPairIndexExclusive, visiblePairRange.endPairIndexExclusive)
+      : systemEndPairIndexExclusive
+    if (renderEndPairIndexExclusive <= renderStartPairIndex) continue
 
     const systemTop = SCORE_TOP_PADDING + (systemIndex - renderOriginSystemIndex) * (SYSTEM_HEIGHT + SYSTEM_GAP_Y)
     const trebleY = systemTop + SYSTEM_TREBLE_OFFSET_Y
     const bassY = systemTop + SYSTEM_BASS_OFFSET_Y
     const systemUsableWidth = Math.max(1, scoreWidth - pagePaddingX * 2)
 
-    const systemMeta = systemMeasures.map((measure, indexInSystem) => {
-      const pairIndex = start + indexInSystem
-      const isSystemStart = indexInSystem === 0
+    const systemMeta: Array<{
+      pairIndex: number
+      measure: MeasurePair
+      isSystemStart: boolean
+      keyFifths: number
+      showKeySignature: boolean
+      timeSignature: TimeSignature
+      showTimeSignature: boolean
+      nextTimeSignature: TimeSignature
+      showEndTimeSignature: boolean
+      includeMeasureStartDecorations: boolean
+      preferMeasureStartBarlineAxis: boolean
+      preferMeasureEndBarlineAxis: boolean
+    }> = []
+    for (let pairIndex = renderStartPairIndex; pairIndex < renderEndPairIndexExclusive; pairIndex += 1) {
+      const measure = measurePairs[pairIndex]
+      if (!measure) continue
+      const isSystemStart = pairIndex === systemStartPairIndex
       const timeSignature =
         measureTimeSignaturesFromImport?.[pairIndex] ??
         measureTimeSignaturesFromImport?.[pairIndex - 1] ?? {
@@ -344,7 +393,7 @@ export function renderVisibleSystems(params: {
             measureTimeSignaturesFromImport?.[pairIndex] ??
             timeSignature
           : timeSignature
-      const isSystemEnd = indexInSystem === systemMeasures.length - 1
+      const isSystemEnd = pairIndex === systemEndPairIndexExclusive - 1
       const showEndTimeSignature =
         hasNextMeasure &&
         isSystemEnd &&
@@ -355,7 +404,7 @@ export function renderVisibleSystems(params: {
       const includeMeasureStartDecorations = !isSystemStart && (showKeySignature || showTimeSignature)
       const preferMeasureStartBarlineAxis = !isSystemStart && !showKeySignature && !showTimeSignature
       const preferMeasureEndBarlineAxis = !showEndTimeSignature
-      return {
+      systemMeta.push({
         pairIndex,
         measure,
         isSystemStart,
@@ -368,8 +417,9 @@ export function renderVisibleSystems(params: {
         includeMeasureStartDecorations,
         preferMeasureStartBarlineAxis,
         preferMeasureEndBarlineAxis,
-      }
-    })
+      })
+    }
+    if (systemMeta.length === 0) continue
     // Apply spacing freeze while dragging; optionally allow post-release freeze
     // when geometry is unchanged (caller controls this flag).
     const freezeSelection =
@@ -388,6 +438,52 @@ export function renderVisibleSystems(params: {
         frozenSpacingByPairIndex.set(entry.pairIndex, frozen)
       }
     })
+    const probeGeometryCache = new Map<string, { noteStartOffset: number; noteEndOffset: number; formatWidth: number }>()
+    const getMeasureProbeGeometry = (entry: (typeof systemMeta)[number], measureWidth: number) => {
+      const safeWidth = Math.max(1, Number(measureWidth.toFixed(3)))
+      const cacheKey = `${entry.pairIndex}|${safeWidth.toFixed(3)}`
+      const cached = probeGeometryCache.get(cacheKey)
+      if (cached) return cached
+
+      const noteStartProbe = new Stave(0, trebleY, safeWidth)
+      if (entry.isSystemStart) {
+        noteStartProbe.addClef('treble')
+        if (entry.showKeySignature) {
+          noteStartProbe.addKeySignature(getKeySignatureSpecFromFifths(entry.keyFifths))
+        }
+        if (entry.showTimeSignature) {
+          noteStartProbe.addTimeSignature(`${entry.timeSignature.beats}/${entry.timeSignature.beatType}`)
+        }
+      } else {
+        noteStartProbe.setBegBarType(BarlineType.NONE)
+        if (entry.showKeySignature) {
+          noteStartProbe.addKeySignature(getKeySignatureSpecFromFifths(entry.keyFifths))
+        }
+        if (entry.showTimeSignature) {
+          noteStartProbe.addTimeSignature(`${entry.timeSignature.beats}/${entry.timeSignature.beatType}`)
+        }
+      }
+      if (entry.showEndTimeSignature) {
+        noteStartProbe.setEndTimeSignature(`${entry.nextTimeSignature.beats}/${entry.nextTimeSignature.beatType}`)
+      }
+      const noteStartOffset = noteStartProbe.getNoteStartX()
+      const noteEndOffset = noteStartProbe.getNoteEndX()
+      const formatWidth = Math.max(80, noteEndOffset - noteStartOffset - 8)
+      const geometry = { noteStartOffset, noteEndOffset, formatWidth }
+      probeGeometryCache.set(cacheKey, geometry)
+      return geometry
+    }
+    const buildMeasureProbe = (entry: (typeof systemMeta)[number], measureX: number, measureWidth: number) => {
+      const geometry = getMeasureProbeGeometry(entry, measureWidth)
+      const measureEndX = measureX + measureWidth
+      const noteEndX = measureX + geometry.noteEndOffset
+      return {
+        noteStartX: measureX + geometry.noteStartOffset,
+        noteEndX,
+        spacingRightLimitX: entry.preferMeasureEndBarlineAxis ? measureEndX : noteEndX,
+        formatWidth: geometry.formatWidth,
+      }
+    }
 
     const shouldSkipSystemReflow =
       layoutReflowHint !== null &&
@@ -395,12 +491,125 @@ export function renderVisibleSystems(params: {
       !layoutReflowHint.shouldReflow &&
       systemMeta.some((entry) => entry.pairIndex === layoutReflowHint.pairIndex)
     const incrementalPairIndex = shouldUseIncrementalPaint ? hintPairIndex : null
+    if (measureFramesByPair !== null) {
+      systemMeta.forEach((entry) => {
+        if (incrementalPairIndex !== null && entry.pairIndex !== incrementalPairIndex) {
+          const previousLayouts = previousNoteLayoutsByPair?.get(entry.pairIndex)
+          const previousMeasureLayout = previousMeasureLayouts?.get(entry.pairIndex)
+          if (previousLayouts && previousMeasureLayout) {
+            nextLayouts.push(...previousLayouts)
+            nextLayoutsByPair.set(entry.pairIndex, previousLayouts)
+            previousLayouts.forEach((layout) => {
+              nextLayoutsByKey.set(getLayoutNoteKey(layout.staff, layout.id), layout)
+            })
+            nextMeasureLayouts.set(entry.pairIndex, previousMeasureLayout)
+            return
+          }
+        }
+
+        const frame = measureFramesByPair[entry.pairIndex]
+        if (!frame) return
+        const measureX = frame.measureX - renderOffsetX
+        const measureWidth = Math.max(1, frame.measureWidth)
+        const { noteStartX, noteEndX, formatWidth } = buildMeasureProbe(entry, measureX, measureWidth)
+        const frozenSpacing = frozenSpacingByPairIndex.get(entry.pairIndex) ?? null
+        const translatedFrozenSpacing =
+          frozenSpacing !== null ? translateFrozenSpacingToMeasureX(frozenSpacing, measureX) : null
+        if (incrementalPairIndex !== null) {
+          const previousMeasureLayout = previousMeasureLayouts?.get(entry.pairIndex)
+          const clearRect = previousMeasureLayout?.overlayRect
+          if (clearRect) {
+            context.save()
+            context.clearRect(clearRect.x, clearRect.y, clearRect.width, clearRect.height)
+            context.setFillStyle('#ffffff')
+            context.fillRect(clearRect.x, clearRect.y, clearRect.width, clearRect.height)
+            context.restore()
+          }
+        }
+
+        const measureNoteLayouts = drawMeasureToContext({
+          context,
+          measure: entry.measure,
+          pairIndex: entry.pairIndex,
+          measureX,
+          measureWidth,
+          trebleY,
+          bassY,
+          isSystemStart: entry.isSystemStart,
+          keyFifths: entry.keyFifths,
+          showKeySignature: entry.showKeySignature,
+          timeSignature: entry.timeSignature,
+          showTimeSignature: entry.showTimeSignature,
+          endTimeSignature: entry.nextTimeSignature,
+          showEndTimeSignature: entry.showEndTimeSignature,
+          activeSelection,
+          draggingSelection,
+          formatWidthOverride: formatWidth,
+          timeAxisSpacingConfig: spacingConfig,
+          spacingLayoutMode,
+          staticNoteXById: translatedFrozenSpacing?.staticNoteXById ?? null,
+          staticAccidentalRightXById: translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
+          preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
+          preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
+        })
+
+        nextLayouts.push(...measureNoteLayouts)
+        const pairLayouts = nextLayoutsByPair.get(entry.pairIndex)
+        if (pairLayouts) {
+          pairLayouts.push(...measureNoteLayouts)
+        } else {
+          nextLayoutsByPair.set(entry.pairIndex, [...measureNoteLayouts])
+        }
+        measureNoteLayouts.forEach((layout) => {
+          nextLayoutsByKey.set(getLayoutNoteKey(layout.staff, layout.id), layout)
+        })
+
+        let minNoteX = Number.POSITIVE_INFINITY
+        let maxNoteX = Number.NEGATIVE_INFINITY
+        for (const layout of measureNoteLayouts) {
+          if (layout.x < minNoteX) minNoteX = layout.x
+          if (layout.rightX > maxNoteX) maxNoteX = layout.rightX
+        }
+        const overlayRect = buildMeasureOverlayRect(
+          minNoteX,
+          maxNoteX,
+          noteStartX,
+          measureX,
+          measureWidth,
+          systemTop,
+          scoreWidth,
+          scoreHeight,
+          entry.isSystemStart,
+          entry.includeMeasureStartDecorations,
+        )
+        nextMeasureLayouts.set(entry.pairIndex, {
+          pairIndex: entry.pairIndex,
+          measureX,
+          measureWidth,
+          trebleY,
+          bassY,
+          systemTop,
+          isSystemStart: entry.isSystemStart,
+          keyFifths: entry.keyFifths,
+          showKeySignature: entry.showKeySignature,
+          timeSignature: entry.timeSignature,
+          showTimeSignature: entry.showTimeSignature,
+          endTimeSignature: entry.nextTimeSignature,
+          showEndTimeSignature: entry.showEndTimeSignature,
+          includeMeasureStartDecorations: entry.includeMeasureStartDecorations,
+          noteStartX,
+          noteEndX,
+          formatWidth,
+          overlayRect,
+        })
+      })
+      continue
+    }
     const stableSystemFrames = shouldSkipSystemReflow
       ? collectStableSystemMeasureFrames(systemMeta, previousMeasureLayouts)
       : null
     if (!stableSystemFrames && !didClearCanvas) {
-      context.clearRect(0, 0, scoreWidth, scoreHeight)
-      didClearCanvas = true
+      clearRenderSurface()
     }
     if (stableSystemFrames) {
       systemMeta.forEach((entry, indexInSystem) => {
@@ -531,54 +740,7 @@ export function renderVisibleSystems(params: {
         spacingConfig,
       ),
     )
-    const probeGeometryCache = new Map<string, { noteStartOffset: number; noteEndOffset: number; formatWidth: number }>()
-    const getMeasureProbeGeometry = (entry: (typeof systemMeta)[number], measureWidth: number) => {
-      const safeWidth = Math.max(1, Number(measureWidth.toFixed(3)))
-      const cacheKey = `${entry.pairIndex}|${safeWidth.toFixed(3)}`
-      const cached = probeGeometryCache.get(cacheKey)
-      if (cached) return cached
-
-      const noteStartProbe = new Stave(0, trebleY, safeWidth)
-      if (entry.isSystemStart) {
-        noteStartProbe.addClef('treble')
-        if (entry.showKeySignature) {
-          noteStartProbe.addKeySignature(getKeySignatureSpecFromFifths(entry.keyFifths))
-        }
-        if (entry.showTimeSignature) {
-          noteStartProbe.addTimeSignature(`${entry.timeSignature.beats}/${entry.timeSignature.beatType}`)
-        }
-      } else {
-        noteStartProbe.setBegBarType(BarlineType.NONE)
-        if (entry.showKeySignature) {
-          noteStartProbe.addKeySignature(getKeySignatureSpecFromFifths(entry.keyFifths))
-        }
-        if (entry.showTimeSignature) {
-          noteStartProbe.addTimeSignature(`${entry.timeSignature.beats}/${entry.timeSignature.beatType}`)
-        }
-      }
-      if (entry.showEndTimeSignature) {
-        noteStartProbe.setEndTimeSignature(`${entry.nextTimeSignature.beats}/${entry.nextTimeSignature.beatType}`)
-      }
-      const noteStartOffset = noteStartProbe.getNoteStartX()
-      const noteEndOffset = noteStartProbe.getNoteEndX()
-      const formatWidth = Math.max(80, noteEndOffset - noteStartOffset - 8)
-      const geometry = { noteStartOffset, noteEndOffset, formatWidth }
-      probeGeometryCache.set(cacheKey, geometry)
-      return geometry
-    }
-
-    const buildMeasureProbe = (entry: (typeof systemMeta)[number], measureX: number, measureWidth: number) => {
-      const geometry = getMeasureProbeGeometry(entry, measureWidth)
-      const measureEndX = measureX + measureWidth
-      const noteEndX = measureX + geometry.noteEndOffset
-      return {
-        noteStartX: measureX + geometry.noteStartOffset,
-        noteEndX,
-        spacingRightLimitX: entry.preferMeasureEndBarlineAxis ? measureEndX : noteEndX,
-        formatWidth: geometry.formatWidth,
-      }
-    }
-    const probeWidth = Math.max(140, Math.floor(systemUsableWidth / Math.max(1, systemMeasures.length)))
+    const probeWidth = Math.max(140, Math.floor(systemUsableWidth / Math.max(1, systemMeta.length)))
     const uniformTickPadding = getUniformTickSpacingPadding(spacingConfig)
     let fixedWidths = systemMeta.map((entry) => {
       const geometry = getMeasureProbeGeometry(entry, probeWidth)
@@ -811,7 +973,7 @@ export function renderVisibleSystems(params: {
 
     let measureCursorX = pagePaddingX
     systemMeta.forEach((entry, indexInSystem) => {
-      const measureWidth = measureWidths[indexInSystem] ?? Math.floor(systemUsableWidth / systemMeasures.length)
+      const measureWidth = measureWidths[indexInSystem] ?? Math.floor(systemUsableWidth / Math.max(1, systemMeta.length))
       const measureX = measureCursorX
       measureCursorX += measureWidth
       const { noteStartX, noteEndX, formatWidth } = buildMeasureProbe(entry, measureX, measureWidth)

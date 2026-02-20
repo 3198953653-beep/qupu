@@ -464,7 +464,8 @@
 
 .score-surface {
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: 0;
   touch-action: none;
   cursor: grab;
   z-index: 2;

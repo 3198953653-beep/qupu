@@ -5,7 +5,9 @@ export function ScoreBoard(props: {
   scoreScrollRef: RefObject<HTMLDivElement | null>
   displayScoreWidth: number
   displayScoreHeight: number
-  scoreScale: number
+  scoreScaleX: number
+  scoreScaleY: number
+  scoreSurfaceOffsetXPx: number
   isHorizontalView: boolean
   currentPage: number
   pageCount: number
@@ -36,7 +38,9 @@ export function ScoreBoard(props: {
     scoreScrollRef,
     displayScoreWidth,
     displayScoreHeight,
-    scoreScale,
+    scoreScaleX,
+    scoreScaleY,
+    scoreSurfaceOffsetXPx,
     isHorizontalView,
     currentPage,
     pageCount,
@@ -90,7 +94,11 @@ export function ScoreBoard(props: {
           <canvas
             className={`score-surface ${draggingSelection ? 'is-dragging' : ''}`}
             ref={scoreRef}
-            style={{ transform: `scale(${scoreScale})`, transformOrigin: 'left top' }}
+            style={{
+              left: `${scoreSurfaceOffsetXPx}px`,
+              transform: `scale(${scoreScaleX}, ${scoreScaleY})`,
+              transformOrigin: 'left top',
+            }}
             onPointerDown={onBeginDrag}
             onPointerMove={onSurfacePointerMove}
             onPointerUp={onEndDrag}
@@ -101,7 +109,11 @@ export function ScoreBoard(props: {
             ref={scoreOverlayRef}
             width={1}
             height={1}
-            style={{ transform: `scale(${scoreScale})`, transformOrigin: 'left top' }}
+            style={{
+              left: `${scoreSurfaceOffsetXPx}px`,
+              transform: `scale(${scoreScaleX}, ${scoreScaleY})`,
+              transformOrigin: 'left top',
+            }}
           />
         </div>
       </div>

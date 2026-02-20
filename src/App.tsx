@@ -67,8 +67,13 @@ const DEFAULT_PAGE_HORIZONTAL_PADDING_PX = 86
 const ENABLE_AUTO_FIRST_MEASURE_DRAG_DEBUG = false
 const HORIZONTAL_VIEW_MEASURE_WIDTH_PX = 220
 const HORIZONTAL_VIEW_MEASURE_WIDTH_GAIN = 1.4
+const HORIZONTAL_VIEW_MEASURE_EXTRA_SAFETY_PX = 72
+const HORIZONTAL_VIEW_ACCIDENTAL_WIDTH_PX = 12
+const HORIZONTAL_VIEW_MAX_ACCIDENTAL_BONUS_PX = 96
 const HORIZONTAL_VIEW_HEIGHT_PX = SCORE_TOP_PADDING * 2 + SYSTEM_HEIGHT + 24
 const MAX_CANVAS_RENDER_DIM_PX = 32760
+const HORIZONTAL_RENDER_BUFFER_PX = 1200
+const HORIZONTAL_RENDER_EDGE_BUFFER_MEASURES = 1
 const DEFAULT_TIME_SIGNATURE: TimeSignature = { beats: 4, beatType: 4 }
 
 const PITCHES: Pitch[] = createPianoPitches()
@@ -120,6 +125,18 @@ function hasTimeSignatureChanged(current: TimeSignature, previous: TimeSignature
   return current.beats !== previous.beats || current.beatType !== previous.beatType
 }
 
+function countAccidentalsForNote(note: ScoreNote): number {
+  const chordAccidentals = note.chordAccidentals ?? []
+  const chordCount = chordAccidentals.reduce((sum, accidental) => (accidental ? sum + 1 : sum), 0)
+  return (note.accidental ? 1 : 0) + chordCount
+}
+
+function countAccidentalsForMeasure(measure: MeasurePair): number {
+  const trebleCount = measure.treble.reduce((sum, note) => sum + countAccidentalsForNote(note), 0)
+  const bassCount = measure.bass.reduce((sum, note) => sum + countAccidentalsForNote(note), 0)
+  return trebleCount + bassCount
+}
+
 type FirstMeasureNoteDebugRow = {
   staff: 'treble' | 'bass'
   noteId: string
@@ -169,6 +186,10 @@ function App() {
   const [isHorizontalView, setIsHorizontalView] = useState(false)
   const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
   const [timeAxisSpacingConfig, setTimeAxisSpacingConfig] = useState(DEFAULT_TIME_AXIS_SPACING_CONFIG)
+  const [horizontalViewportXRange, setHorizontalViewportXRange] = useState<{ startX: number; endX: number }>({
+    startX: 0,
+    endX: A4_PAGE_WIDTH,
+  })
 
   const scoreRef = useRef<HTMLCanvasElement | null>(null)
   const scoreOverlayRef = useRef<HTMLCanvasElement | null>(null)
@@ -214,11 +235,11 @@ function App() {
     [measurePairsFromImport, notes, bassNotes],
   )
   const spacingLayoutMode: SpacingLayoutMode = isHorizontalView ? 'legacy' : 'custom'
-  const horizontalEstimatedMeasureWidthTotal = useMemo(() => {
-    if (!isHorizontalView) return 0
-    if (measurePairs.length === 0) return HORIZONTAL_VIEW_MEASURE_WIDTH_PX
+  const horizontalRawMeasureWidths = useMemo(() => {
+    if (!isHorizontalView) return []
+    if (measurePairs.length === 0) return []
 
-    let totalWidth = 0
+    const widths: number[] = []
     let previousKeyFifths = 0
     let previousTimeSignature = DEFAULT_TIME_SIGNATURE
 
@@ -241,16 +262,24 @@ function App() {
         false,
       )
       const adaptiveWidth = estimateAdaptiveMeasureWidth(layoutDemand)
+      const accidentalWidthBonus = Math.min(
+        HORIZONTAL_VIEW_MAX_ACCIDENTAL_BONUS_PX,
+        countAccidentalsForMeasure(measure) * HORIZONTAL_VIEW_ACCIDENTAL_WIDTH_PX,
+      )
       const estimatedWidth = Math.max(
         HORIZONTAL_VIEW_MEASURE_WIDTH_PX,
-        Math.round(adaptiveWidth * HORIZONTAL_VIEW_MEASURE_WIDTH_GAIN),
+        Math.round(
+          adaptiveWidth * HORIZONTAL_VIEW_MEASURE_WIDTH_GAIN +
+            HORIZONTAL_VIEW_MEASURE_EXTRA_SAFETY_PX +
+            accidentalWidthBonus,
+        ),
       )
-      totalWidth += estimatedWidth
+      widths.push(estimatedWidth)
       previousKeyFifths = keyFifths
       previousTimeSignature = timeSignature
     }
 
-    return Math.max(HORIZONTAL_VIEW_MEASURE_WIDTH_PX, totalWidth)
+    return widths
   }, [
     isHorizontalView,
     measurePairs,
@@ -259,22 +288,29 @@ function App() {
     timeAxisSpacingConfig.baseMinGap32Px,
     timeAxisSpacingConfig.durationGapRatios,
   ])
-  const displayScoreWidth = useMemo(() => {
-    if (!isHorizontalView) return A4_PAGE_WIDTH
-    const totalMeasureWidth = horizontalEstimatedMeasureWidthTotal
-    return Math.max(A4_PAGE_WIDTH, pageHorizontalPaddingPx * 2 + totalMeasureWidth)
-  }, [isHorizontalView, horizontalEstimatedMeasureWidthTotal, pageHorizontalPaddingPx])
-  const displayScoreHeight = isHorizontalView ? HORIZONTAL_VIEW_HEIGHT_PX : A4_PAGE_HEIGHT
+  const horizontalEstimatedMeasureWidthTotal = useMemo(() => {
+    if (!isHorizontalView) return 0
+    if (horizontalRawMeasureWidths.length === 0) return HORIZONTAL_VIEW_MEASURE_WIDTH_PX
+    const total = horizontalRawMeasureWidths.reduce((sum, width) => sum + width, 0)
+    return Math.max(HORIZONTAL_VIEW_MEASURE_WIDTH_PX, total)
+  }, [isHorizontalView, horizontalRawMeasureWidths])
   const autoScoreScale = useMemo(() => getAutoScoreScale(measurePairs.length), [measurePairs.length])
   const safeManualScalePercent = clampScalePercent(manualScalePercent)
   const relativeScale = autoScaleEnabled ? autoScoreScale : safeManualScalePercent / 100
+  const provisionalDisplayScoreHeight = isHorizontalView ? HORIZONTAL_VIEW_HEIGHT_PX : A4_PAGE_HEIGHT
+  const displayScoreWidth = useMemo(() => {
+    if (!isHorizontalView) return A4_PAGE_WIDTH
+    const totalMeasureWidth = horizontalEstimatedMeasureWidthTotal
+    const baseWidth = Math.max(A4_PAGE_WIDTH, pageHorizontalPaddingPx * 2 + totalMeasureWidth)
+    return Math.max(A4_PAGE_WIDTH, Math.round(baseWidth * relativeScale))
+  }, [isHorizontalView, horizontalEstimatedMeasureWidthTotal, pageHorizontalPaddingPx, relativeScale])
   const baseScoreScale = relativeScale * MANUAL_SCALE_BASELINE
-  const minScaleForCanvasWidth = displayScoreWidth / MAX_CANVAS_RENDER_DIM_PX
-  const minScaleForCanvasHeight = displayScoreHeight / MAX_CANVAS_RENDER_DIM_PX
-  const scoreScale = Math.max(baseScoreScale, minScaleForCanvasWidth, minScaleForCanvasHeight)
+  const minScaleForCanvasHeight = provisionalDisplayScoreHeight / MAX_CANVAS_RENDER_DIM_PX
+  const scoreScaleX = baseScoreScale
+  const scoreScaleY = Math.max(baseScoreScale, minScaleForCanvasHeight)
+  const scoreScale = scoreScaleX
   const autoScalePercent = Math.round(baseScoreScale * 100)
-  const scoreWidth = Math.max(1, Math.round(displayScoreWidth / scoreScale))
-  const scoreHeight = Math.max(1, Math.round(displayScoreHeight / scoreScale))
+  const totalScoreWidth = Math.max(1, Math.round(displayScoreWidth / scoreScaleX))
   const trebleNoteById = useMemo(() => new Map(notes.map((note) => [note.id, note] as const)), [notes])
   const bassNoteById = useMemo(() => new Map(bassNotes.map((note) => [note.id, note] as const)), [bassNotes])
   const trebleNoteIndexById = useMemo(() => {
@@ -287,7 +323,36 @@ function App() {
     bassNotes.forEach((note, index) => byId.set(note.id, index))
     return byId
   }, [bassNotes])
-  const systemUsableWidth = Math.max(1, scoreWidth - pageHorizontalPaddingPx * 2)
+  const horizontalMeasureFramesByPair = useMemo(() => {
+    if (!isHorizontalView) return null
+    if (horizontalRawMeasureWidths.length === 0) return [] as Array<{ measureX: number; measureWidth: number }>
+    let cursorX = pageHorizontalPaddingPx
+    return horizontalRawMeasureWidths.map((measureWidth) => {
+      const frame = { measureX: cursorX, measureWidth }
+      cursorX += measureWidth
+      return frame
+    })
+  }, [isHorizontalView, horizontalRawMeasureWidths, pageHorizontalPaddingPx])
+  const horizontalViewportWidthInScore = Math.max(1, horizontalViewportXRange.endX - horizontalViewportXRange.startX)
+  const horizontalRenderSurfaceWidth = useMemo(() => {
+    if (!isHorizontalView) return totalScoreWidth
+    const desiredWidth = Math.ceil(horizontalViewportWidthInScore + HORIZONTAL_RENDER_BUFFER_PX * 2)
+    const targetWidth = Math.max(1200, desiredWidth)
+    return Math.max(1, Math.min(totalScoreWidth, Math.min(MAX_CANVAS_RENDER_DIM_PX, targetWidth)))
+  }, [isHorizontalView, totalScoreWidth, horizontalViewportWidthInScore])
+  const horizontalRenderOffsetX = useMemo(() => {
+    if (!isHorizontalView) return 0
+    const desiredOffset = Math.max(0, Math.floor(horizontalViewportXRange.startX - HORIZONTAL_RENDER_BUFFER_PX))
+    const maxOffset = Math.max(0, totalScoreWidth - horizontalRenderSurfaceWidth)
+    return Math.max(0, Math.min(maxOffset, desiredOffset))
+  }, [
+    isHorizontalView,
+    horizontalViewportXRange.startX,
+    totalScoreWidth,
+    horizontalRenderSurfaceWidth,
+  ])
+  const scoreWidth = isHorizontalView ? horizontalRenderSurfaceWidth : totalScoreWidth
+  const logicalSystemUsableWidth = Math.max(1, totalScoreWidth - pageHorizontalPaddingPx * 2)
   const systemRanges = useMemo(
     () => {
       if (isHorizontalView) {
@@ -295,7 +360,7 @@ function App() {
       }
       return buildAdaptiveSystemRanges({
         measurePairs,
-        systemUsableWidth,
+        systemUsableWidth: logicalSystemUsableWidth,
         measureKeyFifthsFromImport,
         measureTimeSignaturesFromImport,
         timeAxisSpacingConfig,
@@ -303,7 +368,7 @@ function App() {
     },
     [
       measurePairs,
-      systemUsableWidth,
+      logicalSystemUsableWidth,
       isHorizontalView,
       pageHorizontalPaddingPx,
       measureKeyFifthsFromImport,
@@ -312,19 +377,73 @@ function App() {
     ],
   )
   const systemCount = Math.max(1, systemRanges.length)
+  const displayScoreHeight = useMemo(() => {
+    if (isHorizontalView) return HORIZONTAL_VIEW_HEIGHT_PX
+    return A4_PAGE_HEIGHT
+  }, [isHorizontalView])
+  const scoreHeight = Math.max(1, Math.round(displayScoreHeight / scoreScaleY))
   const systemsPerPage = Math.max(
     1,
     isHorizontalView
-      ? systemCount
+      ? 1
       : Math.floor((displayScoreHeight - SCORE_TOP_PADDING * 2 + SYSTEM_GAP_Y) / ((SYSTEM_HEIGHT + SYSTEM_GAP_Y) * scoreScale)),
   )
   const pageCount = Math.max(1, Math.ceil(systemCount / systemsPerPage))
   const safeCurrentPage = Math.min(currentPage, pageCount - 1)
   const visibleSystemRange = useMemo(() => {
+    if (isHorizontalView) return { start: 0, end: 0 }
     const start = Math.min(systemCount - 1, safeCurrentPage * systemsPerPage)
     const end = Math.min(systemCount - 1, start + systemsPerPage - 1)
     return { start, end }
-  }, [safeCurrentPage, systemCount, systemsPerPage])
+  }, [isHorizontalView, safeCurrentPage, systemCount, systemsPerPage])
+  const horizontalRenderWindow = useMemo(() => {
+    if (!isHorizontalView) return null
+    const frames = horizontalMeasureFramesByPair ?? []
+    const renderWindowStartX = horizontalRenderOffsetX
+    const renderWindowEndX = Math.min(totalScoreWidth, horizontalRenderOffsetX + scoreWidth)
+    if (frames.length === 0) {
+      return {
+        startPairIndex: 0,
+        endPairIndexExclusive: 0,
+        startX: renderWindowStartX,
+        endX: renderWindowEndX,
+      }
+    }
+    const bufferedStartX = Math.max(0, renderWindowStartX - HORIZONTAL_RENDER_BUFFER_PX)
+    const bufferedEndX = Math.min(totalScoreWidth, renderWindowEndX + HORIZONTAL_RENDER_BUFFER_PX)
+
+    let startPairIndex = 0
+    while (
+      startPairIndex < frames.length &&
+      frames[startPairIndex].measureX + frames[startPairIndex].measureWidth < bufferedStartX
+    ) {
+      startPairIndex += 1
+    }
+
+    let endPairIndexExclusive = startPairIndex
+    while (endPairIndexExclusive < frames.length && frames[endPairIndexExclusive].measureX <= bufferedEndX) {
+      endPairIndexExclusive += 1
+    }
+
+    startPairIndex = Math.max(0, startPairIndex - HORIZONTAL_RENDER_EDGE_BUFFER_MEASURES)
+    endPairIndexExclusive = Math.min(frames.length, endPairIndexExclusive + HORIZONTAL_RENDER_EDGE_BUFFER_MEASURES)
+    if (endPairIndexExclusive <= startPairIndex) {
+      startPairIndex = Math.max(0, Math.min(frames.length - 1, startPairIndex))
+      endPairIndexExclusive = Math.min(frames.length, startPairIndex + 1)
+    }
+
+    const firstFrame = frames[startPairIndex]
+    const lastFrame = frames[endPairIndexExclusive - 1]
+    const startX = Math.max(0, (firstFrame?.measureX ?? 0) - 120)
+    const endX = Math.min(totalScoreWidth, (lastFrame ? lastFrame.measureX + lastFrame.measureWidth : totalScoreWidth) + 120)
+    return { startPairIndex, endPairIndexExclusive, startX, endX }
+  }, [
+    isHorizontalView,
+    horizontalMeasureFramesByPair,
+    horizontalRenderOffsetX,
+    scoreWidth,
+    totalScoreWidth,
+  ])
   const layoutStabilityKey = useMemo(() => {
     const systemRangeKey = systemRanges.map((range) => `${range.startPairIndex}-${range.endPairIndexExclusive}`).join(',')
     const spacingKey = [
@@ -368,6 +487,50 @@ function App() {
     setCurrentPage(0)
   }, [isHorizontalView])
 
+  useEffect(() => {
+    if (!isHorizontalView) {
+      setHorizontalViewportXRange({ startX: 0, endX: totalScoreWidth })
+      return
+    }
+    const scrollHost = scoreScrollRef.current
+    if (!scrollHost) {
+      setHorizontalViewportXRange({ startX: 0, endX: totalScoreWidth })
+      return
+    }
+
+    let rafId: number | null = null
+    const updateViewport = () => {
+      const nextStartX = Math.max(0, scrollHost.scrollLeft / scoreScaleX)
+      const nextEndX = Math.max(nextStartX + 1, (scrollHost.scrollLeft + scrollHost.clientWidth) / scoreScaleX)
+      setHorizontalViewportXRange((current) => {
+        if (Math.abs(current.startX - nextStartX) < 0.5 && Math.abs(current.endX - nextEndX) < 0.5) {
+          return current
+        }
+        return { startX: nextStartX, endX: nextEndX }
+      })
+    }
+
+    const scheduleViewportUpdate = () => {
+      if (rafId !== null) return
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null
+        updateViewport()
+      })
+    }
+
+    updateViewport()
+    scrollHost.addEventListener('scroll', scheduleViewportUpdate, { passive: true })
+    window.addEventListener('resize', scheduleViewportUpdate)
+
+    return () => {
+      scrollHost.removeEventListener('scroll', scheduleViewportUpdate)
+      window.removeEventListener('resize', scheduleViewportUpdate)
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId)
+      }
+    }
+  }, [isHorizontalView, scoreScaleX, totalScoreWidth, displayScoreWidth])
+
   useImportedRefsSync({
     measurePairsFromImport,
     measurePairsFromImportRef,
@@ -399,6 +562,16 @@ function App() {
     systemRanges,
     visibleSystemRange,
     renderOriginSystemIndex: visibleSystemRange.start,
+    visiblePairRange:
+      isHorizontalView && horizontalRenderWindow
+        ? {
+          startPairIndex: horizontalRenderWindow.startPairIndex,
+          endPairIndexExclusive: horizontalRenderWindow.endPairIndexExclusive,
+        }
+        : null,
+    clearViewportXRange: null,
+    measureFramesByPair: isHorizontalView ? horizontalMeasureFramesByPair : null,
+    renderOffsetX: isHorizontalView ? horizontalRenderOffsetX : 0,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
     activeSelection: null,
@@ -473,7 +646,7 @@ function App() {
     previewDefaultAccidentalOffsetPx: PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX,
     previewStartThresholdPx: PREVIEW_START_THRESHOLD_PX,
     backend: SCORE_RENDER_BACKEND,
-    scoreScale,
+    scoreScale: scoreScaleY,
     timeAxisSpacingConfig,
     spacingLayoutMode,
   })
@@ -547,6 +720,7 @@ function App() {
     (pageIndex: number) => setCurrentPage(Math.max(0, Math.min(pageCount - 1, pageIndex))),
     [pageCount],
   )
+  const scoreSurfaceOffsetXPx = isHorizontalView ? horizontalRenderOffsetX * scoreScaleX : 0
   const formatDebugCoord = (value: number | null | undefined): string => {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 'null'
     return value.toFixed(3)
@@ -981,6 +1155,8 @@ function App() {
         manualScalePercent: safeManualScalePercent,
         baseScoreScale,
         scoreScale,
+        scoreScaleX,
+        scoreScaleY,
         isHorizontalView,
         spacingLayoutMode,
       }),
@@ -1071,6 +1247,8 @@ function App() {
     autoScaleEnabled,
     baseScoreScale,
     scoreScale,
+    scoreScaleX,
+    scoreScaleY,
     isHorizontalView,
     spacingLayoutMode,
     dragDebugFramesRef,
@@ -1224,7 +1402,9 @@ function App() {
         scoreScrollRef={scoreScrollRef}
         displayScoreWidth={displayScoreWidth}
         displayScoreHeight={displayScoreHeight}
-        scoreScale={scoreScale}
+        scoreScaleX={scoreScaleX}
+        scoreScaleY={scoreScaleY}
+        scoreSurfaceOffsetXPx={scoreSurfaceOffsetXPx}
         isHorizontalView={isHorizontalView}
         currentPage={safeCurrentPage}
         pageCount={pageCount}
