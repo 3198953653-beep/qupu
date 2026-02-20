@@ -310,6 +310,9 @@ export function renderVisibleSystems(params: {
     !layoutReflowHint.shouldReflow &&
     hintPairIndex !== null &&
     hintPairVisibleInCurrentWindow &&
+    // Vertical view must repaint the visible page in one pass to avoid
+    // stale or partially cleared canvas artifacts after drag commit.
+    measureFramesByPair !== null &&
     previousNoteLayoutsByPair !== null &&
     previousMeasureLayouts !== null
   let didClearCanvas = false
