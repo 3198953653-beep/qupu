@@ -81,7 +81,6 @@ const DEFAULT_OSMD_PREVIEW_HORIZONTAL_MARGIN_PX = 9
 const DEFAULT_OSMD_PREVIEW_FIRST_PAGE_TOP_MARGIN_PX = 10
 const DEFAULT_OSMD_PREVIEW_FOLLOWING_PAGE_TOP_MARGIN_PX = 10
 const DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX = 10
-const DEFAULT_OSMD_PREVIEW_MARGIN_UI_SCALE = 10
 const OSMD_PREVIEW_SPARSE_SYSTEM_COUNT = 4
 
 const PITCHES: Pitch[] = createPianoPitches()
@@ -232,19 +231,6 @@ type OsmdPreviewSystemFrame = {
   height: number
 }
 
-type OsmdPreviewStaffSystemEdge = {
-  topY: number
-  bottomY: number
-}
-
-type OsmdPreviewPageCalibration = {
-  pxPerUnit: number
-  domPageHeight: number
-  topEdgeOffsetPx: number
-  bottomEdgeOffsetPx: number
-  matchedSystemCount: number
-}
-
 type OsmdPreviewRebalanceStats = {
   executed: boolean
   pageCount: number
@@ -287,206 +273,6 @@ function collectOsmdPreviewSystemFrames(page: OsmdPreviewPage): OsmdPreviewSyste
     .sort((left, right) => left.y - right.y)
 }
 
-function parseOsmdPreviewPageDomHeight(pageElement: HTMLElement): number | null {
-  const viewBox = pageElement.getAttribute('viewBox')
-  if (viewBox) {
-    const parts = viewBox.trim().split(/\s+/).map(Number)
-    if (parts.length === 4 && Number.isFinite(parts[3]) && parts[3] > 0) {
-      return parts[3]
-    }
-  }
-  const heightAttr = Number(pageElement.getAttribute('height'))
-  if (Number.isFinite(heightAttr) && heightAttr > 0) {
-    return heightAttr
-  }
-  return null
-}
-
-function collectHorizontalLineYValues(root: ParentNode): number[] {
-  const ys: number[] = []
-  root.querySelectorAll('line, path').forEach((element) => {
-    const tag = element.tagName.toLowerCase()
-    if (tag === 'line') {
-      const x1 = Number((element as SVGLineElement).getAttribute('x1'))
-      const x2 = Number((element as SVGLineElement).getAttribute('x2'))
-      const y1 = Number((element as SVGLineElement).getAttribute('y1'))
-      const y2 = Number((element as SVGLineElement).getAttribute('y2'))
-      if (
-        Number.isFinite(x1) &&
-        Number.isFinite(x2) &&
-        Number.isFinite(y1) &&
-        Number.isFinite(y2) &&
-        Math.abs(y1 - y2) <= 0.5 &&
-        Math.abs(x2 - x1) >= 24
-      ) {
-        ys.push(y1)
-      }
-      return
-    }
-    const d = element.getAttribute('d')
-    if (!d) return
-    const numbers = d.match(/-?\d*\.?\d+/g)?.map(Number) ?? []
-    if (numbers.length < 4) return
-    const x1 = numbers[0]
-    const y1 = numbers[1]
-    const x2 = numbers[2]
-    const y2 = numbers[3]
-    if (
-      Number.isFinite(x1) &&
-      Number.isFinite(x2) &&
-      Number.isFinite(y1) &&
-      Number.isFinite(y2) &&
-      Math.abs(y1 - y2) <= 0.5 &&
-      Math.abs(x2 - x1) >= 24
-    ) {
-      ys.push(y1)
-    }
-  })
-  return ys
-}
-
-function collectOsmdPreviewStaffSystemEdges(pageElement: HTMLElement): OsmdPreviewStaffSystemEdge[] {
-  const staffGroups = Array.from(pageElement.querySelectorAll('g.staffline'))
-    .map((group) => {
-      const ys = collectHorizontalLineYValues(group)
-      if (ys.length === 0) return null
-      return {
-        topY: Math.min(...ys),
-        bottomY: Math.max(...ys),
-      }
-    })
-    .filter((group): group is { topY: number; bottomY: number } => group !== null)
-
-  const systems: OsmdPreviewStaffSystemEdge[] = []
-  for (let index = 0; index + 1 < staffGroups.length; index += 2) {
-    const upper = staffGroups[index]
-    const lower = staffGroups[index + 1]
-    systems.push({
-      topY: Math.min(upper.topY, lower.topY),
-      bottomY: Math.max(upper.bottomY, lower.bottomY),
-    })
-  }
-  return systems
-}
-
-function resolveOsmdPreviewPageGraphicElement(pageElement: HTMLElement): HTMLElement | null {
-  const tag = pageElement.tagName.toLowerCase()
-  if (tag === 'svg' || tag === 'canvas') return pageElement
-  return pageElement.querySelector('svg, canvas')
-}
-
-function median(values: number[]): number | null {
-  if (values.length === 0) return null
-  const sorted = values.slice().sort((left, right) => left - right)
-  const centerIndex = Math.floor(sorted.length / 2)
-  if (sorted.length % 2 === 1) return sorted[centerIndex]
-  return (sorted[centerIndex - 1] + sorted[centerIndex]) / 2
-}
-
-function estimateOsmdPreviewPxPerUnit(
-  frames: OsmdPreviewSystemFrame[],
-  staffSystems: OsmdPreviewStaffSystemEdge[],
-  matchedSystemCount: number,
-): number | null {
-  const samples: number[] = []
-  for (let index = 1; index < matchedSystemCount; index += 1) {
-    const prevFrame = frames[index - 1]
-    const nextFrame = frames[index]
-    const prevStaff = staffSystems[index - 1]
-    const nextStaff = staffSystems[index]
-    const frameTopDelta = nextFrame.y - prevFrame.y
-    const staffTopDelta = nextStaff.topY - prevStaff.topY
-    if (Math.abs(frameTopDelta) > 1e-6 && Math.abs(staffTopDelta) > 1e-6) {
-      const ratio = staffTopDelta / frameTopDelta
-      if (Number.isFinite(ratio) && ratio > 0.01 && ratio < 1000) {
-        samples.push(ratio)
-      }
-    }
-    const prevFrameBottom = prevFrame.y + prevFrame.height
-    const nextFrameBottom = nextFrame.y + nextFrame.height
-    const frameBottomDelta = nextFrameBottom - prevFrameBottom
-    const staffBottomDelta = nextStaff.bottomY - prevStaff.bottomY
-    if (Math.abs(frameBottomDelta) > 1e-6 && Math.abs(staffBottomDelta) > 1e-6) {
-      const ratio = staffBottomDelta / frameBottomDelta
-      if (Number.isFinite(ratio) && ratio > 0.01 && ratio < 1000) {
-        samples.push(ratio)
-      }
-    }
-  }
-
-  const medianSample = median(samples)
-  if (typeof medianSample === 'number' && Number.isFinite(medianSample) && medianSample > 0.01) {
-    return medianSample
-  }
-
-  if (matchedSystemCount >= 2) {
-    const firstFrame = frames[0]
-    const firstStaff = staffSystems[0]
-    const lastFrame = frames[matchedSystemCount - 1]
-    const lastStaff = staffSystems[matchedSystemCount - 1]
-    const frameDelta = lastFrame.y - firstFrame.y
-    const staffDelta = lastStaff.topY - firstStaff.topY
-    if (Math.abs(frameDelta) > 1e-6 && Math.abs(staffDelta) > 1e-6) {
-      const ratio = staffDelta / frameDelta
-      if (Number.isFinite(ratio) && ratio > 0.01 && ratio < 1000) {
-        return ratio
-      }
-    }
-  }
-
-  return null
-}
-
-function buildOsmdPreviewPageCalibrations(
-  pages: OsmdPreviewPage[],
-  renderContainer?: HTMLElement | null,
-): Map<number, OsmdPreviewPageCalibration> {
-  const calibrations = new Map<number, OsmdPreviewPageCalibration>()
-  if (!renderContainer) return calibrations
-  const pageElements = collectOsmdPreviewPages(renderContainer)
-  pages.forEach((page, pageIndex) => {
-    const rawPageElement = pageElements[pageIndex]
-    if (!rawPageElement) return
-    const pageElement = resolveOsmdPreviewPageGraphicElement(rawPageElement)
-    if (!pageElement) return
-    const frames = collectOsmdPreviewSystemFrames(page)
-    if (frames.length === 0) return
-    const staffSystems = collectOsmdPreviewStaffSystemEdges(pageElement)
-    if (staffSystems.length === 0) return
-    const matchedSystemCount = Math.min(frames.length, staffSystems.length)
-    if (matchedSystemCount <= 0) return
-    const domPageHeight = parseOsmdPreviewPageDomHeight(pageElement)
-    if (typeof domPageHeight !== 'number' || !Number.isFinite(domPageHeight) || domPageHeight <= 0) return
-    const estimatedPxPerUnit = estimateOsmdPreviewPxPerUnit(frames, staffSystems, matchedSystemCount)
-    const pageHeight = page.PositionAndShape?.Size?.height
-    const pageHeightUnits =
-      typeof pageHeight === 'number' && Number.isFinite(pageHeight) && pageHeight > 0
-        ? pageHeight
-        : A4_PAGE_HEIGHT
-    const fallbackPxPerUnit = domPageHeight / pageHeightUnits
-    const pxPerUnit =
-      typeof estimatedPxPerUnit === 'number' && Number.isFinite(estimatedPxPerUnit) && estimatedPxPerUnit > 0
-        ? estimatedPxPerUnit
-        : fallbackPxPerUnit
-    if (!Number.isFinite(pxPerUnit) || pxPerUnit <= 0) return
-    const firstFrame = frames[0]
-    const firstStaff = staffSystems[0]
-    const lastFrame = frames[matchedSystemCount - 1]
-    const lastStaff = staffSystems[matchedSystemCount - 1]
-    const topEdgeOffsetPx = firstStaff.topY - firstFrame.y * pxPerUnit
-    const bottomEdgeOffsetPx = (lastFrame.y + lastFrame.height) * pxPerUnit - lastStaff.bottomY
-    if (!Number.isFinite(topEdgeOffsetPx) || !Number.isFinite(bottomEdgeOffsetPx)) return
-    calibrations.set(pageIndex, {
-      pxPerUnit,
-      domPageHeight,
-      topEdgeOffsetPx,
-      bottomEdgeOffsetPx,
-      matchedSystemCount,
-    })
-  })
-  return calibrations
-}
-
 function setOsmdPreviewSystemY(system: OsmdPreviewMusicSystem, nextY: number): boolean {
   const box = system.PositionAndShape
   const position = box?.RelativePosition
@@ -517,7 +303,6 @@ function rebalanceOsmdPreviewVerticalSystems(
   firstPageTopMarginPx: number,
   followingPageTopMarginPx: number,
   bottomMarginPx: number,
-  renderContainer?: HTMLElement | null,
 ): OsmdPreviewRebalanceStats {
   const sheet = osmd.GraphicSheet
   const pages = sheet?.MusicPages ?? []
@@ -539,8 +324,6 @@ function rebalanceOsmdPreviewVerticalSystems(
   let hasMutated = false
   let mutatedCount = 0
   const pageSummaries: OsmdPreviewRebalanceStats['pageSummaries'] = []
-  const pageCalibrations = buildOsmdPreviewPageCalibrations(pages, renderContainer)
-
   pages.forEach((page, pageIndex) => {
     const frames = collectOsmdPreviewSystemFrames(page)
     if (frames.length === 0) {
@@ -555,65 +338,22 @@ function rebalanceOsmdPreviewVerticalSystems(
       return
     }
     const firstYBefore = frames[0].y
-
-    const pageHeight = page.PositionAndShape?.Size?.height
-    const pageHeightUnits =
-      typeof pageHeight === 'number' && Number.isFinite(pageHeight) && pageHeight > 0
-        ? pageHeight
-        : A4_PAGE_HEIGHT
-    const targetTopUi = pageIndex === 0 ? safeFirstPageTopMarginPx : safeFollowingPageTopMarginPx
-    const targetBottomUi = safeBottomMarginPx
-    const calibration = pageCalibrations.get(pageIndex)
-    const marginUiScale =
-      typeof calibration?.pxPerUnit === 'number' && Number.isFinite(calibration.pxPerUnit) && calibration.pxPerUnit > 0
-        ? calibration.pxPerUnit
-        : DEFAULT_OSMD_PREVIEW_MARGIN_UI_SCALE
-    const targetTopPx = targetTopUi * marginUiScale
-    const targetBottomPx = targetBottomUi * marginUiScale
-    let targetTop = targetTopPx
-    let targetBottom = pageHeightUnits - targetBottomPx
-    if (calibration) {
-      const calibratedTop = (targetTopPx - calibration.topEdgeOffsetPx) / calibration.pxPerUnit
-      const calibratedBottom =
-        (calibration.domPageHeight - targetBottomPx + calibration.bottomEdgeOffsetPx) / calibration.pxPerUnit
-      if (Number.isFinite(calibratedTop)) {
-        targetTop = calibratedTop
-      }
-      if (Number.isFinite(calibratedBottom)) {
-        targetBottom = calibratedBottom
+    let pageMutated = 0
+    if (pageIndex === 0) {
+      const requestedDelta = safeFirstPageTopMarginPx - safeFollowingPageTopMarginPx
+      const minDelta = -Math.max(0, firstYBefore)
+      const deltaFirstPageTop = Math.max(minDelta, requestedDelta)
+      if (Math.abs(deltaFirstPageTop) > 0.01) {
+        frames.forEach((frame) => {
+          const nextY = frame.y + deltaFirstPageTop
+          if (setOsmdPreviewSystemY(frame.system, nextY)) {
+            hasMutated = true
+            mutatedCount += 1
+            pageMutated += 1
+          }
+        })
       }
     }
-    let pageMutated = 0
-
-    const heights = frames.map((frame) => frame.height)
-    const totalHeight = heights.reduce((sum, height) => sum + height, 0)
-    const baseGaps = frames.slice(0, -1).map((frame, index) => {
-      const nextFrame = frames[index + 1]
-      const gap = nextFrame.y - (frame.y + heights[index])
-      return Math.max(0, gap)
-    })
-    const usableHeight = Math.max(totalHeight, targetBottom - targetTop)
-    const targetGapSum = Math.max(0, usableHeight - totalHeight)
-    const baseGapSum = baseGaps.reduce((sum, gap) => sum + gap, 0)
-    const targetGaps =
-      baseGaps.length === 0
-        ? []
-        : baseGapSum > 0.01
-          ? baseGaps.map((gap) => (gap / baseGapSum) * targetGapSum)
-          : baseGaps.map(() => targetGapSum / baseGaps.length)
-
-    let cursorY = targetTop
-    frames.forEach((frame, index) => {
-      if (setOsmdPreviewSystemY(frame.system, cursorY)) {
-        hasMutated = true
-        mutatedCount += 1
-        pageMutated += 1
-      }
-      cursorY += heights[index]
-      if (index < targetGaps.length) {
-        cursorY += targetGaps[index]
-      }
-    })
     pageSummaries.push({
       pageIndex,
       frameCount: frames.length,
@@ -636,8 +376,6 @@ function rebalanceOsmdPreviewVerticalSystems(
       drawer.backend.clear()
     } else if (drawer.clear) {
       drawer.clear()
-    } else if (renderContainer) {
-      renderContainer.querySelectorAll('svg, canvas').forEach((node) => node.remove())
     }
     osmd.Drawer?.drawSheet(sheet)
   }
@@ -1438,8 +1176,8 @@ function App() {
         applyOsmdPreviewHorizontalMargins(previewInstance, osmdPreviewHorizontalMarginPxRef.current)
         applyOsmdPreviewVerticalMargins(
           previewInstance,
-          DEFAULT_OSMD_PREVIEW_FOLLOWING_PAGE_TOP_MARGIN_PX,
-          DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX,
+          osmdPreviewTopMarginPxRef.current,
+          osmdPreviewBottomMarginPxRef.current,
         )
         osmd.Zoom = clampOsmdPreviewZoomPercent(osmdPreviewZoomPercent) / 100
         osmd.render()
@@ -1448,7 +1186,6 @@ function App() {
           osmdPreviewFirstPageTopMarginPxRef.current,
           osmdPreviewTopMarginPxRef.current,
           osmdPreviewBottomMarginPxRef.current,
-          container,
         )
         if (canceled) return
         osmdPreviewInstanceRef.current = previewInstance
@@ -1492,14 +1229,13 @@ function App() {
     if (Math.abs(osmd.Zoom - nextZoom) < 1e-6) return
     osmd.Zoom = nextZoom
     osmd.render()
-    const container = osmdPreviewContainerRef.current
     osmdPreviewLastRebalanceStatsRef.current = rebalanceOsmdPreviewVerticalSystems(
       osmd,
       osmdPreviewFirstPageTopMarginPxRef.current,
       osmdPreviewTopMarginPxRef.current,
       osmdPreviewBottomMarginPxRef.current,
-      container,
     )
+    const container = osmdPreviewContainerRef.current
     if (!container) return
     const renderedPages = collectOsmdPreviewPages(container)
     osmdPreviewPagesRef.current = renderedPages
@@ -1507,7 +1243,7 @@ function App() {
     const nextPageCount = Math.max(1, renderedPages.length, graphicPageCount)
     setOsmdPreviewPageCount(nextPageCount)
     applyOsmdPreviewPageVisibility(renderedPages, osmdPreviewPageIndex)
-  }, [isOsmdPreviewOpen, osmdPreviewZoomPercent, osmdPreviewPageIndex])
+  }, [isOsmdPreviewOpen, osmdPreviewZoomPercent])
 
   useEffect(() => {
     if (!isOsmdPreviewOpen) return
@@ -1516,8 +1252,8 @@ function App() {
     applyOsmdPreviewHorizontalMargins(osmd, osmdPreviewHorizontalMarginPx)
     applyOsmdPreviewVerticalMargins(
       osmd,
-      DEFAULT_OSMD_PREVIEW_FOLLOWING_PAGE_TOP_MARGIN_PX,
-      DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX,
+      osmdPreviewTopMarginPx,
+      osmdPreviewBottomMarginPx,
     )
     osmd.render()
     const container = osmdPreviewContainerRef.current
@@ -1526,7 +1262,6 @@ function App() {
       osmdPreviewFirstPageTopMarginPx,
       osmdPreviewTopMarginPx,
       osmdPreviewBottomMarginPx,
-      container,
     )
     if (!container) return
     const renderedPages = collectOsmdPreviewPages(container)
@@ -1538,33 +1273,30 @@ function App() {
   }, [
     isOsmdPreviewOpen,
     osmdPreviewHorizontalMarginPx,
+    osmdPreviewTopMarginPx,
+    osmdPreviewBottomMarginPx,
   ])
 
   useEffect(() => {
     if (!isOsmdPreviewOpen) return
     const osmd = osmdPreviewInstanceRef.current
     if (!osmd) return
-    const container = osmdPreviewContainerRef.current
     osmdPreviewLastRebalanceStatsRef.current = rebalanceOsmdPreviewVerticalSystems(
       osmd,
       osmdPreviewFirstPageTopMarginPx,
       osmdPreviewTopMarginPx,
       osmdPreviewBottomMarginPx,
-      container,
     )
+    const container = osmdPreviewContainerRef.current
     if (!container) return
     const renderedPages = collectOsmdPreviewPages(container)
     osmdPreviewPagesRef.current = renderedPages
-    const graphicPageCount = osmd.GraphicSheet?.MusicPages?.length ?? 0
-    const nextPageCount = Math.max(1, renderedPages.length, graphicPageCount)
-    setOsmdPreviewPageCount(nextPageCount)
     applyOsmdPreviewPageVisibility(renderedPages, osmdPreviewPageIndex)
   }, [
     isOsmdPreviewOpen,
     osmdPreviewFirstPageTopMarginPx,
     osmdPreviewTopMarginPx,
     osmdPreviewBottomMarginPx,
-    osmdPreviewPageIndex,
   ])
 
   useEffect(() => {
