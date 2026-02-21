@@ -81,7 +81,14 @@ const DEFAULT_OSMD_PREVIEW_HORIZONTAL_MARGIN_PX = 9
 const DEFAULT_OSMD_PREVIEW_FIRST_PAGE_TOP_MARGIN_PX = 10
 const DEFAULT_OSMD_PREVIEW_FOLLOWING_PAGE_TOP_MARGIN_PX = 10
 const DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX = 10
+const OSMD_PREVIEW_LAYOUT_TOP_MARGIN_PX = DEFAULT_OSMD_PREVIEW_FOLLOWING_PAGE_TOP_MARGIN_PX
 const OSMD_PREVIEW_SPARSE_SYSTEM_COUNT = 4
+const OSMD_PREVIEW_MIN_SYSTEM_GAP_PX = 1
+const OSMD_PREVIEW_REPAGINATION_MIN_FRAME_COUNT = 2
+const OSMD_PREVIEW_REPAGINATION_SHORTFALL_EPS = 0.01
+const OSMD_PREVIEW_REPAGINATION_MAX_ATTEMPTS = 12
+const OSMD_PREVIEW_REPAGINATION_MIN_STEP_PX = 2
+const OSMD_PREVIEW_REPAGINATION_MAX_STEP_PX = 12
 const PDF_CJK_FONT_FAMILY = 'NotoSansSC'
 const PDF_CJK_FONT_FILE_NAME = 'NotoSansSC-Regular.ttf'
 const PDF_CJK_FONT_URL = new URL('./assets/fonts/NotoSansSC-Regular.ttf', import.meta.url).href
@@ -348,6 +355,7 @@ type OsmdPreviewEngravingRules = {
   PageRightMargin: number
   PageTopMargin: number
   PageBottomMargin: number
+  PageHeight?: number
 }
 type OsmdPreviewDrawer = {
   drawSheet: (graphicalSheet: unknown) => void
@@ -373,6 +381,10 @@ type OsmdPreviewRebalanceStats = {
   targetFirstTop: number
   targetFollowingTop: number
   targetBottom: number
+  layoutBottom: number
+  minSystemGap: number
+  repaginationAttempts: number
+  requiresRepagination: boolean
   pageSummaries: Array<{
     pageIndex: number
     frameCount: number
@@ -380,6 +392,9 @@ type OsmdPreviewRebalanceStats = {
     mode: 'sparse' | 'distributed'
     firstYBefore: number | null
     firstYAfter: number | null
+    gapCount: number
+    minGapShortfall: number
+    bottomGapAfter: number | null
   }>
 }
 
@@ -438,12 +453,15 @@ function rebalanceOsmdPreviewVerticalSystems(
   firstPageTopMarginPx: number,
   followingPageTopMarginPx: number,
   bottomMarginPx: number,
+  layoutBottomMarginPx = bottomMarginPx,
+  repaginationAttempts = 0,
 ): OsmdPreviewRebalanceStats {
   const sheet = osmd.GraphicSheet
   const pages = sheet?.MusicPages ?? []
   const safeFirstPageTopMarginPx = clampOsmdPreviewTopMarginPx(firstPageTopMarginPx)
   const safeFollowingPageTopMarginPx = clampOsmdPreviewTopMarginPx(followingPageTopMarginPx)
   const safeBottomMarginPx = clampOsmdPreviewBottomMarginPx(bottomMarginPx)
+  const safeLayoutBottomMarginPx = clampOsmdPreviewBottomMarginPx(layoutBottomMarginPx)
   if (!sheet || pages.length === 0) {
     return {
       executed: false,
@@ -452,12 +470,31 @@ function rebalanceOsmdPreviewVerticalSystems(
       targetFirstTop: safeFirstPageTopMarginPx,
       targetFollowingTop: safeFollowingPageTopMarginPx,
       targetBottom: safeBottomMarginPx,
+      layoutBottom: safeLayoutBottomMarginPx,
+      minSystemGap: OSMD_PREVIEW_MIN_SYSTEM_GAP_PX,
+      repaginationAttempts,
+      requiresRepagination: false,
       pageSummaries: [],
     }
   }
 
   let hasMutated = false
   let mutatedCount = 0
+  let requiresRepagination = false
+  const rulePageHeight = osmd.EngravingRules?.PageHeight
+  const hasRulePageHeight = typeof rulePageHeight === 'number' && Number.isFinite(rulePageHeight) && rulePageHeight > 0
+  const referencePageHeightUnits = pages.reduce((maxHeight, page) => {
+    const candidate = page.PositionAndShape?.Size?.height
+    if (typeof candidate !== 'number' || !Number.isFinite(candidate) || candidate <= 0) {
+      return maxHeight
+    }
+    return Math.max(maxHeight, candidate)
+  }, 0)
+  const normalizedPageHeightUnits = hasRulePageHeight
+    ? rulePageHeight
+    : referencePageHeightUnits > 0
+      ? referencePageHeightUnits
+      : A4_PAGE_HEIGHT
   const pageSummaries: OsmdPreviewRebalanceStats['pageSummaries'] = []
   pages.forEach((page, pageIndex) => {
     const frames = collectOsmdPreviewSystemFrames(page)
@@ -469,26 +506,68 @@ function rebalanceOsmdPreviewVerticalSystems(
         mode: 'distributed',
         firstYBefore: null,
         firstYAfter: null,
+        gapCount: 0,
+        minGapShortfall: 0,
+        bottomGapAfter: null,
       })
       return
     }
     const firstYBefore = frames[0].y
+    const pageHeightUnits = normalizedPageHeightUnits
+
     let pageMutated = 0
-    if (pageIndex === 0) {
-      const requestedDelta = safeFirstPageTopMarginPx - safeFollowingPageTopMarginPx
-      const minDelta = -Math.max(0, firstYBefore)
-      const deltaFirstPageTop = Math.max(minDelta, requestedDelta)
-      if (Math.abs(deltaFirstPageTop) > 0.01) {
-        frames.forEach((frame) => {
-          const nextY = frame.y + deltaFirstPageTop
-          if (setOsmdPreviewSystemY(frame.system, nextY)) {
-            hasMutated = true
-            mutatedCount += 1
-            pageMutated += 1
-          }
-        })
-      }
+
+    const heights = frames.map((frame) => frame.height)
+    const sourceGaps = frames.slice(0, -1).map((frame, index) => {
+      const next = frames[index + 1]
+      const gap = next.y - (frame.y + heights[index])
+      return Math.max(0, gap)
+    })
+    const sourceGapSum = sourceGaps.reduce((sum, gap) => sum + gap, 0)
+    const targetTop = pageIndex === 0 ? safeFirstPageTopMarginPx : safeFollowingPageTopMarginPx
+    const gapCount = sourceGaps.length
+    const minGapTotal = gapCount * OSMD_PREVIEW_MIN_SYSTEM_GAP_PX
+    const heightSum = heights.reduce((sum, height) => sum + height, 0)
+    const targetBottom = safeBottomMarginPx
+    const minRequiredSpan = heightSum + minGapTotal
+    const maxFeasibleTop = Math.max(0, pageHeightUnits - targetBottom - minRequiredSpan)
+    const appliedTop = Math.min(targetTop, maxFeasibleTop)
+    const topShortfall = Math.max(0, targetTop - appliedTop)
+    const availableSpan = Math.max(0, pageHeightUnits - appliedTop - targetBottom)
+    const contentShortfall = Math.max(0, minRequiredSpan - availableSpan)
+    const minGapShortfall = topShortfall + contentShortfall
+    const extraGapSpan = Math.max(0, availableSpan - minRequiredSpan)
+    const targetGaps =
+      gapCount === 0
+        ? []
+        : sourceGapSum > 1e-6
+          ? sourceGaps.map((gap) => OSMD_PREVIEW_MIN_SYSTEM_GAP_PX + (gap / sourceGapSum) * extraGapSpan)
+          : sourceGaps.map(() => OSMD_PREVIEW_MIN_SYSTEM_GAP_PX + extraGapSpan / gapCount)
+    if (
+      minGapShortfall > OSMD_PREVIEW_REPAGINATION_SHORTFALL_EPS &&
+      frames.length >= OSMD_PREVIEW_REPAGINATION_MIN_FRAME_COUNT
+    ) {
+      requiresRepagination = true
     }
+
+    let cursorY = appliedTop
+    frames.forEach((frame, index) => {
+      if (setOsmdPreviewSystemY(frame.system, cursorY)) {
+        hasMutated = true
+        mutatedCount += 1
+        pageMutated += 1
+      }
+      cursorY += heights[index]
+      if (index < targetGaps.length) {
+        cursorY += targetGaps[index]
+      }
+    })
+    const lastFrameAfter = frames[frames.length - 1]
+    const lastFrameAfterY = lastFrameAfter.system.PositionAndShape?.RelativePosition?.y
+    const bottomGapAfter =
+      typeof lastFrameAfterY === 'number' && Number.isFinite(lastFrameAfterY)
+        ? Number((pageHeightUnits - (lastFrameAfterY + lastFrameAfter.height)).toFixed(3))
+        : null
     pageSummaries.push({
       pageIndex,
       frameCount: frames.length,
@@ -496,6 +575,9 @@ function rebalanceOsmdPreviewVerticalSystems(
       mode: frames.length <= OSMD_PREVIEW_SPARSE_SYSTEM_COUNT ? 'sparse' : 'distributed',
       firstYBefore,
       firstYAfter: frames[0].system.PositionAndShape?.RelativePosition?.y ?? null,
+      gapCount,
+      minGapShortfall: Number(minGapShortfall.toFixed(3)),
+      bottomGapAfter,
     })
   })
 
@@ -521,7 +603,65 @@ function rebalanceOsmdPreviewVerticalSystems(
     targetFirstTop: safeFirstPageTopMarginPx,
     targetFollowingTop: safeFollowingPageTopMarginPx,
     targetBottom: safeBottomMarginPx,
+    layoutBottom: safeLayoutBottomMarginPx,
+    minSystemGap: OSMD_PREVIEW_MIN_SYSTEM_GAP_PX,
+    repaginationAttempts,
+    requiresRepagination,
     pageSummaries,
+  }
+}
+
+function renderAndRebalanceOsmdPreview(
+  osmd: OsmdPreviewInstance,
+  horizontalMarginPx: number,
+  firstPageTopMarginPx: number,
+  followingPageTopMarginPx: number,
+  bottomMarginPx: number,
+): OsmdPreviewRebalanceStats {
+  const safeHorizontalMarginPx = clampOsmdPreviewHorizontalMarginPx(horizontalMarginPx)
+  const safeBottomMarginPx = clampOsmdPreviewBottomMarginPx(bottomMarginPx)
+  applyOsmdPreviewHorizontalMargins(osmd, safeHorizontalMarginPx)
+
+  const baseLayoutBottomPx = clampOsmdPreviewBottomMarginPx(
+    Math.min(safeBottomMarginPx, DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX),
+  )
+  let layoutBottomPx = baseLayoutBottomPx
+  let attempt = 0
+  while (true) {
+    applyOsmdPreviewVerticalMargins(osmd, OSMD_PREVIEW_LAYOUT_TOP_MARGIN_PX, layoutBottomPx)
+    osmd.render()
+    const stats = rebalanceOsmdPreviewVerticalSystems(
+      osmd,
+      firstPageTopMarginPx,
+      followingPageTopMarginPx,
+      safeBottomMarginPx,
+      layoutBottomPx,
+      attempt,
+    )
+    const maxShortfall = stats.pageSummaries.reduce(
+      (maxValue, summary) =>
+        summary.frameCount >= OSMD_PREVIEW_REPAGINATION_MIN_FRAME_COUNT
+          ? Math.max(maxValue, summary.minGapShortfall)
+          : maxValue,
+      0,
+    )
+    if (!stats.requiresRepagination || maxShortfall <= OSMD_PREVIEW_REPAGINATION_SHORTFALL_EPS) {
+      return stats
+    }
+    if (attempt >= OSMD_PREVIEW_REPAGINATION_MAX_ATTEMPTS || layoutBottomPx >= 180) {
+      return stats
+    }
+    const step = clampNumber(
+      Math.ceil(maxShortfall * 0.25),
+      OSMD_PREVIEW_REPAGINATION_MIN_STEP_PX,
+      OSMD_PREVIEW_REPAGINATION_MAX_STEP_PX,
+    )
+    const nextLayoutBottomPx = clampOsmdPreviewBottomMarginPx(layoutBottomPx + step)
+    if (nextLayoutBottomPx <= layoutBottomPx) {
+      return stats
+    }
+    layoutBottomPx = nextLayoutBottomPx
+    attempt += 1
   }
 }
 
@@ -1408,16 +1548,10 @@ function App() {
         await osmd.load(osmdPreviewXml)
         if (canceled) return
         const previewInstance = osmd as unknown as OsmdPreviewInstance
-        applyOsmdPreviewHorizontalMargins(previewInstance, osmdPreviewHorizontalMarginPxRef.current)
-        applyOsmdPreviewVerticalMargins(
-          previewInstance,
-          osmdPreviewTopMarginPxRef.current,
-          osmdPreviewBottomMarginPxRef.current,
-        )
         osmd.Zoom = clampOsmdPreviewZoomPercent(osmdPreviewZoomPercent) / 100
-        osmd.render()
-        osmdPreviewLastRebalanceStatsRef.current = rebalanceOsmdPreviewVerticalSystems(
+        osmdPreviewLastRebalanceStatsRef.current = renderAndRebalanceOsmdPreview(
           previewInstance,
+          osmdPreviewHorizontalMarginPxRef.current,
           osmdPreviewFirstPageTopMarginPxRef.current,
           osmdPreviewTopMarginPxRef.current,
           osmdPreviewBottomMarginPxRef.current,
@@ -1463,9 +1597,9 @@ function App() {
     const nextZoom = clampOsmdPreviewZoomPercent(osmdPreviewZoomPercent) / 100
     if (Math.abs(osmd.Zoom - nextZoom) < 1e-6) return
     osmd.Zoom = nextZoom
-    osmd.render()
-    osmdPreviewLastRebalanceStatsRef.current = rebalanceOsmdPreviewVerticalSystems(
+    osmdPreviewLastRebalanceStatsRef.current = renderAndRebalanceOsmdPreview(
       osmd,
+      osmdPreviewHorizontalMarginPxRef.current,
       osmdPreviewFirstPageTopMarginPxRef.current,
       osmdPreviewTopMarginPxRef.current,
       osmdPreviewBottomMarginPxRef.current,
@@ -1484,16 +1618,10 @@ function App() {
     if (!isOsmdPreviewOpen) return
     const osmd = osmdPreviewInstanceRef.current
     if (!osmd) return
-    applyOsmdPreviewHorizontalMargins(osmd, osmdPreviewHorizontalMarginPx)
-    applyOsmdPreviewVerticalMargins(
-      osmd,
-      osmdPreviewTopMarginPx,
-      osmdPreviewBottomMarginPx,
-    )
-    osmd.render()
     const container = osmdPreviewContainerRef.current
-    osmdPreviewLastRebalanceStatsRef.current = rebalanceOsmdPreviewVerticalSystems(
+    osmdPreviewLastRebalanceStatsRef.current = renderAndRebalanceOsmdPreview(
       osmd,
+      osmdPreviewHorizontalMarginPx,
       osmdPreviewFirstPageTopMarginPx,
       osmdPreviewTopMarginPx,
       osmdPreviewBottomMarginPx,
@@ -1508,27 +1636,6 @@ function App() {
   }, [
     isOsmdPreviewOpen,
     osmdPreviewHorizontalMarginPx,
-    osmdPreviewTopMarginPx,
-    osmdPreviewBottomMarginPx,
-  ])
-
-  useEffect(() => {
-    if (!isOsmdPreviewOpen) return
-    const osmd = osmdPreviewInstanceRef.current
-    if (!osmd) return
-    osmdPreviewLastRebalanceStatsRef.current = rebalanceOsmdPreviewVerticalSystems(
-      osmd,
-      osmdPreviewFirstPageTopMarginPx,
-      osmdPreviewTopMarginPx,
-      osmdPreviewBottomMarginPx,
-    )
-    const container = osmdPreviewContainerRef.current
-    if (!container) return
-    const renderedPages = collectOsmdPreviewPages(container)
-    osmdPreviewPagesRef.current = renderedPages
-    applyOsmdPreviewPageVisibility(renderedPages, osmdPreviewPageIndex)
-  }, [
-    isOsmdPreviewOpen,
     osmdPreviewFirstPageTopMarginPx,
     osmdPreviewTopMarginPx,
     osmdPreviewBottomMarginPx,
@@ -1968,10 +2075,12 @@ function App() {
       return {
         hasPreview: false,
         pageCount: 0,
-      pages: [] as Array<{
+        pages: [] as Array<{
           pageIndex: number
           pageHeight: number | null
+          pageHeightRaw: number | null
           bottomGap: number | null
+          bottomGapRaw: number | null
           systemCount: number
           systemY: number[]
           systemHeights: number[]
@@ -1979,28 +2088,51 @@ function App() {
       }
     }
     const pages = osmd.GraphicSheet?.MusicPages ?? []
+    const rulePageHeight = osmd.EngravingRules?.PageHeight
+    const hasRulePageHeight =
+      typeof rulePageHeight === 'number' && Number.isFinite(rulePageHeight) && rulePageHeight > 0
+    const referencePageHeight = pages.reduce((maxHeight, page) => {
+      const candidate = page.PositionAndShape?.Size?.height
+      if (typeof candidate !== 'number' || !Number.isFinite(candidate) || candidate <= 0) {
+        return maxHeight
+      }
+      return Math.max(maxHeight, candidate)
+    }, 0)
+    const normalizedPageHeight = hasRulePageHeight
+      ? rulePageHeight
+      : referencePageHeight > 0
+        ? referencePageHeight
+        : null
     return {
       hasPreview: true,
       pageCount: pages.length,
       pages: pages.map((page, pageIndex) => {
         const systems = page.MusicSystems ?? []
+        const rawPageHeight =
+          typeof page.PositionAndShape?.Size?.height === 'number' && Number.isFinite(page.PositionAndShape.Size.height)
+            ? Number(page.PositionAndShape.Size.height.toFixed(3))
+            : null
+        const lastSystemBottom =
+          systems.length > 0
+            ? (systems[systems.length - 1].PositionAndShape?.RelativePosition?.y ?? 0) +
+              (systems[systems.length - 1].PositionAndShape?.Size?.height ?? 0)
+            : null
         return {
           pageIndex,
-          pageHeight:
-            typeof page.PositionAndShape?.Size?.height === 'number' && Number.isFinite(page.PositionAndShape.Size.height)
-              ? Number(page.PositionAndShape.Size.height.toFixed(3))
-              : null,
+          pageHeight: normalizedPageHeight !== null ? Number(normalizedPageHeight.toFixed(3)) : rawPageHeight,
+          pageHeightRaw: rawPageHeight,
           bottomGap:
-            typeof page.PositionAndShape?.Size?.height === 'number' &&
-            Number.isFinite(page.PositionAndShape.Size.height) &&
-            systems.length > 0
+            normalizedPageHeight !== null && typeof lastSystemBottom === 'number' && Number.isFinite(lastSystemBottom)
               ? Number(
                   (
-                    page.PositionAndShape.Size.height -
-                    ((systems[systems.length - 1].PositionAndShape?.RelativePosition?.y ?? 0) +
-                      (systems[systems.length - 1].PositionAndShape?.Size?.height ?? 0))
+                    normalizedPageHeight -
+                    lastSystemBottom
                   ).toFixed(3),
                 )
+              : null,
+          bottomGapRaw:
+            rawPageHeight !== null && typeof lastSystemBottom === 'number' && Number.isFinite(lastSystemBottom)
+              ? Number((rawPageHeight - lastSystemBottom).toFixed(3))
               : null,
           systemCount: systems.length,
           systemY: systems.map((system) => {
@@ -2050,6 +2182,7 @@ function App() {
       dumpAllMeasureCoordinates: () => dumpAllMeasureCoordinateReport(),
       getOsmdPreviewSystemMetrics: () => dumpOsmdPreviewSystemMetrics(),
       getOsmdPreviewRebalanceStats: () => osmdPreviewLastRebalanceStatsRef.current,
+      getOsmdPreviewInstance: () => osmdPreviewInstanceRef.current,
       getDragPreviewFrames: () =>
         dragDebugFramesRef.current.map((frame) => ({
           ...frame,
