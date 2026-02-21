@@ -78,8 +78,10 @@ const HORIZONTAL_RENDER_EDGE_BUFFER_MEASURES = 1
 const DEFAULT_TIME_SIGNATURE: TimeSignature = { beats: 4, beatType: 4 }
 const OSMD_PREVIEW_ZOOM_DEBOUNCE_MS = 120
 const DEFAULT_OSMD_PREVIEW_HORIZONTAL_MARGIN_PX = 9
-const DEFAULT_OSMD_PREVIEW_TOP_MARGIN_PX = 10
+const DEFAULT_OSMD_PREVIEW_FIRST_PAGE_TOP_MARGIN_PX = 10
+const DEFAULT_OSMD_PREVIEW_FOLLOWING_PAGE_TOP_MARGIN_PX = 10
 const DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX = 10
+const OSMD_PREVIEW_SPARSE_SYSTEM_COUNT = 4
 
 const PITCHES: Pitch[] = createPianoPitches()
 const INITIAL_BASS_NOTES: ScoreNote[] = buildBassMockNotes(INITIAL_NOTES)
@@ -142,7 +144,7 @@ function clampOsmdPreviewHorizontalMarginPx(value: number): number {
 }
 
 function clampOsmdPreviewTopMarginPx(value: number): number {
-  if (!Number.isFinite(value)) return DEFAULT_OSMD_PREVIEW_TOP_MARGIN_PX
+  if (!Number.isFinite(value)) return DEFAULT_OSMD_PREVIEW_FOLLOWING_PAGE_TOP_MARGIN_PX
   return Math.max(0, Math.min(180, Math.round(value)))
 }
 
@@ -187,15 +189,253 @@ function applyOsmdPreviewPageVisibility(pages: HTMLElement[], pageIndex: number)
   })
 }
 
+type OsmdPreviewPoint = { x: number; y: number }
+type OsmdPreviewSize = { width: number; height: number }
+type OsmdPreviewBoundingBox = {
+  RelativePosition?: OsmdPreviewPoint
+  AbsolutePosition?: OsmdPreviewPoint
+  Size?: OsmdPreviewSize
+  ChildElements?: OsmdPreviewBoundingBox[]
+}
+type OsmdPreviewMusicSystem = {
+  PositionAndShape?: OsmdPreviewBoundingBox
+}
+type OsmdPreviewPage = {
+  MusicSystems?: OsmdPreviewMusicSystem[]
+  PositionAndShape?: OsmdPreviewBoundingBox
+}
+type OsmdPreviewGraphicalSheet = {
+  MusicPages?: OsmdPreviewPage[]
+  reCalculate?: () => void
+}
+type OsmdPreviewEngravingRules = {
+  PageLeftMargin: number
+  PageRightMargin: number
+  PageTopMargin: number
+  PageBottomMargin: number
+}
+type OsmdPreviewDrawer = {
+  drawSheet: (graphicalSheet: unknown) => void
+}
 type OsmdPreviewInstance = {
   Zoom: number
   render: () => void
-  GraphicSheet?: { MusicPages?: unknown[] }
-  EngravingRules?: {
-    PageLeftMargin: number
-    PageRightMargin: number
-    PageTopMargin: number
-    PageBottomMargin: number
+  GraphicSheet?: OsmdPreviewGraphicalSheet
+  Drawer?: OsmdPreviewDrawer
+  EngravingRules?: OsmdPreviewEngravingRules
+}
+
+type OsmdPreviewSystemFrame = {
+  system: OsmdPreviewMusicSystem
+  y: number
+  height: number
+}
+
+type OsmdPreviewRebalanceStats = {
+  executed: boolean
+  pageCount: number
+  mutatedCount: number
+  targetFirstTop: number
+  targetFollowingTop: number
+  targetBottom: number
+  pageSummaries: Array<{
+    pageIndex: number
+    frameCount: number
+    mutated: number
+    mode: 'sparse' | 'distributed'
+    firstYBefore: number | null
+    firstYAfter: number | null
+  }>
+}
+
+function collectOsmdPreviewSystemFrames(page: OsmdPreviewPage): OsmdPreviewSystemFrame[] {
+  const systems = page.MusicSystems ?? []
+  return systems
+    .map((system) => {
+      const box = system.PositionAndShape
+      const y = box?.RelativePosition?.y
+      const height = box?.Size?.height
+      if (
+        typeof y !== 'number' ||
+        !Number.isFinite(y) ||
+        typeof height !== 'number' ||
+        !Number.isFinite(height)
+      ) {
+        return null
+      }
+      return {
+        system,
+        y,
+        height: Math.max(0, height),
+      }
+    })
+    .filter((frame): frame is OsmdPreviewSystemFrame => frame !== null)
+    .sort((left, right) => left.y - right.y)
+}
+
+function setOsmdPreviewSystemY(system: OsmdPreviewMusicSystem, nextY: number): boolean {
+  const box = system.PositionAndShape
+  const position = box?.RelativePosition
+  if (!position || !Number.isFinite(position.y) || !Number.isFinite(nextY)) return false
+  const delta = nextY - position.y
+  if (Math.abs(delta) < 0.01) return false
+  position.y = nextY
+  const absolute = box?.AbsolutePosition
+  if (absolute && Number.isFinite(absolute.y)) {
+    absolute.y += delta
+  }
+  const shiftAbsoluteTreeY = (target: OsmdPreviewBoundingBox | undefined): void => {
+    if (!target || !target.ChildElements || target.ChildElements.length === 0) return
+    target.ChildElements.forEach((child) => {
+      const childAbsolute = child.AbsolutePosition
+      if (childAbsolute && Number.isFinite(childAbsolute.y)) {
+        childAbsolute.y += delta
+      }
+      shiftAbsoluteTreeY(child)
+    })
+  }
+  shiftAbsoluteTreeY(box)
+  return true
+}
+
+function rebalanceOsmdPreviewVerticalSystems(
+  osmd: OsmdPreviewInstance,
+  firstPageTopMarginPx: number,
+  followingPageTopMarginPx: number,
+  bottomMarginPx: number,
+  renderContainer?: HTMLElement | null,
+): OsmdPreviewRebalanceStats {
+  const sheet = osmd.GraphicSheet
+  const pages = sheet?.MusicPages ?? []
+  const safeFirstPageTopMarginPx = clampOsmdPreviewTopMarginPx(firstPageTopMarginPx)
+  const safeFollowingPageTopMarginPx = clampOsmdPreviewTopMarginPx(followingPageTopMarginPx)
+  const safeBottomMarginPx = clampOsmdPreviewBottomMarginPx(bottomMarginPx)
+  if (!sheet || pages.length === 0) {
+    return {
+      executed: false,
+      pageCount: pages.length,
+      mutatedCount: 0,
+      targetFirstTop: safeFirstPageTopMarginPx,
+      targetFollowingTop: safeFollowingPageTopMarginPx,
+      targetBottom: safeBottomMarginPx,
+      pageSummaries: [],
+    }
+  }
+
+  let hasMutated = false
+  let mutatedCount = 0
+  const pageSummaries: OsmdPreviewRebalanceStats['pageSummaries'] = []
+
+  pages.forEach((page, pageIndex) => {
+    const frames = collectOsmdPreviewSystemFrames(page)
+    if (frames.length === 0) {
+      pageSummaries.push({
+        pageIndex,
+        frameCount: 0,
+        mutated: 0,
+        mode: 'distributed',
+        firstYBefore: null,
+        firstYAfter: null,
+      })
+      return
+    }
+    const firstYBefore = frames[0].y
+
+    const pageHeight = page.PositionAndShape?.Size?.height
+    const pageHeightUnits =
+      typeof pageHeight === 'number' && Number.isFinite(pageHeight) && pageHeight > 0
+        ? pageHeight
+        : A4_PAGE_HEIGHT
+    const targetTop = pageIndex === 0 ? safeFirstPageTopMarginPx : safeFollowingPageTopMarginPx
+    const targetBottom = pageHeightUnits - safeBottomMarginPx
+    let pageMutated = 0
+
+    if (frames.length <= OSMD_PREVIEW_SPARSE_SYSTEM_COUNT) {
+      const offset = targetTop - frames[0].y
+      if (Math.abs(offset) >= 0.01) {
+        frames.forEach((frame) => {
+          if (setOsmdPreviewSystemY(frame.system, frame.y + offset)) {
+            hasMutated = true
+            mutatedCount += 1
+            pageMutated += 1
+          }
+        })
+      }
+      pageSummaries.push({
+        pageIndex,
+        frameCount: frames.length,
+        mutated: pageMutated,
+        mode: 'sparse',
+        firstYBefore,
+        firstYAfter: frames[0].system.PositionAndShape?.RelativePosition?.y ?? null,
+      })
+      return
+    }
+
+    const heights = frames.map((frame) => frame.height)
+    const totalHeight = heights.reduce((sum, height) => sum + height, 0)
+    const baseGaps = frames.slice(0, -1).map((frame, index) => {
+      const nextFrame = frames[index + 1]
+      const gap = nextFrame.y - (frame.y + heights[index])
+      return Math.max(0, gap)
+    })
+    const usableHeight = Math.max(totalHeight, targetBottom - targetTop)
+    const targetGapSum = Math.max(0, usableHeight - totalHeight)
+    const baseGapSum = baseGaps.reduce((sum, gap) => sum + gap, 0)
+    const targetGaps =
+      baseGaps.length === 0
+        ? []
+        : baseGapSum > 0.01
+          ? baseGaps.map((gap) => (gap / baseGapSum) * targetGapSum)
+          : baseGaps.map(() => targetGapSum / baseGaps.length)
+
+    let cursorY = targetTop
+    frames.forEach((frame, index) => {
+      if (setOsmdPreviewSystemY(frame.system, cursorY)) {
+        hasMutated = true
+        mutatedCount += 1
+        pageMutated += 1
+      }
+      cursorY += heights[index]
+      if (index < targetGaps.length) {
+        cursorY += targetGaps[index]
+      }
+    })
+    pageSummaries.push({
+      pageIndex,
+      frameCount: frames.length,
+      mutated: pageMutated,
+      mode: 'distributed',
+      firstYBefore,
+      firstYAfter: frames[0].system.PositionAndShape?.RelativePosition?.y ?? null,
+    })
+  })
+
+  if (hasMutated) {
+    const drawer = osmd.Drawer as unknown as {
+      clear?: () => void
+      backend?: { clear?: () => void }
+      Backends?: Array<{ clear?: () => void }>
+    }
+    if (Array.isArray(drawer.Backends) && drawer.Backends.length > 0) {
+      drawer.Backends.forEach((backend) => backend.clear?.())
+    } else if (drawer.backend?.clear) {
+      drawer.backend.clear()
+    } else if (drawer.clear) {
+      drawer.clear()
+    } else if (renderContainer) {
+      renderContainer.querySelectorAll('svg, canvas').forEach((node) => node.remove())
+    }
+    osmd.Drawer?.drawSheet(sheet)
+  }
+  return {
+    executed: true,
+    pageCount: pages.length,
+    mutatedCount,
+    targetFirstTop: safeFirstPageTopMarginPx,
+    targetFollowingTop: safeFollowingPageTopMarginPx,
+    targetBottom: safeBottomMarginPx,
+    pageSummaries,
   }
 }
 
@@ -282,8 +522,11 @@ function App() {
   const [osmdPreviewHorizontalMarginPx, setOsmdPreviewHorizontalMarginPx] = useState(
     DEFAULT_OSMD_PREVIEW_HORIZONTAL_MARGIN_PX,
   )
+  const [osmdPreviewFirstPageTopMarginPx, setOsmdPreviewFirstPageTopMarginPx] = useState(
+    DEFAULT_OSMD_PREVIEW_FIRST_PAGE_TOP_MARGIN_PX,
+  )
   const [osmdPreviewTopMarginPx, setOsmdPreviewTopMarginPx] = useState(
-    DEFAULT_OSMD_PREVIEW_TOP_MARGIN_PX,
+    DEFAULT_OSMD_PREVIEW_FOLLOWING_PAGE_TOP_MARGIN_PX,
   )
   const [osmdPreviewBottomMarginPx, setOsmdPreviewBottomMarginPx] = useState(
     DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX,
@@ -300,8 +543,10 @@ function App() {
   const osmdPreviewPagesRef = useRef<HTMLElement[]>([])
   const osmdPreviewInstanceRef = useRef<OsmdPreviewInstance | null>(null)
   const osmdPreviewHorizontalMarginPxRef = useRef<number>(DEFAULT_OSMD_PREVIEW_HORIZONTAL_MARGIN_PX)
-  const osmdPreviewTopMarginPxRef = useRef<number>(DEFAULT_OSMD_PREVIEW_TOP_MARGIN_PX)
+  const osmdPreviewFirstPageTopMarginPxRef = useRef<number>(DEFAULT_OSMD_PREVIEW_FIRST_PAGE_TOP_MARGIN_PX)
+  const osmdPreviewTopMarginPxRef = useRef<number>(DEFAULT_OSMD_PREVIEW_FOLLOWING_PAGE_TOP_MARGIN_PX)
   const osmdPreviewBottomMarginPxRef = useRef<number>(DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX)
+  const osmdPreviewLastRebalanceStatsRef = useRef<OsmdPreviewRebalanceStats | null>(null)
   const osmdPreviewZoomCommitTimerRef = useRef<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const synthRef = useRef<Tone.PolySynth | null>(null)
@@ -889,6 +1134,9 @@ function App() {
   const onOsmdPreviewHorizontalMarginPxChange = useCallback((nextValue: number) => {
     setOsmdPreviewHorizontalMarginPx(clampOsmdPreviewHorizontalMarginPx(nextValue))
   }, [])
+  const onOsmdPreviewFirstPageTopMarginPxChange = useCallback((nextValue: number) => {
+    setOsmdPreviewFirstPageTopMarginPx(clampOsmdPreviewTopMarginPx(nextValue))
+  }, [])
   const onOsmdPreviewTopMarginPxChange = useCallback((nextValue: number) => {
     setOsmdPreviewTopMarginPx(clampOsmdPreviewTopMarginPx(nextValue))
   }, [])
@@ -906,6 +1154,10 @@ function App() {
   useEffect(() => {
     osmdPreviewHorizontalMarginPxRef.current = clampOsmdPreviewHorizontalMarginPx(osmdPreviewHorizontalMarginPx)
   }, [osmdPreviewHorizontalMarginPx])
+
+  useEffect(() => {
+    osmdPreviewFirstPageTopMarginPxRef.current = clampOsmdPreviewTopMarginPx(osmdPreviewFirstPageTopMarginPx)
+  }, [osmdPreviewFirstPageTopMarginPx])
 
   useEffect(() => {
     osmdPreviewTopMarginPxRef.current = clampOsmdPreviewTopMarginPx(osmdPreviewTopMarginPx)
@@ -969,16 +1221,24 @@ function App() {
         })
         await osmd.load(osmdPreviewXml)
         if (canceled) return
-        applyOsmdPreviewHorizontalMargins(osmd as OsmdPreviewInstance, osmdPreviewHorizontalMarginPxRef.current)
+        const previewInstance = osmd as unknown as OsmdPreviewInstance
+        applyOsmdPreviewHorizontalMargins(previewInstance, osmdPreviewHorizontalMarginPxRef.current)
         applyOsmdPreviewVerticalMargins(
-          osmd as OsmdPreviewInstance,
-          osmdPreviewTopMarginPxRef.current,
-          osmdPreviewBottomMarginPxRef.current,
+          previewInstance,
+          DEFAULT_OSMD_PREVIEW_FOLLOWING_PAGE_TOP_MARGIN_PX,
+          DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX,
         )
         osmd.Zoom = clampOsmdPreviewZoomPercent(osmdPreviewZoomPercent) / 100
         osmd.render()
+        osmdPreviewLastRebalanceStatsRef.current = rebalanceOsmdPreviewVerticalSystems(
+          previewInstance,
+          osmdPreviewFirstPageTopMarginPxRef.current,
+          osmdPreviewTopMarginPxRef.current,
+          osmdPreviewBottomMarginPxRef.current,
+          container,
+        )
         if (canceled) return
-        osmdPreviewInstanceRef.current = osmd
+        osmdPreviewInstanceRef.current = previewInstance
         const renderedPages = collectOsmdPreviewPages(container)
         osmdPreviewPagesRef.current = renderedPages
         const graphicPageCount = osmd.GraphicSheet?.MusicPages?.length ?? 0
@@ -1020,6 +1280,13 @@ function App() {
     osmd.Zoom = nextZoom
     osmd.render()
     const container = osmdPreviewContainerRef.current
+    osmdPreviewLastRebalanceStatsRef.current = rebalanceOsmdPreviewVerticalSystems(
+      osmd,
+      osmdPreviewFirstPageTopMarginPxRef.current,
+      osmdPreviewTopMarginPxRef.current,
+      osmdPreviewBottomMarginPxRef.current,
+      container,
+    )
     if (!container) return
     const renderedPages = collectOsmdPreviewPages(container)
     osmdPreviewPagesRef.current = renderedPages
@@ -1034,9 +1301,20 @@ function App() {
     const osmd = osmdPreviewInstanceRef.current
     if (!osmd) return
     applyOsmdPreviewHorizontalMargins(osmd, osmdPreviewHorizontalMarginPx)
-    applyOsmdPreviewVerticalMargins(osmd, osmdPreviewTopMarginPx, osmdPreviewBottomMarginPx)
+    applyOsmdPreviewVerticalMargins(
+      osmd,
+      DEFAULT_OSMD_PREVIEW_FOLLOWING_PAGE_TOP_MARGIN_PX,
+      DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX,
+    )
     osmd.render()
     const container = osmdPreviewContainerRef.current
+    osmdPreviewLastRebalanceStatsRef.current = rebalanceOsmdPreviewVerticalSystems(
+      osmd,
+      osmdPreviewFirstPageTopMarginPx,
+      osmdPreviewTopMarginPx,
+      osmdPreviewBottomMarginPx,
+      container,
+    )
     if (!container) return
     const renderedPages = collectOsmdPreviewPages(container)
     osmdPreviewPagesRef.current = renderedPages
@@ -1047,8 +1325,33 @@ function App() {
   }, [
     isOsmdPreviewOpen,
     osmdPreviewHorizontalMarginPx,
+  ])
+
+  useEffect(() => {
+    if (!isOsmdPreviewOpen) return
+    const osmd = osmdPreviewInstanceRef.current
+    if (!osmd) return
+    const container = osmdPreviewContainerRef.current
+    osmdPreviewLastRebalanceStatsRef.current = rebalanceOsmdPreviewVerticalSystems(
+      osmd,
+      osmdPreviewFirstPageTopMarginPx,
+      osmdPreviewTopMarginPx,
+      osmdPreviewBottomMarginPx,
+      container,
+    )
+    if (!container) return
+    const renderedPages = collectOsmdPreviewPages(container)
+    osmdPreviewPagesRef.current = renderedPages
+    const graphicPageCount = osmd.GraphicSheet?.MusicPages?.length ?? 0
+    const nextPageCount = Math.max(1, renderedPages.length, graphicPageCount)
+    setOsmdPreviewPageCount(nextPageCount)
+    applyOsmdPreviewPageVisibility(renderedPages, osmdPreviewPageIndex)
+  }, [
+    isOsmdPreviewOpen,
+    osmdPreviewFirstPageTopMarginPx,
     osmdPreviewTopMarginPx,
     osmdPreviewBottomMarginPx,
+    osmdPreviewPageIndex,
   ])
 
   useEffect(() => {
@@ -1057,6 +1360,7 @@ function App() {
 
   const safeOsmdPreviewPaperScalePercent = clampOsmdPreviewPaperScalePercent(osmdPreviewPaperScalePercent)
   const safeOsmdPreviewHorizontalMarginPx = clampOsmdPreviewHorizontalMarginPx(osmdPreviewHorizontalMarginPx)
+  const safeOsmdPreviewFirstPageTopMarginPx = clampOsmdPreviewTopMarginPx(osmdPreviewFirstPageTopMarginPx)
   const safeOsmdPreviewTopMarginPx = clampOsmdPreviewTopMarginPx(osmdPreviewTopMarginPx)
   const safeOsmdPreviewBottomMarginPx = clampOsmdPreviewBottomMarginPx(osmdPreviewBottomMarginPx)
   const osmdPreviewPaperScale = safeOsmdPreviewPaperScalePercent / 100
@@ -1478,6 +1782,60 @@ function App() {
     }
   }, [visibleSystemRange])
 
+  const dumpOsmdPreviewSystemMetrics = useCallback(() => {
+    const osmd = osmdPreviewInstanceRef.current
+    if (!osmd) {
+      return {
+        hasPreview: false,
+        pageCount: 0,
+      pages: [] as Array<{
+          pageIndex: number
+          pageHeight: number | null
+          bottomGap: number | null
+          systemCount: number
+          systemY: number[]
+          systemHeights: number[]
+        }>,
+      }
+    }
+    const pages = osmd.GraphicSheet?.MusicPages ?? []
+    return {
+      hasPreview: true,
+      pageCount: pages.length,
+      pages: pages.map((page, pageIndex) => {
+        const systems = page.MusicSystems ?? []
+        return {
+          pageIndex,
+          pageHeight:
+            typeof page.PositionAndShape?.Size?.height === 'number' && Number.isFinite(page.PositionAndShape.Size.height)
+              ? Number(page.PositionAndShape.Size.height.toFixed(3))
+              : null,
+          bottomGap:
+            typeof page.PositionAndShape?.Size?.height === 'number' &&
+            Number.isFinite(page.PositionAndShape.Size.height) &&
+            systems.length > 0
+              ? Number(
+                  (
+                    page.PositionAndShape.Size.height -
+                    ((systems[systems.length - 1].PositionAndShape?.RelativePosition?.y ?? 0) +
+                      (systems[systems.length - 1].PositionAndShape?.Size?.height ?? 0))
+                  ).toFixed(3),
+                )
+              : null,
+          systemCount: systems.length,
+          systemY: systems.map((system) => {
+            const y = system.PositionAndShape?.RelativePosition?.y
+            return typeof y === 'number' && Number.isFinite(y) ? Number(y.toFixed(3)) : NaN
+          }),
+          systemHeights: systems.map((system) => {
+            const h = system.PositionAndShape?.Size?.height
+            return typeof h === 'number' && Number.isFinite(h) ? Number(h.toFixed(3)) : NaN
+          }),
+        }
+      }),
+    }
+  }, [])
+
   useEffect(() => {
     return () => {
       if (firstMeasureDebugRafRef.current !== null) {
@@ -1510,6 +1868,8 @@ function App() {
         setManualScalePercent(clampScalePercent(nextPercent))
       },
       dumpAllMeasureCoordinates: () => dumpAllMeasureCoordinateReport(),
+      getOsmdPreviewSystemMetrics: () => dumpOsmdPreviewSystemMetrics(),
+      getOsmdPreviewRebalanceStats: () => osmdPreviewLastRebalanceStatsRef.current,
       getDragPreviewFrames: () =>
         dragDebugFramesRef.current.map((frame) => ({
           ...frame,
@@ -1583,6 +1943,7 @@ function App() {
   }, [
     importMusicXmlText,
     dumpAllMeasureCoordinateReport,
+    dumpOsmdPreviewSystemMetrics,
     goToPage,
     pageCount,
     safeCurrentPage,
@@ -1599,6 +1960,7 @@ function App() {
     scoreOverlayRef,
     scoreRef,
     overlayLastRectRef,
+    osmdPreviewLastRebalanceStatsRef,
     systemsPerPage,
     visibleSystemRange,
   ])
@@ -1902,35 +2264,62 @@ function App() {
                 }
                 onChange={(event) => onOsmdPreviewHorizontalMarginPxChange(Number(event.target.value))}
               />
-                <span>px</span>
-              </div>
-              <div className="osmd-preview-zoom">
-                <label htmlFor="osmd-preview-top-margin-range">顶部边距</label>
-                <input
-                  id="osmd-preview-top-margin-range"
-                  type="range"
-                  min={0}
-                  max={180}
-                  step={1}
-                  value={safeOsmdPreviewTopMarginPx}
-                  onInput={(event) =>
-                    onOsmdPreviewTopMarginPxChange(Number((event.target as HTMLInputElement).value))
-                  }
-                  onChange={(event) => onOsmdPreviewTopMarginPxChange(Number(event.target.value))}
-                />
-                <input
-                  type="number"
-                  min={0}
-                  max={180}
-                  step={1}
-                  value={safeOsmdPreviewTopMarginPx}
-                  onInput={(event) =>
-                    onOsmdPreviewTopMarginPxChange(Number((event.target as HTMLInputElement).value))
-                  }
-                  onChange={(event) => onOsmdPreviewTopMarginPxChange(Number(event.target.value))}
-                />
-                <span>px</span>
-              </div>
+              <span>px</span>
+            </div>
+            <div className="osmd-preview-zoom">
+              <label htmlFor="osmd-preview-first-top-margin-range">首页顶部</label>
+              <input
+                id="osmd-preview-first-top-margin-range"
+                type="range"
+                min={0}
+                max={180}
+                step={1}
+                value={safeOsmdPreviewFirstPageTopMarginPx}
+                onInput={(event) =>
+                  onOsmdPreviewFirstPageTopMarginPxChange(Number((event.target as HTMLInputElement).value))
+                }
+                onChange={(event) => onOsmdPreviewFirstPageTopMarginPxChange(Number(event.target.value))}
+              />
+              <input
+                type="number"
+                min={0}
+                max={180}
+                step={1}
+                value={safeOsmdPreviewFirstPageTopMarginPx}
+                onInput={(event) =>
+                  onOsmdPreviewFirstPageTopMarginPxChange(Number((event.target as HTMLInputElement).value))
+                }
+                onChange={(event) => onOsmdPreviewFirstPageTopMarginPxChange(Number(event.target.value))}
+              />
+              <span>px</span>
+            </div>
+            <div className="osmd-preview-zoom">
+              <label htmlFor="osmd-preview-top-margin-range">后续页顶部</label>
+              <input
+                id="osmd-preview-top-margin-range"
+                type="range"
+                min={0}
+                max={180}
+                step={1}
+                value={safeOsmdPreviewTopMarginPx}
+                onInput={(event) =>
+                  onOsmdPreviewTopMarginPxChange(Number((event.target as HTMLInputElement).value))
+                }
+                onChange={(event) => onOsmdPreviewTopMarginPxChange(Number(event.target.value))}
+              />
+              <input
+                type="number"
+                min={0}
+                max={180}
+                step={1}
+                value={safeOsmdPreviewTopMarginPx}
+                onInput={(event) =>
+                  onOsmdPreviewTopMarginPxChange(Number((event.target as HTMLInputElement).value))
+                }
+                onChange={(event) => onOsmdPreviewTopMarginPxChange(Number(event.target.value))}
+              />
+              <span>px</span>
+            </div>
               <div className="osmd-preview-zoom">
                 <label htmlFor="osmd-preview-bottom-margin-range">底部边距</label>
                 <input
@@ -1988,10 +2377,3 @@ function App() {
 }
 
 export default App
-
-
-
-
-
-
-
