@@ -229,6 +229,23 @@ function getSvgRenderSize(svgElement: SVGSVGElement): { width: number; height: n
   return { width: A4_PAGE_WIDTH, height: A4_PAGE_HEIGHT }
 }
 
+function getSvgCoordinateSize(svgElement: SVGSVGElement): { width: number; height: number } {
+  const viewBox = svgElement.getAttribute('viewBox')
+  if (viewBox) {
+    const parts = viewBox.trim().split(/\s+/).map(Number)
+    if (
+      parts.length === 4 &&
+      Number.isFinite(parts[2]) &&
+      Number.isFinite(parts[3]) &&
+      parts[2] > 0 &&
+      parts[3] > 0
+    ) {
+      return { width: parts[2], height: parts[3] }
+    }
+  }
+  return getSvgRenderSize(svgElement)
+}
+
 function cloneOsmdPreviewSvgForPdf(svgElement: SVGSVGElement): { svg: SVGSVGElement; width: number; height: number } {
   const svgClone = svgElement.cloneNode(true) as SVGSVGElement
   if (!svgClone.getAttribute('xmlns')) {
@@ -336,29 +353,30 @@ function applyOsmdPreviewPageNumbers(pages: HTMLElement[], visible: boolean): vo
   pages.forEach((page, index) => {
     const svg = resolveOsmdPreviewPageSvgElement(page)
     if (!svg) return
+    const pageNumber = index + 1
     const existing = svg.querySelector('.osmd-preview-page-number-overlay')
-    if (!visible) {
+    if (!visible || pageNumber <= 1) {
       existing?.remove()
       return
     }
     const svgNamespace = 'http://www.w3.org/2000/svg'
-    const { width } = getSvgRenderSize(svg)
-    const x = Math.max(28, width - 24)
-    const y = 24
+    const { width } = getSvgCoordinateSize(svg)
+    const isEvenPage = pageNumber % 2 === 0
+    const marginX = Math.max(36, width * 0.03)
+    const x = isEvenPage ? marginX : Math.max(marginX, width - marginX)
+    const y = 18
     const label = existing instanceof SVGTextElement
       ? existing
       : document.createElementNS(svgNamespace, 'text')
     label.setAttribute('class', 'osmd-preview-page-number-overlay')
-    label.setAttribute('text-anchor', 'end')
-    label.setAttribute('font-size', '20')
+    label.setAttribute('text-anchor', isEvenPage ? 'start' : 'end')
+    label.setAttribute('dominant-baseline', 'hanging')
+    label.setAttribute('font-size', '30')
     label.setAttribute('font-weight', '600')
-    label.setAttribute('fill', '#1d4ed8')
-    label.setAttribute('stroke', '#ffffff')
-    label.setAttribute('stroke-width', '1.4')
-    label.setAttribute('paint-order', 'stroke')
+    label.setAttribute('fill', '#000000')
     label.setAttribute('x', x.toFixed(3))
     label.setAttribute('y', y.toFixed(3))
-    label.textContent = `第${index + 1}页`
+    label.textContent = String(pageNumber)
     if (!(existing instanceof SVGTextElement)) {
       svg.appendChild(label)
     }
