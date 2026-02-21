@@ -715,6 +715,28 @@
   text-align: center;
 }
 
+.osmd-preview-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #d7e4eb;
+  border-radius: 10px;
+  background: #f7fbff;
+}
+
+.osmd-preview-toggle label {
+  color: #20445a;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.osmd-preview-toggle span {
+  color: #20445a;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
 .osmd-preview-zoom {
   display: grid;
   grid-template-columns: 72px minmax(180px, 1fr) 72px 18px;

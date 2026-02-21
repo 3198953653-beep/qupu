@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as Tone from 'tone'
 import { Renderer } from 'vexflow'
 import './App.css'
@@ -78,7 +78,7 @@ const HORIZONTAL_RENDER_EDGE_BUFFER_MEASURES = 1
 const DEFAULT_TIME_SIGNATURE: TimeSignature = { beats: 4, beatType: 4 }
 const OSMD_PREVIEW_ZOOM_DEBOUNCE_MS = 120
 const DEFAULT_OSMD_PREVIEW_HORIZONTAL_MARGIN_PX = 9
-const DEFAULT_OSMD_PREVIEW_FIRST_PAGE_TOP_MARGIN_PX = 10
+const DEFAULT_OSMD_PREVIEW_FIRST_PAGE_TOP_MARGIN_PX = 23
 const DEFAULT_OSMD_PREVIEW_FOLLOWING_PAGE_TOP_MARGIN_PX = 10
 const DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX = 10
 const OSMD_PREVIEW_LAYOUT_TOP_MARGIN_PX = DEFAULT_OSMD_PREVIEW_FOLLOWING_PAGE_TOP_MARGIN_PX
@@ -88,7 +88,8 @@ const OSMD_PREVIEW_REPAGINATION_MIN_FRAME_COUNT = 2
 const OSMD_PREVIEW_REPAGINATION_SHORTFALL_EPS = 0.01
 const OSMD_PREVIEW_REPAGINATION_MAX_ATTEMPTS = 12
 const OSMD_PREVIEW_REPAGINATION_MIN_STEP_PX = 2
-const OSMD_PREVIEW_REPAGINATION_MAX_STEP_PX = 12
+const OSMD_PREVIEW_REPAGINATION_MAX_STEP_PX = 64
+const OSMD_PREVIEW_MARGIN_APPLY_DEBOUNCE_MS = 90
 const PDF_CJK_FONT_FAMILY = 'NotoSansSC'
 const PDF_CJK_FONT_FILE_NAME = 'NotoSansSC-Regular.ttf'
 const PDF_CJK_FONT_URL = new URL('./assets/fonts/NotoSansSC-Regular.ttf', import.meta.url).href
@@ -328,6 +329,39 @@ function applyOsmdPreviewPageVisibility(pages: HTMLElement[], pageIndex: number)
   const safeIndex = Math.max(0, Math.min(pages.length - 1, pageIndex))
   pages.forEach((page, index) => {
     page.style.display = index === safeIndex ? '' : 'none'
+  })
+}
+
+function applyOsmdPreviewPageNumbers(pages: HTMLElement[], visible: boolean): void {
+  pages.forEach((page, index) => {
+    const svg = resolveOsmdPreviewPageSvgElement(page)
+    if (!svg) return
+    const existing = svg.querySelector('.osmd-preview-page-number-overlay')
+    if (!visible) {
+      existing?.remove()
+      return
+    }
+    const svgNamespace = 'http://www.w3.org/2000/svg'
+    const { width } = getSvgRenderSize(svg)
+    const x = Math.max(28, width - 24)
+    const y = 24
+    const label = existing instanceof SVGTextElement
+      ? existing
+      : document.createElementNS(svgNamespace, 'text')
+    label.setAttribute('class', 'osmd-preview-page-number-overlay')
+    label.setAttribute('text-anchor', 'end')
+    label.setAttribute('font-size', '20')
+    label.setAttribute('font-weight', '600')
+    label.setAttribute('fill', '#1d4ed8')
+    label.setAttribute('stroke', '#ffffff')
+    label.setAttribute('stroke-width', '1.4')
+    label.setAttribute('paint-order', 'stroke')
+    label.setAttribute('x', x.toFixed(3))
+    label.setAttribute('y', y.toFixed(3))
+    label.textContent = `第${index + 1}页`
+    if (!(existing instanceof SVGTextElement)) {
+      svg.appendChild(label)
+    }
   })
 }
 
@@ -652,7 +686,7 @@ function renderAndRebalanceOsmdPreview(
       return stats
     }
     const step = clampNumber(
-      Math.ceil(maxShortfall * 0.25),
+      Math.ceil(maxShortfall),
       OSMD_PREVIEW_REPAGINATION_MIN_STEP_PX,
       OSMD_PREVIEW_REPAGINATION_MAX_STEP_PX,
     )
@@ -743,6 +777,7 @@ function App() {
   const [isOsmdPreviewExportingPdf, setIsOsmdPreviewExportingPdf] = useState(false)
   const [osmdPreviewPageIndex, setOsmdPreviewPageIndex] = useState(0)
   const [osmdPreviewPageCount, setOsmdPreviewPageCount] = useState(1)
+  const [osmdPreviewShowPageNumbers, setOsmdPreviewShowPageNumbers] = useState(true)
   const [osmdPreviewZoomPercent, setOsmdPreviewZoomPercent] = useState(66)
   const [osmdPreviewZoomDraftPercent, setOsmdPreviewZoomDraftPercent] = useState(66)
   const [osmdPreviewPaperScalePercent, setOsmdPreviewPaperScalePercent] = useState(100)
@@ -773,8 +808,10 @@ function App() {
   const osmdPreviewFirstPageTopMarginPxRef = useRef<number>(DEFAULT_OSMD_PREVIEW_FIRST_PAGE_TOP_MARGIN_PX)
   const osmdPreviewTopMarginPxRef = useRef<number>(DEFAULT_OSMD_PREVIEW_FOLLOWING_PAGE_TOP_MARGIN_PX)
   const osmdPreviewBottomMarginPxRef = useRef<number>(DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX)
+  const osmdPreviewShowPageNumbersRef = useRef<boolean>(true)
   const osmdPreviewLastRebalanceStatsRef = useRef<OsmdPreviewRebalanceStats | null>(null)
   const osmdPreviewZoomCommitTimerRef = useRef<number | null>(null)
+  const osmdPreviewMarginApplyTimerRef = useRef<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const synthRef = useRef<Tone.PolySynth | null>(null)
 
@@ -1469,6 +1506,9 @@ function App() {
   const onOsmdPreviewBottomMarginPxChange = useCallback((nextValue: number) => {
     setOsmdPreviewBottomMarginPx(clampOsmdPreviewBottomMarginPx(nextValue))
   }, [])
+  const onOsmdPreviewShowPageNumbersChange = useCallback((nextVisible: boolean) => {
+    setOsmdPreviewShowPageNumbers(Boolean(nextVisible))
+  }, [])
 
   useEffect(() => {
     setOsmdPreviewZoomDraftPercent((current) => {
@@ -1494,10 +1534,18 @@ function App() {
   }, [osmdPreviewBottomMarginPx])
 
   useEffect(() => {
+    osmdPreviewShowPageNumbersRef.current = osmdPreviewShowPageNumbers
+  }, [osmdPreviewShowPageNumbers])
+
+  useEffect(() => {
     return () => {
       if (osmdPreviewZoomCommitTimerRef.current !== null) {
         window.clearTimeout(osmdPreviewZoomCommitTimerRef.current)
         osmdPreviewZoomCommitTimerRef.current = null
+      }
+      if (osmdPreviewMarginApplyTimerRef.current !== null) {
+        window.clearTimeout(osmdPreviewMarginApplyTimerRef.current)
+        osmdPreviewMarginApplyTimerRef.current = null
       }
     }
   }, [])
@@ -1560,6 +1608,7 @@ function App() {
         osmdPreviewInstanceRef.current = previewInstance
         const renderedPages = collectOsmdPreviewPages(container)
         osmdPreviewPagesRef.current = renderedPages
+        applyOsmdPreviewPageNumbers(renderedPages, osmdPreviewShowPageNumbersRef.current)
         const graphicPageCount = osmd.GraphicSheet?.MusicPages?.length ?? 0
         const nextPageCount = Math.max(1, renderedPages.length, graphicPageCount)
         setOsmdPreviewPageCount(nextPageCount)
@@ -1608,6 +1657,7 @@ function App() {
     if (!container) return
     const renderedPages = collectOsmdPreviewPages(container)
     osmdPreviewPagesRef.current = renderedPages
+    applyOsmdPreviewPageNumbers(renderedPages, osmdPreviewShowPageNumbersRef.current)
     const graphicPageCount = osmd.GraphicSheet?.MusicPages?.length ?? 0
     const nextPageCount = Math.max(1, renderedPages.length, graphicPageCount)
     setOsmdPreviewPageCount(nextPageCount)
@@ -1618,21 +1668,35 @@ function App() {
     if (!isOsmdPreviewOpen) return
     const osmd = osmdPreviewInstanceRef.current
     if (!osmd) return
-    const container = osmdPreviewContainerRef.current
-    osmdPreviewLastRebalanceStatsRef.current = renderAndRebalanceOsmdPreview(
-      osmd,
-      osmdPreviewHorizontalMarginPx,
-      osmdPreviewFirstPageTopMarginPx,
-      osmdPreviewTopMarginPx,
-      osmdPreviewBottomMarginPx,
-    )
-    if (!container) return
-    const renderedPages = collectOsmdPreviewPages(container)
-    osmdPreviewPagesRef.current = renderedPages
-    const graphicPageCount = osmd.GraphicSheet?.MusicPages?.length ?? 0
-    const nextPageCount = Math.max(1, renderedPages.length, graphicPageCount)
-    setOsmdPreviewPageCount(nextPageCount)
-    applyOsmdPreviewPageVisibility(renderedPages, osmdPreviewPageIndex)
+    if (osmdPreviewMarginApplyTimerRef.current !== null) {
+      window.clearTimeout(osmdPreviewMarginApplyTimerRef.current)
+      osmdPreviewMarginApplyTimerRef.current = null
+    }
+    osmdPreviewMarginApplyTimerRef.current = window.setTimeout(() => {
+      osmdPreviewMarginApplyTimerRef.current = null
+      const container = osmdPreviewContainerRef.current
+      osmdPreviewLastRebalanceStatsRef.current = renderAndRebalanceOsmdPreview(
+        osmd,
+        osmdPreviewHorizontalMarginPx,
+        osmdPreviewFirstPageTopMarginPx,
+        osmdPreviewTopMarginPx,
+        osmdPreviewBottomMarginPx,
+      )
+      if (!container) return
+      const renderedPages = collectOsmdPreviewPages(container)
+      osmdPreviewPagesRef.current = renderedPages
+      applyOsmdPreviewPageNumbers(renderedPages, osmdPreviewShowPageNumbersRef.current)
+      const graphicPageCount = osmd.GraphicSheet?.MusicPages?.length ?? 0
+      const nextPageCount = Math.max(1, renderedPages.length, graphicPageCount)
+      setOsmdPreviewPageCount(nextPageCount)
+      applyOsmdPreviewPageVisibility(renderedPages, osmdPreviewPageIndex)
+    }, OSMD_PREVIEW_MARGIN_APPLY_DEBOUNCE_MS)
+    return () => {
+      if (osmdPreviewMarginApplyTimerRef.current !== null) {
+        window.clearTimeout(osmdPreviewMarginApplyTimerRef.current)
+        osmdPreviewMarginApplyTimerRef.current = null
+      }
+    }
   }, [
     isOsmdPreviewOpen,
     osmdPreviewHorizontalMarginPx,
@@ -1644,6 +1708,10 @@ function App() {
   useEffect(() => {
     applyOsmdPreviewPageVisibility(osmdPreviewPagesRef.current, osmdPreviewPageIndex)
   }, [osmdPreviewPageIndex, osmdPreviewPageCount])
+
+  useEffect(() => {
+    applyOsmdPreviewPageNumbers(osmdPreviewPagesRef.current, osmdPreviewShowPageNumbers)
+  }, [osmdPreviewShowPageNumbers, osmdPreviewPageCount])
 
   const safeOsmdPreviewPaperScalePercent = clampOsmdPreviewPaperScalePercent(osmdPreviewPaperScalePercent)
   const safeOsmdPreviewHorizontalMarginPx = clampOsmdPreviewHorizontalMarginPx(osmdPreviewHorizontalMarginPx)
@@ -2487,18 +2555,28 @@ function App() {
             </div>
             <div className="osmd-preview-side">
               <div className="osmd-preview-pagination">
-              <button type="button" onClick={goToPrevOsmdPreviewPage} disabled={osmdPreviewPageIndex <= 0}>
-                上一页
-              </button>
-              <span>{`${Math.min(osmdPreviewPageCount, osmdPreviewPageIndex + 1)} / ${osmdPreviewPageCount}`}</span>
-              <button
-                type="button"
-                onClick={goToNextOsmdPreviewPage}
-                disabled={osmdPreviewPageIndex >= osmdPreviewPageCount - 1}
-              >
-                下一页
-              </button>
-            </div>
+                <button type="button" onClick={goToPrevOsmdPreviewPage} disabled={osmdPreviewPageIndex <= 0}>
+                  上一页
+                </button>
+                <span>{`${Math.min(osmdPreviewPageCount, osmdPreviewPageIndex + 1)} / ${osmdPreviewPageCount}`}</span>
+                <button
+                  type="button"
+                  onClick={goToNextOsmdPreviewPage}
+                  disabled={osmdPreviewPageIndex >= osmdPreviewPageCount - 1}
+                >
+                  下一页
+                </button>
+              </div>
+              <div className="osmd-preview-toggle">
+                <label htmlFor="osmd-preview-page-number-toggle">页码</label>
+                <input
+                  id="osmd-preview-page-number-toggle"
+                  type="checkbox"
+                  checked={osmdPreviewShowPageNumbers}
+                  onChange={(event) => onOsmdPreviewShowPageNumbersChange(event.target.checked)}
+                />
+                <span>{osmdPreviewShowPageNumbers ? '显示' : '隐藏'}</span>
+              </div>
             <div className="osmd-preview-zoom">
               <label htmlFor="osmd-preview-zoom-range">音符缩放</label>
               <input
