@@ -81,6 +81,7 @@ const DEFAULT_OSMD_PREVIEW_HORIZONTAL_MARGIN_PX = 9
 const DEFAULT_OSMD_PREVIEW_FIRST_PAGE_TOP_MARGIN_PX = 10
 const DEFAULT_OSMD_PREVIEW_FOLLOWING_PAGE_TOP_MARGIN_PX = 10
 const DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX = 10
+const DEFAULT_OSMD_PREVIEW_MARGIN_UI_SCALE = 10
 const OSMD_PREVIEW_SPARSE_SYSTEM_COUNT = 4
 
 const PITCHES: Pitch[] = createPianoPitches()
@@ -231,6 +232,19 @@ type OsmdPreviewSystemFrame = {
   height: number
 }
 
+type OsmdPreviewStaffSystemEdge = {
+  topY: number
+  bottomY: number
+}
+
+type OsmdPreviewPageCalibration = {
+  pxPerUnit: number
+  domPageHeight: number
+  topEdgeOffsetPx: number
+  bottomEdgeOffsetPx: number
+  matchedSystemCount: number
+}
+
 type OsmdPreviewRebalanceStats = {
   executed: boolean
   pageCount: number
@@ -271,6 +285,206 @@ function collectOsmdPreviewSystemFrames(page: OsmdPreviewPage): OsmdPreviewSyste
     })
     .filter((frame): frame is OsmdPreviewSystemFrame => frame !== null)
     .sort((left, right) => left.y - right.y)
+}
+
+function parseOsmdPreviewPageDomHeight(pageElement: HTMLElement): number | null {
+  const viewBox = pageElement.getAttribute('viewBox')
+  if (viewBox) {
+    const parts = viewBox.trim().split(/\s+/).map(Number)
+    if (parts.length === 4 && Number.isFinite(parts[3]) && parts[3] > 0) {
+      return parts[3]
+    }
+  }
+  const heightAttr = Number(pageElement.getAttribute('height'))
+  if (Number.isFinite(heightAttr) && heightAttr > 0) {
+    return heightAttr
+  }
+  return null
+}
+
+function collectHorizontalLineYValues(root: ParentNode): number[] {
+  const ys: number[] = []
+  root.querySelectorAll('line, path').forEach((element) => {
+    const tag = element.tagName.toLowerCase()
+    if (tag === 'line') {
+      const x1 = Number((element as SVGLineElement).getAttribute('x1'))
+      const x2 = Number((element as SVGLineElement).getAttribute('x2'))
+      const y1 = Number((element as SVGLineElement).getAttribute('y1'))
+      const y2 = Number((element as SVGLineElement).getAttribute('y2'))
+      if (
+        Number.isFinite(x1) &&
+        Number.isFinite(x2) &&
+        Number.isFinite(y1) &&
+        Number.isFinite(y2) &&
+        Math.abs(y1 - y2) <= 0.5 &&
+        Math.abs(x2 - x1) >= 24
+      ) {
+        ys.push(y1)
+      }
+      return
+    }
+    const d = element.getAttribute('d')
+    if (!d) return
+    const numbers = d.match(/-?\d*\.?\d+/g)?.map(Number) ?? []
+    if (numbers.length < 4) return
+    const x1 = numbers[0]
+    const y1 = numbers[1]
+    const x2 = numbers[2]
+    const y2 = numbers[3]
+    if (
+      Number.isFinite(x1) &&
+      Number.isFinite(x2) &&
+      Number.isFinite(y1) &&
+      Number.isFinite(y2) &&
+      Math.abs(y1 - y2) <= 0.5 &&
+      Math.abs(x2 - x1) >= 24
+    ) {
+      ys.push(y1)
+    }
+  })
+  return ys
+}
+
+function collectOsmdPreviewStaffSystemEdges(pageElement: HTMLElement): OsmdPreviewStaffSystemEdge[] {
+  const staffGroups = Array.from(pageElement.querySelectorAll('g.staffline'))
+    .map((group) => {
+      const ys = collectHorizontalLineYValues(group)
+      if (ys.length === 0) return null
+      return {
+        topY: Math.min(...ys),
+        bottomY: Math.max(...ys),
+      }
+    })
+    .filter((group): group is { topY: number; bottomY: number } => group !== null)
+
+  const systems: OsmdPreviewStaffSystemEdge[] = []
+  for (let index = 0; index + 1 < staffGroups.length; index += 2) {
+    const upper = staffGroups[index]
+    const lower = staffGroups[index + 1]
+    systems.push({
+      topY: Math.min(upper.topY, lower.topY),
+      bottomY: Math.max(upper.bottomY, lower.bottomY),
+    })
+  }
+  return systems
+}
+
+function resolveOsmdPreviewPageGraphicElement(pageElement: HTMLElement): HTMLElement | null {
+  const tag = pageElement.tagName.toLowerCase()
+  if (tag === 'svg' || tag === 'canvas') return pageElement
+  return pageElement.querySelector('svg, canvas')
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null
+  const sorted = values.slice().sort((left, right) => left - right)
+  const centerIndex = Math.floor(sorted.length / 2)
+  if (sorted.length % 2 === 1) return sorted[centerIndex]
+  return (sorted[centerIndex - 1] + sorted[centerIndex]) / 2
+}
+
+function estimateOsmdPreviewPxPerUnit(
+  frames: OsmdPreviewSystemFrame[],
+  staffSystems: OsmdPreviewStaffSystemEdge[],
+  matchedSystemCount: number,
+): number | null {
+  const samples: number[] = []
+  for (let index = 1; index < matchedSystemCount; index += 1) {
+    const prevFrame = frames[index - 1]
+    const nextFrame = frames[index]
+    const prevStaff = staffSystems[index - 1]
+    const nextStaff = staffSystems[index]
+    const frameTopDelta = nextFrame.y - prevFrame.y
+    const staffTopDelta = nextStaff.topY - prevStaff.topY
+    if (Math.abs(frameTopDelta) > 1e-6 && Math.abs(staffTopDelta) > 1e-6) {
+      const ratio = staffTopDelta / frameTopDelta
+      if (Number.isFinite(ratio) && ratio > 0.01 && ratio < 1000) {
+        samples.push(ratio)
+      }
+    }
+    const prevFrameBottom = prevFrame.y + prevFrame.height
+    const nextFrameBottom = nextFrame.y + nextFrame.height
+    const frameBottomDelta = nextFrameBottom - prevFrameBottom
+    const staffBottomDelta = nextStaff.bottomY - prevStaff.bottomY
+    if (Math.abs(frameBottomDelta) > 1e-6 && Math.abs(staffBottomDelta) > 1e-6) {
+      const ratio = staffBottomDelta / frameBottomDelta
+      if (Number.isFinite(ratio) && ratio > 0.01 && ratio < 1000) {
+        samples.push(ratio)
+      }
+    }
+  }
+
+  const medianSample = median(samples)
+  if (typeof medianSample === 'number' && Number.isFinite(medianSample) && medianSample > 0.01) {
+    return medianSample
+  }
+
+  if (matchedSystemCount >= 2) {
+    const firstFrame = frames[0]
+    const firstStaff = staffSystems[0]
+    const lastFrame = frames[matchedSystemCount - 1]
+    const lastStaff = staffSystems[matchedSystemCount - 1]
+    const frameDelta = lastFrame.y - firstFrame.y
+    const staffDelta = lastStaff.topY - firstStaff.topY
+    if (Math.abs(frameDelta) > 1e-6 && Math.abs(staffDelta) > 1e-6) {
+      const ratio = staffDelta / frameDelta
+      if (Number.isFinite(ratio) && ratio > 0.01 && ratio < 1000) {
+        return ratio
+      }
+    }
+  }
+
+  return null
+}
+
+function buildOsmdPreviewPageCalibrations(
+  pages: OsmdPreviewPage[],
+  renderContainer?: HTMLElement | null,
+): Map<number, OsmdPreviewPageCalibration> {
+  const calibrations = new Map<number, OsmdPreviewPageCalibration>()
+  if (!renderContainer) return calibrations
+  const pageElements = collectOsmdPreviewPages(renderContainer)
+  pages.forEach((page, pageIndex) => {
+    const rawPageElement = pageElements[pageIndex]
+    if (!rawPageElement) return
+    const pageElement = resolveOsmdPreviewPageGraphicElement(rawPageElement)
+    if (!pageElement) return
+    const frames = collectOsmdPreviewSystemFrames(page)
+    if (frames.length === 0) return
+    const staffSystems = collectOsmdPreviewStaffSystemEdges(pageElement)
+    if (staffSystems.length === 0) return
+    const matchedSystemCount = Math.min(frames.length, staffSystems.length)
+    if (matchedSystemCount <= 0) return
+    const domPageHeight = parseOsmdPreviewPageDomHeight(pageElement)
+    if (typeof domPageHeight !== 'number' || !Number.isFinite(domPageHeight) || domPageHeight <= 0) return
+    const estimatedPxPerUnit = estimateOsmdPreviewPxPerUnit(frames, staffSystems, matchedSystemCount)
+    const pageHeight = page.PositionAndShape?.Size?.height
+    const pageHeightUnits =
+      typeof pageHeight === 'number' && Number.isFinite(pageHeight) && pageHeight > 0
+        ? pageHeight
+        : A4_PAGE_HEIGHT
+    const fallbackPxPerUnit = domPageHeight / pageHeightUnits
+    const pxPerUnit =
+      typeof estimatedPxPerUnit === 'number' && Number.isFinite(estimatedPxPerUnit) && estimatedPxPerUnit > 0
+        ? estimatedPxPerUnit
+        : fallbackPxPerUnit
+    if (!Number.isFinite(pxPerUnit) || pxPerUnit <= 0) return
+    const firstFrame = frames[0]
+    const firstStaff = staffSystems[0]
+    const lastFrame = frames[matchedSystemCount - 1]
+    const lastStaff = staffSystems[matchedSystemCount - 1]
+    const topEdgeOffsetPx = firstStaff.topY - firstFrame.y * pxPerUnit
+    const bottomEdgeOffsetPx = (lastFrame.y + lastFrame.height) * pxPerUnit - lastStaff.bottomY
+    if (!Number.isFinite(topEdgeOffsetPx) || !Number.isFinite(bottomEdgeOffsetPx)) return
+    calibrations.set(pageIndex, {
+      pxPerUnit,
+      domPageHeight,
+      topEdgeOffsetPx,
+      bottomEdgeOffsetPx,
+      matchedSystemCount,
+    })
+  })
+  return calibrations
 }
 
 function setOsmdPreviewSystemY(system: OsmdPreviewMusicSystem, nextY: number): boolean {
@@ -325,6 +539,7 @@ function rebalanceOsmdPreviewVerticalSystems(
   let hasMutated = false
   let mutatedCount = 0
   const pageSummaries: OsmdPreviewRebalanceStats['pageSummaries'] = []
+  const pageCalibrations = buildOsmdPreviewPageCalibrations(pages, renderContainer)
 
   pages.forEach((page, pageIndex) => {
     const frames = collectOsmdPreviewSystemFrames(page)
@@ -346,31 +561,29 @@ function rebalanceOsmdPreviewVerticalSystems(
       typeof pageHeight === 'number' && Number.isFinite(pageHeight) && pageHeight > 0
         ? pageHeight
         : A4_PAGE_HEIGHT
-    const targetTop = pageIndex === 0 ? safeFirstPageTopMarginPx : safeFollowingPageTopMarginPx
-    const targetBottom = pageHeightUnits - safeBottomMarginPx
-    let pageMutated = 0
-
-    if (frames.length <= OSMD_PREVIEW_SPARSE_SYSTEM_COUNT) {
-      const offset = targetTop - frames[0].y
-      if (Math.abs(offset) >= 0.01) {
-        frames.forEach((frame) => {
-          if (setOsmdPreviewSystemY(frame.system, frame.y + offset)) {
-            hasMutated = true
-            mutatedCount += 1
-            pageMutated += 1
-          }
-        })
+    const targetTopUi = pageIndex === 0 ? safeFirstPageTopMarginPx : safeFollowingPageTopMarginPx
+    const targetBottomUi = safeBottomMarginPx
+    const calibration = pageCalibrations.get(pageIndex)
+    const marginUiScale =
+      typeof calibration?.pxPerUnit === 'number' && Number.isFinite(calibration.pxPerUnit) && calibration.pxPerUnit > 0
+        ? calibration.pxPerUnit
+        : DEFAULT_OSMD_PREVIEW_MARGIN_UI_SCALE
+    const targetTopPx = targetTopUi * marginUiScale
+    const targetBottomPx = targetBottomUi * marginUiScale
+    let targetTop = targetTopPx
+    let targetBottom = pageHeightUnits - targetBottomPx
+    if (calibration) {
+      const calibratedTop = (targetTopPx - calibration.topEdgeOffsetPx) / calibration.pxPerUnit
+      const calibratedBottom =
+        (calibration.domPageHeight - targetBottomPx + calibration.bottomEdgeOffsetPx) / calibration.pxPerUnit
+      if (Number.isFinite(calibratedTop)) {
+        targetTop = calibratedTop
       }
-      pageSummaries.push({
-        pageIndex,
-        frameCount: frames.length,
-        mutated: pageMutated,
-        mode: 'sparse',
-        firstYBefore,
-        firstYAfter: frames[0].system.PositionAndShape?.RelativePosition?.y ?? null,
-      })
-      return
+      if (Number.isFinite(calibratedBottom)) {
+        targetBottom = calibratedBottom
+      }
     }
+    let pageMutated = 0
 
     const heights = frames.map((frame) => frame.height)
     const totalHeight = heights.reduce((sum, height) => sum + height, 0)
@@ -405,7 +618,7 @@ function rebalanceOsmdPreviewVerticalSystems(
       pageIndex,
       frameCount: frames.length,
       mutated: pageMutated,
-      mode: 'distributed',
+      mode: frames.length <= OSMD_PREVIEW_SPARSE_SYSTEM_COUNT ? 'sparse' : 'distributed',
       firstYBefore,
       firstYAfter: frames[0].system.PositionAndShape?.RelativePosition?.y ?? null,
     })
