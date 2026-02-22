@@ -10,12 +10,10 @@ import {
   PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX,
   PREVIEW_START_THRESHOLD_PX,
   SCORE_TOP_PADDING,
-  SYSTEM_GAP_Y,
   SYSTEM_HEIGHT,
   TICKS_PER_BEAT,
 } from './score/constants'
 import {
-  buildAdaptiveSystemRanges,
   estimateAdaptiveMeasureWidth,
   getMeasureLayoutDemandFromNoteDemand,
   getMeasureNoteLayoutDemand,
@@ -805,12 +803,10 @@ function App() {
   const [measureDivisionsFromImport, setMeasureDivisionsFromImport] = useState<number[] | null>(null)
   const [measureTimeSignaturesFromImport, setMeasureTimeSignaturesFromImport] = useState<TimeSignature[] | null>(null)
   const [musicXmlMetadataFromImport, setMusicXmlMetadataFromImport] = useState<MusicXmlMetadata | null>(null)
-  const [currentPage, setCurrentPage] = useState(0)
   const [dragDebugReport, setDragDebugReport] = useState<string>('')
   const [measureEdgeDebugReport, setMeasureEdgeDebugReport] = useState<string>('')
   const [autoScaleEnabled, setAutoScaleEnabled] = useState(false)
   const [manualScalePercent, setManualScalePercent] = useState(100)
-  const [isHorizontalView, setIsHorizontalView] = useState(false)
   const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
   const [timeAxisSpacingConfig, setTimeAxisSpacingConfig] = useState(DEFAULT_TIME_AXIS_SPACING_CONFIG)
   const [isOsmdPreviewOpen, setIsOsmdPreviewOpen] = useState(false)
@@ -895,9 +891,8 @@ function App() {
     () => measurePairsFromImport ?? buildMeasurePairs(notes, bassNotes),
     [measurePairsFromImport, notes, bassNotes],
   )
-  const spacingLayoutMode: SpacingLayoutMode = isHorizontalView ? 'legacy' : 'custom'
+  const spacingLayoutMode: SpacingLayoutMode = 'legacy'
   const horizontalRawMeasureWidths = useMemo(() => {
-    if (!isHorizontalView) return []
     if (measurePairs.length === 0) return []
 
     const widths: number[] = []
@@ -942,7 +937,6 @@ function App() {
 
     return widths
   }, [
-    isHorizontalView,
     measurePairs,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
@@ -950,24 +944,22 @@ function App() {
     timeAxisSpacingConfig.durationGapRatios,
   ])
   const horizontalEstimatedMeasureWidthTotal = useMemo(() => {
-    if (!isHorizontalView) return 0
     if (horizontalRawMeasureWidths.length === 0) return HORIZONTAL_VIEW_MEASURE_WIDTH_PX
     const total = horizontalRawMeasureWidths.reduce((sum, width) => sum + width, 0)
     return Math.max(HORIZONTAL_VIEW_MEASURE_WIDTH_PX, total)
-  }, [isHorizontalView, horizontalRawMeasureWidths])
+  }, [horizontalRawMeasureWidths])
   const autoScoreScale = useMemo(() => getAutoScoreScale(measurePairs.length), [measurePairs.length])
   const safeManualScalePercent = clampScalePercent(manualScalePercent)
   const relativeScale = autoScaleEnabled ? autoScoreScale : safeManualScalePercent / 100
   const horizontalDisplayScale = relativeScale * MANUAL_SCALE_BASELINE
-  const provisionalDisplayScoreHeight = isHorizontalView ? HORIZONTAL_VIEW_HEIGHT_PX : A4_PAGE_HEIGHT
+  const provisionalDisplayScoreHeight = HORIZONTAL_VIEW_HEIGHT_PX
   const displayScoreWidth = useMemo(() => {
-    if (!isHorizontalView) return A4_PAGE_WIDTH
     const totalMeasureWidth = horizontalEstimatedMeasureWidthTotal
     const baseWidth = Math.max(A4_PAGE_WIDTH, pageHorizontalPaddingPx * 2 + totalMeasureWidth)
     // Keep horizontal display width in the same scale space as canvas transform.
     // Otherwise scroll-space and render-space drift apart and can leave blank tails.
     return Math.max(A4_PAGE_WIDTH, Math.round(baseWidth * horizontalDisplayScale))
-  }, [isHorizontalView, horizontalEstimatedMeasureWidthTotal, pageHorizontalPaddingPx, horizontalDisplayScale])
+  }, [horizontalEstimatedMeasureWidthTotal, pageHorizontalPaddingPx, horizontalDisplayScale])
   const baseScoreScale = relativeScale * MANUAL_SCALE_BASELINE
   const minScaleForCanvasHeight = provisionalDisplayScoreHeight / MAX_CANVAS_RENDER_DIM_PX
   const scoreScaleX = baseScoreScale
@@ -988,7 +980,6 @@ function App() {
     return byId
   }, [bassNotes])
   const horizontalMeasureFramesByPair = useMemo(() => {
-    if (!isHorizontalView) return null
     if (horizontalRawMeasureWidths.length === 0) return [] as Array<{ measureX: number; measureWidth: number }>
     let cursorX = pageHorizontalPaddingPx
     return horizontalRawMeasureWidths.map((measureWidth) => {
@@ -996,73 +987,28 @@ function App() {
       cursorX += measureWidth
       return frame
     })
-  }, [isHorizontalView, horizontalRawMeasureWidths, pageHorizontalPaddingPx])
+  }, [horizontalRawMeasureWidths, pageHorizontalPaddingPx])
   const horizontalViewportWidthInScore = Math.max(1, horizontalViewportXRange.endX - horizontalViewportXRange.startX)
   const horizontalRenderSurfaceWidth = useMemo(() => {
-    if (!isHorizontalView) return totalScoreWidth
     const desiredWidth = Math.ceil(horizontalViewportWidthInScore + HORIZONTAL_RENDER_BUFFER_PX * 2)
     const targetWidth = Math.max(1200, desiredWidth)
     return Math.max(1, Math.min(totalScoreWidth, Math.min(MAX_CANVAS_RENDER_DIM_PX, targetWidth)))
-  }, [isHorizontalView, totalScoreWidth, horizontalViewportWidthInScore])
+  }, [totalScoreWidth, horizontalViewportWidthInScore])
   const horizontalRenderOffsetX = useMemo(() => {
-    if (!isHorizontalView) return 0
     const desiredOffset = Math.max(0, Math.floor(horizontalViewportXRange.startX - HORIZONTAL_RENDER_BUFFER_PX))
     const maxOffset = Math.max(0, totalScoreWidth - horizontalRenderSurfaceWidth)
     return Math.max(0, Math.min(maxOffset, desiredOffset))
-  }, [
-    isHorizontalView,
-    horizontalViewportXRange.startX,
-    totalScoreWidth,
-    horizontalRenderSurfaceWidth,
-  ])
-  const scoreWidth = isHorizontalView ? horizontalRenderSurfaceWidth : totalScoreWidth
-  const logicalSystemUsableWidth = Math.max(1, totalScoreWidth - pageHorizontalPaddingPx * 2)
-  const systemRanges = useMemo(
-    () => {
-      if (isHorizontalView) {
-        return [{ startPairIndex: 0, endPairIndexExclusive: measurePairs.length }]
-      }
-      return buildAdaptiveSystemRanges({
-        measurePairs,
-        systemUsableWidth: logicalSystemUsableWidth,
-        measureKeyFifthsFromImport,
-        measureTimeSignaturesFromImport,
-        timeAxisSpacingConfig,
-      })
-    },
-    [
-      measurePairs,
-      logicalSystemUsableWidth,
-      isHorizontalView,
-      pageHorizontalPaddingPx,
-      measureKeyFifthsFromImport,
-      measureTimeSignaturesFromImport,
-      timeAxisSpacingConfig,
-    ],
-  )
-  const systemCount = Math.max(1, systemRanges.length)
-  const displayScoreHeight = useMemo(() => {
-    if (isHorizontalView) return HORIZONTAL_VIEW_HEIGHT_PX
-    return A4_PAGE_HEIGHT
-  }, [isHorizontalView])
+  }, [horizontalViewportXRange.startX, totalScoreWidth, horizontalRenderSurfaceWidth])
+  const scoreWidth = horizontalRenderSurfaceWidth
+  const systemRanges = useMemo(() => [{ startPairIndex: 0, endPairIndexExclusive: measurePairs.length }], [measurePairs.length])
+  const displayScoreHeight = HORIZONTAL_VIEW_HEIGHT_PX
   const scoreHeight = Math.max(1, Math.round(displayScoreHeight / scoreScaleY))
-  const systemsPerPage = Math.max(
-    1,
-    isHorizontalView
-      ? 1
-      : Math.floor((displayScoreHeight - SCORE_TOP_PADDING * 2 + SYSTEM_GAP_Y) / ((SYSTEM_HEIGHT + SYSTEM_GAP_Y) * scoreScale)),
-  )
-  const pageCount = Math.max(1, Math.ceil(systemCount / systemsPerPage))
-  const safeCurrentPage = Math.min(currentPage, pageCount - 1)
-  const visibleSystemRange = useMemo(() => {
-    if (isHorizontalView) return { start: 0, end: 0 }
-    const start = Math.min(systemCount - 1, safeCurrentPage * systemsPerPage)
-    const end = Math.min(systemCount - 1, start + systemsPerPage - 1)
-    return { start, end }
-  }, [isHorizontalView, safeCurrentPage, systemCount, systemsPerPage])
+  const systemsPerPage = 1
+  const pageCount = 1
+  const safeCurrentPage = 0
+  const visibleSystemRange = useMemo(() => ({ start: 0, end: 0 }), [])
   const horizontalRenderWindow = useMemo(() => {
-    if (!isHorizontalView) return null
-    const frames = horizontalMeasureFramesByPair ?? []
+    const frames = horizontalMeasureFramesByPair
     const renderWindowStartX = horizontalRenderOffsetX
     const renderWindowEndX = Math.min(totalScoreWidth, horizontalRenderOffsetX + scoreWidth)
     if (frames.length === 0) {
@@ -1102,7 +1048,6 @@ function App() {
     const endX = Math.min(totalScoreWidth, (lastFrame ? lastFrame.measureX + lastFrame.measureWidth : totalScoreWidth) + 120)
     return { startPairIndex, endPairIndexExclusive, startX, endX }
   }, [
-    isHorizontalView,
     horizontalMeasureFramesByPair,
     horizontalRenderOffsetX,
     scoreWidth,
@@ -1111,12 +1056,6 @@ function App() {
   const layoutStabilityKey = useMemo(() => {
     const systemRangeKey = systemRanges.map((range) => `${range.startPairIndex}-${range.endPairIndexExclusive}`).join(',')
     const spacingKey = [
-      timeAxisSpacingConfig.minGapBeats,
-      timeAxisSpacingConfig.gapGamma,
-      timeAxisSpacingConfig.gapBaseWeight,
-      timeAxisSpacingConfig.leftEdgePaddingPx,
-      timeAxisSpacingConfig.rightEdgePaddingPx,
-      timeAxisSpacingConfig.interOnsetPaddingPx,
       timeAxisSpacingConfig.baseMinGap32Px,
       timeAxisSpacingConfig.durationGapRatios.thirtySecond,
       timeAxisSpacingConfig.durationGapRatios.sixteenth,
@@ -1131,12 +1070,6 @@ function App() {
     scoreHeight,
     pageHorizontalPaddingPx,
     systemRanges,
-    timeAxisSpacingConfig.minGapBeats,
-    timeAxisSpacingConfig.gapGamma,
-    timeAxisSpacingConfig.gapBaseWeight,
-    timeAxisSpacingConfig.leftEdgePaddingPx,
-    timeAxisSpacingConfig.rightEdgePaddingPx,
-    timeAxisSpacingConfig.interOnsetPaddingPx,
     timeAxisSpacingConfig.baseMinGap32Px,
     timeAxisSpacingConfig.durationGapRatios.thirtySecond,
     timeAxisSpacingConfig.durationGapRatios.sixteenth,
@@ -1147,15 +1080,6 @@ function App() {
   ])
 
   useEffect(() => {
-    if (!isHorizontalView) return
-    setCurrentPage(0)
-  }, [isHorizontalView])
-
-  useEffect(() => {
-    if (!isHorizontalView) {
-      setHorizontalViewportXRange({ startX: 0, endX: totalScoreWidth })
-      return
-    }
     const scrollHost = scoreScrollRef.current
     if (!scrollHost) {
       setHorizontalViewportXRange({ startX: 0, endX: totalScoreWidth })
@@ -1193,7 +1117,7 @@ function App() {
         window.cancelAnimationFrame(rafId)
       }
     }
-  }, [isHorizontalView, scoreScaleX, totalScoreWidth, displayScoreWidth])
+  }, [scoreScaleX, totalScoreWidth, displayScoreWidth])
 
   useImportedRefsSync({
     measurePairsFromImport,
@@ -1226,16 +1150,13 @@ function App() {
     systemRanges,
     visibleSystemRange,
     renderOriginSystemIndex: visibleSystemRange.start,
-    visiblePairRange:
-      isHorizontalView && horizontalRenderWindow
-        ? {
-          startPairIndex: horizontalRenderWindow.startPairIndex,
-          endPairIndexExclusive: horizontalRenderWindow.endPairIndexExclusive,
-        }
-        : null,
+    visiblePairRange: {
+      startPairIndex: horizontalRenderWindow.startPairIndex,
+      endPairIndexExclusive: horizontalRenderWindow.endPairIndexExclusive,
+    },
     clearViewportXRange: null,
-    measureFramesByPair: isHorizontalView ? horizontalMeasureFramesByPair : null,
-    renderOffsetX: isHorizontalView ? horizontalRenderOffsetX : 0,
+    measureFramesByPair: horizontalMeasureFramesByPair,
+    renderOffsetX: horizontalRenderOffsetX,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
     activeSelection: null,
@@ -1377,12 +1298,6 @@ function App() {
   useEffect(() => {
     importFeedbackRef.current = importFeedback
   }, [importFeedback])
-  const goToPrevPage = () => setCurrentPage((page) => Math.max(0, Math.min(page, pageCount - 1) - 1))
-  const goToNextPage = () => setCurrentPage((page) => Math.min(pageCount - 1, Math.max(0, page) + 1))
-  const goToPage = useCallback(
-    (pageIndex: number) => setCurrentPage(Math.max(0, Math.min(pageCount - 1, pageIndex))),
-    [pageCount],
-  )
   const closeOsmdPreview = useCallback(() => {
     if (osmdPreviewZoomCommitTimerRef.current !== null) {
       window.clearTimeout(osmdPreviewZoomCommitTimerRef.current)
@@ -1812,7 +1727,7 @@ function App() {
   const osmdPreviewPaperWidthPx = A4_PAGE_WIDTH * osmdPreviewPaperScale
   const osmdPreviewPaperHeightPx = A4_PAGE_HEIGHT * osmdPreviewPaperScale
 
-  const scoreSurfaceOffsetXPx = isHorizontalView ? horizontalRenderOffsetX * scoreScaleX : 0
+  const scoreSurfaceOffsetXPx = horizontalRenderOffsetX * scoreScaleX
   const formatDebugCoord = (value: number | null | undefined): string => {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 'null'
     return value.toFixed(3)
@@ -2328,7 +2243,7 @@ function App() {
         scoreScale,
         scoreScaleX,
         scoreScaleY,
-        isHorizontalView,
+        isHorizontalView: true,
         spacingLayoutMode,
       }),
       setAutoScaleEnabled: (enabled: boolean) => {
@@ -2403,9 +2318,6 @@ function App() {
         systemsPerPage,
         visibleSystemRange: { ...visibleSystemRange },
       }),
-      goToPage: (pageIndex: number) => {
-        goToPage(pageIndex)
-      },
     }
     ;(window as unknown as { __scoreDebug?: typeof debugApi }).__scoreDebug = debugApi
     return () => {
@@ -2415,7 +2327,6 @@ function App() {
     importMusicXmlText,
     dumpAllMeasureCoordinateReport,
     dumpOsmdPreviewSystemMetrics,
-    goToPage,
     pageCount,
     safeCurrentPage,
     safeManualScalePercent,
@@ -2424,7 +2335,6 @@ function App() {
     scoreScale,
     scoreScaleX,
     scoreScaleY,
-    isHorizontalView,
     spacingLayoutMode,
     dragDebugFramesRef,
     dragRef,
@@ -2450,18 +2360,11 @@ function App() {
         isPlaying={isPlaying}
         onPlayScore={playScore}
         onReset={resetScore}
-        isHorizontalView={isHorizontalView}
-        onToggleHorizontalView={() => setIsHorizontalView((current) => !current)}
         autoScaleEnabled={autoScaleEnabled}
         autoScalePercent={autoScalePercent}
         onToggleAutoScale={() => setAutoScaleEnabled((enabled) => !enabled)}
         manualScalePercent={safeManualScalePercent}
         onManualScalePercentChange={(nextPercent) => setManualScalePercent(clampScalePercent(nextPercent))}
-        spacingGapGamma={timeAxisSpacingConfig.gapGamma}
-        spacingBaseWeight={timeAxisSpacingConfig.gapBaseWeight}
-        spacingMinGapBeats={timeAxisSpacingConfig.minGapBeats}
-        spacingLeftEdgePaddingPx={timeAxisSpacingConfig.leftEdgePaddingPx}
-        spacingRightEdgePaddingPx={timeAxisSpacingConfig.rightEdgePaddingPx}
         pageHorizontalPaddingPx={pageHorizontalPaddingPx}
         baseMinGap32Px={timeAxisSpacingConfig.baseMinGap32Px}
         durationGapRatio32={timeAxisSpacingConfig.durationGapRatios.thirtySecond}
@@ -2469,36 +2372,6 @@ function App() {
         durationGapRatio8={timeAxisSpacingConfig.durationGapRatios.eighth}
         durationGapRatio4={timeAxisSpacingConfig.durationGapRatios.quarter}
         durationGapRatio2={timeAxisSpacingConfig.durationGapRatios.half}
-        onSpacingMinGapBeatsChange={(nextValue) =>
-          setTimeAxisSpacingConfig((current) => ({
-            ...current,
-            minGapBeats: clampNumber(nextValue, 0.01, 0.25),
-          }))
-        }
-        onSpacingGapGammaChange={(nextValue) =>
-          setTimeAxisSpacingConfig((current) => ({
-            ...current,
-            gapGamma: clampNumber(nextValue, 0.55, 1),
-          }))
-        }
-        onSpacingBaseWeightChange={(nextValue) =>
-          setTimeAxisSpacingConfig((current) => ({
-            ...current,
-            gapBaseWeight: clampNumber(nextValue, 0.1, 1.2),
-          }))
-        }
-        onSpacingLeftEdgePaddingPxChange={(nextValue) =>
-          setTimeAxisSpacingConfig((current) => ({
-            ...current,
-            leftEdgePaddingPx: Math.round(clampNumber(nextValue, 0, 24)),
-          }))
-        }
-        onSpacingRightEdgePaddingPxChange={(nextValue) =>
-          setTimeAxisSpacingConfig((current) => ({
-            ...current,
-            rightEdgePaddingPx: Math.round(clampNumber(nextValue, 0, 24)),
-          }))
-        }
         onPageHorizontalPaddingPxChange={(nextValue) =>
           setPageHorizontalPaddingPx(clampPageHorizontalPaddingPx(nextValue))
         }
@@ -2581,12 +2454,6 @@ function App() {
         scoreScaleX={scoreScaleX}
         scoreScaleY={scoreScaleY}
         scoreSurfaceOffsetXPx={scoreSurfaceOffsetXPx}
-        isHorizontalView={isHorizontalView}
-        currentPage={safeCurrentPage}
-        pageCount={pageCount}
-        onPrevPage={goToPrevPage}
-        onNextPage={goToNextPage}
-        onGoToPage={goToPage}
         draggingSelection={draggingSelection}
         scoreRef={scoreRef}
         scoreOverlayRef={scoreOverlayRef}

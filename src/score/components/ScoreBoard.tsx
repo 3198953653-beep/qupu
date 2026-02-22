@@ -1,4 +1,4 @@
-import type { PointerEvent, RefObject } from 'react'
+﻿import type { PointerEvent, RefObject } from 'react'
 import { SelectionInspector } from './SelectionInspector'
 
 export function ScoreBoard(props: {
@@ -8,12 +8,6 @@ export function ScoreBoard(props: {
   scoreScaleX: number
   scoreScaleY: number
   scoreSurfaceOffsetXPx: number
-  isHorizontalView: boolean
-  currentPage: number
-  pageCount: number
-  onPrevPage: () => void
-  onNextPage: () => void
-  onGoToPage: (pageIndex: number) => void
   draggingSelection: { noteId: string; staff: 'treble' | 'bass'; keyIndex: number } | null
   scoreRef: RefObject<HTMLCanvasElement | null>
   scoreOverlayRef: RefObject<HTMLCanvasElement | null>
@@ -41,12 +35,6 @@ export function ScoreBoard(props: {
     scoreScaleX,
     scoreScaleY,
     scoreSurfaceOffsetXPx,
-    isHorizontalView,
-    currentPage,
-    pageCount,
-    onPrevPage,
-    onNextPage,
-    onGoToPage,
     draggingSelection,
     scoreRef,
     scoreOverlayRef,
@@ -70,27 +58,8 @@ export function ScoreBoard(props: {
 
   return (
     <section className="board">
-      {!isHorizontalView && (
-        <div className="page-nav">
-          <button type="button" onClick={() => onGoToPage(0)} disabled={currentPage <= 0}>
-            首页
-          </button>
-          <button type="button" onClick={onPrevPage} disabled={currentPage <= 0}>
-            上一页
-          </button>
-          <p className="page-label">
-            第 <strong>{currentPage + 1}</strong> / {pageCount} 页
-          </p>
-          <button type="button" onClick={onNextPage} disabled={currentPage >= pageCount - 1}>
-            下一页
-          </button>
-          <button type="button" onClick={() => onGoToPage(pageCount - 1)} disabled={currentPage >= pageCount - 1}>
-            末页
-          </button>
-        </div>
-      )}
-      <div className={`score-scroll ${isHorizontalView ? 'horizontal-view' : ''}`} ref={scoreScrollRef}>
-        <div className={`score-stage ${isHorizontalView ? 'horizontal-view' : ''}`} style={{ width: `${displayScoreWidth}px`, height: `${displayScoreHeight}px` }}>
+      <div className="score-scroll horizontal-view" ref={scoreScrollRef}>
+        <div className="score-stage horizontal-view" style={{ width: `${displayScoreWidth}px`, height: `${displayScoreHeight}px` }}>
           <canvas
             className={`score-surface ${draggingSelection ? 'is-dragging' : ''}`}
             ref={scoreRef}

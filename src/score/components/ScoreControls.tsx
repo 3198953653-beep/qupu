@@ -6,8 +6,6 @@ export function ScoreControls(props: {
   isPlaying: boolean
   onPlayScore: () => void
   onReset: () => void
-  isHorizontalView: boolean
-  onToggleHorizontalView: () => void
   onOpenMusicXmlFilePicker: () => void
   onLoadSampleMusicXml: () => void
   onExportMusicXmlFile: () => void
@@ -25,11 +23,6 @@ export function ScoreControls(props: {
   onToggleAutoScale: () => void
   manualScalePercent: number
   onManualScalePercentChange: (nextPercent: number) => void
-  spacingGapGamma: number
-  spacingBaseWeight: number
-  spacingMinGapBeats: number
-  spacingLeftEdgePaddingPx: number
-  spacingRightEdgePaddingPx: number
   pageHorizontalPaddingPx: number
   baseMinGap32Px: number
   durationGapRatio32: number
@@ -37,11 +30,6 @@ export function ScoreControls(props: {
   durationGapRatio8: number
   durationGapRatio4: number
   durationGapRatio2: number
-  onSpacingMinGapBeatsChange: (nextValue: number) => void
-  onSpacingGapGammaChange: (nextValue: number) => void
-  onSpacingBaseWeightChange: (nextValue: number) => void
-  onSpacingLeftEdgePaddingPxChange: (nextValue: number) => void
-  onSpacingRightEdgePaddingPxChange: (nextValue: number) => void
   onPageHorizontalPaddingPxChange: (nextValue: number) => void
   onBaseMinGap32PxChange: (nextValue: number) => void
   onDurationGapRatio32Change: (nextValue: number) => void
@@ -55,8 +43,6 @@ export function ScoreControls(props: {
     isPlaying,
     onPlayScore,
     onReset,
-    isHorizontalView,
-    onToggleHorizontalView,
     onOpenMusicXmlFilePicker,
     onLoadSampleMusicXml,
     onExportMusicXmlFile,
@@ -74,11 +60,6 @@ export function ScoreControls(props: {
     onToggleAutoScale,
     manualScalePercent,
     onManualScalePercentChange,
-    spacingGapGamma,
-    spacingBaseWeight,
-    spacingMinGapBeats,
-    spacingLeftEdgePaddingPx,
-    spacingRightEdgePaddingPx,
     pageHorizontalPaddingPx,
     baseMinGap32Px,
     durationGapRatio32,
@@ -86,11 +67,6 @@ export function ScoreControls(props: {
     durationGapRatio8,
     durationGapRatio4,
     durationGapRatio2,
-    onSpacingMinGapBeatsChange,
-    onSpacingGapGammaChange,
-    onSpacingBaseWeightChange,
-    onSpacingLeftEdgePaddingPxChange,
-    onSpacingRightEdgePaddingPxChange,
     onPageHorizontalPaddingPxChange,
     onBaseMinGap32PxChange,
     onDurationGapRatio32Change,
@@ -122,9 +98,6 @@ export function ScoreControls(props: {
           {isPlaying ? '播放中...' : '播放小节'}
         </button>
         <button type="button" onClick={onReset}>重置</button>
-        <button type="button" onClick={onToggleHorizontalView}>
-          {isHorizontalView ? '横向视图：开（原版排版）' : '横向视图：关'}
-        </button>
         <button type="button" onClick={onToggleAutoScale}>
           {autoScaleEnabled ? `自动缩放：开（${autoScalePercent}%）` : '自动缩放：关'}
         </button>
@@ -181,125 +154,6 @@ export function ScoreControls(props: {
             <button type="button" className="spacing-reset-btn" onClick={onResetSpacingConfig}>重置</button>
           </div>
         </div>
-        <div className="spacing-grid">
-          <label htmlFor="spacing-min-gap-range">最小间距（拍）</label>
-          <input
-            id="spacing-min-gap-range"
-            type="range"
-            min={0.01}
-            max={0.25}
-            step={0.005}
-            value={spacingMinGapBeats}
-            onInput={(event) =>
-              handleFloatValue((event.target as HTMLInputElement).value, onSpacingMinGapBeatsChange)
-            }
-            onChange={(event) => handleFloatValue(event.target.value, onSpacingMinGapBeatsChange)}
-          />
-          <input
-            type="number"
-            min={0.01}
-            max={0.25}
-            step={0.005}
-            value={spacingMinGapBeats}
-            onInput={(event) =>
-              handleFloatValue((event.target as HTMLInputElement).value, onSpacingMinGapBeatsChange)
-            }
-            onChange={(event) => handleFloatValue(event.target.value, onSpacingMinGapBeatsChange)}
-          />
-
-          <label htmlFor="spacing-gamma-range">间距指数</label>
-          <input
-            id="spacing-gamma-range"
-            type="range"
-            min={0.55}
-            max={1}
-            step={0.01}
-            value={spacingGapGamma}
-            onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onSpacingGapGammaChange)}
-            onChange={(event) => handleFloatValue(event.target.value, onSpacingGapGammaChange)}
-          />
-          <input
-            type="number"
-            min={0.55}
-            max={1}
-            step={0.01}
-            value={spacingGapGamma}
-            onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onSpacingGapGammaChange)}
-            onChange={(event) => handleFloatValue(event.target.value, onSpacingGapGammaChange)}
-          />
-
-          <label htmlFor="spacing-base-range">间距基值</label>
-          <input
-            id="spacing-base-range"
-            type="range"
-            min={0.1}
-            max={1.2}
-            step={0.01}
-            value={spacingBaseWeight}
-            onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onSpacingBaseWeightChange)}
-            onChange={(event) => handleFloatValue(event.target.value, onSpacingBaseWeightChange)}
-          />
-          <input
-            type="number"
-            min={0.1}
-            max={1.2}
-            step={0.01}
-            value={spacingBaseWeight}
-            onInput={(event) => handleFloatValue((event.target as HTMLInputElement).value, onSpacingBaseWeightChange)}
-            onChange={(event) => handleFloatValue(event.target.value, onSpacingBaseWeightChange)}
-          />
-
-          <label htmlFor="spacing-left-pad-range">左边缘留白</label>
-          <input
-            id="spacing-left-pad-range"
-            type="range"
-            min={0}
-            max={24}
-            step={1}
-            value={spacingLeftEdgePaddingPx}
-            onInput={(event) =>
-              handleFloatValue((event.target as HTMLInputElement).value, onSpacingLeftEdgePaddingPxChange)
-            }
-            onChange={(event) => handleFloatValue(event.target.value, onSpacingLeftEdgePaddingPxChange)}
-          />
-          <input
-            type="number"
-            min={0}
-            max={24}
-            step={1}
-            value={spacingLeftEdgePaddingPx}
-            onInput={(event) =>
-              handleFloatValue((event.target as HTMLInputElement).value, onSpacingLeftEdgePaddingPxChange)
-            }
-            onChange={(event) => handleFloatValue(event.target.value, onSpacingLeftEdgePaddingPxChange)}
-          />
-
-          <label htmlFor="spacing-right-pad-range">右边缘留白</label>
-          <input
-            id="spacing-right-pad-range"
-            type="range"
-            min={0}
-            max={24}
-            step={1}
-            value={spacingRightEdgePaddingPx}
-            onInput={(event) =>
-              handleFloatValue((event.target as HTMLInputElement).value, onSpacingRightEdgePaddingPxChange)
-            }
-            onChange={(event) => handleFloatValue(event.target.value, onSpacingRightEdgePaddingPxChange)}
-          />
-          <input
-            type="number"
-            min={0}
-            max={24}
-            step={1}
-            value={spacingRightEdgePaddingPx}
-            onInput={(event) =>
-              handleFloatValue((event.target as HTMLInputElement).value, onSpacingRightEdgePaddingPxChange)
-            }
-            onChange={(event) => handleFloatValue(event.target.value, onSpacingRightEdgePaddingPxChange)}
-          />
-        </div>
-
         {showGlobalGapPanel && (
           <div className="duration-base-grid">
             <label htmlFor="duration-base-gap-32">全局间距大小</label>
