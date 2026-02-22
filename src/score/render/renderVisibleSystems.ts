@@ -304,7 +304,12 @@ export function renderVisibleSystems(params: {
         return false
       })()
       : false
+  // Horizontal virtual-window incremental paint can leave stale fragments
+  // when drag-commit re-renders interleave with viewport/window updates.
+  // Keep commit path deterministic: repaint the full visible window.
+  const enableIncrementalPaint = false
   const shouldUseIncrementalPaint =
+    enableIncrementalPaint &&
     layoutReflowHint !== null &&
     layoutReflowHint.layoutStabilityKey === layoutStabilityKey &&
     !layoutReflowHint.shouldReflow &&

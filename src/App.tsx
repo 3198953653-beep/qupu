@@ -933,13 +933,16 @@ function App() {
   const autoScoreScale = useMemo(() => getAutoScoreScale(measurePairs.length), [measurePairs.length])
   const safeManualScalePercent = clampScalePercent(manualScalePercent)
   const relativeScale = autoScaleEnabled ? autoScoreScale : safeManualScalePercent / 100
+  const horizontalDisplayScale = relativeScale * MANUAL_SCALE_BASELINE
   const provisionalDisplayScoreHeight = isHorizontalView ? HORIZONTAL_VIEW_HEIGHT_PX : A4_PAGE_HEIGHT
   const displayScoreWidth = useMemo(() => {
     if (!isHorizontalView) return A4_PAGE_WIDTH
     const totalMeasureWidth = horizontalEstimatedMeasureWidthTotal
     const baseWidth = Math.max(A4_PAGE_WIDTH, pageHorizontalPaddingPx * 2 + totalMeasureWidth)
-    return Math.max(A4_PAGE_WIDTH, Math.round(baseWidth * relativeScale))
-  }, [isHorizontalView, horizontalEstimatedMeasureWidthTotal, pageHorizontalPaddingPx, relativeScale])
+    // Keep horizontal display width in the same scale space as canvas transform.
+    // Otherwise scroll-space and render-space drift apart and can leave blank tails.
+    return Math.max(A4_PAGE_WIDTH, Math.round(baseWidth * horizontalDisplayScale))
+  }, [isHorizontalView, horizontalEstimatedMeasureWidthTotal, pageHorizontalPaddingPx, horizontalDisplayScale])
   const baseScoreScale = relativeScale * MANUAL_SCALE_BASELINE
   const minScaleForCanvasHeight = provisionalDisplayScoreHeight / MAX_CANVAS_RENDER_DIM_PX
   const scoreScaleX = baseScoreScale
