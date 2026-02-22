@@ -255,6 +255,7 @@ export function useDragHandlers(params: {
       commitDragPitchToScore,
       dragPreviewFrameRef,
       clearDragOverlay,
+      setActiveSelection,
       setDraggingSelection,
     })
   }

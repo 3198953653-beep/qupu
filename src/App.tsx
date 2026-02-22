@@ -1159,8 +1159,8 @@ function App() {
     renderOffsetX: horizontalRenderOffsetX,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
-    activeSelection: null,
-    draggingSelection: null,
+    activeSelection,
+    draggingSelection,
     layoutReflowHintRef,
     layoutStabilityKey,
     noteLayoutsRef,
@@ -1280,6 +1280,32 @@ function App() {
     initialTrebleNotes: INITIAL_NOTES,
     initialBassNotes: INITIAL_BASS_NOTES,
   })
+
+  useEffect(() => {
+    const hasActiveTreble = notes.some((note) => note.id === activeSelection.noteId)
+    const hasActiveBass = bassNotes.some((note) => note.id === activeSelection.noteId)
+
+    if (activeSelection.staff === 'treble') {
+      if (hasActiveTreble) return
+      if (notes[0]) {
+        setActiveSelection({ noteId: notes[0].id, staff: 'treble', keyIndex: 0 })
+        return
+      }
+      if (bassNotes[0]) {
+        setActiveSelection({ noteId: bassNotes[0].id, staff: 'bass', keyIndex: 0 })
+      }
+      return
+    }
+
+    if (hasActiveBass) return
+    if (bassNotes[0]) {
+      setActiveSelection({ noteId: bassNotes[0].id, staff: 'bass', keyIndex: 0 })
+      return
+    }
+    if (notes[0]) {
+      setActiveSelection({ noteId: notes[0].id, staff: 'treble', keyIndex: 0 })
+    }
+  }, [activeSelection, notes, bassNotes])
 
   const activePool = activeSelection.staff === 'treble' ? notes : bassNotes
   const activePoolById = activeSelection.staff === 'treble' ? trebleNoteById : bassNoteById

@@ -171,6 +171,7 @@ export function handleEndDragPointer(params: {
   commitDragPitchToScore: (drag: DragState, pitch: Pitch) => void
   dragPreviewFrameRef: MutableRefObject<number>
   clearDragOverlay: () => void
+  setActiveSelection: StateSetter<Selection>
   setDraggingSelection: StateSetter<Selection | null>
 }): void {
   const {
@@ -181,6 +182,7 @@ export function handleEndDragPointer(params: {
     commitDragPitchToScore,
     dragPreviewFrameRef,
     clearDragOverlay,
+    setActiveSelection,
     setDraggingSelection,
   } = params
 
@@ -197,11 +199,18 @@ export function handleEndDragPointer(params: {
   if (pending && pending.drag.pointerId === drag.pointerId) {
     finalPitch = pending.pitch
   }
+  // Restore selected-note highlight immediately on release, then commit pitch.
+  setActiveSelection(upsertSelection({
+    noteId: drag.noteId,
+    staff: drag.staff,
+    keyIndex: drag.keyIndex,
+  }))
+  setDraggingSelection(null)
+  clearDragOverlay()
   commitDragPitchToScore(drag, finalPitch)
-
   dragRef.current = null
   dragPreviewFrameRef.current = 0
-  clearDragOverlay()
-  setDraggingSelection(null)
-  event.currentTarget.releasePointerCapture(event.pointerId)
+  if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+    event.currentTarget.releasePointerCapture(event.pointerId)
+  }
 }

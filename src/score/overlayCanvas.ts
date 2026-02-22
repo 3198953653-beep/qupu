@@ -32,11 +32,11 @@ export function clearOverlayCanvas(
   overlayLastRectRef: MutableRefObject<MeasureLayout['overlayRect'] | null>,
 ): void {
   if (!overlay) return
+  overlay.style.display = 'none'
+  overlayLastRectRef.current = null
   const overlay2d = overlay.getContext('2d')
   if (!overlay2d) return
   overlay2d.clearRect(0, 0, overlay.width, overlay.height)
-  overlay.style.display = 'none'
-  overlayLastRectRef.current = null
 }
 
 export function ensureOverlayCanvasForRect(params: {
