@@ -1,9 +1,9 @@
 import { BarlineType, Renderer, Stave } from 'vexflow'
 import {
-  DURATION_TICKS,
   SCORE_PAGE_PADDING_X,
   SCORE_TOP_PADDING,
   SYSTEM_BASS_OFFSET_Y,
+  DURATION_TICKS,
   SYSTEM_GAP_Y,
   SYSTEM_HEIGHT,
   SYSTEM_TREBLE_OFFSET_Y,
@@ -33,16 +33,12 @@ import type {
   TimeSignature,
 } from '../types'
 
-const OVERFLOW_ANALYSIS_MAX_PASSES = 6
+const OVERFLOW_ANALYSIS_MAX_PASSES = 16
 const OVERFLOW_RECOVERY_PAD_PX = 2
-const EDGE_REBALANCE_MAX_PASSES = 5
-const EDGE_TARGET_GAP_RATIO = 0.82
-const EDGE_TARGET_GAP_MAX_PX = 48
-const EDGE_TRANSFER_DAMPING = 0.75
-const EDGE_REBALANCE_EPSILON_PX = 0.5
-const EDGE_SYSTEM_START_PRIORITY = 1.65
+const EDGE_SHORTFALL_RECOVERY_MAX_STEP_PX = 48
 const MIN_TIMELINE_WEIGHT = 0.0001
-const MIN_TIMELINE_WEIGHT_FRACTION = 0.35
+const MIN_FORMAT_WIDTH_PX = 8
+const UNIFORM_BARLINE_EDGE_GAP_RATIO = 0.82
 
 type FrozenMeasureSpacing = {
   baselineMeasureX: number
@@ -194,20 +190,74 @@ function getMeasureSpacingRightEdge(layouts: NoteLayout[]): number {
   return maxSpacingRightX
 }
 
-function getNoteDurationTicks(note: ScoreNote): number {
-  const ticks = DURATION_TICKS[note.duration]
-  if (!Number.isFinite(ticks)) return TICKS_PER_BEAT
-  return Math.max(1, Math.round(ticks))
+function getLayoutOnsetXs(layouts: NoteLayout[], measure: MeasurePair): number[] {
+  const onsetByNoteKey = new Map<string, number>()
+  let trebleTicks = 0
+  measure.treble.forEach((note, noteIndex) => {
+    onsetByNoteKey.set(`treble:${noteIndex}`, trebleTicks)
+    trebleTicks += DURATION_TICKS[note.duration] ?? 16
+  })
+  let bassTicks = 0
+  measure.bass.forEach((note, noteIndex) => {
+    onsetByNoteKey.set(`bass:${noteIndex}`, bassTicks)
+    bassTicks += DURATION_TICKS[note.duration] ?? 16
+  })
+
+  const onsetXMap = new Map<number, number>()
+  layouts.forEach((layout) => {
+    const onsetTicks = onsetByNoteKey.get(`${layout.staff}:${layout.noteIndex}`)
+    if (onsetTicks === undefined || !Number.isFinite(layout.x)) return
+    const current = onsetXMap.get(onsetTicks)
+    onsetXMap.set(onsetTicks, current === undefined ? layout.x : Math.min(current, layout.x))
+  })
+
+  return [...onsetXMap.entries()]
+    .sort((left, right) => left[0] - right[0])
+    .map((entry) => entry[1])
 }
 
-function buildStaffOnsetTicks(notes: ScoreNote[]): number[] {
-  const onsetTicks: number[] = []
-  let cursorTicks = 0
-  notes.forEach((note) => {
-    onsetTicks.push(cursorTicks)
-    cursorTicks += getNoteDurationTicks(note)
-  })
-  return onsetTicks
+function getMeasureEdgeShortfallPx(params: {
+  layouts: NoteLayout[]
+  measure: MeasurePair
+  leftBoundaryX: number
+  rightBoundaryX: number
+  rightSpacingEdgeX: number
+  preferMeasureStartBarlineAxis: boolean
+  spacingConfig: TimeAxisSpacingConfig
+}): number {
+  const {
+    layouts,
+    measure,
+    leftBoundaryX,
+    rightBoundaryX,
+    rightSpacingEdgeX,
+    preferMeasureStartBarlineAxis,
+    spacingConfig,
+  } = params
+  if (!Number.isFinite(leftBoundaryX) || !Number.isFinite(rightBoundaryX) || !Number.isFinite(rightSpacingEdgeX)) {
+    return 0
+  }
+  const onsetXs = getLayoutOnsetXs(layouts, measure)
+  if (onsetXs.length < 2) return 0
+  const firstX = onsetXs[0]
+  const secondX = onsetXs[1]
+  const previousLastX = onsetXs[onsetXs.length - 2]
+  const lastX = onsetXs[onsetXs.length - 1]
+  const firstInternalGap = Math.max(0, secondX - firstX)
+  const lastInternalGap = Math.max(0, lastX - previousLastX)
+  if (firstInternalGap <= 0.0001 || lastInternalGap <= 0.0001) return 0
+  const currentLeftEdgeGap = firstX - leftBoundaryX
+  const currentRightEdgeGap = rightBoundaryX - rightSpacingEdgeX
+  const targetLeftEdgeGap = preferMeasureStartBarlineAxis
+    ? Math.max(spacingConfig.leftEdgePaddingPx, firstInternalGap * UNIFORM_BARLINE_EDGE_GAP_RATIO)
+    : spacingConfig.leftEdgePaddingPx
+  const targetRightEdgeGap = Math.max(
+    spacingConfig.rightEdgePaddingPx,
+    lastInternalGap * UNIFORM_BARLINE_EDGE_GAP_RATIO,
+  )
+  const leftDeficit = Math.max(0, targetLeftEdgeGap - currentLeftEdgeGap)
+  const rightDeficit = Math.max(0, targetRightEdgeGap - currentRightEdgeGap)
+  return leftDeficit + rightDeficit
 }
 
 export function renderVisibleSystems(params: {
@@ -476,7 +526,7 @@ export function renderVisibleSystems(params: {
       }
       const noteStartOffset = noteStartProbe.getNoteStartX()
       const noteEndOffset = noteStartProbe.getNoteEndX()
-      const formatWidth = Math.max(80, noteEndOffset - noteStartOffset - 8)
+      const formatWidth = Math.max(MIN_FORMAT_WIDTH_PX, noteEndOffset - noteStartOffset - 8)
       const geometry = { noteStartOffset, noteEndOffset, formatWidth }
       probeGeometryCache.set(cacheKey, geometry)
       return geometry
@@ -748,87 +798,68 @@ export function renderVisibleSystems(params: {
         spacingConfig,
       ),
     )
-    const probeWidth = Math.max(140, Math.floor(systemUsableWidth / Math.max(1, systemMeta.length)))
     const uniformTickPadding = getUniformTickSpacingPadding(spacingConfig)
-    let fixedWidths = systemMeta.map((entry) => {
-      const geometry = getMeasureProbeGeometry(entry, probeWidth)
-      const leftDecorationWidth = Math.max(0, geometry.noteStartOffset)
-      const rightDecorationWidth = Math.max(0, probeWidth - geometry.noteEndOffset)
-      const leftAxisInset =
-        (entry.preferMeasureStartBarlineAxis ? 0 : leftDecorationWidth) + uniformTickPadding.startPadPx
-      const rightAxisInset = entry.preferMeasureEndBarlineAxis
-        ? uniformTickPadding.endPadPx
-        : rightDecorationWidth + 8 + uniformTickPadding.endPadPx
-      // Keep fixed cost aligned with drawMeasure's axis start/end behavior.
-      return Math.max(
-        1,
-        leftAxisInset + rightAxisInset,
-      )
-    })
-    const onsetTicksByPairIndex = new Map<number, { treble: number[]; bass: number[] }>()
-    systemMeta.forEach((entry) => {
-      onsetTicksByPairIndex.set(entry.pairIndex, {
-        treble: buildStaffOnsetTicks(entry.measure.treble),
-        bass: buildStaffOnsetTicks(entry.measure.bass),
-      })
-    })
-
-    let adaptiveTimelineWeights = measureTimelineWeightsBySystem.map((weight) =>
+    const adaptiveTimelineWeights = measureTimelineWeightsBySystem.map((weight) =>
       Math.max(MIN_TIMELINE_WEIGHT, weight),
     )
-    const timelineWeightFloors = measureTimelineWeightsBySystem.map((weight) =>
-      Math.max(MIN_TIMELINE_WEIGHT, weight * MIN_TIMELINE_WEIGHT_FRACTION),
-    )
+    const fixedWidthBonuses = new Array<number>(systemMeta.length).fill(0)
+    const measureProbeWidthSeed = Math.max(140, Math.floor(systemUsableWidth / Math.max(1, systemMeta.length)))
 
-    const buildMeasureWidthsFromFixed = (fixed: number[], weights: number[]): number[] => {
-      const fixedTotal = fixed.reduce((sum, width) => sum + width, 0)
-      const safeWeights = weights.map((weight) => Math.max(MIN_TIMELINE_WEIGHT, weight))
+    const getResolvedFixedWidth = (
+      entry: (typeof systemMeta)[number],
+      indexInSystem: number,
+      measureWidth: number,
+    ): number => {
+      const safeMeasureWidth = Math.max(1, Number(measureWidth.toFixed(3)))
+      const geometry = getMeasureProbeGeometry(entry, safeMeasureWidth)
+      const axisBoundaryStart = entry.preferMeasureStartBarlineAxis ? 0 : geometry.noteStartOffset
+      const axisBoundaryEnd = entry.preferMeasureEndBarlineAxis ? safeMeasureWidth : geometry.noteEndOffset
+      const axisSpan = Math.max(
+        1,
+        axisBoundaryEnd -
+          axisBoundaryStart -
+          uniformTickPadding.startPadPx -
+          uniformTickPadding.endPadPx,
+      )
+      const intrinsicFixed = Math.max(1, safeMeasureWidth - axisSpan)
+      return intrinsicFixed + (fixedWidthBonuses[indexInSystem] ?? 0)
+    }
+
+    const solveMeasureWidths = (): number[] => {
+      const safeWeights = adaptiveTimelineWeights.map((weight) => Math.max(MIN_TIMELINE_WEIGHT, weight))
       const safeTotalTimelineWeight = Math.max(
         MIN_TIMELINE_WEIGHT,
         safeWeights.reduce((sum, weight) => sum + weight, 0),
       )
-      if (fixedTotal >= systemUsableWidth) {
-        return fixed.map((width) => (systemUsableWidth * width) / Math.max(1, fixedTotal))
+      let widths = systemMeta.map(() => measureProbeWidthSeed)
+      for (let pass = 0; pass < 8; pass += 1) {
+        const fixed = systemMeta.map((entry, indexInSystem) =>
+          getResolvedFixedWidth(entry, indexInSystem, widths[indexInSystem] ?? measureProbeWidthSeed),
+        )
+        const fixedTotal = fixed.reduce((sum, width) => sum + width, 0)
+        const nextWidths =
+          fixedTotal >= systemUsableWidth
+            ? fixed.map((width) => (systemUsableWidth * width) / Math.max(1, fixedTotal))
+            : (() => {
+              const flexWidth = systemUsableWidth - fixedTotal
+              return fixed.map(
+                (fixedWidth, index) =>
+                  fixedWidth + (flexWidth * (safeWeights[index] ?? MIN_TIMELINE_WEIGHT)) / safeTotalTimelineWeight,
+              )
+            })()
+        const maxDelta = nextWidths.reduce(
+          (max, width, index) => Math.max(max, Math.abs(width - (widths[index] ?? 0))),
+          0,
+        )
+        widths = nextWidths
+        if (maxDelta < 0.25) break
       }
-      const flexWidth = systemUsableWidth - fixedTotal
-      return fixed.map(
-        (fixedWidth, index) =>
-          fixedWidth + (flexWidth * (safeWeights[index] ?? MIN_TIMELINE_WEIGHT)) / safeTotalTimelineWeight,
-      )
-    }
-
-    const getMeasureLastInternalGapPx = (
-      entry: (typeof systemMeta)[number],
-      measureNoteLayouts: NoteLayout[],
-    ): number | null => {
-      if (measureNoteLayouts.length < 2) return null
-      const onsetTicks = onsetTicksByPairIndex.get(entry.pairIndex)
-      if (!onsetTicks) return null
-      const onsetBuckets = new Map<number, { xTotal: number; xCount: number }>()
-      measureNoteLayouts.forEach((layout) => {
-        const onset =
-          layout.staff === 'treble'
-            ? onsetTicks.treble[layout.noteIndex]
-            : onsetTicks.bass[layout.noteIndex]
-        if (!Number.isFinite(onset) || !Number.isFinite(layout.x)) return
-        const bucket = onsetBuckets.get(onset) ?? { xTotal: 0, xCount: 0 }
-        bucket.xTotal += layout.x
-        bucket.xCount += 1
-        onsetBuckets.set(onset, bucket)
-      })
-      const orderedOnsetXs = [...onsetBuckets.entries()]
-        .sort((left, right) => left[0] - right[0])
-        .map(([, bucket]) => (bucket.xCount > 0 ? bucket.xTotal / bucket.xCount : Number.NaN))
-        .filter((x) => Number.isFinite(x))
-      if (orderedOnsetXs.length < 2) return null
-      const lastGap = orderedOnsetXs[orderedOnsetXs.length - 1] - orderedOnsetXs[orderedOnsetXs.length - 2]
-      return Number.isFinite(lastGap) && lastGap > 0.001 ? lastGap : null
+      return widths
     }
 
     type MeasureProbeStats = {
       overflowPx: number | null
-      rightGapPx: number | null
-      lastInternalGapPx: number | null
+      edgeShortfallPx: number
     }
 
     const measureProbeStatsCache = new Map<string, MeasureProbeStats>()
@@ -843,7 +874,11 @@ export function renderVisibleSystems(params: {
         return cached
       }
       const probeMeasureX = pagePaddingX
-      const { spacingRightLimitX, formatWidth } = buildMeasureProbe(entry, probeMeasureX, safeMeasureWidth)
+      const { noteStartX, noteEndX, spacingRightLimitX, formatWidth } = buildMeasureProbe(
+        entry,
+        probeMeasureX,
+        safeMeasureWidth,
+      )
       const measureNoteLayouts = drawMeasureToContext({
         context,
         measure: entry.measure,
@@ -878,14 +913,23 @@ export function renderVisibleSystems(params: {
       })
       const spacingRightEdge = getMeasureSpacingRightEdge(measureNoteLayouts)
       if (!Number.isFinite(spacingRightEdge)) {
-        const stats: MeasureProbeStats = { overflowPx: null, rightGapPx: null, lastInternalGapPx: null }
+        const stats: MeasureProbeStats = { overflowPx: null, edgeShortfallPx: 0 }
         measureProbeStatsCache.set(cacheKey, stats)
         return stats
       }
+      const edgeBoundaryStart = entry.preferMeasureStartBarlineAxis ? probeMeasureX : noteStartX
+      const edgeBoundaryEnd = entry.preferMeasureEndBarlineAxis ? probeMeasureX + safeMeasureWidth : noteEndX
       const stats: MeasureProbeStats = {
         overflowPx: spacingRightEdge - spacingRightLimitX,
-        rightGapPx: spacingRightLimitX - spacingRightEdge,
-        lastInternalGapPx: getMeasureLastInternalGapPx(entry, measureNoteLayouts),
+        edgeShortfallPx: getMeasureEdgeShortfallPx({
+          layouts: measureNoteLayouts,
+          measure: entry.measure,
+          leftBoundaryX: edgeBoundaryStart,
+          rightBoundaryX: edgeBoundaryEnd,
+          rightSpacingEdgeX: spacingRightEdge,
+          preferMeasureStartBarlineAxis: entry.preferMeasureStartBarlineAxis,
+          spacingConfig,
+        }),
       }
       measureProbeStatsCache.set(cacheKey, stats)
       return stats
@@ -897,87 +941,25 @@ export function renderVisibleSystems(params: {
         systemMeta.forEach((entry, indexInSystem) => {
           const stats = getMeasureProbeStats(entry, measureWidths[indexInSystem] ?? 1)
           const overflow = stats.overflowPx
-          if (overflow === null || overflow <= 0.001) return
-          fixedWidths[indexInSystem] = fixedWidths[indexInSystem] + overflow + OVERFLOW_RECOVERY_PAD_PX
+          const edgeShortfall = stats.edgeShortfallPx
+          let nextBonus = 0
+          if (overflow !== null && overflow > 0.001) {
+            nextBonus += overflow + OVERFLOW_RECOVERY_PAD_PX
+          }
+          if (edgeShortfall > 0.001) {
+            nextBonus += Math.min(edgeShortfall, EDGE_SHORTFALL_RECOVERY_MAX_STEP_PX)
+          }
+          if (nextBonus <= 0.001) return
+          fixedWidthBonuses[indexInSystem] = (fixedWidthBonuses[indexInSystem] ?? 0) + nextBonus
           changed = true
         })
         if (!changed) break
-        measureWidths = buildMeasureWidthsFromFixed(fixedWidths, adaptiveTimelineWeights)
+        measureWidths = solveMeasureWidths()
       }
     }
 
-    let measureWidths = buildMeasureWidthsFromFixed(fixedWidths, adaptiveTimelineWeights)
+    let measureWidths = solveMeasureWidths()
     runOverflowRecovery()
-
-    for (let pass = 0; pass < EDGE_REBALANCE_MAX_PASSES; pass += 1) {
-      const deficits = new Array<number>(systemMeta.length).fill(0)
-      const surpluses = new Array<number>(systemMeta.length).fill(0)
-      let totalDeficit = 0
-      let totalSurplus = 0
-      let maxDeficit = 0
-
-      systemMeta.forEach((entry, indexInSystem) => {
-        const stats = getMeasureProbeStats(entry, measureWidths[indexInSystem] ?? 1)
-        const rightGapPx = stats.rightGapPx
-        if (rightGapPx === null || !Number.isFinite(rightGapPx)) return
-        const baseTargetGap =
-          stats.lastInternalGapPx !== null && Number.isFinite(stats.lastInternalGapPx)
-            ? stats.lastInternalGapPx * EDGE_TARGET_GAP_RATIO
-            : spacingConfig.rightEdgePaddingPx
-        const targetRightGap = Math.max(
-          spacingConfig.rightEdgePaddingPx,
-          Math.min(EDGE_TARGET_GAP_MAX_PX, baseTargetGap),
-        )
-        const priority = entry.isSystemStart ? EDGE_SYSTEM_START_PRIORITY : 1
-        const deficit = Math.max(0, targetRightGap - rightGapPx) * priority
-        const surplus = Math.max(0, rightGapPx - targetRightGap)
-        deficits[indexInSystem] = deficit
-        surpluses[indexInSystem] = surplus
-        totalDeficit += deficit
-        totalSurplus += surplus
-        maxDeficit = Math.max(maxDeficit, deficit)
-      })
-
-      if (
-        maxDeficit <= EDGE_REBALANCE_EPSILON_PX ||
-        totalDeficit <= 0.001 ||
-        totalSurplus <= 0.001
-      ) {
-        break
-      }
-
-      const fixedTotal = fixedWidths.reduce((sum, width) => sum + width, 0)
-      const flexWidth = Math.max(0, systemUsableWidth - fixedTotal)
-      if (flexWidth <= 0.001) break
-      const safeWeights = adaptiveTimelineWeights.map((weight) => Math.max(MIN_TIMELINE_WEIGHT, weight))
-      const safeWeightTotal = Math.max(
-        MIN_TIMELINE_WEIGHT,
-        safeWeights.reduce((sum, weight) => sum + weight, 0),
-      )
-      const pxPerWeight = flexWidth / safeWeightTotal
-      if (!Number.isFinite(pxPerWeight) || pxPerWeight <= 0.0001) break
-
-      const transferablePx = Math.min(totalDeficit, totalSurplus) * EDGE_TRANSFER_DAMPING
-      const weightMass = transferablePx / pxPerWeight
-      if (!Number.isFinite(weightMass) || weightMass <= 0.0001) break
-
-      let changed = false
-      const safeDeficitTotal = Math.max(0.0001, totalDeficit)
-      const safeSurplusTotal = Math.max(0.0001, totalSurplus)
-      for (let indexInSystem = 0; indexInSystem < systemMeta.length; indexInSystem += 1) {
-        const addWeight = weightMass * (deficits[indexInSystem] / safeDeficitTotal)
-        const removeWeight = weightMass * (surpluses[indexInSystem] / safeSurplusTotal)
-        const currentWeight = safeWeights[indexInSystem] ?? MIN_TIMELINE_WEIGHT
-        const minWeightFloor = timelineWeightFloors[indexInSystem] ?? MIN_TIMELINE_WEIGHT
-        const nextWeight = Math.max(minWeightFloor, currentWeight + addWeight - removeWeight)
-        if (Math.abs(nextWeight - currentWeight) > 0.0001) changed = true
-        adaptiveTimelineWeights[indexInSystem] = nextWeight
-      }
-      if (!changed) break
-
-      measureWidths = buildMeasureWidthsFromFixed(fixedWidths, adaptiveTimelineWeights)
-      runOverflowRecovery()
-    }
 
     let measureCursorX = pagePaddingX
     systemMeta.forEach((entry, indexInSystem) => {

@@ -43,6 +43,8 @@ const PITCH_LINE_MAP: Record<StaffKind, Record<Pitch, number>> = {
 }
 const VALID_BEAM_DURATIONS = ['4', '8', '16', '32', '64'] as const
 const ACCIDENTAL_HEAD_CLEARANCE_PX = 2
+const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
+const MIN_FORMAT_WIDTH_PX = 8
 export type DrawMeasureParams = {
   context: ReturnType<Renderer['getContext']>
   measure: MeasurePair
@@ -252,7 +254,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     bassStave.setContext(context).draw()
   }
 
-  if (!skipPainting && spacingLayoutMode === 'legacy') {
+  if (!skipPainting) {
     const context2D = (context as unknown as { context2D?: CanvasRenderingContext2D }).context2D
     if (context2D) {
       context2D.save()
@@ -380,8 +382,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   const bassVoice = new Voice({ numBeats: timeSignature.beats, beatValue: timeSignature.beatType }).addTickables(bassVexNotes)
   const formatWidth =
     typeof formatWidthOverride === 'number' && Number.isFinite(formatWidthOverride)
-      ? Math.max(80, formatWidthOverride)
-      : Math.max(80, trebleStave.getNoteEndX() - trebleStave.getNoteStartX() - 8)
+      ? Math.max(MIN_FORMAT_WIDTH_PX, formatWidthOverride)
+      : Math.max(MIN_FORMAT_WIDTH_PX, trebleStave.getNoteEndX() - trebleStave.getNoteStartX() - 8)
 
   new Formatter().joinVoices([trebleVoice]).joinVoices([bassVoice]).format([trebleVoice, bassVoice], formatWidth)
 
@@ -680,14 +682,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       (maxX, head) => Math.max(maxX, head.x + 9),
       getRenderedNoteVisualX(vexNote) + 9,
     )
-    let stemRightX = Number.NEGATIVE_INFINITY
-    if (vexNote.hasStem()) {
-      const stemX = vexNote.getStemX()
-      if (Number.isFinite(stemX)) {
-        stemRightX = stemX + 1
-      }
-    }
-    const spacingRightX = Math.max(fallbackHeadRightX, stemRightX)
+    const stemInvariantPadding = vexNote.hasStem() ? STEM_INVARIANT_RIGHT_PADDING_PX : 0
+    const spacingRightX = fallbackHeadRightX + stemInvariantPadding
     return Number.isFinite(spacingRightX) ? spacingRightX : getRenderedNoteVisualX(vexNote) + 9
   }
 

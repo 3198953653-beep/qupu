@@ -1,4 +1,4 @@
-import { DURATION_BEATS, DURATION_LABEL, DURATION_TICKS } from '../constants'
+import { DURATION_LABEL, DURATION_TICKS } from '../constants'
 import type { MeasurePair, NoteDuration, NoteDurationBase, ScoreNote, TimeSignature } from '../types'
 
 const MEASURE_KEY_SIGNATURE_DEMAND = 2.2
@@ -14,9 +14,6 @@ const ADAPTIVE_SYSTEM_OCCUPANCY_TARGET = 0.9
 const ADAPTIVE_SYSTEM_OCCUPANCY_LOW = 0.86
 const ADAPTIVE_SYSTEM_OCCUPANCY_HIGH = 0.95
 const ADAPTIVE_SYSTEM_REBALANCE_PASSES = 16
-const DEMAND_MIN_GAP_BEATS = 1 / 32
-const DEMAND_GAP_GAMMA = 1
-const DEMAND_GAP_BASE_WEIGHT = 0.3
 const NOTE_DEMAND_SCALE = 2
 const DEMAND_BASE_MIN_GAP_SCALE = 0.16
 
@@ -74,11 +71,6 @@ export function countVisibleAccidentals(accidentals?: Array<string | null>): num
   return count
 }
 
-function mapBeatsToDemand(beats: number): number {
-  const compressed = Math.pow(Math.max(DEMAND_MIN_GAP_BEATS, beats), DEMAND_GAP_GAMMA)
-  return DEMAND_GAP_BASE_WEIGHT + compressed
-}
-
 function getDurationGapRatioByTicks(deltaTicks: number, ratios: DurationGapRatios): number {
   const anchors: Array<{ ticks: number; ratio: number }> = [
     { ticks: 2, ratio: ratios.thirtySecond },
@@ -105,22 +97,13 @@ function getDurationGapRatioByTicks(deltaTicks: number, ratios: DurationGapRatio
   return anchors[anchors.length - 1].ratio
 }
 
-function getDurationRatioMean(ratios: DurationGapRatios): number {
-  const mean =
-    (ratios.thirtySecond + ratios.sixteenth + ratios.eighth + ratios.quarter + ratios.half) / 5
-  return Math.max(0.0001, mean)
-}
-
 function getDurationGapRatioForNote(note: ScoreNote, spacingConfig: MeasureDemandSpacingConfig | null): number {
   if (!spacingConfig) return 1
   const durationTicks = DURATION_TICKS[note.duration] ?? 16
-  const rawRatio = getDurationGapRatioByTicks(durationTicks, spacingConfig.durationGapRatios)
-  return rawRatio / getDurationRatioMean(spacingConfig.durationGapRatios)
+  return Math.max(0.0001, getDurationGapRatioByTicks(durationTicks, spacingConfig.durationGapRatios))
 }
 
 export function getNoteLayoutDemand(note: ScoreNote, spacingConfig: MeasureDemandSpacingConfig | null = null): number {
-  const durationBeats = DURATION_BEATS[note.duration] ?? 1
-  const durationWeight = mapBeatsToDemand(durationBeats)
   const durationGapRatio = getDurationGapRatioForNote(note, spacingConfig)
   const addedBaseGapDemand =
     spacingConfig !== null
@@ -131,7 +114,7 @@ export function getNoteLayoutDemand(note: ScoreNote, spacingConfig: MeasureDeman
   // Keep measure demand stable for pitch-only edits so local pitch drags
   // do not reflow unrelated measures on the same system.
   // Accidental width is handled by per-measure overflow probing.
-  return durationWeight * chordSize + chordSpreadBonus + addedBaseGapDemand
+  return durationGapRatio * chordSize + chordSpreadBonus + addedBaseGapDemand
 }
 
 export function getStaffLayoutDemand(notes: ScoreNote[], spacingConfig: MeasureDemandSpacingConfig | null = null): number {

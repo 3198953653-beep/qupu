@@ -41,14 +41,12 @@ const UNIFORM_TICK_SPACING_START_GUARD_PX = 0
 const UNIFORM_TICK_SPACING_END_GUARD_PX = 0
 const UNIFORM_TIMELINE_EDGE_TICK_RATIO = 0.82
 const UNIFORM_BARLINE_EDGE_GAP_RATIO = 0.82
-const UNIFORM_DELTA_FLOOR_RATIO = 1
 const ACCIDENTAL_PREALLOCATED_CLEARANCE_PX = 2
+const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
+const BASE_GAP_UNIT_PX = 3.5
 const MIN_GAP_BEATS = 1 / 32
 const GAP_GAMMA = 0.7
 const GAP_BASE_WEIGHT = 0.45
-const GLOBAL_GAP_SCALE_PER_PX = 0.08
-const GLOBAL_GAP_MIN_ADD_PER_PX = 0.2
-const DURATION_RATIO_WEIGHT_BLEND = 0.35
 
 export type TimeAxisSpacingConfig = {
   minGapBeats: number
@@ -58,6 +56,7 @@ export type TimeAxisSpacingConfig = {
   rightEdgePaddingPx: number
   interOnsetPaddingPx: number
   baseMinGap32Px: number
+  maxBarlineEdgeGapPx: number
   durationGapRatios: DurationGapRatioConfig
 }
 
@@ -76,13 +75,14 @@ export const DEFAULT_TIME_AXIS_SPACING_CONFIG: TimeAxisSpacingConfig = {
   leftEdgePaddingPx: DEFAULT_LEFT_EDGE_PADDING_PX,
   rightEdgePaddingPx: DEFAULT_RIGHT_EDGE_PADDING_PX,
   interOnsetPaddingPx: 1,
-  baseMinGap32Px: 0,
+  baseMinGap32Px: 4,
+  maxBarlineEdgeGapPx: 18,
   durationGapRatios: {
-    thirtySecond: 1,
-    sixteenth: 1.2,
-    eighth: 1.45,
-    quarter: 1.85,
-    half: 2.35,
+    thirtySecond: 0.7,
+    sixteenth: 0.78,
+    eighth: 0.93,
+    quarter: 1.02,
+    half: 1.22,
   },
 }
 
@@ -111,7 +111,8 @@ function getStaffTotalTicks(notes: ScoreNote[]): number {
 
 function getNoteHorizontalExtents(vexNote: StaveNote): { leftExtent: number; rightExtent: number } {
   let leftExtent = 0
-  let rightExtent = DEFAULT_NOTE_HEAD_WIDTH_PX
+  const stemInvariantPadding = vexNote.hasStem() ? STEM_INVARIANT_RIGHT_PADDING_PX : 0
+  let rightExtent = DEFAULT_NOTE_HEAD_WIDTH_PX + stemInvariantPadding
 
   const metrics = (vexNote as unknown as {
     getMetrics?: () => {
@@ -129,20 +130,16 @@ function getNoteHorizontalExtents(vexNote: StaveNote): { leftExtent: number; rig
       ? (metrics.rightDisplacedHeadPx as number)
       : 0
 
-    // Keep extents anchored to note-head geometry and explicit stem geometry.
+    // Keep extents anchored to note-head geometry with pitch-invariant right padding.
     leftExtent = Math.max(0, leftDisplacedHeadPx)
-    rightExtent = Math.max(DEFAULT_NOTE_HEAD_WIDTH_PX, DEFAULT_NOTE_HEAD_WIDTH_PX + rightDisplacedHeadPx)
+    rightExtent = Math.max(
+      DEFAULT_NOTE_HEAD_WIDTH_PX + stemInvariantPadding,
+      DEFAULT_NOTE_HEAD_WIDTH_PX + rightDisplacedHeadPx + stemInvariantPadding,
+    )
   }
 
   const noteHeadX = getRenderedNoteVisualX(vexNote)
   if (Number.isFinite(noteHeadX)) {
-    if (vexNote.hasStem()) {
-      const stemX = vexNote.getStemX()
-      if (Number.isFinite(stemX)) {
-        rightExtent = Math.max(rightExtent, stemX + 1 - noteHeadX)
-      }
-    }
-
     let accidentalMinX = Number.POSITIVE_INFINITY
     vexNote.getModifiersByType(Accidental.CATEGORY).forEach((modifier) => {
       const accidental = modifier as Accidental
@@ -272,16 +269,9 @@ export function getMeasureUniformTimelineTicks(measure: MeasurePair, measureTick
 }
 
 function mapTickGapToWeight(deltaTicks: number, config: TimeAxisSpacingConfig): number {
-  const beats = deltaTicks / TICKS_PER_QUARTER
-  const compressed = Math.pow(Math.max(config.minGapBeats, beats), config.gapGamma)
-  const baseWeight = compressed + config.gapBaseWeight * beats
-  // Duration ratio must always influence timeline spacing, even when min-gap constraints
-  // are not active, so each ratio slider visibly reflows the staff.
-  const durationRatio = getNormalizedDurationGapRatioByDeltaTicks(deltaTicks, config.durationGapRatios)
-  const blendedDurationRatio = 1 + (durationRatio - 1) * DURATION_RATIO_WEIGHT_BLEND
-  // Global gap size scales all durations together without changing ratios.
-  const globalGapScale = 1 + Math.max(0, config.baseMinGap32Px) * GLOBAL_GAP_SCALE_PER_PX
-  return baseWeight * blendedDurationRatio * globalGapScale
+  const durationRatio = Math.max(0.0001, getDurationGapRatioByDeltaTicks(deltaTicks, config.durationGapRatios))
+  const base32GapPx = Math.max(0, config.baseMinGap32Px)
+  return base32GapPx * durationRatio * BASE_GAP_UNIT_PX
 }
 
 function getDurationGapRatioByDeltaTicks(deltaTicks: number, ratios: DurationGapRatioConfig): number {
@@ -310,23 +300,10 @@ function getDurationGapRatioByDeltaTicks(deltaTicks: number, ratios: DurationGap
   return anchors[anchors.length - 1].ratio
 }
 
-function getDurationRatioMean(ratios: DurationGapRatioConfig): number {
-  const mean =
-    (ratios.thirtySecond + ratios.sixteenth + ratios.eighth + ratios.quarter + ratios.half) / 5
-  return Math.max(0.0001, mean)
-}
-
-function getNormalizedDurationGapRatioByDeltaTicks(
-  deltaTicks: number,
-  ratios: DurationGapRatioConfig,
-): number {
-  const rawRatio = getDurationGapRatioByDeltaTicks(deltaTicks, ratios)
-  return rawRatio / getDurationRatioMean(ratios)
-}
-
 function getDurationAddedMinGapPx(deltaTicks: number, spacingConfig: TimeAxisSpacingConfig): number {
   void deltaTicks
-  return Math.max(0, spacingConfig.baseMinGap32Px) * GLOBAL_GAP_MIN_ADD_PER_PX
+  void spacingConfig
+  return 0
 }
 
 function buildUniformTimelineWeightMap(
@@ -371,14 +348,84 @@ function buildUniformTimelineWeightMap(
   }
 }
 
+function applyMeasureEdgeGapCap(params: {
+  noteOnsets: number[]
+  targetXByOnset: Map<number, number>
+  edgeBoundaryStart: number
+  edgeBoundaryEnd: number
+  firstLeftExtent: number
+  lastRightExtent: number
+  maxBarlineEdgeGapPx: number
+}): void {
+  const {
+    noteOnsets,
+    targetXByOnset,
+    edgeBoundaryStart,
+    edgeBoundaryEnd,
+    firstLeftExtent,
+    lastRightExtent,
+    maxBarlineEdgeGapPx,
+  } = params
+
+  if (!Number.isFinite(maxBarlineEdgeGapPx)) return
+  const maxGap = Math.max(0, maxBarlineEdgeGapPx)
+  if (noteOnsets.length === 0) return
+
+  const positions = noteOnsets.map((onset) => targetXByOnset.get(onset))
+  if (positions.some((value) => value === undefined || !Number.isFinite(value))) return
+  const safePositions = positions as number[]
+
+  const firstIndex = 0
+  const lastIndex = safePositions.length - 1
+  const currentFirstX = safePositions[firstIndex]
+  const currentLastX = safePositions[lastIndex]
+  if (!Number.isFinite(currentFirstX) || !Number.isFinite(currentLastX)) return
+
+  const minFirstX = edgeBoundaryStart + firstLeftExtent
+  const maxLastX = edgeBoundaryEnd - lastRightExtent
+  const cappedFirstMaxX = edgeBoundaryStart + firstLeftExtent + maxGap
+  const cappedLastMinX = edgeBoundaryEnd - lastRightExtent - maxGap
+
+  const shiftMinForLegalBounds = Math.max(
+    minFirstX - currentFirstX,
+    cappedLastMinX - currentLastX,
+  )
+  const shiftMaxForLegalBounds = Math.min(
+    cappedFirstMaxX - currentFirstX,
+    maxLastX - currentLastX,
+  )
+
+  let resolvedShift = 0
+  if (shiftMinForLegalBounds <= shiftMaxForLegalBounds) {
+    resolvedShift = Math.max(shiftMinForLegalBounds, Math.min(0, shiftMaxForLegalBounds))
+  } else {
+    const shiftMin = minFirstX - currentFirstX
+    const shiftMax = maxLastX - currentLastX
+    if (shiftMin > shiftMax) return
+    resolvedShift = Math.max(shiftMin, Math.min(0, shiftMax))
+  }
+
+  if (!Number.isFinite(resolvedShift) || Math.abs(resolvedShift) < 0.001) return
+
+  for (let i = 0; i < safePositions.length; i += 1) {
+    targetXByOnset.set(noteOnsets[i], safePositions[i] + resolvedShift)
+  }
+}
+
 export function getMeasureUniformTimelineWeightSpan(
   measure: MeasurePair,
   measureTicks: number,
   spacingConfig: TimeAxisSpacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
 ): number {
-  const onsets = collectMeasureOnsetTicks(measure)
-  const weightMap = buildUniformTimelineWeightMap(onsets, measureTicks, spacingConfig)
-  return Math.max(0.0001, weightMap.totalWeight)
+  void measureTicks
+  const onsets = collectMeasureOnsetTicks(measure).sort((left, right) => left - right)
+  if (onsets.length <= 1) return 0
+  let totalGapPx = 0
+  for (let i = 1; i < onsets.length; i += 1) {
+    const deltaTicks = Math.max(1, onsets[i] - onsets[i - 1])
+    totalGapPx += Math.max(0, mapTickGapToWeight(deltaTicks, spacingConfig))
+  }
+  return Math.max(0, totalGapPx)
 }
 
 export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingParams): void {
@@ -515,15 +562,10 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
         }
         requiredMinGapBySegment.set(i, minGap)
       }
-      const floorGapByDeltaTicks = new Map<number, number>()
-      baseGapByDeltaTicks.forEach((baseGap, deltaTicks) => {
-        floorGapByDeltaTicks.set(deltaTicks, baseGap * UNIFORM_DELTA_FLOOR_RATIO)
-      })
-
       const adjustedPositions = [...basePositions]
       for (let i = 1; i < onsetSequence.length; i += 1) {
         const deltaTicks = Math.max(1, onsetSequence[i] - onsetSequence[i - 1])
-        const floorGap = floorGapByDeltaTicks.get(deltaTicks) ?? 0
+        const floorGap = baseGapByDeltaTicks.get(deltaTicks) ?? 0
         const segmentMinGap = requiredMinGapBySegment.get(i) ?? 0
         const targetMinGap = Math.max(floorGap, segmentMinGap)
         const minAllowed = adjustedPositions[i - 1] + targetMinGap
@@ -673,6 +715,16 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
       })
     }
   }
+
+  applyMeasureEdgeGapCap({
+    noteOnsets,
+    targetXByOnset,
+    edgeBoundaryStart: axisBoundaryStart,
+    edgeBoundaryEnd: axisBoundaryEnd,
+    firstLeftExtent,
+    lastRightExtent,
+    maxBarlineEdgeGapPx: spacingConfig.maxBarlineEdgeGapPx,
+  })
 
   refs.forEach((ref) => {
     const targetX = targetXByOnset.get(ref.onsetTicks)

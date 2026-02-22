@@ -14,12 +14,13 @@ import {
   TICKS_PER_BEAT,
 } from './score/constants'
 import {
-  estimateAdaptiveMeasureWidth,
-  getMeasureLayoutDemandFromNoteDemand,
-  getMeasureNoteLayoutDemand,
   toDisplayDuration,
 } from './score/layout/demand'
-import { DEFAULT_TIME_AXIS_SPACING_CONFIG } from './score/layout/timeAxisSpacing'
+import {
+  DEFAULT_TIME_AXIS_SPACING_CONFIG,
+  getMeasureUniformTimelineWeightSpan,
+  getUniformTickSpacingPadding,
+} from './score/layout/timeAxisSpacing'
 import { useDragHandlers } from './score/dragHandlers'
 import { useEditorHandlers } from './score/editorHandlers'
 import { buildMusicXmlExportPayload } from './score/musicXmlActions'
@@ -65,14 +66,16 @@ const MANUAL_SCALE_BASELINE = 0.7
 const DEFAULT_PAGE_HORIZONTAL_PADDING_PX = 86
 const ENABLE_AUTO_FIRST_MEASURE_DRAG_DEBUG = false
 const HORIZONTAL_VIEW_MEASURE_WIDTH_PX = 220
-const HORIZONTAL_VIEW_MEASURE_WIDTH_GAIN = 1.4
-const HORIZONTAL_VIEW_MEASURE_EXTRA_SAFETY_PX = 72
-const HORIZONTAL_VIEW_ACCIDENTAL_WIDTH_PX = 12
-const HORIZONTAL_VIEW_MAX_ACCIDENTAL_BONUS_PX = 96
+const HORIZONTAL_VIEW_SYSTEM_START_DECORATION_PX = 96
+const HORIZONTAL_VIEW_INLINE_DECORATION_PX = 24
+const HORIZONTAL_VIEW_MIN_MEASURE_WIDTH_PX = 1
 const HORIZONTAL_VIEW_HEIGHT_PX = SCORE_TOP_PADDING * 2 + SYSTEM_HEIGHT + 24
 const MAX_CANVAS_RENDER_DIM_PX = 32760
 const HORIZONTAL_RENDER_BUFFER_PX = 1200
 const HORIZONTAL_RENDER_EDGE_BUFFER_MEASURES = 1
+const HORIZONTAL_OVERFLOW_RECOVERY_PAD_PX = 2
+const HORIZONTAL_OVERFLOW_RECOVERY_EPS_PX = 0.5
+const HORIZONTAL_OVERFLOW_GLOBAL_SCALE_EPS = 0.001
 const DEFAULT_TIME_SIGNATURE: TimeSignature = { beats: 4, beatType: 4 }
 const OSMD_PREVIEW_ZOOM_DEBOUNCE_MS = 120
 const DEFAULT_OSMD_PREVIEW_HORIZONTAL_MARGIN_PX = 9
@@ -136,6 +139,11 @@ function clampBaseMinGap32Px(value: number): number {
   return Number(clamped.toFixed(2))
 }
 
+function clampMaxBarlineEdgeGapPx(value: number): number {
+  const clamped = clampNumber(value, 0, 40)
+  return Number(clamped.toFixed(2))
+}
+
 function clampPageHorizontalPaddingPx(value: number): number {
   return Math.round(clampNumber(value, 8, 120))
 }
@@ -169,16 +177,10 @@ function hasTimeSignatureChanged(current: TimeSignature, previous: TimeSignature
   return current.beats !== previous.beats || current.beatType !== previous.beatType
 }
 
-function countAccidentalsForNote(note: ScoreNote): number {
-  const chordAccidentals = note.chordAccidentals ?? []
-  const chordCount = chordAccidentals.reduce((sum, accidental) => (accidental ? sum + 1 : sum), 0)
-  return (note.accidental ? 1 : 0) + chordCount
-}
-
-function countAccidentalsForMeasure(measure: MeasurePair): number {
-  const trebleCount = measure.treble.reduce((sum, note) => sum + countAccidentalsForNote(note), 0)
-  const bassCount = measure.bass.reduce((sum, note) => sum + countAccidentalsForNote(note), 0)
-  return trebleCount + bassCount
+function getNoteLayoutRightEdge(layout: NoteLayout): number {
+  if (Number.isFinite(layout.spacingRightX)) return layout.spacingRightX
+  if (Number.isFinite(layout.rightX)) return layout.rightX
+  return layout.x
 }
 
 function collectOsmdPreviewPages(container: HTMLElement): HTMLElement[] {
@@ -832,6 +834,7 @@ function App() {
   const [osmdPreviewBottomMarginPx, setOsmdPreviewBottomMarginPx] = useState(
     DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX,
   )
+  const [horizontalMeasureWidthOverrides, setHorizontalMeasureWidthOverrides] = useState<Record<number, number>>({})
   const [horizontalViewportXRange, setHorizontalViewportXRange] = useState<{ startX: number; endX: number }>({
     startX: 0,
     endX: A4_PAGE_WIDTH,
@@ -891,10 +894,12 @@ function App() {
     () => measurePairsFromImport ?? buildMeasurePairs(notes, bassNotes),
     [measurePairsFromImport, notes, bassNotes],
   )
-  const spacingLayoutMode: SpacingLayoutMode = 'legacy'
+  const spacingLayoutMode: SpacingLayoutMode = 'custom'
   const horizontalRawMeasureWidths = useMemo(() => {
     if (measurePairs.length === 0) return []
 
+    const uniformPadding = getUniformTickSpacingPadding(timeAxisSpacingConfig)
+    const sharedAxisPaddingPx = Math.max(0, uniformPadding.startPadPx + uniformPadding.endPadPx)
     const widths: number[] = []
     let previousKeyFifths = 0
     let previousTimeSignature = DEFAULT_TIME_SIGNATURE
@@ -906,28 +911,20 @@ function App() {
       const isSystemStart = pairIndex === 0
       const showKeySignature = isSystemStart || keyFifths !== previousKeyFifths
       const showTimeSignature = pairIndex === 0 || hasTimeSignatureChanged(timeSignature, previousTimeSignature)
-      const noteDemand = getMeasureNoteLayoutDemand(measure, {
-        baseMinGap32Px: timeAxisSpacingConfig.baseMinGap32Px,
-        durationGapRatios: timeAxisSpacingConfig.durationGapRatios,
-      })
-      const layoutDemand = getMeasureLayoutDemandFromNoteDemand(
-        noteDemand,
-        isSystemStart,
-        showKeySignature,
-        showTimeSignature,
-        false,
+      const measureTicks = Math.max(
+        1,
+        Math.round(timeSignature.beats * TICKS_PER_BEAT * (4 / timeSignature.beatType)),
       )
-      const adaptiveWidth = estimateAdaptiveMeasureWidth(layoutDemand)
-      const accidentalWidthBonus = Math.min(
-        HORIZONTAL_VIEW_MAX_ACCIDENTAL_BONUS_PX,
-        countAccidentalsForMeasure(measure) * HORIZONTAL_VIEW_ACCIDENTAL_WIDTH_PX,
-      )
+      const weightSpan = getMeasureUniformTimelineWeightSpan(measure, measureTicks, timeAxisSpacingConfig)
+      const decorationFixedPx = isSystemStart
+        ? HORIZONTAL_VIEW_SYSTEM_START_DECORATION_PX
+        : (showKeySignature || showTimeSignature ? HORIZONTAL_VIEW_INLINE_DECORATION_PX : 0)
       const estimatedWidth = Math.max(
-        HORIZONTAL_VIEW_MEASURE_WIDTH_PX,
+        HORIZONTAL_VIEW_MIN_MEASURE_WIDTH_PX,
         Math.round(
-          adaptiveWidth * HORIZONTAL_VIEW_MEASURE_WIDTH_GAIN +
-            HORIZONTAL_VIEW_MEASURE_EXTRA_SAFETY_PX +
-            accidentalWidthBonus,
+          sharedAxisPaddingPx +
+            decorationFixedPx +
+            weightSpan,
         ),
       )
       widths.push(estimatedWidth)
@@ -940,14 +937,27 @@ function App() {
     measurePairs,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
+    timeAxisSpacingConfig.leftEdgePaddingPx,
+    timeAxisSpacingConfig.rightEdgePaddingPx,
     timeAxisSpacingConfig.baseMinGap32Px,
     timeAxisSpacingConfig.durationGapRatios,
+    timeAxisSpacingConfig.minGapBeats,
+    timeAxisSpacingConfig.gapGamma,
+    timeAxisSpacingConfig.gapBaseWeight,
   ])
+  const horizontalMeasureWidths = useMemo(() => {
+    if (horizontalRawMeasureWidths.length === 0) return []
+    return horizontalRawMeasureWidths.map((baseWidth, pairIndex) => {
+      const overrideWidth = horizontalMeasureWidthOverrides[pairIndex]
+      if (!Number.isFinite(overrideWidth)) return baseWidth
+      return Math.max(baseWidth, overrideWidth)
+    })
+  }, [horizontalRawMeasureWidths, horizontalMeasureWidthOverrides])
   const horizontalEstimatedMeasureWidthTotal = useMemo(() => {
-    if (horizontalRawMeasureWidths.length === 0) return HORIZONTAL_VIEW_MEASURE_WIDTH_PX
-    const total = horizontalRawMeasureWidths.reduce((sum, width) => sum + width, 0)
+    if (horizontalMeasureWidths.length === 0) return HORIZONTAL_VIEW_MEASURE_WIDTH_PX
+    const total = horizontalMeasureWidths.reduce((sum, width) => sum + width, 0)
     return Math.max(HORIZONTAL_VIEW_MEASURE_WIDTH_PX, total)
-  }, [horizontalRawMeasureWidths])
+  }, [horizontalMeasureWidths])
   const autoScoreScale = useMemo(() => getAutoScoreScale(measurePairs.length), [measurePairs.length])
   const safeManualScalePercent = clampScalePercent(manualScalePercent)
   const relativeScale = autoScaleEnabled ? autoScoreScale : safeManualScalePercent / 100
@@ -980,14 +990,14 @@ function App() {
     return byId
   }, [bassNotes])
   const horizontalMeasureFramesByPair = useMemo(() => {
-    if (horizontalRawMeasureWidths.length === 0) return [] as Array<{ measureX: number; measureWidth: number }>
+    if (horizontalMeasureWidths.length === 0) return [] as Array<{ measureX: number; measureWidth: number }>
     let cursorX = pageHorizontalPaddingPx
-    return horizontalRawMeasureWidths.map((measureWidth) => {
+    return horizontalMeasureWidths.map((measureWidth) => {
       const frame = { measureX: cursorX, measureWidth }
       cursorX += measureWidth
       return frame
     })
-  }, [horizontalRawMeasureWidths, pageHorizontalPaddingPx])
+  }, [horizontalMeasureWidths, pageHorizontalPaddingPx])
   const horizontalViewportWidthInScore = Math.max(1, horizontalViewportXRange.endX - horizontalViewportXRange.startX)
   const horizontalRenderSurfaceWidth = useMemo(() => {
     const desiredWidth = Math.ceil(horizontalViewportWidthInScore + HORIZONTAL_RENDER_BUFFER_PX * 2)
@@ -1057,6 +1067,7 @@ function App() {
     const systemRangeKey = systemRanges.map((range) => `${range.startPairIndex}-${range.endPairIndexExclusive}`).join(',')
     const spacingKey = [
       timeAxisSpacingConfig.baseMinGap32Px,
+      timeAxisSpacingConfig.maxBarlineEdgeGapPx,
       timeAxisSpacingConfig.durationGapRatios.thirtySecond,
       timeAxisSpacingConfig.durationGapRatios.sixteenth,
       timeAxisSpacingConfig.durationGapRatios.eighth,
@@ -1071,6 +1082,7 @@ function App() {
     pageHorizontalPaddingPx,
     systemRanges,
     timeAxisSpacingConfig.baseMinGap32Px,
+    timeAxisSpacingConfig.maxBarlineEdgeGapPx,
     timeAxisSpacingConfig.durationGapRatios.thirtySecond,
     timeAxisSpacingConfig.durationGapRatios.sixteenth,
     timeAxisSpacingConfig.durationGapRatios.eighth,
@@ -1118,6 +1130,30 @@ function App() {
       }
     }
   }, [scoreScaleX, totalScoreWidth, displayScoreWidth])
+
+  useEffect(() => {
+    setHorizontalMeasureWidthOverrides((current) => {
+      const currentKeys = Object.keys(current)
+      if (currentKeys.length === 0) return current
+      let changed = false
+      const next: Record<number, number> = {}
+      currentKeys.forEach((key) => {
+        const pairIndex = Number(key)
+        const width = current[pairIndex]
+        if (
+          Number.isInteger(pairIndex) &&
+          pairIndex >= 0 &&
+          pairIndex < horizontalRawMeasureWidths.length &&
+          Number.isFinite(width)
+        ) {
+          next[pairIndex] = width
+        } else {
+          changed = true
+        }
+      })
+      return changed ? next : current
+    })
+  }, [horizontalRawMeasureWidths.length])
 
   useImportedRefsSync({
     measurePairsFromImport,
@@ -1173,6 +1209,72 @@ function App() {
     timeAxisSpacingConfig,
     spacingLayoutMode,
   })
+
+  useEffect(() => {
+    if (draggingSelection) return
+    if (horizontalMeasureWidths.length === 0) return
+
+    const measureLayouts = measureLayoutsRef.current
+    const noteLayoutsByPair = noteLayoutsByPairRef.current
+    if (measureLayouts.size === 0 || noteLayoutsByPair.size === 0) return
+
+    setHorizontalMeasureWidthOverrides((current) => {
+      let requiredGlobalScale = 1
+
+      measureLayouts.forEach((measureLayout, pairIndex) => {
+        const pairLayouts = noteLayoutsByPair.get(pairIndex)
+        if (!pairLayouts || pairLayouts.length === 0) return
+
+        let maxLayoutRightX = Number.NEGATIVE_INFINITY
+        pairLayouts.forEach((layout) => {
+          maxLayoutRightX = Math.max(maxLayoutRightX, getNoteLayoutRightEdge(layout))
+        })
+        if (!Number.isFinite(maxLayoutRightX)) return
+
+        const measureEndBarX = measureLayout.measureX + measureLayout.measureWidth
+        const rightLimitX = measureLayout.showEndTimeSignature
+          ? (Number.isFinite(measureLayout.noteEndX) ? measureLayout.noteEndX : measureEndBarX)
+          : measureEndBarX
+        const overflow = maxLayoutRightX - rightLimitX
+        if (!Number.isFinite(overflow) || overflow <= HORIZONTAL_OVERFLOW_RECOVERY_EPS_PX) return
+
+        const baseWidth = horizontalRawMeasureWidths[pairIndex] ?? measureLayout.measureWidth
+        const currentEffectiveWidth = Math.max(
+          baseWidth,
+          horizontalMeasureWidths[pairIndex] ?? baseWidth,
+          current[pairIndex] ?? Number.NEGATIVE_INFINITY,
+        )
+        if (!Number.isFinite(currentEffectiveWidth) || currentEffectiveWidth <= 0) return
+        const nextScale = (currentEffectiveWidth + overflow + HORIZONTAL_OVERFLOW_RECOVERY_PAD_PX) / currentEffectiveWidth
+        if (!Number.isFinite(nextScale) || nextScale <= 1 + HORIZONTAL_OVERFLOW_GLOBAL_SCALE_EPS) return
+        requiredGlobalScale = Math.max(requiredGlobalScale, nextScale)
+      })
+
+      if (requiredGlobalScale <= 1 + HORIZONTAL_OVERFLOW_GLOBAL_SCALE_EPS) return current
+
+      const next: Record<number, number> = {}
+      for (let pairIndex = 0; pairIndex < horizontalRawMeasureWidths.length; pairIndex += 1) {
+        const baseWidth = horizontalRawMeasureWidths[pairIndex]
+        const currentEffectiveWidth = Math.max(
+          baseWidth,
+          horizontalMeasureWidths[pairIndex] ?? baseWidth,
+          current[pairIndex] ?? Number.NEGATIVE_INFINITY,
+        )
+        if (!Number.isFinite(currentEffectiveWidth) || currentEffectiveWidth <= 0) continue
+        next[pairIndex] = Math.ceil(currentEffectiveWidth * requiredGlobalScale * 1000) / 1000
+      }
+      return next
+    })
+  }, [
+    draggingSelection,
+    horizontalMeasureWidths,
+    horizontalRawMeasureWidths,
+    horizontalRenderWindow.startPairIndex,
+    horizontalRenderWindow.endPairIndexExclusive,
+    layoutStabilityKey,
+    notes,
+    bassNotes,
+  ])
 
   useSynthLifecycle({
     synthRef,
@@ -2393,6 +2495,7 @@ function App() {
         onManualScalePercentChange={(nextPercent) => setManualScalePercent(clampScalePercent(nextPercent))}
         pageHorizontalPaddingPx={pageHorizontalPaddingPx}
         baseMinGap32Px={timeAxisSpacingConfig.baseMinGap32Px}
+        maxBarlineEdgeGapPx={timeAxisSpacingConfig.maxBarlineEdgeGapPx}
         durationGapRatio32={timeAxisSpacingConfig.durationGapRatios.thirtySecond}
         durationGapRatio16={timeAxisSpacingConfig.durationGapRatios.sixteenth}
         durationGapRatio8={timeAxisSpacingConfig.durationGapRatios.eighth}
@@ -2405,6 +2508,12 @@ function App() {
           setTimeAxisSpacingConfig((current) => ({
             ...current,
             baseMinGap32Px: clampBaseMinGap32Px(nextValue),
+          }))
+        }
+        onMaxBarlineEdgeGapPxChange={(nextValue) =>
+          setTimeAxisSpacingConfig((current) => ({
+            ...current,
+            maxBarlineEdgeGapPx: clampMaxBarlineEdgeGapPx(nextValue),
           }))
         }
         onDurationGapRatio32Change={(nextValue) =>
@@ -2457,6 +2566,7 @@ function App() {
             ...DEFAULT_TIME_AXIS_SPACING_CONFIG,
             durationGapRatios: { ...DEFAULT_TIME_AXIS_SPACING_CONFIG.durationGapRatios },
           })
+          setHorizontalMeasureWidthOverrides({})
           setPageHorizontalPaddingPx(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
         }}
         onOpenMusicXmlFilePicker={openMusicXmlFilePicker}
