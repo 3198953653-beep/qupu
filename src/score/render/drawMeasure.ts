@@ -252,6 +252,21 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     bassStave.setContext(context).draw()
   }
 
+  if (!skipPainting && spacingLayoutMode === 'legacy') {
+    const context2D = (context as unknown as { context2D?: CanvasRenderingContext2D }).context2D
+    if (context2D) {
+      context2D.save()
+      context2D.fillStyle = '#111111'
+      context2D.font = '14px "Times New Roman", serif'
+      context2D.textAlign = 'center'
+      context2D.textBaseline = 'bottom'
+      const labelX = measureX
+      const labelY = trebleY + 24
+      context2D.fillText(String(pairIndex + 1), labelX, labelY)
+      context2D.restore()
+    }
+  }
+
   if (!suppressSystemDecorations && !skipPainting) {
     if (isSystemStart) {
       new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.BRACE).setContext(context).draw()
