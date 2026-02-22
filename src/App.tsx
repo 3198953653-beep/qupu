@@ -90,6 +90,7 @@ const OSMD_PREVIEW_REPAGINATION_MAX_ATTEMPTS = 12
 const OSMD_PREVIEW_REPAGINATION_MIN_STEP_PX = 2
 const OSMD_PREVIEW_REPAGINATION_MAX_STEP_PX = 64
 const OSMD_PREVIEW_MARGIN_APPLY_DEBOUNCE_MS = 90
+const OSMD_PREVIEW_FAST_STAGE_MEASURE_LIMIT = 12
 const PDF_CJK_FONT_FAMILY = 'NotoSansSC'
 const PDF_CJK_FONT_FILE_NAME = 'NotoSansSC-Regular.ttf'
 const PDF_CJK_FONT_URL = new URL('./assets/fonts/NotoSansSC-Regular.ttf', import.meta.url).href
@@ -737,6 +738,30 @@ function applyOsmdPreviewVerticalMargins(
   if (!rules) return
   rules.PageTopMargin = clampOsmdPreviewTopMarginPx(topMarginPx)
   rules.PageBottomMargin = clampOsmdPreviewBottomMarginPx(bottomMarginPx)
+}
+
+function buildFastOsmdPreviewXml(xmlText: string, measureLimit: number): string {
+  const safeLimit = Math.max(1, Math.floor(measureLimit))
+  if (!Number.isFinite(safeLimit)) return xmlText
+  try {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(xmlText, 'application/xml')
+    if (doc.querySelector('parsererror')) return xmlText
+    const partNodes = Array.from(doc.querySelectorAll('score-partwise > part, score-timewise > part'))
+    if (partNodes.length === 0) return xmlText
+    let hasTrimmedMeasures = false
+    partNodes.forEach((partNode) => {
+      const measureNodes = Array.from(partNode.children).filter((node) => node.tagName.toLowerCase() === 'measure')
+      for (let index = safeLimit; index < measureNodes.length; index += 1) {
+        measureNodes[index].remove()
+        hasTrimmedMeasures = true
+      }
+    })
+    if (!hasTrimmedMeasures) return xmlText
+    return new XMLSerializer().serializeToString(doc)
+  } catch {
+    return xmlText
+  }
 }
 
 type FirstMeasureNoteDebugRow = {
@@ -1614,10 +1639,56 @@ function App() {
           drawMeasureNumbersOnlyAtSystemStart: true,
           useXMLMeasureNumbers: true,
         })
-        await osmd.load(osmdPreviewXml)
+        const fastStageXml = buildFastOsmdPreviewXml(osmdPreviewXml, OSMD_PREVIEW_FAST_STAGE_MEASURE_LIMIT)
+        const useFastStageXml = fastStageXml !== osmdPreviewXml
+
+        await osmd.load(useFastStageXml ? fastStageXml : osmdPreviewXml)
         if (canceled) return
         const previewInstance = osmd as unknown as OsmdPreviewInstance
         osmd.Zoom = clampOsmdPreviewZoomPercent(osmdPreviewZoomPercent) / 100
+        // Stage 1: render once and show page 1 as early as possible.
+        applyOsmdPreviewHorizontalMargins(previewInstance, osmdPreviewHorizontalMarginPxRef.current)
+        applyOsmdPreviewVerticalMargins(
+          previewInstance,
+          OSMD_PREVIEW_LAYOUT_TOP_MARGIN_PX,
+          clampOsmdPreviewBottomMarginPx(
+            Math.min(osmdPreviewBottomMarginPxRef.current, DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX),
+          ),
+        )
+        previewInstance.render()
+        if (canceled) return
+        osmdPreviewInstanceRef.current = previewInstance
+        let renderedPages = collectOsmdPreviewPages(container)
+        osmdPreviewPagesRef.current = renderedPages
+        applyOsmdPreviewPageNumbers(renderedPages, osmdPreviewShowPageNumbersRef.current)
+        let graphicPageCount = osmd.GraphicSheet?.MusicPages?.length ?? 0
+        let nextPageCount = Math.max(1, renderedPages.length, graphicPageCount)
+        setOsmdPreviewPageCount(nextPageCount)
+        applyOsmdPreviewPageVisibility(renderedPages, 0)
+        setOsmdPreviewStatusText(
+          useFastStageXml ? '已显示第一页，正在后台加载完整曲谱...' : '已显示第一页，正在优化后续分页...',
+        )
+
+        // Give browser a paint chance before heavy re-balance.
+        await new Promise<void>((resolve) => {
+          if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+            resolve()
+            return
+          }
+          window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => resolve())
+          })
+        })
+        if (canceled) return
+
+        if (useFastStageXml) {
+          setOsmdPreviewStatusText('正在加载完整曲谱并优化分页...')
+          await osmd.load(osmdPreviewXml)
+          if (canceled) return
+          osmd.Zoom = clampOsmdPreviewZoomPercent(osmdPreviewZoomPercent) / 100
+        }
+
+        // Stage 2: full re-balance for all pages.
         osmdPreviewLastRebalanceStatsRef.current = renderAndRebalanceOsmdPreview(
           previewInstance,
           osmdPreviewHorizontalMarginPxRef.current,
@@ -1626,12 +1697,11 @@ function App() {
           osmdPreviewBottomMarginPxRef.current,
         )
         if (canceled) return
-        osmdPreviewInstanceRef.current = previewInstance
-        const renderedPages = collectOsmdPreviewPages(container)
+        renderedPages = collectOsmdPreviewPages(container)
         osmdPreviewPagesRef.current = renderedPages
         applyOsmdPreviewPageNumbers(renderedPages, osmdPreviewShowPageNumbersRef.current)
-        const graphicPageCount = osmd.GraphicSheet?.MusicPages?.length ?? 0
-        const nextPageCount = Math.max(1, renderedPages.length, graphicPageCount)
+        graphicPageCount = osmd.GraphicSheet?.MusicPages?.length ?? 0
+        nextPageCount = Math.max(1, renderedPages.length, graphicPageCount)
         setOsmdPreviewPageCount(nextPageCount)
         applyOsmdPreviewPageVisibility(renderedPages, 0)
         setOsmdPreviewStatusText('')
