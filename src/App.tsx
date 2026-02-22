@@ -1324,7 +1324,6 @@ function App() {
     loadSampleMusicXml,
     exportMusicXmlFile,
     resetScore,
-    runAiDraft,
     applyRhythmPreset,
   } = useEditorHandlers({
     synthRef,
@@ -2450,7 +2449,6 @@ function App() {
       <ScoreControls
         isPlaying={isPlaying}
         onPlayScore={playScore}
-        onRunAiDraft={runAiDraft}
         onReset={resetScore}
         isHorizontalView={isHorizontalView}
         onToggleHorizontalView={() => setIsHorizontalView((current) => !current)}

@@ -1,11 +1,10 @@
-import { useState, type ChangeEvent, type RefObject } from 'react'
+﻿import { useState, type ChangeEvent, type RefObject } from 'react'
 import { RHYTHM_PRESETS } from '../constants'
 import type { ImportFeedback, RhythmPresetId } from '../types'
 
 export function ScoreControls(props: {
   isPlaying: boolean
   onPlayScore: () => void
-  onRunAiDraft: () => void
   onReset: () => void
   isHorizontalView: boolean
   onToggleHorizontalView: () => void
@@ -55,7 +54,6 @@ export function ScoreControls(props: {
   const {
     isPlaying,
     onPlayScore,
-    onRunAiDraft,
     onReset,
     isHorizontalView,
     onToggleHorizontalView,
@@ -123,7 +121,6 @@ export function ScoreControls(props: {
         <button type="button" onClick={onPlayScore} disabled={isPlaying}>
           {isPlaying ? '播放中...' : '播放小节'}
         </button>
-        <button type="button" onClick={onRunAiDraft}>智能草稿</button>
         <button type="button" onClick={onReset}>重置</button>
         <button type="button" onClick={onToggleHorizontalView}>
           {isHorizontalView ? '横向视图：开（原版排版）' : '横向视图：关'}
