@@ -25,6 +25,7 @@ export function ScoreControls(props: {
   onManualScalePercentChange: (nextPercent: number) => void
   pageHorizontalPaddingPx: number
   baseMinGap32Px: number
+  minBarlineEdgeGapPx: number
   maxBarlineEdgeGapPx: number
   durationGapRatio32: number
   durationGapRatio16: number
@@ -33,6 +34,7 @@ export function ScoreControls(props: {
   durationGapRatio2: number
   onPageHorizontalPaddingPxChange: (nextValue: number) => void
   onBaseMinGap32PxChange: (nextValue: number) => void
+  onMinBarlineEdgeGapPxChange: (nextValue: number) => void
   onMaxBarlineEdgeGapPxChange: (nextValue: number) => void
   onDurationGapRatio32Change: (nextValue: number) => void
   onDurationGapRatio16Change: (nextValue: number) => void
@@ -64,6 +66,7 @@ export function ScoreControls(props: {
     onManualScalePercentChange,
     pageHorizontalPaddingPx,
     baseMinGap32Px,
+    minBarlineEdgeGapPx,
     maxBarlineEdgeGapPx,
     durationGapRatio32,
     durationGapRatio16,
@@ -72,6 +75,7 @@ export function ScoreControls(props: {
     durationGapRatio2,
     onPageHorizontalPaddingPxChange,
     onBaseMinGap32PxChange,
+    onMinBarlineEdgeGapPxChange,
     onMaxBarlineEdgeGapPxChange,
     onDurationGapRatio32Change,
     onDurationGapRatio16Change,
@@ -204,6 +208,31 @@ export function ScoreControls(props: {
                 handleFloatValue((event.target as HTMLInputElement).value, onMaxBarlineEdgeGapPxChange)
               }
               onChange={(event) => handleFloatValue(event.target.value, onMaxBarlineEdgeGapPxChange)}
+            />
+
+            <label htmlFor="barline-edge-min-gap">小节边缘最小间距</label>
+            <input
+              id="barline-edge-min-gap"
+              type="range"
+              min={0}
+              max={40}
+              step={0.1}
+              value={minBarlineEdgeGapPx}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onMinBarlineEdgeGapPxChange)
+              }
+              onChange={(event) => handleFloatValue(event.target.value, onMinBarlineEdgeGapPxChange)}
+            />
+            <input
+              type="number"
+              min={0}
+              max={40}
+              step={0.1}
+              value={minBarlineEdgeGapPx}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onMinBarlineEdgeGapPxChange)
+              }
+              onChange={(event) => handleFloatValue(event.target.value, onMinBarlineEdgeGapPxChange)}
             />
           </div>
         )}

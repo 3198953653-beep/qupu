@@ -40,8 +40,8 @@ const TICKS_PER_QUARTER = 16
 const DEFAULT_COMPACT_TAIL_ANCHOR_TICKS = 4
 const UNIFORM_TICK_SPACING_START_GUARD_PX = 0
 const UNIFORM_TICK_SPACING_END_GUARD_PX = 0
-const UNIFORM_TIMELINE_EDGE_TICK_RATIO = 0.82
-const ACCIDENTAL_PREALLOCATED_CLEARANCE_PX = 2
+const UNIFORM_TIMELINE_EDGE_TICK_RATIO = 0
+const ACCIDENTAL_PREALLOCATED_CLEARANCE_PX = 0
 const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
 const BASE_GAP_UNIT_PX = 3.5
 const MIN_GAP_BEATS = 1 / 32
@@ -56,6 +56,7 @@ export type TimeAxisSpacingConfig = {
   rightEdgePaddingPx: number
   interOnsetPaddingPx: number
   baseMinGap32Px: number
+  minBarlineEdgeGapPx: number
   maxBarlineEdgeGapPx: number
   durationGapRatios: DurationGapRatioConfig
 }
@@ -76,6 +77,7 @@ export const DEFAULT_TIME_AXIS_SPACING_CONFIG: TimeAxisSpacingConfig = {
   rightEdgePaddingPx: DEFAULT_RIGHT_EDGE_PADDING_PX,
   interOnsetPaddingPx: 1,
   baseMinGap32Px: 4,
+  minBarlineEdgeGapPx: 0,
   maxBarlineEdgeGapPx: 18,
   durationGapRatios: {
     thirtySecond: 0.7,
@@ -86,12 +88,33 @@ export const DEFAULT_TIME_AXIS_SPACING_CONFIG: TimeAxisSpacingConfig = {
   },
 }
 
+function resolveEffectiveEdgeGapRange(
+  spacingConfig: TimeAxisSpacingConfig,
+): { minGapPx: number; maxGapPx: number } {
+  const maxGapPx = Math.max(0, spacingConfig.maxBarlineEdgeGapPx)
+  const minCandidate = Number.isFinite(spacingConfig.minBarlineEdgeGapPx)
+    ? Math.max(0, spacingConfig.minBarlineEdgeGapPx)
+    : 0
+  const minGapPx = minCandidate <= maxGapPx ? minCandidate : 0
+  return { minGapPx, maxGapPx }
+}
+
+function resolveEffectiveEdgePadding(
+  spacingConfig: TimeAxisSpacingConfig,
+): { leftPadPx: number; rightPadPx: number; minGapPx: number; maxGapPx: number } {
+  const { minGapPx, maxGapPx } = resolveEffectiveEdgeGapRange(spacingConfig)
+  const leftPadPx = Math.min(maxGapPx, Math.max(0, Math.max(spacingConfig.leftEdgePaddingPx, minGapPx)))
+  const rightPadPx = Math.min(maxGapPx, Math.max(0, Math.max(spacingConfig.rightEdgePaddingPx, minGapPx)))
+  return { leftPadPx, rightPadPx, minGapPx, maxGapPx }
+}
+
 export function getUniformTickSpacingPadding(
   spacingConfig: TimeAxisSpacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
 ): { startPadPx: number; endPadPx: number } {
+  const { leftPadPx, rightPadPx } = resolveEffectiveEdgePadding(spacingConfig)
   return {
-    startPadPx: spacingConfig.leftEdgePaddingPx + UNIFORM_TICK_SPACING_START_GUARD_PX,
-    endPadPx: Math.max(0, spacingConfig.rightEdgePaddingPx + UNIFORM_TICK_SPACING_END_GUARD_PX),
+    startPadPx: leftPadPx + UNIFORM_TICK_SPACING_START_GUARD_PX,
+    endPadPx: Math.max(0, rightPadPx + UNIFORM_TICK_SPACING_END_GUARD_PX),
   }
 }
 
@@ -125,13 +148,12 @@ function getNoteHorizontalExtents(vexNote: StaveNote): { leftExtent: number; rig
   }).getMetrics?.()
 
   if (metrics) {
-    const leftDisplacedHeadPx = Number.isFinite(metrics.leftDisplacedHeadPx) ? (metrics.leftDisplacedHeadPx as number) : 0
     const rightDisplacedHeadPx = Number.isFinite(metrics.rightDisplacedHeadPx)
       ? (metrics.rightDisplacedHeadPx as number)
       : 0
 
-    // Keep extents anchored to note-head geometry with pitch-invariant right padding.
-    leftExtent = Math.max(0, leftDisplacedHeadPx)
+    // Keep right extent anchored to note-head geometry with pitch-invariant
+    // stem padding. Left extent is derived from rendered glyph edges below.
     rightExtent = Math.max(
       DEFAULT_NOTE_HEAD_WIDTH_PX + stemInvariantPadding,
       DEFAULT_NOTE_HEAD_WIDTH_PX + rightDisplacedHeadPx + stemInvariantPadding,
@@ -151,10 +173,10 @@ function getNoteHorizontalExtents(vexNote: StaveNote): { leftExtent: number; rig
       }
     })
     if (Number.isFinite(accidentalMinX)) {
-      leftExtent = Math.max(
-        leftExtent,
-        noteHeadX - accidentalMinX + ACCIDENTAL_PREALLOCATED_CLEARANCE_PX,
-      )
+      // Accidental columns in VexFlow metrics are intentionally conservative.
+      // Use the actual rendered accidental edge so edge-gap=0 can visually
+      // reach the boundary instead of leaving hidden reserved whitespace.
+      leftExtent = Math.max(0, noteHeadX - accidentalMinX + ACCIDENTAL_PREALLOCATED_CLEARANCE_PX)
     }
   }
 
@@ -357,6 +379,7 @@ function applyMeasureEdgeGapCap(params: {
   legalBoundaryEnd: number
   firstLeftExtent: number
   lastRightExtent: number
+  minBarlineEdgeGapPx: number
   maxBarlineEdgeGapPx: number
 }): void {
   const {
@@ -368,11 +391,15 @@ function applyMeasureEdgeGapCap(params: {
     legalBoundaryEnd,
     firstLeftExtent,
     lastRightExtent,
+    minBarlineEdgeGapPx,
     maxBarlineEdgeGapPx,
   } = params
 
   if (!Number.isFinite(maxBarlineEdgeGapPx)) return
   const maxGap = Math.max(0, maxBarlineEdgeGapPx)
+  const minGapCandidate = Number.isFinite(minBarlineEdgeGapPx) ? Math.max(0, minBarlineEdgeGapPx) : 0
+  const hasEffectiveMinGap = minGapCandidate <= maxGap
+  const minGap = hasEffectiveMinGap ? minGapCandidate : 0
   if (noteOnsets.length === 0) return
 
   const positions = noteOnsets.map((onset) => targetXByOnset.get(onset))
@@ -385,9 +412,8 @@ function applyMeasureEdgeGapCap(params: {
   const currentLastX = safePositions[lastIndex]
   if (!Number.isFinite(currentFirstX) || !Number.isFinite(currentLastX)) return
 
-  // Keep full glyph envelope (including accidentals) inside legal boundaries.
-  const minFirstX = legalBoundaryStart + Math.max(0, firstLeftExtent)
-  const maxLastX = legalBoundaryEnd - Math.max(0, lastRightExtent)
+  const minFirstX = legalBoundaryStart
+  const maxLastX = legalBoundaryEnd
   if (!Number.isFinite(minFirstX) || !Number.isFinite(maxLastX) || minFirstX > maxLastX) return
 
   // Preserve all inter-onset spacing and only resolve by translation.
@@ -395,7 +421,9 @@ function applyMeasureEdgeGapCap(params: {
   const legalShiftMax = maxLastX - currentLastX
   if (!Number.isFinite(legalShiftMin) || !Number.isFinite(legalShiftMax) || legalShiftMin > legalShiftMax) return
 
-  // Cap is interpreted as full-glyph envelope distance to measure edges.
+  // Cap is interpreted as visual edge distance: first/last note glyph edge to
+  // measure boundary. This keeps "=0" behavior aligned with user expectation
+  // (touching boundaries), instead of onset anchor distance.
   const currentLeftEdgeGap = currentFirstX - firstLeftExtent - edgeBoundaryStart
   const currentRightEdgeGap = edgeBoundaryEnd - (currentLastX + lastRightExtent)
   if (!Number.isFinite(currentLeftEdgeGap) || !Number.isFinite(currentRightEdgeGap)) return
@@ -405,8 +433,10 @@ function applyMeasureEdgeGapCap(params: {
   const capShiftMin = currentRightEdgeGap - maxGap
   const capShiftMax = maxGap - currentLeftEdgeGap
 
-  const feasibleShiftMin = Math.max(legalShiftMin, capShiftMin)
-  const feasibleShiftMax = Math.min(legalShiftMax, capShiftMax)
+  const minShiftMin = minGap - currentLeftEdgeGap
+  const minShiftMax = currentRightEdgeGap - minGap
+  const feasibleShiftMin = Math.max(legalShiftMin, capShiftMin, hasEffectiveMinGap ? minShiftMin : Number.NEGATIVE_INFINITY)
+  const feasibleShiftMax = Math.min(legalShiftMax, capShiftMax, hasEffectiveMinGap ? minShiftMax : Number.POSITIVE_INFINITY)
 
   const clampShift = (value: number): number => Math.max(legalShiftMin, Math.min(legalShiftMax, value))
 
@@ -414,11 +444,18 @@ function applyMeasureEdgeGapCap(params: {
   if (feasibleShiftMin <= feasibleShiftMax) {
     resolvedShift = Math.max(feasibleShiftMin, Math.min(0, feasibleShiftMax))
   } else {
+    // If min-gap constraints are infeasible, disable min-gap and keep max-gap behavior.
+    const feasibleWithoutMinShiftMin = Math.max(legalShiftMin, capShiftMin)
+    const feasibleWithoutMinShiftMax = Math.min(legalShiftMax, capShiftMax)
+    if (feasibleWithoutMinShiftMin <= feasibleWithoutMinShiftMax) {
+      resolvedShift = Math.max(feasibleWithoutMinShiftMin, Math.min(0, feasibleWithoutMinShiftMax))
+    } else {
     // When cap constraints are infeasible under pure translation, prefer a
     // balanced placement (left/right gaps as equal as possible) instead of
     // forcing one side to the cap and exploding the opposite side.
-    const balancedShift = (currentRightEdgeGap - currentLeftEdgeGap) * 0.5
-    resolvedShift = clampShift(balancedShift)
+      const balancedShift = (currentRightEdgeGap - currentLeftEdgeGap) * 0.5
+      resolvedShift = clampShift(balancedShift)
+    }
   }
 
   if (!Number.isFinite(resolvedShift) || Math.abs(resolvedShift) < 0.001) return
@@ -513,14 +550,8 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
   const lastRightExtent = lastOnsetRefs.reduce((max, ref) => Math.max(max, ref.rightExtent), DEFAULT_NOTE_HEAD_WIDTH_PX)
 
   const usableFormatWidth = Math.max(MIN_RENDER_WIDTH_PX, formatWidth)
-  const cappedEdgePaddingLeft = Math.max(
-    0,
-    Math.min(spacingConfig.leftEdgePaddingPx, spacingConfig.maxBarlineEdgeGapPx),
-  )
-  const cappedEdgePaddingRight = Math.max(
-    0,
-    Math.min(spacingConfig.rightEdgePaddingPx, spacingConfig.maxBarlineEdgeGapPx),
-  )
+  const { leftPadPx: cappedEdgePaddingLeft, rightPadPx: cappedEdgePaddingRight, minGapPx: minBarlineEdgeGapPx } =
+    resolveEffectiveEdgePadding(spacingConfig)
   const defaultAxisBoundaryStart = noteStartX
   const defaultAxisBoundaryEnd = noteStartX + usableFormatWidth
   const barlineAxisBoundaryStart =
@@ -536,18 +567,20 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
   const axisBoundaryEnd =
     uniformSpacingByTicks && preferMeasureEndBarlineAxis ? barlineAxisBoundaryEnd : defaultAxisBoundaryEnd
 
+  const edgeLegalStartInset = firstLeftExtent
+  const edgeLegalEndInset = lastRightExtent
   const startPad = uniformSpacingByTicks
     ? Math.max(
       Math.max(0, cappedEdgePaddingLeft + UNIFORM_TICK_SPACING_START_GUARD_PX),
-      firstLeftExtent + cappedEdgePaddingLeft,
+      edgeLegalStartInset + cappedEdgePaddingLeft,
     )
-    : Math.max(1, firstLeftExtent + cappedEdgePaddingLeft)
+    : Math.max(1, edgeLegalStartInset + cappedEdgePaddingLeft)
   const endPad = uniformSpacingByTicks
     ? Math.max(
       Math.max(0, cappedEdgePaddingRight + UNIFORM_TICK_SPACING_END_GUARD_PX),
-      lastRightExtent + cappedEdgePaddingRight,
+      edgeLegalEndInset + cappedEdgePaddingRight,
     )
-    : Math.max(1, lastRightExtent + cappedEdgePaddingRight)
+    : Math.max(1, edgeLegalEndInset + cappedEdgePaddingRight)
 
   const axisStart = axisBoundaryStart + startPad
   const axisEnd = axisBoundaryEnd - endPad
@@ -722,6 +755,8 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
   }
 
   if (enableEdgeGapCap) {
+    const legalBoundaryStart = axisBoundaryStart + Math.max(0, edgeLegalStartInset)
+    const legalBoundaryEnd = axisBoundaryEnd - Math.max(0, edgeLegalEndInset)
     applyMeasureEdgeGapCap({
       noteOnsets,
       targetXByOnset,
@@ -730,10 +765,11 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
       // push notes into decorations.
       edgeBoundaryStart: axisBoundaryStart,
       edgeBoundaryEnd: axisBoundaryEnd,
-      legalBoundaryStart: axisBoundaryStart,
-      legalBoundaryEnd: axisBoundaryEnd,
+      legalBoundaryStart,
+      legalBoundaryEnd,
       firstLeftExtent,
       lastRightExtent,
+      minBarlineEdgeGapPx,
       maxBarlineEdgeGapPx: spacingConfig.maxBarlineEdgeGapPx,
     })
   }

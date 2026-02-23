@@ -189,9 +189,7 @@ function getMeasureSpacingRightEdge(layouts: NoteLayout[]): number {
   return maxSpacingRightX
 }
 
-type OnsetEnvelope = { onsetTicks: number; leftX: number; rightX: number }
-
-function getLayoutOnsetEnvelopes(layouts: NoteLayout[], measure: MeasurePair): OnsetEnvelope[] {
+function getLayoutOnsetAnchorXs(layouts: NoteLayout[], measure: MeasurePair): number[] {
   const onsetByNoteKey = new Map<string, number>()
   let trebleTicks = 0
   measure.treble.forEach((note, noteIndex) => {
@@ -204,42 +202,17 @@ function getLayoutOnsetEnvelopes(layouts: NoteLayout[], measure: MeasurePair): O
     bassTicks += DURATION_TICKS[note.duration] ?? 16
   })
 
-  const onsetEnvelopeByTicks = new Map<number, { leftX: number; rightX: number }>()
+  const onsetXMap = new Map<number, number>()
   layouts.forEach((layout) => {
     const onsetTicks = onsetByNoteKey.get(`${layout.staff}:${layout.noteIndex}`)
-    if (onsetTicks === undefined) return
-
-    let leftX = layout.x
-    if (!Number.isFinite(leftX)) return
-    // accidentalRightXByKeyIndex stores accidental rendered x (left edge).
-    Object.values(layout.accidentalRightXByKeyIndex).forEach((value) => {
-      if (!Number.isFinite(value)) return
-      leftX = Math.min(leftX, value)
-    })
-    layout.noteHeads.forEach((head) => {
-      if (!Number.isFinite(head.x)) return
-      leftX = Math.min(leftX, head.x)
-    })
-
-    const rightX = getLayoutSpacingRightX(layout)
-    if (!Number.isFinite(rightX)) return
-
-    const current = onsetEnvelopeByTicks.get(onsetTicks)
-    if (!current) {
-      onsetEnvelopeByTicks.set(onsetTicks, { leftX, rightX })
-      return
-    }
-    current.leftX = Math.min(current.leftX, leftX)
-    current.rightX = Math.max(current.rightX, rightX)
+    if (onsetTicks === undefined || !Number.isFinite(layout.x)) return
+    const current = onsetXMap.get(onsetTicks)
+    onsetXMap.set(onsetTicks, current === undefined ? layout.x : Math.min(current, layout.x))
   })
 
-  return [...onsetEnvelopeByTicks.entries()]
+  return [...onsetXMap.entries()]
     .sort((left, right) => left[0] - right[0])
-    .map(([onsetTicks, envelope]) => ({
-      onsetTicks,
-      leftX: envelope.leftX,
-      rightX: envelope.rightX,
-    }))
+    .map((entry) => entry[1])
 }
 
 function getMeasureEdgeExcessPx(params: {
@@ -259,13 +232,13 @@ function getMeasureEdgeExcessPx(params: {
   if (!Number.isFinite(maxBarlineEdgeGapPx)) return 0
   if (!Number.isFinite(leftBoundaryX) || !Number.isFinite(rightBoundaryX) || leftBoundaryX >= rightBoundaryX) return 0
   const maxGap = Math.max(0, maxBarlineEdgeGapPx)
-  const onsetEnvelopes = getLayoutOnsetEnvelopes(layouts, measure)
-  if (onsetEnvelopes.length === 0) return 0
-  const firstOnset = onsetEnvelopes[0]
-  const lastOnset = onsetEnvelopes[onsetEnvelopes.length - 1]
-  if (!Number.isFinite(firstOnset.leftX) || !Number.isFinite(lastOnset.rightX)) return 0
-  const leftGap = firstOnset.leftX - leftBoundaryX
-  const rightGap = rightBoundaryX - lastOnset.rightX
+  const onsetAnchors = getLayoutOnsetAnchorXs(layouts, measure)
+  if (onsetAnchors.length === 0) return 0
+  const firstX = onsetAnchors[0]
+  const lastX = onsetAnchors[onsetAnchors.length - 1]
+  if (!Number.isFinite(firstX) || !Number.isFinite(lastX)) return 0
+  const leftGap = firstX - leftBoundaryX
+  const rightGap = rightBoundaryX - lastX
   if (!Number.isFinite(leftGap) || !Number.isFinite(rightGap)) return 0
   const leftExcess = Math.max(0, leftGap - maxGap)
   const rightExcess = Math.max(0, rightGap - maxGap)
@@ -536,8 +509,10 @@ export function renderVisibleSystems(params: {
       if (entry.showEndTimeSignature) {
         noteStartProbe.setEndTimeSignature(`${entry.nextTimeSignature.beats}/${entry.nextTimeSignature.beatType}`)
       }
-      const noteStartOffset = noteStartProbe.getNoteStartX()
-      const noteEndOffset = noteStartProbe.getNoteEndX()
+      const rawNoteStartOffset = noteStartProbe.getNoteStartX()
+      const rawNoteEndOffset = noteStartProbe.getNoteEndX()
+      const noteStartOffset = entry.preferMeasureStartBarlineAxis ? 0 : rawNoteStartOffset
+      const noteEndOffset = rawNoteEndOffset
       const formatWidth = Math.max(MIN_FORMAT_WIDTH_PX, noteEndOffset - noteStartOffset - 8)
       const geometry = { noteStartOffset, noteEndOffset, formatWidth }
       probeGeometryCache.set(cacheKey, geometry)

@@ -145,6 +145,11 @@ function clampMaxBarlineEdgeGapPx(value: number): number {
   return Number(clamped.toFixed(2))
 }
 
+function clampMinBarlineEdgeGapPx(value: number): number {
+  const clamped = clampNumber(value, 0, 40)
+  return Number(clamped.toFixed(2))
+}
+
 function clampPageHorizontalPaddingPx(value: number): number {
   return Math.round(clampNumber(value, 8, 120))
 }
@@ -1083,6 +1088,7 @@ function App() {
     const systemRangeKey = systemRanges.map((range) => `${range.startPairIndex}-${range.endPairIndexExclusive}`).join(',')
     const spacingKey = [
       timeAxisSpacingConfig.baseMinGap32Px,
+      timeAxisSpacingConfig.minBarlineEdgeGapPx,
       timeAxisSpacingConfig.maxBarlineEdgeGapPx,
       timeAxisSpacingConfig.durationGapRatios.thirtySecond,
       timeAxisSpacingConfig.durationGapRatios.sixteenth,
@@ -1098,6 +1104,7 @@ function App() {
     pageHorizontalPaddingPx,
     systemRanges,
     timeAxisSpacingConfig.baseMinGap32Px,
+    timeAxisSpacingConfig.minBarlineEdgeGapPx,
     timeAxisSpacingConfig.maxBarlineEdgeGapPx,
     timeAxisSpacingConfig.durationGapRatios.thirtySecond,
     timeAxisSpacingConfig.durationGapRatios.sixteenth,
@@ -1157,6 +1164,7 @@ function App() {
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
     timeAxisSpacingConfig.baseMinGap32Px,
+    timeAxisSpacingConfig.minBarlineEdgeGapPx,
     timeAxisSpacingConfig.maxBarlineEdgeGapPx,
     timeAxisSpacingConfig.durationGapRatios.thirtySecond,
     timeAxisSpacingConfig.durationGapRatios.sixteenth,
@@ -1255,6 +1263,10 @@ function App() {
     const measureLayouts = measureLayoutsRef.current
     const noteLayoutsByPair = noteLayoutsByPairRef.current
     if (measureLayouts.size === 0 || noteLayoutsByPair.size === 0) return
+    const maxBarlineEdgeGapPx = Math.max(0, timeAxisSpacingConfig.maxBarlineEdgeGapPx)
+    const minBarlineEdgeGapCandidatePx = Math.max(0, timeAxisSpacingConfig.minBarlineEdgeGapPx)
+    const effectiveMinBarlineEdgeGapPx =
+      minBarlineEdgeGapCandidatePx <= maxBarlineEdgeGapPx ? minBarlineEdgeGapCandidatePx : maxBarlineEdgeGapPx
 
     setHorizontalMeasureWidthOverrides((current) => {
       let changed = false
@@ -1275,7 +1287,18 @@ function App() {
           ? (Number.isFinite(measureLayout.noteEndX) ? measureLayout.noteEndX : measureEndBarX)
           : measureEndBarX
         const overflow = maxLayoutRightX - rightLimitX
-        if (!Number.isFinite(overflow) || overflow <= HORIZONTAL_OVERFLOW_RECOVERY_EPS_PX) return
+        const overflowPx =
+          Number.isFinite(overflow) && overflow > HORIZONTAL_OVERFLOW_RECOVERY_EPS_PX
+            ? overflow
+            : 0
+        const rightGapToBoundaryPx = rightLimitX - maxLayoutRightX
+        const minGapDeficitPx =
+          effectiveMinBarlineEdgeGapPx > 0 && Number.isFinite(rightGapToBoundaryPx)
+            ? Math.max(0, effectiveMinBarlineEdgeGapPx - rightGapToBoundaryPx)
+            : 0
+        if (overflowPx <= HORIZONTAL_OVERFLOW_RECOVERY_EPS_PX && minGapDeficitPx <= HORIZONTAL_OVERFLOW_RECOVERY_EPS_PX) {
+          return
+        }
 
         const baseWidth = horizontalRawMeasureWidths[pairIndex] ?? measureLayout.measureWidth
         const currentEffectiveWidth = Math.max(
@@ -1284,7 +1307,12 @@ function App() {
           current[pairIndex] ?? Number.NEGATIVE_INFINITY,
         )
         if (!Number.isFinite(currentEffectiveWidth) || currentEffectiveWidth <= 0) return
-        const desiredWidth = Math.ceil((currentEffectiveWidth + overflow + HORIZONTAL_OVERFLOW_RECOVERY_PAD_PX) * 1000) / 1000
+        const overflowRecoveryPadPx =
+          overflowPx <= HORIZONTAL_OVERFLOW_RECOVERY_EPS_PX || maxBarlineEdgeGapPx <= 0
+            ? 0
+            : HORIZONTAL_OVERFLOW_RECOVERY_PAD_PX
+        const desiredWidth =
+          Math.ceil((currentEffectiveWidth + overflowPx + overflowRecoveryPadPx + minGapDeficitPx) * 1000) / 1000
         const existingOverride = next[pairIndex]
         const nextWidth = Number.isFinite(existingOverride) ? Math.max(existingOverride, desiredWidth) : desiredWidth
         if (Math.abs(nextWidth - (existingOverride ?? Number.NEGATIVE_INFINITY)) > HORIZONTAL_OVERFLOW_GLOBAL_SCALE_EPS) {
@@ -1301,6 +1329,8 @@ function App() {
     horizontalRawMeasureWidths,
     horizontalRenderWindow.startPairIndex,
     horizontalRenderWindow.endPairIndexExclusive,
+    timeAxisSpacingConfig.minBarlineEdgeGapPx,
+    timeAxisSpacingConfig.maxBarlineEdgeGapPx,
     notes,
     bassNotes,
   ])
@@ -2524,6 +2554,7 @@ function App() {
         onManualScalePercentChange={(nextPercent) => setManualScalePercent(clampScalePercent(nextPercent))}
         pageHorizontalPaddingPx={pageHorizontalPaddingPx}
         baseMinGap32Px={timeAxisSpacingConfig.baseMinGap32Px}
+        minBarlineEdgeGapPx={timeAxisSpacingConfig.minBarlineEdgeGapPx}
         maxBarlineEdgeGapPx={timeAxisSpacingConfig.maxBarlineEdgeGapPx}
         durationGapRatio32={timeAxisSpacingConfig.durationGapRatios.thirtySecond}
         durationGapRatio16={timeAxisSpacingConfig.durationGapRatios.sixteenth}
@@ -2543,6 +2574,12 @@ function App() {
           setTimeAxisSpacingConfig((current) => ({
             ...current,
             maxBarlineEdgeGapPx: clampMaxBarlineEdgeGapPx(nextValue),
+          }))
+        }
+        onMinBarlineEdgeGapPxChange={(nextValue) =>
+          setTimeAxisSpacingConfig((current) => ({
+            ...current,
+            minBarlineEdgeGapPx: clampMinBarlineEdgeGapPx(nextValue),
           }))
         }
         onDurationGapRatio32Change={(nextValue) =>

@@ -251,6 +251,18 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     bassStave.setEndTimeSignature(endTimeSignatureLabel)
   }
 
+  // In barline-axis mode (mid-system measure without start decorations),
+  // remove VexFlow's implicit left note-start inset so edge-cap=0 can
+  // truly touch the measure start boundary.
+  if (
+    typeof noteStartXOverride !== 'number' &&
+    !suppressSystemDecorations &&
+    preferMeasureBarlineAxis
+  ) {
+    trebleStave.setNoteStartX(measureX)
+    bassStave.setNoteStartX(measureX)
+  }
+
   if (!skipPainting) {
     trebleStave.setContext(context).draw()
     bassStave.setContext(context).draw()
