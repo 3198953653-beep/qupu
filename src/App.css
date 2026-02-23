@@ -832,6 +832,16 @@
   transform-origin: top left;
 }
 
+.osmd-preview-note-selected,
+.osmd-preview-note-selected * {
+  fill: #1184d7 !important;
+  stroke: #1184d7 !important;
+}
+
+.osmd-preview-note-selected {
+  filter: drop-shadow(0 0 1px rgba(17, 132, 215, 0.85));
+}
+
 @media (max-width: 1180px) {
   .osmd-preview-card {
     width: min(1100px, calc(100vw - 1rem));
