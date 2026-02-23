@@ -8,6 +8,7 @@ export function ScoreBoard(props: {
   scoreScaleX: number
   scoreScaleY: number
   scoreSurfaceOffsetXPx: number
+  scoreSurfaceOffsetYPx: number
   draggingSelection: { noteId: string; staff: 'treble' | 'bass'; keyIndex: number } | null
   scoreRef: RefObject<HTMLCanvasElement | null>
   scoreOverlayRef: RefObject<HTMLCanvasElement | null>
@@ -35,6 +36,7 @@ export function ScoreBoard(props: {
     scoreScaleX,
     scoreScaleY,
     scoreSurfaceOffsetXPx,
+    scoreSurfaceOffsetYPx,
     draggingSelection,
     scoreRef,
     scoreOverlayRef,
@@ -65,6 +67,7 @@ export function ScoreBoard(props: {
             ref={scoreRef}
             style={{
               left: `${scoreSurfaceOffsetXPx}px`,
+              top: `${scoreSurfaceOffsetYPx}px`,
               transform: `scale(${scoreScaleX}, ${scoreScaleY})`,
               transformOrigin: 'left top',
             }}
@@ -80,6 +83,7 @@ export function ScoreBoard(props: {
             height={1}
             style={{
               left: `${scoreSurfaceOffsetXPx}px`,
+              top: `${scoreSurfaceOffsetYPx}px`,
               transform: `scale(${scoreScaleX}, ${scoreScaleY})`,
               transformOrigin: 'left top',
             }}

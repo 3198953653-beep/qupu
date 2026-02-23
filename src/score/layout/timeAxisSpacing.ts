@@ -76,9 +76,9 @@ export const DEFAULT_TIME_AXIS_SPACING_CONFIG: TimeAxisSpacingConfig = {
   leftEdgePaddingPx: DEFAULT_LEFT_EDGE_PADDING_PX,
   rightEdgePaddingPx: DEFAULT_RIGHT_EDGE_PADDING_PX,
   interOnsetPaddingPx: 1,
-  baseMinGap32Px: 4,
-  minBarlineEdgeGapPx: 0,
-  maxBarlineEdgeGapPx: 18,
+  baseMinGap32Px: 6.9,
+  minBarlineEdgeGapPx: 9.7,
+  maxBarlineEdgeGapPx: 12.7,
   durationGapRatios: {
     thirtySecond: 0.7,
     sixteenth: 0.78,

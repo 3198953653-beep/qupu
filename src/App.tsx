@@ -62,7 +62,7 @@ import type {
 
 const SCORE_RENDER_BACKEND = Renderer.Backends.CANVAS
 const INSPECTOR_SEQUENCE_PREVIEW_LIMIT = 64
-const MANUAL_SCALE_BASELINE = 0.7
+const MANUAL_SCALE_BASELINE = 0.91
 const DEFAULT_PAGE_HORIZONTAL_PADDING_PX = 86
 const ENABLE_AUTO_FIRST_MEASURE_DRAG_DEBUG = false
 const HORIZONTAL_VIEW_MEASURE_WIDTH_PX = 220
@@ -123,6 +123,11 @@ function getAutoScoreScale(measureCount: number): number {
 function clampScalePercent(value: number): number {
   if (!Number.isFinite(value)) return 100
   return Math.max(55, Math.min(130, Math.round(value)))
+}
+
+function clampCanvasHeightPercent(value: number): number {
+  if (!Number.isFinite(value)) return 100
+  return Math.max(70, Math.min(260, Math.round(value)))
 }
 
 function clampNumber(value: number, min: number, max: number): number {
@@ -815,6 +820,7 @@ function App() {
   const [measureEdgeDebugReport, setMeasureEdgeDebugReport] = useState<string>('')
   const [autoScaleEnabled, setAutoScaleEnabled] = useState(false)
   const [manualScalePercent, setManualScalePercent] = useState(100)
+  const [canvasHeightPercent, setCanvasHeightPercent] = useState(100)
   const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
   const [timeAxisSpacingConfig, setTimeAxisSpacingConfig] = useState(DEFAULT_TIME_AXIS_SPACING_CONFIG)
   const [isOsmdPreviewOpen, setIsOsmdPreviewOpen] = useState(false)
@@ -981,6 +987,7 @@ function App() {
   }, [horizontalMeasureWidths])
   const autoScoreScale = useMemo(() => getAutoScoreScale(measurePairs.length), [measurePairs.length])
   const safeManualScalePercent = clampScalePercent(manualScalePercent)
+  const safeCanvasHeightPercent = clampCanvasHeightPercent(canvasHeightPercent)
   const relativeScale = autoScaleEnabled ? autoScoreScale : safeManualScalePercent / 100
   const horizontalDisplayScale = relativeScale * MANUAL_SCALE_BASELINE
   const provisionalDisplayScoreHeight = HORIZONTAL_VIEW_HEIGHT_PX
@@ -995,6 +1002,8 @@ function App() {
   const minScaleForCanvasHeight = provisionalDisplayScoreHeight / MAX_CANVAS_RENDER_DIM_PX
   const scoreScaleX = baseScoreScale
   const scoreScaleY = Math.max(baseScoreScale, minScaleForCanvasHeight)
+  const canvasHeightScale = safeCanvasHeightPercent / 100
+  const viewportHeightScaleByZoom = Math.max(0.1, scoreScaleY / MANUAL_SCALE_BASELINE)
   const scoreScale = scoreScaleX
   const autoScalePercent = Math.round(baseScoreScale * 100)
   const totalScoreWidth = Math.max(1, Math.round(displayScoreWidth / scoreScaleX))
@@ -1032,8 +1041,9 @@ function App() {
   }, [horizontalViewportXRange.startX, totalScoreWidth, horizontalRenderSurfaceWidth])
   const scoreWidth = horizontalRenderSurfaceWidth
   const systemRanges = useMemo(() => [{ startPairIndex: 0, endPairIndexExclusive: measurePairs.length }], [measurePairs.length])
-  const displayScoreHeight = HORIZONTAL_VIEW_HEIGHT_PX
-  const scoreHeight = Math.max(1, Math.round(displayScoreHeight / scoreScaleY))
+  const scaledScoreContentHeight = Math.max(1, HORIZONTAL_VIEW_HEIGHT_PX * viewportHeightScaleByZoom)
+  const displayScoreHeight = Math.max(1, Math.round(scaledScoreContentHeight * canvasHeightScale))
+  const scoreHeight = Math.max(1, Math.round(scaledScoreContentHeight / scoreScaleY))
   const systemsPerPage = 1
   const pageCount = 1
   const safeCurrentPage = 0
@@ -1915,6 +1925,8 @@ function App() {
   const osmdPreviewPaperHeightPx = A4_PAGE_HEIGHT * osmdPreviewPaperScale
 
   const scoreSurfaceOffsetXPx = horizontalRenderOffsetX * scoreScaleX
+  const scaledRenderedScoreHeight = Math.max(1, scoreHeight * scoreScaleY)
+  const scoreSurfaceOffsetYPx = Math.max(0, (displayScoreHeight - scaledRenderedScoreHeight) / 2)
   const formatDebugCoord = (value: number | null | undefined): string => {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 'null'
     return value.toFixed(3)
@@ -2552,6 +2564,8 @@ function App() {
         onToggleAutoScale={() => setAutoScaleEnabled((enabled) => !enabled)}
         manualScalePercent={safeManualScalePercent}
         onManualScalePercentChange={(nextPercent) => setManualScalePercent(clampScalePercent(nextPercent))}
+        canvasHeightPercent={safeCanvasHeightPercent}
+        onCanvasHeightPercentChange={(nextPercent) => setCanvasHeightPercent(clampCanvasHeightPercent(nextPercent))}
         pageHorizontalPaddingPx={pageHorizontalPaddingPx}
         baseMinGap32Px={timeAxisSpacingConfig.baseMinGap32Px}
         minBarlineEdgeGapPx={timeAxisSpacingConfig.minBarlineEdgeGapPx}
@@ -2642,8 +2656,6 @@ function App() {
         onImportMusicXmlFromTextarea={importMusicXmlFromTextarea}
         fileInputRef={fileInputRef}
         onMusicXmlFileChange={onMusicXmlFileChange}
-        musicXmlInput={musicXmlInput}
-        onMusicXmlInputChange={setMusicXmlInput}
         importFeedback={importFeedback}
         rhythmPreset={rhythmPreset}
         onApplyRhythmPreset={applyRhythmPreset}
@@ -2656,6 +2668,7 @@ function App() {
         scoreScaleX={scoreScaleX}
         scoreScaleY={scoreScaleY}
         scoreSurfaceOffsetXPx={scoreSurfaceOffsetXPx}
+        scoreSurfaceOffsetYPx={scoreSurfaceOffsetYPx}
         draggingSelection={draggingSelection}
         scoreRef={scoreRef}
         scoreOverlayRef={scoreOverlayRef}

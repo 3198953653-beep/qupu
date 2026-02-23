@@ -13,8 +13,6 @@ export function ScoreControls(props: {
   onImportMusicXmlFromTextarea: () => void
   fileInputRef: RefObject<HTMLInputElement | null>
   onMusicXmlFileChange: (event: ChangeEvent<HTMLInputElement>) => void
-  musicXmlInput: string
-  onMusicXmlInputChange: (nextValue: string) => void
   importFeedback: ImportFeedback
   rhythmPreset: RhythmPresetId
   onApplyRhythmPreset: (presetId: RhythmPresetId) => void
@@ -23,6 +21,8 @@ export function ScoreControls(props: {
   onToggleAutoScale: () => void
   manualScalePercent: number
   onManualScalePercentChange: (nextPercent: number) => void
+  canvasHeightPercent: number
+  onCanvasHeightPercentChange: (nextPercent: number) => void
   pageHorizontalPaddingPx: number
   baseMinGap32Px: number
   minBarlineEdgeGapPx: number
@@ -54,8 +54,6 @@ export function ScoreControls(props: {
     onImportMusicXmlFromTextarea,
     fileInputRef,
     onMusicXmlFileChange,
-    musicXmlInput,
-    onMusicXmlInputChange,
     importFeedback,
     rhythmPreset,
     onApplyRhythmPreset,
@@ -64,6 +62,8 @@ export function ScoreControls(props: {
     onToggleAutoScale,
     manualScalePercent,
     onManualScalePercentChange,
+    canvasHeightPercent,
+    onCanvasHeightPercentChange,
     pageHorizontalPaddingPx,
     baseMinGap32Px,
     minBarlineEdgeGapPx,
@@ -134,6 +134,31 @@ export function ScoreControls(props: {
           disabled={autoScaleEnabled}
           onInput={(event) => handleScaleValue((event.target as HTMLInputElement).value)}
           onChange={(event) => handleScaleValue(event.target.value)}
+        />
+        <span className="scale-percent-label">%</span>
+      </section>
+
+      <section className="scale-row">
+        <label htmlFor="canvas-height-range">画布高度</label>
+        <input
+          id="canvas-height-range"
+          type="range"
+          min={70}
+          max={260}
+          step={1}
+          value={canvasHeightPercent}
+          onInput={(event) => onCanvasHeightPercentChange(Number((event.target as HTMLInputElement).value))}
+          onChange={(event) => onCanvasHeightPercentChange(Number(event.target.value))}
+        />
+        <input
+          className="scale-percent-input"
+          type="number"
+          min={70}
+          max={260}
+          step={1}
+          value={canvasHeightPercent}
+          onInput={(event) => onCanvasHeightPercentChange(Number((event.target as HTMLInputElement).value))}
+          onChange={(event) => onCanvasHeightPercentChange(Number(event.target.value))}
         />
         <span className="scale-percent-label">%</span>
       </section>
@@ -411,14 +436,6 @@ export function ScoreControls(props: {
           type="file"
           accept=".musicxml,.xml,text/xml,application/xml"
           onChange={onMusicXmlFileChange}
-        />
-
-        <textarea
-          className="xml-input"
-          value={musicXmlInput}
-          onChange={(event) => onMusicXmlInputChange(event.target.value)}
-          placeholder="在此粘贴乐谱文本，然后点击“导入文本”。"
-          spellCheck={false}
         />
 
         {importFeedback.kind === 'loading' && (
