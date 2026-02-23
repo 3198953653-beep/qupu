@@ -29,6 +29,7 @@ type ApplyUnifiedTimeAxisSpacingParams = {
   measureEndBarX?: number
   preferMeasureBarlineAxis?: boolean
   preferMeasureEndBarlineAxis?: boolean
+  enableEdgeGapCap?: boolean
 }
 
 const MIN_RENDER_WIDTH_PX = 1
@@ -40,7 +41,6 @@ const DEFAULT_COMPACT_TAIL_ANCHOR_TICKS = 4
 const UNIFORM_TICK_SPACING_START_GUARD_PX = 0
 const UNIFORM_TICK_SPACING_END_GUARD_PX = 0
 const UNIFORM_TIMELINE_EDGE_TICK_RATIO = 0.82
-const UNIFORM_BARLINE_EDGE_GAP_RATIO = 0.82
 const ACCIDENTAL_PREALLOCATED_CLEARANCE_PX = 2
 const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
 const BASE_GAP_UNIT_PX = 3.5
@@ -353,6 +353,8 @@ function applyMeasureEdgeGapCap(params: {
   targetXByOnset: Map<number, number>
   edgeBoundaryStart: number
   edgeBoundaryEnd: number
+  legalBoundaryStart: number
+  legalBoundaryEnd: number
   firstLeftExtent: number
   lastRightExtent: number
   maxBarlineEdgeGapPx: number
@@ -362,6 +364,8 @@ function applyMeasureEdgeGapCap(params: {
     targetXByOnset,
     edgeBoundaryStart,
     edgeBoundaryEnd,
+    legalBoundaryStart,
+    legalBoundaryEnd,
     firstLeftExtent,
     lastRightExtent,
     maxBarlineEdgeGapPx,
@@ -381,28 +385,40 @@ function applyMeasureEdgeGapCap(params: {
   const currentLastX = safePositions[lastIndex]
   if (!Number.isFinite(currentFirstX) || !Number.isFinite(currentLastX)) return
 
-  const minFirstX = edgeBoundaryStart + firstLeftExtent
-  const maxLastX = edgeBoundaryEnd - lastRightExtent
-  const cappedFirstMaxX = edgeBoundaryStart + firstLeftExtent + maxGap
-  const cappedLastMinX = edgeBoundaryEnd - lastRightExtent - maxGap
+  // Keep full glyph envelope (including accidentals) inside legal boundaries.
+  const minFirstX = legalBoundaryStart + Math.max(0, firstLeftExtent)
+  const maxLastX = legalBoundaryEnd - Math.max(0, lastRightExtent)
+  if (!Number.isFinite(minFirstX) || !Number.isFinite(maxLastX) || minFirstX > maxLastX) return
 
-  const shiftMinForLegalBounds = Math.max(
-    minFirstX - currentFirstX,
-    cappedLastMinX - currentLastX,
-  )
-  const shiftMaxForLegalBounds = Math.min(
-    cappedFirstMaxX - currentFirstX,
-    maxLastX - currentLastX,
-  )
+  // Preserve all inter-onset spacing and only resolve by translation.
+  const legalShiftMin = minFirstX - currentFirstX
+  const legalShiftMax = maxLastX - currentLastX
+  if (!Number.isFinite(legalShiftMin) || !Number.isFinite(legalShiftMax) || legalShiftMin > legalShiftMax) return
+
+  // Cap is interpreted as full-glyph envelope distance to measure edges.
+  const currentLeftEdgeGap = currentFirstX - firstLeftExtent - edgeBoundaryStart
+  const currentRightEdgeGap = edgeBoundaryEnd - (currentLastX + lastRightExtent)
+  if (!Number.isFinite(currentLeftEdgeGap) || !Number.isFinite(currentRightEdgeGap)) return
+
+  // leftGap' = currentLeftEdgeGap + shift <= maxGap
+  // rightGap' = currentRightEdgeGap - shift <= maxGap
+  const capShiftMin = currentRightEdgeGap - maxGap
+  const capShiftMax = maxGap - currentLeftEdgeGap
+
+  const feasibleShiftMin = Math.max(legalShiftMin, capShiftMin)
+  const feasibleShiftMax = Math.min(legalShiftMax, capShiftMax)
+
+  const clampShift = (value: number): number => Math.max(legalShiftMin, Math.min(legalShiftMax, value))
 
   let resolvedShift = 0
-  if (shiftMinForLegalBounds <= shiftMaxForLegalBounds) {
-    resolvedShift = Math.max(shiftMinForLegalBounds, Math.min(0, shiftMaxForLegalBounds))
+  if (feasibleShiftMin <= feasibleShiftMax) {
+    resolvedShift = Math.max(feasibleShiftMin, Math.min(0, feasibleShiftMax))
   } else {
-    const shiftMin = minFirstX - currentFirstX
-    const shiftMax = maxLastX - currentLastX
-    if (shiftMin > shiftMax) return
-    resolvedShift = Math.max(shiftMin, Math.min(0, shiftMax))
+    // When cap constraints are infeasible under pure translation, prefer a
+    // balanced placement (left/right gaps as equal as possible) instead of
+    // forcing one side to the cap and exploding the opposite side.
+    const balancedShift = (currentRightEdgeGap - currentLeftEdgeGap) * 0.5
+    resolvedShift = clampShift(balancedShift)
   }
 
   if (!Number.isFinite(resolvedShift) || Math.abs(resolvedShift) < 0.001) return
@@ -444,6 +460,7 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     measureEndBarX,
     preferMeasureBarlineAxis = false,
     preferMeasureEndBarlineAxis = false,
+    enableEdgeGapCap = true,
   } = params
 
   const refs = [
@@ -496,7 +513,14 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
   const lastRightExtent = lastOnsetRefs.reduce((max, ref) => Math.max(max, ref.rightExtent), DEFAULT_NOTE_HEAD_WIDTH_PX)
 
   const usableFormatWidth = Math.max(MIN_RENDER_WIDTH_PX, formatWidth)
-  const uniformPadding = getUniformTickSpacingPadding(spacingConfig)
+  const cappedEdgePaddingLeft = Math.max(
+    0,
+    Math.min(spacingConfig.leftEdgePaddingPx, spacingConfig.maxBarlineEdgeGapPx),
+  )
+  const cappedEdgePaddingRight = Math.max(
+    0,
+    Math.min(spacingConfig.rightEdgePaddingPx, spacingConfig.maxBarlineEdgeGapPx),
+  )
   const defaultAxisBoundaryStart = noteStartX
   const defaultAxisBoundaryEnd = noteStartX + usableFormatWidth
   const barlineAxisBoundaryStart =
@@ -513,11 +537,17 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     uniformSpacingByTicks && preferMeasureEndBarlineAxis ? barlineAxisBoundaryEnd : defaultAxisBoundaryEnd
 
   const startPad = uniformSpacingByTicks
-    ? Math.max(uniformPadding.startPadPx, firstLeftExtent + spacingConfig.leftEdgePaddingPx)
-    : Math.max(1, firstLeftExtent + spacingConfig.leftEdgePaddingPx)
+    ? Math.max(
+      Math.max(0, cappedEdgePaddingLeft + UNIFORM_TICK_SPACING_START_GUARD_PX),
+      firstLeftExtent + cappedEdgePaddingLeft,
+    )
+    : Math.max(1, firstLeftExtent + cappedEdgePaddingLeft)
   const endPad = uniformSpacingByTicks
-    ? Math.max(uniformPadding.endPadPx, lastRightExtent + spacingConfig.rightEdgePaddingPx)
-    : Math.max(1, lastRightExtent + spacingConfig.rightEdgePaddingPx)
+    ? Math.max(
+      Math.max(0, cappedEdgePaddingRight + UNIFORM_TICK_SPACING_END_GUARD_PX),
+      lastRightExtent + cappedEdgePaddingRight,
+    )
+    : Math.max(1, lastRightExtent + cappedEdgePaddingRight)
 
   const axisStart = axisBoundaryStart + startPad
   const axisEnd = axisBoundaryEnd - endPad
@@ -527,11 +557,15 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
   if (uniformSpacingByTicks) {
     const timelineWeightMap = buildUniformTimelineWeightMap(noteOnsets, measureTotalTicks, spacingConfig)
     const spanWidth = Math.max(1, axisEnd - axisStart)
+    const intrinsicSpan = Math.max(0.0001, timelineWeightMap.totalWeight)
+    // Keep inter-onset spacing stable across measures: do not stretch when
+    // there is extra measure width, only compress when axis span is smaller
+    // than intrinsic timeline span.
+    const timelineScale = Math.min(1, spanWidth / intrinsicSpan)
     noteOnsets.forEach((onset) => {
       const cumulativeWeight = timelineWeightMap.cumulativeWeightByTick.get(onset)
       if (cumulativeWeight === undefined) return
-      const ratio = cumulativeWeight / timelineWeightMap.totalWeight
-      targetXByOnset.set(onset, axisStart + spanWidth * ratio)
+      targetXByOnset.set(onset, axisStart + cumulativeWeight * timelineScale)
     })
 
     if (noteOnsets.length > 1) {
@@ -583,35 +617,6 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
           if (shift > 0) {
             for (let i = 0; i < adjustedPositions.length; i += 1) {
               adjustedPositions[i] -= shift
-            }
-          }
-        }
-
-        if (adjustedPositions.length > 1) {
-          const lastIndex = adjustedPositions.length - 1
-          const firstInternalGap = Math.max(0, adjustedPositions[1] - adjustedPositions[0])
-          const lastInternalGap = Math.max(0, adjustedPositions[lastIndex] - adjustedPositions[lastIndex - 1])
-          const currentRightEdgeGap = axisBoundaryEnd - (adjustedPositions[lastIndex] + lastRightExtent)
-          const targetRightEdgeGap = Math.max(
-            spacingConfig.rightEdgePaddingPx,
-            lastInternalGap * UNIFORM_BARLINE_EDGE_GAP_RATIO,
-          )
-
-          if (currentRightEdgeGap < targetRightEdgeGap - 0.001) {
-            const currentLeftEdgeGap = adjustedPositions[0] - axisBoundaryStart - firstLeftExtent
-            const targetLeftEdgeFloor = preferMeasureBarlineAxis
-              ? Math.max(
-                spacingConfig.leftEdgePaddingPx,
-                firstInternalGap * UNIFORM_BARLINE_EDGE_GAP_RATIO,
-              )
-              : spacingConfig.leftEdgePaddingPx
-            const availableLeftShift = Math.max(0, currentLeftEdgeGap - targetLeftEdgeFloor)
-            const neededShift = targetRightEdgeGap - currentRightEdgeGap
-            const shift = Math.min(neededShift, availableLeftShift)
-            if (shift > 0) {
-              for (let i = 0; i < adjustedPositions.length; i += 1) {
-                adjustedPositions[i] -= shift
-              }
             }
           }
         }
@@ -716,15 +721,22 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     }
   }
 
-  applyMeasureEdgeGapCap({
-    noteOnsets,
-    targetXByOnset,
-    edgeBoundaryStart: axisBoundaryStart,
-    edgeBoundaryEnd: axisBoundaryEnd,
-    firstLeftExtent,
-    lastRightExtent,
-    maxBarlineEdgeGapPx: spacingConfig.maxBarlineEdgeGapPx,
-  })
+  if (enableEdgeGapCap) {
+    applyMeasureEdgeGapCap({
+      noteOnsets,
+      targetXByOnset,
+      // Use effective spacing boundaries (noteStartX / noteEndX when
+      // key/time signatures occupy measure edges) so edge-cap logic doesn't
+      // push notes into decorations.
+      edgeBoundaryStart: axisBoundaryStart,
+      edgeBoundaryEnd: axisBoundaryEnd,
+      legalBoundaryStart: axisBoundaryStart,
+      legalBoundaryEnd: axisBoundaryEnd,
+      firstLeftExtent,
+      lastRightExtent,
+      maxBarlineEdgeGapPx: spacingConfig.maxBarlineEdgeGapPx,
+    })
+  }
 
   refs.forEach((ref) => {
     const targetX = targetXByOnset.get(ref.onsetTicks)

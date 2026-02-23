@@ -77,6 +77,7 @@ export type DrawMeasureParams = {
   staticAccidentalRightXById?: Map<string, Map<number, number>> | null
   preferMeasureBarlineAxis?: boolean
   preferMeasureEndBarlineAxis?: boolean
+  enableEdgeGapCap?: boolean
   debugCapture?: {
     frame: number
     draggedNoteId: string
@@ -119,6 +120,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     staticAccidentalRightXById = null,
     preferMeasureBarlineAxis = !isSystemStart && !showKeySignature && !showTimeSignature,
     preferMeasureEndBarlineAxis = !showEndTimeSignature,
+    enableEdgeGapCap = true,
     debugCapture = null,
   } = params
   const isSpacingOnlyLayout = layoutDetail === 'spacing-only'
@@ -403,6 +405,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       measureEndBarX: measureX + measureWidth,
       preferMeasureBarlineAxis,
       preferMeasureEndBarlineAxis,
+      enableEdgeGapCap,
     })
   }
 

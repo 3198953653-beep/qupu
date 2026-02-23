@@ -76,6 +76,7 @@ const HORIZONTAL_RENDER_EDGE_BUFFER_MEASURES = 1
 const HORIZONTAL_OVERFLOW_RECOVERY_PAD_PX = 2
 const HORIZONTAL_OVERFLOW_RECOVERY_EPS_PX = 0.5
 const HORIZONTAL_OVERFLOW_GLOBAL_SCALE_EPS = 0.001
+const ENABLE_HORIZONTAL_OVERFLOW_AUTO_GROW = true
 const DEFAULT_TIME_SIGNATURE: TimeSignature = { beats: 4, beatType: 4 }
 const OSMD_PREVIEW_ZOOM_DEBOUNCE_MS = 120
 const DEFAULT_OSMD_PREVIEW_HORIZONTAL_MARGIN_PX = 9
@@ -899,7 +900,18 @@ function App() {
     if (measurePairs.length === 0) return []
 
     const uniformPadding = getUniformTickSpacingPadding(timeAxisSpacingConfig)
-    const sharedAxisPaddingPx = Math.max(0, uniformPadding.startPadPx + uniformPadding.endPadPx)
+    const maxBarlineEdgeGapPx = Math.max(0, timeAxisSpacingConfig.maxBarlineEdgeGapPx)
+    const sharedAxisPaddingPx = Math.max(
+      0,
+      Math.min(Math.max(0, uniformPadding.startPadPx), maxBarlineEdgeGapPx) +
+        Math.min(Math.max(0, uniformPadding.endPadPx), maxBarlineEdgeGapPx),
+    )
+    // Width model for horizontal view:
+    // 1) timeline span comes from global gap + duration ratios
+    // 2) edge-cap slider contributes explicit per-measure edge budget
+    // This keeps edge-cap meaningful (changes measure width) while timeline
+    // spacing remains controlled by duration/global sliders.
+    const edgeGapBudgetPx = maxBarlineEdgeGapPx * 2
     const widths: number[] = []
     let previousKeyFifths = 0
     let previousTimeSignature = DEFAULT_TIME_SIGNATURE
@@ -921,10 +933,13 @@ function App() {
         : (showKeySignature || showTimeSignature ? HORIZONTAL_VIEW_INLINE_DECORATION_PX : 0)
       const estimatedWidth = Math.max(
         HORIZONTAL_VIEW_MIN_MEASURE_WIDTH_PX,
-        Math.round(
-          sharedAxisPaddingPx +
+        Number(
+          (
+            sharedAxisPaddingPx +
+            edgeGapBudgetPx +
             decorationFixedPx +
-            weightSpan,
+            weightSpan
+          ).toFixed(3),
         ),
       )
       widths.push(estimatedWidth)
@@ -940,6 +955,7 @@ function App() {
     timeAxisSpacingConfig.leftEdgePaddingPx,
     timeAxisSpacingConfig.rightEdgePaddingPx,
     timeAxisSpacingConfig.baseMinGap32Px,
+    timeAxisSpacingConfig.maxBarlineEdgeGapPx,
     timeAxisSpacingConfig.durationGapRatios,
     timeAxisSpacingConfig.minGapBeats,
     timeAxisSpacingConfig.gapGamma,
@@ -1133,6 +1149,24 @@ function App() {
 
   useEffect(() => {
     setHorizontalMeasureWidthOverrides((current) => {
+      if (Object.keys(current).length === 0) return current
+      return {}
+    })
+  }, [
+    measurePairs.length,
+    measureKeyFifthsFromImport,
+    measureTimeSignaturesFromImport,
+    timeAxisSpacingConfig.baseMinGap32Px,
+    timeAxisSpacingConfig.maxBarlineEdgeGapPx,
+    timeAxisSpacingConfig.durationGapRatios.thirtySecond,
+    timeAxisSpacingConfig.durationGapRatios.sixteenth,
+    timeAxisSpacingConfig.durationGapRatios.eighth,
+    timeAxisSpacingConfig.durationGapRatios.quarter,
+    timeAxisSpacingConfig.durationGapRatios.half,
+  ])
+
+  useEffect(() => {
+    setHorizontalMeasureWidthOverrides((current) => {
       const currentKeys = Object.keys(current)
       if (currentKeys.length === 0) return current
       let changed = false
@@ -1140,11 +1174,14 @@ function App() {
       currentKeys.forEach((key) => {
         const pairIndex = Number(key)
         const width = current[pairIndex]
+        const baseWidth = horizontalRawMeasureWidths[pairIndex]
         if (
           Number.isInteger(pairIndex) &&
           pairIndex >= 0 &&
           pairIndex < horizontalRawMeasureWidths.length &&
-          Number.isFinite(width)
+          Number.isFinite(width) &&
+          Number.isFinite(baseWidth) &&
+          width > baseWidth + HORIZONTAL_OVERFLOW_GLOBAL_SCALE_EPS
         ) {
           next[pairIndex] = width
         } else {
@@ -1153,7 +1190,7 @@ function App() {
       })
       return changed ? next : current
     })
-  }, [horizontalRawMeasureWidths.length])
+  }, [horizontalRawMeasureWidths])
 
   useImportedRefsSync({
     measurePairsFromImport,
@@ -1211,6 +1248,7 @@ function App() {
   })
 
   useEffect(() => {
+    if (!ENABLE_HORIZONTAL_OVERFLOW_AUTO_GROW) return
     if (draggingSelection) return
     if (horizontalMeasureWidths.length === 0) return
 
@@ -1219,7 +1257,8 @@ function App() {
     if (measureLayouts.size === 0 || noteLayoutsByPair.size === 0) return
 
     setHorizontalMeasureWidthOverrides((current) => {
-      let requiredGlobalScale = 1
+      let changed = false
+      const next: Record<number, number> = { ...current }
 
       measureLayouts.forEach((measureLayout, pairIndex) => {
         const pairLayouts = noteLayoutsByPair.get(pairIndex)
@@ -1245,25 +1284,16 @@ function App() {
           current[pairIndex] ?? Number.NEGATIVE_INFINITY,
         )
         if (!Number.isFinite(currentEffectiveWidth) || currentEffectiveWidth <= 0) return
-        const nextScale = (currentEffectiveWidth + overflow + HORIZONTAL_OVERFLOW_RECOVERY_PAD_PX) / currentEffectiveWidth
-        if (!Number.isFinite(nextScale) || nextScale <= 1 + HORIZONTAL_OVERFLOW_GLOBAL_SCALE_EPS) return
-        requiredGlobalScale = Math.max(requiredGlobalScale, nextScale)
+        const desiredWidth = Math.ceil((currentEffectiveWidth + overflow + HORIZONTAL_OVERFLOW_RECOVERY_PAD_PX) * 1000) / 1000
+        const existingOverride = next[pairIndex]
+        const nextWidth = Number.isFinite(existingOverride) ? Math.max(existingOverride, desiredWidth) : desiredWidth
+        if (Math.abs(nextWidth - (existingOverride ?? Number.NEGATIVE_INFINITY)) > HORIZONTAL_OVERFLOW_GLOBAL_SCALE_EPS) {
+          next[pairIndex] = nextWidth
+          changed = true
+        }
       })
 
-      if (requiredGlobalScale <= 1 + HORIZONTAL_OVERFLOW_GLOBAL_SCALE_EPS) return current
-
-      const next: Record<number, number> = {}
-      for (let pairIndex = 0; pairIndex < horizontalRawMeasureWidths.length; pairIndex += 1) {
-        const baseWidth = horizontalRawMeasureWidths[pairIndex]
-        const currentEffectiveWidth = Math.max(
-          baseWidth,
-          horizontalMeasureWidths[pairIndex] ?? baseWidth,
-          current[pairIndex] ?? Number.NEGATIVE_INFINITY,
-        )
-        if (!Number.isFinite(currentEffectiveWidth) || currentEffectiveWidth <= 0) continue
-        next[pairIndex] = Math.ceil(currentEffectiveWidth * requiredGlobalScale * 1000) / 1000
-      }
-      return next
+      return changed ? next : current
     })
   }, [
     draggingSelection,
@@ -1271,7 +1301,6 @@ function App() {
     horizontalRawMeasureWidths,
     horizontalRenderWindow.startPairIndex,
     horizontalRenderWindow.endPairIndexExclusive,
-    layoutStabilityKey,
     notes,
     bassNotes,
   ])
