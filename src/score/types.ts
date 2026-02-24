@@ -32,6 +32,7 @@ export type ScoreNote = {
   id: string
   pitch: Pitch
   duration: NoteDuration
+  isRest?: boolean
   accidental?: string | null
   chordPitches?: Pitch[]
   chordAccidentals?: Array<string | null>

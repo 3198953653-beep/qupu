@@ -76,6 +76,8 @@ export function syncBassNotesToTreble(trebleNotes: ScoreNote[], currentBass: Sco
 }
 
 export function updateScoreNotePitchAtKey(note: ScoreNote, pitch: Pitch, keyIndex: number): ScoreNote {
+  if (note.isRest) return note
+
   if (keyIndex <= 0) {
     if (note.pitch === pitch) return note
     return { ...note, pitch, accidental: null }

@@ -45,6 +45,11 @@ const VALID_BEAM_DURATIONS = ['4', '8', '16', '32', '64'] as const
 const ACCIDENTAL_HEAD_CLEARANCE_PX = 2
 const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
 const MIN_FORMAT_WIDTH_PX = 8
+
+function getRestAnchorPitch(staff: StaffKind): Pitch {
+  return staff === 'treble' ? 'b/4' : 'd/3'
+}
+
 export type DrawMeasureParams = {
   context: ReturnType<Renderer['getContext']>
   measure: MeasurePair
@@ -135,24 +140,33 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   const resolveRenderedNoteData = (
     note: ScoreNote,
     staff: StaffKind,
-  ): { rootPitch: Pitch; chordPitches?: Pitch[]; previewedKeyIndex: number | null } => {
+  ): { rootPitch: Pitch; chordPitches?: Pitch[]; previewedKeyIndex: number | null; isRest: boolean } => {
+    if (note.isRest) {
+      return {
+        rootPitch: getRestAnchorPitch(staff),
+        chordPitches: undefined,
+        previewedKeyIndex: null,
+        isRest: true,
+      }
+    }
+
     if (!previewNote || previewNote.noteId !== note.id || previewNote.staff !== staff) {
-      return { rootPitch: note.pitch, chordPitches: note.chordPitches, previewedKeyIndex: null }
+      return { rootPitch: note.pitch, chordPitches: note.chordPitches, previewedKeyIndex: null, isRest: false }
     }
 
     if (previewNote.keyIndex <= 0) {
-      return { rootPitch: previewNote.pitch, chordPitches: note.chordPitches, previewedKeyIndex: 0 }
+      return { rootPitch: previewNote.pitch, chordPitches: note.chordPitches, previewedKeyIndex: 0, isRest: false }
     }
 
     const chordIndex = previewNote.keyIndex - 1
     const sourceChordPitches = note.chordPitches
     if (!sourceChordPitches || chordIndex < 0 || chordIndex >= sourceChordPitches.length) {
-      return { rootPitch: note.pitch, chordPitches: sourceChordPitches, previewedKeyIndex: null }
+      return { rootPitch: note.pitch, chordPitches: sourceChordPitches, previewedKeyIndex: null, isRest: false }
     }
 
     const chordPitches = sourceChordPitches.slice()
     chordPitches[chordIndex] = previewNote.pitch
-    return { rootPitch: note.pitch, chordPitches, previewedKeyIndex: previewNote.keyIndex }
+    return { rootPitch: note.pitch, chordPitches, previewedKeyIndex: previewNote.keyIndex, isRest: false }
   }
 
   const buildPreviewAccidentalOverridesForStaff = (
@@ -165,6 +179,10 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     const overrides = new Map<string, Map<number, string | null>>()
     notes.forEach((note) => {
       const rendered = resolveRenderedNoteData(note, staff)
+      if (rendered.isRest) {
+        overrides.set(note.id, new Map([[0, null]]))
+        return
+      }
       const noteOverrides = new Map<number, string | null>()
 
       const rootParts = getStepOctaveAlterFromPitch(rendered.rootPitch)
@@ -295,34 +313,40 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
 
   const trebleRendered = measure.treble.map((note) => {
     const rendered = resolveRenderedNoteData(note, 'treble')
-    const forceChordIndex =
-      !lockPreviewAccidentalLayout && rendered.previewedKeyIndex !== null && rendered.previewedKeyIndex > 0
-        ? rendered.previewedKeyIndex - 1
-        : null
-    const renderedKeys = buildRenderedNoteKeys(
-      note,
-      'treble',
-      rendered.rootPitch,
-      rendered.chordPitches,
-      keyFifths,
-      previewAccidentalStateBeforeNote,
-      !lockPreviewAccidentalLayout && rendered.previewedKeyIndex === 0,
-      forceChordIndex,
-      treblePreviewAccidentalOverrides?.get(note.id) ?? null,
-      getPitchLine,
-    )
+    const renderedKeys: RenderedNoteKey[] = rendered.isRest
+      ? [{ pitch: rendered.rootPitch, accidental: null, keyIndex: 0 }]
+      : (() => {
+          const forceChordIndex =
+            !lockPreviewAccidentalLayout && rendered.previewedKeyIndex !== null && rendered.previewedKeyIndex > 0
+              ? rendered.previewedKeyIndex - 1
+              : null
+          return buildRenderedNoteKeys(
+            note,
+            'treble',
+            rendered.rootPitch,
+            rendered.chordPitches,
+            keyFifths,
+            previewAccidentalStateBeforeNote,
+            !lockPreviewAccidentalLayout && rendered.previewedKeyIndex === 0,
+            forceChordIndex,
+            treblePreviewAccidentalOverrides?.get(note.id) ?? null,
+            getPitchLine,
+          )
+        })()
     const dots = getDurationDots(note.duration)
     const vexNote = new StaveNote({
       keys: renderedKeys.map((entry) => entry.pitch),
-      duration: toVexDuration(note.duration),
+      duration: rendered.isRest ? `${toVexDuration(note.duration)}r` : toVexDuration(note.duration),
       dots,
       clef: 'treble',
       stemDirection: getStrictStemDirection(rendered.rootPitch),
     })
-    renderedKeys.forEach((entry, keyIndex) => {
-      if (!entry.accidental) return
-      vexNote.addModifier(new Accidental(entry.accidental), keyIndex)
-    })
+    if (!rendered.isRest) {
+      renderedKeys.forEach((entry, keyIndex) => {
+        if (!entry.accidental) return
+        vexNote.addModifier(new Accidental(entry.accidental), keyIndex)
+      })
+    }
     if (dots > 0) {
       Dot.buildAndAttach([vexNote], { all: true })
     }
@@ -331,34 +355,40 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
 
   const bassRendered = measure.bass.map((note) => {
     const rendered = resolveRenderedNoteData(note, 'bass')
-    const forceChordIndex =
-      !lockPreviewAccidentalLayout && rendered.previewedKeyIndex !== null && rendered.previewedKeyIndex > 0
-        ? rendered.previewedKeyIndex - 1
-        : null
-    const renderedKeys = buildRenderedNoteKeys(
-      note,
-      'bass',
-      rendered.rootPitch,
-      rendered.chordPitches,
-      keyFifths,
-      previewAccidentalStateBeforeNote,
-      !lockPreviewAccidentalLayout && rendered.previewedKeyIndex === 0,
-      forceChordIndex,
-      bassPreviewAccidentalOverrides?.get(note.id) ?? null,
-      getPitchLine,
-    )
+    const renderedKeys: RenderedNoteKey[] = rendered.isRest
+      ? [{ pitch: rendered.rootPitch, accidental: null, keyIndex: 0 }]
+      : (() => {
+          const forceChordIndex =
+            !lockPreviewAccidentalLayout && rendered.previewedKeyIndex !== null && rendered.previewedKeyIndex > 0
+              ? rendered.previewedKeyIndex - 1
+              : null
+          return buildRenderedNoteKeys(
+            note,
+            'bass',
+            rendered.rootPitch,
+            rendered.chordPitches,
+            keyFifths,
+            previewAccidentalStateBeforeNote,
+            !lockPreviewAccidentalLayout && rendered.previewedKeyIndex === 0,
+            forceChordIndex,
+            bassPreviewAccidentalOverrides?.get(note.id) ?? null,
+            getPitchLine,
+          )
+        })()
     const dots = getDurationDots(note.duration)
     const vexNote = new StaveNote({
       keys: renderedKeys.map((entry) => entry.pitch),
-      duration: toVexDuration(note.duration),
+      duration: rendered.isRest ? `${toVexDuration(note.duration)}r` : toVexDuration(note.duration),
       dots,
       clef: 'bass',
       autoStem: true,
     })
-    renderedKeys.forEach((entry, keyIndex) => {
-      if (!entry.accidental) return
-      vexNote.addModifier(new Accidental(entry.accidental), keyIndex)
-    })
+    if (!rendered.isRest) {
+      renderedKeys.forEach((entry, keyIndex) => {
+        if (!entry.accidental) return
+        vexNote.addModifier(new Accidental(entry.accidental), keyIndex)
+      })
+    }
     if (dots > 0) {
       Dot.buildAndAttach([vexNote], { all: true })
     }

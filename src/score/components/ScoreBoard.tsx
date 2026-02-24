@@ -66,7 +66,7 @@ export function ScoreBoard(props: {
 
   return (
     <section className="board">
-      <div className="score-scroll horizontal-view" ref={scoreScrollRef}>
+      <div className="score-scroll horizontal-view" ref={scoreScrollRef} tabIndex={0}>
         <div className="score-ruler-strip" style={{ width: `${displayScoreWidth}px` }} aria-hidden="true">
           <div className="measure-ruler-inline">
             {measureRulerTicks.map((tick) => (

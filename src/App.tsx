@@ -41,7 +41,10 @@ import {
 import {
   buildBassMockNotes,
   buildMeasurePairs,
+  flattenBassFromPairs,
+  flattenTrebleFromPairs,
 } from './score/scoreOps'
+import { appendIntervalKey, deleteSelectedKey } from './score/keyboardEdits'
 import type { HitGridIndex } from './score/layout/hitTest'
 import type {
   DragDebugSnapshot,
@@ -105,9 +108,14 @@ let cachedPdfCjkFontLoadPromise: Promise<string> | null = null
 
 function toSequencePreview(notes: ScoreNote[]): string {
   if (notes.length <= INSPECTOR_SEQUENCE_PREVIEW_LIMIT) {
-    return notes.map((note) => toDisplayPitch(note.pitch)).join('  |  ')
+    return notes
+      .map((note) => (note.isRest ? `Rest(${toDisplayDuration(note.duration)})` : toDisplayPitch(note.pitch)))
+      .join('  |  ')
   }
-  const preview = notes.slice(0, INSPECTOR_SEQUENCE_PREVIEW_LIMIT).map((note) => toDisplayPitch(note.pitch)).join('  |  ')
+  const preview = notes
+    .slice(0, INSPECTOR_SEQUENCE_PREVIEW_LIMIT)
+    .map((note) => (note.isRest ? `Rest(${toDisplayDuration(note.duration)})` : toDisplayPitch(note.pitch)))
+    .join('  |  ')
   return `${preview}  |  ...（还剩 ${notes.length - INSPECTOR_SEQUENCE_PREVIEW_LIMIT} 个）`
 }
 
@@ -183,6 +191,14 @@ function clampOsmdPreviewTopMarginPx(value: number): number {
 function clampOsmdPreviewBottomMarginPx(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX
   return Math.max(0, Math.min(180, Math.round(value)))
+}
+
+function isTextInputTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  const tagName = target.tagName.toLowerCase()
+  if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') return true
+  if (target.isContentEditable) return true
+  return Boolean(target.closest('[contenteditable="true"]'))
 }
 
 function hasTimeSignatureChanged(current: TimeSignature, previous: TimeSignature): boolean {
@@ -1566,6 +1582,7 @@ function App() {
     activeSelection.keyIndex > 0
       ? currentSelection.chordPitches?.[activeSelection.keyIndex - 1] ?? currentSelection.pitch
       : currentSelection.pitch
+  const currentSelectionPitchLabel = currentSelection.isRest ? '休止符' : toDisplayPitch(currentSelectionPitch)
   const trebleSequenceText = useMemo(() => toSequencePreview(notes), [notes])
   const bassSequenceText = useMemo(() => toSequencePreview(bassNotes), [bassNotes])
   const isImportLoading = importFeedback.kind === 'loading'
@@ -1574,6 +1591,19 @@ function App() {
   useEffect(() => {
     importFeedbackRef.current = importFeedback
   }, [importFeedback])
+
+  const applyKeyboardEditResult = useCallback(
+    (nextPairs: MeasurePair[], nextSelection: Selection) => {
+      if (measurePairsFromImportRef.current) {
+        measurePairsFromImportRef.current = nextPairs
+        setMeasurePairsFromImport(nextPairs)
+      }
+      setNotes(flattenTrebleFromPairs(nextPairs))
+      setBassNotes(flattenBassFromPairs(nextPairs))
+      setActiveSelection(nextSelection)
+    },
+    [setBassNotes, setMeasurePairsFromImport, setNotes, setActiveSelection],
+  )
   const closeOsmdPreview = useCallback(() => {
     if (osmdPreviewZoomCommitTimerRef.current !== null) {
       window.clearTimeout(osmdPreviewZoomCommitTimerRef.current)
@@ -2065,6 +2095,62 @@ function App() {
   }, [])
 
   useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isOsmdPreviewOpen) return
+      if (dragRef.current || draggingSelection) return
+      if (isTextInputTarget(event.target)) return
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+
+      const scrollHost = scoreScrollRef.current
+      if (!scrollHost) return
+      const activeElement = document.activeElement
+      if (!(activeElement instanceof HTMLElement)) return
+      if (!(activeElement === scrollHost || scrollHost.contains(activeElement))) return
+
+      if (event.key === 'Delete') {
+        const result = deleteSelectedKey({
+          pairs: measurePairs,
+          selection: activeSelection,
+          keyFifthsByMeasure: measureKeyFifthsFromImport,
+          importedNoteLookup: importedNoteLookupRef.current,
+        })
+        if (!result) return
+        event.preventDefault()
+        applyKeyboardEditResult(result.nextPairs, result.nextSelection)
+        return
+      }
+
+      const digitMatch = /^Digit([2-8])$/.exec(event.code)
+      if (!digitMatch) return
+      const intervalDegree = Number(digitMatch[1])
+      if (!Number.isFinite(intervalDegree)) return
+      const result = appendIntervalKey({
+        pairs: measurePairs,
+        selection: activeSelection,
+        intervalDegree,
+        direction: event.shiftKey ? 'down' : 'up',
+        keyFifthsByMeasure: measureKeyFifthsFromImport,
+        importedNoteLookup: importedNoteLookupRef.current,
+      })
+      if (!result) return
+      event.preventDefault()
+      applyKeyboardEditResult(result.nextPairs, result.nextSelection)
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [
+    isOsmdPreviewOpen,
+    draggingSelection,
+    measurePairs,
+    activeSelection,
+    measureKeyFifthsFromImport,
+    applyKeyboardEditResult,
+  ])
+
+  useEffect(() => {
     if (!isOsmdPreviewOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -2428,6 +2514,7 @@ function App() {
     return lines.join('\n')
   }
   const onBeginDragWithFirstMeasureDebug: typeof beginDrag = (event) => {
+    scoreScrollRef.current?.focus()
     beginDrag(event)
     if (!ENABLE_AUTO_FIRST_MEASURE_DRAG_DEBUG) return
     const drag = dragRef.current
@@ -3081,7 +3168,7 @@ function App() {
         onSurfacePointerMove={onSurfacePointerMove}
         onEndDrag={onEndDragWithFirstMeasureDebug}
         selectedStaffLabel={activeSelection.staff === 'treble' ? '高音谱表' : '低音谱表'}
-        selectedPitchLabel={toDisplayPitch(currentSelectionPitch)}
+        selectedPitchLabel={currentSelectionPitchLabel}
         selectedDurationLabel={toDisplayDuration(currentSelection.duration)}
         selectedPosition={currentSelectionPosition}
         selectedPoolSize={activePool.length}

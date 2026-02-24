@@ -368,25 +368,30 @@ export function buildMusicXmlFromMeasurePairs(params: {
     pitch: Pitch
     duration: NoteDuration
     accidental: string | null | undefined
+    isRest: boolean
     divisions: number
     staff: 1 | 2
     voice: 1 | 2
     isChord: boolean
     beamTags: Record<number, BeamTag>
   }) => {
-    const { destination, pitch, duration, accidental, divisions, staff, voice, isChord, beamTags } = noteParams
+    const { destination, pitch, duration, accidental, isRest, divisions, staff, voice, isChord, beamTags } = noteParams
     const { step, octave, alter } = getStepOctaveAlterFromPitch(pitch)
     const durationType = DURATION_MUSIC_XML[duration]
-    const accidentalXml = accidental ? ACCIDENTAL_TO_MUSIC_XML[accidental] : undefined
+    const accidentalXml = !isRest && accidental ? ACCIDENTAL_TO_MUSIC_XML[accidental] : undefined
     const durationValue = getDurationValueByDivisions(duration, divisions)
 
     destination.push('   <note>')
     if (isChord) destination.push('    <chord/>')
-    destination.push('    <pitch>')
-    destination.push(`     <step>${step}</step>`)
-    if (alter !== 0) destination.push(`     <alter>${alter}</alter>`)
-    destination.push(`     <octave>${octave}</octave>`)
-    destination.push('    </pitch>')
+    if (isRest) {
+      destination.push('    <rest/>')
+    } else {
+      destination.push('    <pitch>')
+      destination.push(`     <step>${step}</step>`)
+      if (alter !== 0) destination.push(`     <alter>${alter}</alter>`)
+      destination.push(`     <octave>${octave}</octave>`)
+      destination.push('    </pitch>')
+    }
     destination.push(`    <duration>${durationValue}</duration>`)
     destination.push(`    <voice>${voice}</voice>`)
     destination.push(`    <type>${durationType.type}</type>`)
@@ -424,18 +429,23 @@ export function buildMusicXmlFromMeasurePairs(params: {
         pitch: note.pitch,
         duration: note.duration,
         accidental: note.accidental,
+        isRest: Boolean(note.isRest),
         divisions,
         staff,
         voice,
         isChord: false,
         beamTags,
       })
+      if (note.isRest) {
+        return
+      }
       note.chordPitches?.forEach((chordPitch, chordIndex) => {
         appendNote({
           destination,
           pitch: chordPitch,
           duration: note.duration,
           accidental: note.chordAccidentals?.[chordIndex],
+          isRest: false,
           divisions,
           staff,
           voice,
@@ -735,12 +745,16 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
           const duration = notePattern[patternIndex]
           const durationTicks = DURATION_TICKS[duration]
           if (slot.ticksUsed[staff] + durationTicks > slot.measureTicks) break
-          slot.notes[staff].push({
+          const nextNote: ScoreNote = {
             id: createImportedNoteId(staff),
             pitch,
             duration,
-            accidental: patternIndex === 0 ? explicitAccidental : null,
-          })
+            isRest,
+          }
+          if (!isRest) {
+            nextNote.accidental = patternIndex === 0 ? explicitAccidental : null
+          }
+          slot.notes[staff].push(nextNote)
           slot.ticksUsed[staff] += durationTicks
         }
 

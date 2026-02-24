@@ -124,6 +124,7 @@ export function buildAccidentalStateBeforeNote(notes: ScoreNote[], noteIndex: nu
   const end = clamp(noteIndex, 0, notes.length)
   for (let index = 0; index < end; index += 1) {
     const note = notes[index]
+    if (note.isRest) continue
     resolvePitchByAccidentalState(note.pitch, note.accidental, state, keyFifths)
     note.chordPitches?.forEach((chordPitch, chordIndex) => {
       const chordAccidental = note.chordAccidentals?.[chordIndex]
@@ -144,6 +145,18 @@ function normalizeMeasureStaffByAccidentalState(notes: ScoreNote[], keyFifths: n
   let changed = false
 
   const next = notes.map((note) => {
+    if (note.isRest) {
+      const hadAccidental = note.accidental !== undefined
+      const hadChord = Boolean(note.chordPitches?.length || note.chordAccidentals?.length)
+      if (!hadAccidental && !hadChord) return note
+      changed = true
+      const nextRest: ScoreNote = { ...note }
+      delete nextRest.accidental
+      delete nextRest.chordPitches
+      delete nextRest.chordAccidentals
+      return nextRest
+    }
+
     const { step, octave, alter } = getStepOctaveAlterFromPitch(note.pitch)
     const expectedAlter = getEffectiveAlterFromContext(step, octave, keyFifths, state)
     const nextAccidental = getRequiredAccidentalForTargetAlter(alter, expectedAlter)
@@ -209,6 +222,10 @@ export function buildRenderedNoteKeys(
   accidentalOverridesByKeyIndex: Map<number, string | null> | null | undefined,
   getPitchLine: (staff: StaffKind, pitch: Pitch) => number,
 ): RenderedNoteKey[] {
+  if (note.isRest) {
+    return [{ pitch: renderedPitch, accidental: null, keyIndex: 0 }]
+  }
+
   const rootOverride = accidentalOverridesByKeyIndex?.get(0)
   const keys: RenderedNoteKey[] = [
     {

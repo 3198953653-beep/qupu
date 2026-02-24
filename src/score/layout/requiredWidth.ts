@@ -14,11 +14,14 @@ const setImplicitClefContext = (stave: Stave, clefSpec: 'treble' | 'bass') => {
 
 function buildVexNotesForStaff(notes: ScoreNote[], staff: StaffKind, keyFifths: number): StaveNote[] {
   return notes.map((note) => {
+    const isRest = Boolean(note.isRest)
+    const rootPitch = isRest ? (staff === 'treble' ? 'b/4' : 'd/3') : note.pitch
+    const chordPitches = isRest ? undefined : note.chordPitches
     const renderedKeys = buildRenderedNoteKeys(
       note,
       staff,
-      note.pitch,
-      note.chordPitches,
+      rootPitch,
+      chordPitches,
       keyFifths,
       null,
       false,
@@ -31,23 +34,25 @@ function buildVexNotesForStaff(notes: ScoreNote[], staff: StaffKind, keyFifths: 
       staff === 'treble'
         ? new StaveNote({
             keys: renderedKeys.map((entry) => entry.pitch),
-            duration: toVexDuration(note.duration),
+            duration: isRest ? `${toVexDuration(note.duration)}r` : toVexDuration(note.duration),
             dots,
             clef: 'treble',
-            stemDirection: getStrictStemDirection(note.pitch),
+            stemDirection: getStrictStemDirection(rootPitch),
           })
         : new StaveNote({
             keys: renderedKeys.map((entry) => entry.pitch),
-            duration: toVexDuration(note.duration),
+            duration: isRest ? `${toVexDuration(note.duration)}r` : toVexDuration(note.duration),
             dots,
             clef: 'bass',
             autoStem: true,
           })
 
-    renderedKeys.forEach((entry, keyIndex) => {
-      if (!entry.accidental) return
-      vexNote.addModifier(new Accidental(entry.accidental), keyIndex)
-    })
+    if (!isRest) {
+      renderedKeys.forEach((entry, keyIndex) => {
+        if (!entry.accidental) return
+        vexNote.addModifier(new Accidental(entry.accidental), keyIndex)
+      })
+    }
     if (dots > 0) {
       Dot.buildAndAttach([vexNote], { all: true })
     }
@@ -122,4 +127,3 @@ export function estimateRequiredMeasureWidth(context: MeasureRequiredWidthContex
     leftDecorationWidth + minContentWidth + CONTENT_PADDING_PX + rightDecorationWidth + SAFETY_PADDING_PX
   return Math.max(1, Math.ceil(requiredWidth))
 }
-
