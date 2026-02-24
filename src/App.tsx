@@ -879,6 +879,7 @@ function App() {
   const [musicXmlMetadataFromImport, setMusicXmlMetadataFromImport] = useState<MusicXmlMetadata | null>(null)
   const [dragDebugReport, setDragDebugReport] = useState<string>('')
   const [measureEdgeDebugReport, setMeasureEdgeDebugReport] = useState<string>('')
+  const [layoutRenderVersion, setLayoutRenderVersion] = useState(0)
   const [autoScaleEnabled, setAutoScaleEnabled] = useState(false)
   const [manualScalePercent, setManualScalePercent] = useState(100)
   const [canvasHeightPercent, setCanvasHeightPercent] = useState(100)
@@ -938,6 +939,7 @@ function App() {
   const noteLayoutByKeyRef = useRef<Map<string, NoteLayout>>(new Map())
   const hitGridRef = useRef<HitGridIndex | null>(null)
   const measureLayoutsRef = useRef<Map<number, MeasureLayout>>(new Map())
+  const rulerLayoutSignatureRef = useRef('')
   const measurePairsRef = useRef<MeasurePair[]>([])
   const dragDebugFramesRef = useRef<DragDebugSnapshot[]>([])
   const dragRef = useRef<DragState | null>(null)
@@ -1295,6 +1297,18 @@ function App() {
     setBassNotes,
   })
 
+  const handleScoreRendered = useCallback(() => {
+    const layouts = measureLayoutsRef.current
+    if (!layouts || layouts.size === 0) return
+    const entries = [...layouts.entries()].sort((left, right) => left[0] - right[0])
+    const signature = entries
+      .map(([pairIndex, layout]) => `${pairIndex}:${layout.measureX.toFixed(3)}`)
+      .join('|')
+    if (signature === rulerLayoutSignatureRef.current) return
+    rulerLayoutSignatureRef.current = signature
+    setLayoutRenderVersion((current) => current + 1)
+  }, [])
+
   useScoreRenderEffect({
     scoreRef,
     rendererRef,
@@ -1327,6 +1341,7 @@ function App() {
     pagePaddingX: pageHorizontalPaddingPx,
     timeAxisSpacingConfig,
     spacingLayoutMode,
+    onAfterRender: handleScoreRendered,
   })
 
   useEffect(() => {
@@ -2278,15 +2293,33 @@ function App() {
   const scoreSurfaceOffsetXPx = horizontalRenderOffsetX * scoreScaleX
   const scaledRenderedScoreHeight = Math.max(1, scoreHeight * scoreScaleY)
   const scoreSurfaceOffsetYPx = Math.max(0, (displayScoreHeight - scaledRenderedScoreHeight) / 2)
-  const measureRulerTicks = useMemo(
-    () =>
-      horizontalMeasureFramesByPair.map((frame, index) => ({
+  const measureRulerTicks = useMemo(() => {
+    if (horizontalMeasureFramesByPair.length === 0) return [] as Array<{ key: string; xPx: number; label: string }>
+    const renderedLayouts = measureLayoutsRef.current
+    let fallbackShift = 0
+    let hasFallbackShift = false
+    if (renderedLayouts.size > 0) {
+      for (const [pairIndex, layout] of renderedLayouts.entries()) {
+        const frame = horizontalMeasureFramesByPair[pairIndex]
+        if (!frame) continue
+        const renderedScoreX = layout.measureX + horizontalRenderOffsetX
+        fallbackShift = renderedScoreX - frame.measureX
+        hasFallbackShift = true
+        break
+      }
+    }
+    return horizontalMeasureFramesByPair.map((frame, index) => {
+      const layout = renderedLayouts.get(index)
+      const scoreX = layout
+        ? layout.measureX + horizontalRenderOffsetX
+        : frame.measureX + (hasFallbackShift ? fallbackShift : 0)
+      return {
         key: `measure-ruler-${index + 1}`,
-        xPx: frame.measureX * scoreScaleX,
-        label: `${index + 1}.`,
-      })),
-    [horizontalMeasureFramesByPair, scoreScaleX],
-  )
+        xPx: scoreX * scoreScaleX,
+        label: `${index + 1}`,
+      }
+    })
+  }, [horizontalMeasureFramesByPair, horizontalRenderOffsetX, scoreScaleX, layoutStabilityKey, visibleSystemRange, layoutRenderVersion])
   const formatDebugCoord = (value: number | null | undefined): string => {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 'null'
     return value.toFixed(3)

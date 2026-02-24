@@ -169,6 +169,7 @@ export function useScoreRenderEffect(params: {
   pagePaddingX?: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
   spacingLayoutMode?: SpacingLayoutMode
+  onAfterRender?: () => void
 }): void {
   const {
     scoreRef,
@@ -199,6 +200,7 @@ export function useScoreRenderEffect(params: {
     pagePaddingX,
     timeAxisSpacingConfig,
     spacingLayoutMode = 'custom',
+    onAfterRender,
   } = params
   useEffect(() => {
     const root = scoreRef.current
@@ -249,6 +251,7 @@ export function useScoreRenderEffect(params: {
     noteLayoutByKeyRef.current = nextLayoutsByKey
     hitGridRef.current = buildHitGridIndex(nextLayouts)
     measureLayoutsRef.current = nextMeasureLayouts
+    onAfterRender?.()
   }, [
     scoreRef,
     rendererRef,
@@ -278,6 +281,7 @@ export function useScoreRenderEffect(params: {
     pagePaddingX,
     timeAxisSpacingConfig,
     spacingLayoutMode,
+    onAfterRender,
   ])
 }
 
