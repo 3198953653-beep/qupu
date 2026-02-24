@@ -9,6 +9,11 @@ export function ScoreBoard(props: {
   scoreScaleY: number
   scoreSurfaceOffsetXPx: number
   scoreSurfaceOffsetYPx: number
+  measureRulerTicks: Array<{
+    key: string
+    xPx: number
+    label: string
+  }>
   draggingSelection: { noteId: string; staff: 'treble' | 'bass'; keyIndex: number } | null
   scoreRef: RefObject<HTMLCanvasElement | null>
   scoreOverlayRef: RefObject<HTMLCanvasElement | null>
@@ -37,6 +42,7 @@ export function ScoreBoard(props: {
     scoreScaleY,
     scoreSurfaceOffsetXPx,
     scoreSurfaceOffsetYPx,
+    measureRulerTicks,
     draggingSelection,
     scoreRef,
     scoreOverlayRef,
@@ -61,6 +67,16 @@ export function ScoreBoard(props: {
   return (
     <section className="board">
       <div className="score-scroll horizontal-view" ref={scoreScrollRef}>
+        <div className="score-ruler-strip" style={{ width: `${displayScoreWidth}px` }} aria-hidden="true">
+          <div className="measure-ruler-inline">
+            {measureRulerTicks.map((tick) => (
+              <div className="measure-ruler-tick" key={tick.key} style={{ left: `${tick.xPx}px` }}>
+                <span className="measure-ruler-label">{tick.label}</span>
+                <span className="measure-ruler-mark" />
+              </div>
+            ))}
+          </div>
+        </div>
         <div className="score-stage horizontal-view" style={{ width: `${displayScoreWidth}px`, height: `${displayScoreHeight}px` }}>
           <canvas
             className={`score-surface ${draggingSelection ? 'is-dragging' : ''}`}

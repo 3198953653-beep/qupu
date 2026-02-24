@@ -2278,6 +2278,15 @@ function App() {
   const scoreSurfaceOffsetXPx = horizontalRenderOffsetX * scoreScaleX
   const scaledRenderedScoreHeight = Math.max(1, scoreHeight * scoreScaleY)
   const scoreSurfaceOffsetYPx = Math.max(0, (displayScoreHeight - scaledRenderedScoreHeight) / 2)
+  const measureRulerTicks = useMemo(
+    () =>
+      horizontalMeasureFramesByPair.map((frame, index) => ({
+        key: `measure-ruler-${index + 1}`,
+        xPx: frame.measureX * scoreScaleX,
+        label: `${index + 1}.`,
+      })),
+    [horizontalMeasureFramesByPair, scoreScaleX],
+  )
   const formatDebugCoord = (value: number | null | undefined): string => {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 'null'
     return value.toFixed(3)
@@ -3031,6 +3040,7 @@ function App() {
         scoreScaleY={scoreScaleY}
         scoreSurfaceOffsetXPx={scoreSurfaceOffsetXPx}
         scoreSurfaceOffsetYPx={scoreSurfaceOffsetYPx}
+        measureRulerTicks={measureRulerTicks}
         draggingSelection={draggingSelection}
         scoreRef={scoreRef}
         scoreOverlayRef={scoreOverlayRef}
