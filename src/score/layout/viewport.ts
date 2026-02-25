@@ -40,8 +40,8 @@ export function buildMeasureOverlayRect(
 ): MeasureLayout['overlayRect'] {
   const leftPad = 56
   const rightPad = 42
-  const topPad = 34
-  const bottomPad = 42
+  const topPad = 42
+  const bottomPad = 72
   const systemStartDecorationGuard = 2
   const interMeasureBarlineGuard = 2
   const noteLeft = Number.isFinite(noteMinX) ? noteMinX : noteStartX

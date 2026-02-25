@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useLayoutEffect } from 'react'
 import * as Tone from 'tone'
 import { Renderer } from 'vexflow'
 import type { SystemMeasureRange } from '../layout/demand'
@@ -202,7 +202,7 @@ export function useScoreRenderEffect(params: {
     spacingLayoutMode = 'custom',
     onAfterRender,
   } = params
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = scoreRef.current
     if (!root) return
 

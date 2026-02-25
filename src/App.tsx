@@ -73,7 +73,7 @@ const HORIZONTAL_VIEW_MEASURE_WIDTH_PX = 220
 const HORIZONTAL_VIEW_SYSTEM_START_DECORATION_PX = 96
 const HORIZONTAL_VIEW_INLINE_DECORATION_PX = 24
 const HORIZONTAL_VIEW_MIN_MEASURE_WIDTH_PX = 1
-const HORIZONTAL_VIEW_HEIGHT_PX = SCORE_TOP_PADDING * 2 + SYSTEM_HEIGHT + 24
+const HORIZONTAL_VIEW_HEIGHT_PX = SCORE_TOP_PADDING * 2 + SYSTEM_HEIGHT + 26
 const MAX_CANVAS_RENDER_DIM_PX = 32760
 const HORIZONTAL_RENDER_BUFFER_PX = 1200
 const HORIZONTAL_RENDER_EDGE_BUFFER_MEASURES = 1
@@ -1117,7 +1117,7 @@ function App() {
     return Math.max(1, Math.min(totalScoreWidth, Math.min(MAX_CANVAS_RENDER_DIM_PX, targetWidth)))
   }, [totalScoreWidth, horizontalViewportWidthInScore])
   const horizontalRenderOffsetX = useMemo(() => {
-    const desiredOffset = Math.max(0, Math.floor(horizontalViewportXRange.startX - HORIZONTAL_RENDER_BUFFER_PX))
+    const desiredOffset = Math.max(0, Math.floor(horizontalViewportXRange.startX))
     const maxOffset = Math.max(0, totalScoreWidth - horizontalRenderSurfaceWidth)
     return Math.max(0, Math.min(maxOffset, desiredOffset))
   }, [horizontalViewportXRange.startX, totalScoreWidth, horizontalRenderSurfaceWidth])
@@ -1206,6 +1206,18 @@ function App() {
     spacingLayoutMode,
   ])
 
+  const handleScoreRendered = useCallback(() => {
+    const layouts = measureLayoutsRef.current
+    if (!layouts || layouts.size === 0) return
+    const entries = [...layouts.entries()].sort((left, right) => left[0] - right[0])
+    const signature = entries
+      .map(([pairIndex, layout]) => `${pairIndex}:${layout.measureX.toFixed(3)}`)
+      .join('|')
+    if (signature === rulerLayoutSignatureRef.current) return
+    rulerLayoutSignatureRef.current = signature
+    setLayoutRenderVersion((current) => current + 1)
+  }, [])
+
   useEffect(() => {
     const scrollHost = scoreScrollRef.current
     if (!scrollHost) {
@@ -1213,7 +1225,6 @@ function App() {
       return
     }
 
-    let rafId: number | null = null
     const updateViewport = () => {
       const nextStartX = Math.max(0, scrollHost.scrollLeft / scoreScaleX)
       const nextEndX = Math.max(nextStartX + 1, (scrollHost.scrollLeft + scrollHost.clientWidth) / scoreScaleX)
@@ -1225,24 +1236,13 @@ function App() {
       })
     }
 
-    const scheduleViewportUpdate = () => {
-      if (rafId !== null) return
-      rafId = window.requestAnimationFrame(() => {
-        rafId = null
-        updateViewport()
-      })
-    }
-
     updateViewport()
-    scrollHost.addEventListener('scroll', scheduleViewportUpdate, { passive: true })
-    window.addEventListener('resize', scheduleViewportUpdate)
+    scrollHost.addEventListener('scroll', updateViewport, { passive: true })
+    window.addEventListener('resize', updateViewport)
 
     return () => {
-      scrollHost.removeEventListener('scroll', scheduleViewportUpdate)
-      window.removeEventListener('resize', scheduleViewportUpdate)
-      if (rafId !== null) {
-        window.cancelAnimationFrame(rafId)
-      }
+      scrollHost.removeEventListener('scroll', updateViewport)
+      window.removeEventListener('resize', updateViewport)
     }
   }, [scoreScaleX, totalScoreWidth, displayScoreWidth])
 
@@ -1312,18 +1312,6 @@ function App() {
     isRhythmLinked,
     setBassNotes,
   })
-
-  const handleScoreRendered = useCallback(() => {
-    const layouts = measureLayoutsRef.current
-    if (!layouts || layouts.size === 0) return
-    const entries = [...layouts.entries()].sort((left, right) => left[0] - right[0])
-    const signature = entries
-      .map(([pairIndex, layout]) => `${pairIndex}:${layout.measureX.toFixed(3)}`)
-      .join('|')
-    if (signature === rulerLayoutSignatureRef.current) return
-    rulerLayoutSignatureRef.current = signature
-    setLayoutRenderVersion((current) => current + 1)
-  }, [])
 
   useScoreRenderEffect({
     scoreRef,
@@ -2394,6 +2382,7 @@ function App() {
         break
       }
     }
+
     return horizontalMeasureFramesByPair.map((frame, index) => {
       const layout = renderedLayouts.get(index)
       const scoreX = layout
@@ -2405,7 +2394,14 @@ function App() {
         label: `${index + 1}`,
       }
     })
-  }, [horizontalMeasureFramesByPair, horizontalRenderOffsetX, scoreScaleX, layoutStabilityKey, visibleSystemRange, layoutRenderVersion])
+  }, [
+    horizontalMeasureFramesByPair,
+    horizontalRenderOffsetX,
+    scoreScaleX,
+    layoutStabilityKey,
+    visibleSystemRange,
+    layoutRenderVersion,
+  ])
   const formatDebugCoord = (value: number | null | undefined): string => {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 'null'
     return value.toFixed(3)
