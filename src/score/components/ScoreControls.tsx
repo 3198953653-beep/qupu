@@ -117,7 +117,7 @@ export function ScoreControls(props: {
           id="manual-scale-range"
           type="range"
           min={55}
-          max={130}
+          max={300}
           step={1}
           value={manualScalePercent}
           disabled={autoScaleEnabled}
@@ -128,7 +128,7 @@ export function ScoreControls(props: {
           className="scale-percent-input"
           type="number"
           min={55}
-          max={130}
+          max={300}
           step={1}
           value={manualScalePercent}
           disabled={autoScaleEnabled}

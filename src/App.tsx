@@ -131,7 +131,7 @@ function getAutoScoreScale(measureCount: number): number {
 
 function clampScalePercent(value: number): number {
   if (!Number.isFinite(value)) return 100
-  return Math.max(55, Math.min(130, Math.round(value)))
+  return Math.max(55, Math.min(300, Math.round(value)))
 }
 
 function clampCanvasHeightPercent(value: number): number {
