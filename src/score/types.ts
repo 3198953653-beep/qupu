@@ -136,6 +136,7 @@ export type DragState = {
   keyIndex: number
   pairIndex: number
   noteIndex: number
+  linkedTieTargets?: DragTieTarget[]
   pointerId: number
   surfaceTop: number
   surfaceClientToScoreScaleY: number
@@ -150,6 +151,15 @@ export type DragState = {
   staticNoteXById: Map<string, number>
   previewAccidentalRightXById: Map<string, Map<number, number>>
   debugStaticByNoteKey: Map<string, DragDebugStaticRecord>
+}
+
+export type DragTieTarget = {
+  pairIndex: number
+  noteIndex: number
+  staff: StaffKind
+  noteId: string
+  keyIndex: number
+  pitch: Pitch
 }
 
 export type MeasureLayout = {

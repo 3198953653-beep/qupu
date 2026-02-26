@@ -6,9 +6,26 @@ import {
 } from './accidentals'
 import { createDragStateFromHit, resolveCurrentNoteForHit, resolveKeyFifthsForPair, resolveMeasureStaffNotesForHit } from './dragStart'
 import { getNearestPitchByY } from './pitchUtils'
-import { flattenBassFromPairs, flattenTrebleFromPairs, updateMeasurePairPitchAt, updateMeasurePairsPitch } from './scoreOps'
+import {
+  flattenBassFromPairs,
+  flattenTrebleFromPairs,
+  updateMeasurePairPitchAt,
+  updateMeasurePairsPitch,
+  updateScoreNotePitchAtKey,
+} from './scoreOps'
+import { resolveConnectedTieTargets } from './tieChain'
 import type { HitNote } from './layout/hitTest'
-import type { DragState, ImportedNoteLocation, LayoutReflowHint, MeasureLayout, MeasurePair, Pitch, ScoreNote, Selection } from './types'
+import type {
+  DragState,
+  DragTieTarget,
+  ImportedNoteLocation,
+  LayoutReflowHint,
+  MeasureLayout,
+  MeasurePair,
+  Pitch,
+  ScoreNote,
+  Selection,
+} from './types'
 
 function normalizeAccidentalSymbol(accidental: string | null | undefined): string {
   return accidental ?? ''
@@ -35,17 +52,61 @@ function hasMeasureAccidentalLayoutChanged(beforePair: MeasurePair | undefined, 
 }
 
 function buildLayoutReflowHint(params: {
-  pairIndex: number
+  pairIndices: number[]
+  fallbackPairIndex: number
   sourcePairs: MeasurePair[]
   normalizedPairs: MeasurePair[]
 }): LayoutReflowHint {
-  const { pairIndex, sourcePairs, normalizedPairs } = params
-  const accidentalLayoutChanged = hasMeasureAccidentalLayoutChanged(sourcePairs[pairIndex], normalizedPairs[pairIndex])
+  const { pairIndices, fallbackPairIndex, sourcePairs, normalizedPairs } = params
+  const uniquePairIndices = [...new Set(pairIndices)].sort((left, right) => left - right)
+  const resolvedPairIndex = uniquePairIndices[0] ?? fallbackPairIndex
+  const accidentalLayoutChanged = uniquePairIndices.some((pairIndex) =>
+    hasMeasureAccidentalLayoutChanged(sourcePairs[pairIndex], normalizedPairs[pairIndex]),
+  )
   return {
-    pairIndex,
+    pairIndex: resolvedPairIndex,
     scoreContentChanged: normalizedPairs !== sourcePairs,
     accidentalLayoutChanged,
     shouldReflow: accidentalLayoutChanged,
+  }
+}
+
+function updatePairsPitchAtTieTargets(params: {
+  pairs: MeasurePair[]
+  targets: DragTieTarget[]
+  pitch: Pitch
+}): { nextPairs: MeasurePair[]; changedPairIndices: number[] } {
+  const { pairs, targets, pitch } = params
+  if (targets.length === 0) return { nextPairs: pairs, changedPairIndices: [] }
+
+  let nextPairs = pairs
+  const changedPairIndices = new Set<number>()
+
+  targets.forEach((target) => {
+    const pair = nextPairs[target.pairIndex]
+    if (!pair) return
+    const sourceNotes = target.staff === 'treble' ? pair.treble : pair.bass
+    const sourceNote = sourceNotes[target.noteIndex]
+    if (!sourceNote || sourceNote.id !== target.noteId) return
+    const nextNote = updateScoreNotePitchAtKey(sourceNote, pitch, target.keyIndex)
+    if (nextNote === sourceNote) return
+
+    if (nextPairs === pairs) {
+      nextPairs = pairs.slice()
+    }
+    const nextPair = nextPairs[target.pairIndex] ?? pair
+    const nextStaffNotes = sourceNotes.slice()
+    nextStaffNotes[target.noteIndex] = nextNote
+    nextPairs[target.pairIndex] =
+      target.staff === 'treble'
+        ? { treble: nextStaffNotes, bass: nextPair.bass }
+        : { treble: nextPair.treble, bass: nextStaffNotes }
+    changedPairIndices.add(target.pairIndex)
+  })
+
+  return {
+    nextPairs,
+    changedPairIndices: [...changedPairIndices].sort((left, right) => left - right),
   }
 }
 
@@ -107,6 +168,19 @@ export function buildDragStateForHit(params: {
   const hitKeyIndex = hitHead.keyIndex
   const currentPitch = current && hitKeyIndex > 0 ? current.chordPitches?.[hitKeyIndex - 1] ?? current.pitch : current?.pitch
   const pitch = currentPitch ?? hitHead.pitch ?? getNearestPitchByY(noteCenterY, hitNote.pitchYMap, pitches)
+  const activeMeasurePairs = importedPairs ?? currentMeasurePairs
+  const importedLocation = importedPairs ? importedNoteLookup.get(hitNote.id) : null
+  const tieSourcePairIndex = importedLocation?.pairIndex ?? hitNote.pairIndex
+  const tieSourceNoteIndex = importedLocation?.noteIndex ?? hitNote.noteIndex
+  const linkedTieTargets =
+    resolveConnectedTieTargets({
+      measurePairs: activeMeasurePairs,
+      pairIndex: tieSourcePairIndex,
+      noteIndex: tieSourceNoteIndex,
+      keyIndex: hitKeyIndex,
+      staff: hitNote.staff,
+      pitchHint: pitch,
+    }) ?? []
 
   const dragState: DragState = createDragStateFromHit({
     hit,
@@ -119,6 +193,18 @@ export function buildDragStateForHit(params: {
     keyFifths,
     accidentalStateBeforeNote,
   })
+  dragState.linkedTieTargets = linkedTieTargets.length > 0
+    ? linkedTieTargets
+    : [
+        {
+          pairIndex: tieSourcePairIndex,
+          noteIndex: tieSourceNoteIndex,
+          staff: hitNote.staff,
+          noteId: hitNote.id,
+          keyIndex: hitKeyIndex,
+          pitch,
+        },
+      ]
 
   return {
     dragState,
@@ -152,16 +238,43 @@ export function commitDragPitchToScoreData(params: {
   if (importedPairs) {
     const sourcePairs = importedPairs
     const location = importedNoteLookup.get(drag.noteId)
-    const updated = location
-      ? updateMeasurePairPitchAt(sourcePairs, location, pitch, drag.keyIndex)
-      : updateMeasurePairsPitch(sourcePairs, drag.noteId, pitch, drag.keyIndex)
-    const normalizeIndex = location?.pairIndex ?? drag.pairIndex
-    const normalizedPairs = normalizeMeasurePairAt(updated, normalizeIndex, importedKeyFifths)
+    const tieTargets =
+      drag.linkedTieTargets && drag.linkedTieTargets.length > 0
+        ? drag.linkedTieTargets
+        : location
+          ? [{
+              pairIndex: location.pairIndex,
+              noteIndex: location.noteIndex,
+              staff: location.staff,
+              noteId: drag.noteId,
+              keyIndex: drag.keyIndex,
+              pitch: drag.pitch,
+            }]
+          : []
+    const { nextPairs: updated, changedPairIndices } =
+      tieTargets.length > 0
+        ? updatePairsPitchAtTieTargets({
+            pairs: sourcePairs,
+            targets: tieTargets,
+            pitch,
+          })
+        : {
+            nextPairs: location
+              ? updateMeasurePairPitchAt(sourcePairs, location, pitch, drag.keyIndex)
+              : updateMeasurePairsPitch(sourcePairs, drag.noteId, pitch, drag.keyIndex),
+            changedPairIndices: [location?.pairIndex ?? drag.pairIndex],
+          }
+    let normalizedPairs = updated
+    changedPairIndices.forEach((pairIndex) => {
+      normalizedPairs = normalizeMeasurePairAt(normalizedPairs, pairIndex, importedKeyFifths)
+    })
+    const layoutHintPairIndices = changedPairIndices.length > 0 ? changedPairIndices : [location?.pairIndex ?? drag.pairIndex]
     return {
       normalizedPairs,
       fromImported: true,
       layoutReflowHint: buildLayoutReflowHint({
-        pairIndex: normalizeIndex,
+        pairIndices: layoutHintPairIndices,
+        fallbackPairIndex: location?.pairIndex ?? drag.pairIndex,
         sourcePairs,
         normalizedPairs,
       }),
@@ -169,15 +282,34 @@ export function commitDragPitchToScoreData(params: {
   }
 
   const sourcePairs = currentPairs
-  const updated = updateMeasurePairsPitch(sourcePairs, drag.noteId, pitch, drag.keyIndex)
-  const normalizedPairs = normalizeMeasurePairAt(updated, drag.pairIndex, null)
+  const tieTargets =
+    drag.linkedTieTargets && drag.linkedTieTargets.length > 0
+      ? drag.linkedTieTargets
+      : []
+  const { nextPairs: updated, changedPairIndices } =
+    tieTargets.length > 0
+      ? updatePairsPitchAtTieTargets({
+          pairs: sourcePairs,
+          targets: tieTargets,
+          pitch,
+        })
+      : {
+          nextPairs: updateMeasurePairsPitch(sourcePairs, drag.noteId, pitch, drag.keyIndex),
+          changedPairIndices: [drag.pairIndex],
+        }
+  let normalizedPairs = updated
+  changedPairIndices.forEach((pairIndex) => {
+    normalizedPairs = normalizeMeasurePairAt(normalizedPairs, pairIndex, null)
+  })
+  const layoutHintPairIndices = changedPairIndices.length > 0 ? changedPairIndices : [drag.pairIndex]
   return {
     normalizedPairs,
     trebleNotes: flattenTrebleFromPairs(normalizedPairs),
     bassNotes: flattenBassFromPairs(normalizedPairs),
     fromImported: false,
     layoutReflowHint: buildLayoutReflowHint({
-      pairIndex: drag.pairIndex,
+      pairIndices: layoutHintPairIndices,
+      fallbackPairIndex: drag.pairIndex,
       sourcePairs,
       normalizedPairs,
     }),

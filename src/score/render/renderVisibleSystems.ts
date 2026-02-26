@@ -41,6 +41,13 @@ const EDGE_EXCESS_SHRINK_MAX_STEP_PX = 48
 const MIN_TIMELINE_WEIGHT = 0.0001
 const MIN_FORMAT_WIDTH_PX = 8
 
+type DragPreviewNoteOverride = {
+  noteId: string
+  staff: StaffKind
+  pitch: string
+  keyIndex: number
+}
+
 type FrozenMeasureSpacing = {
   baselineMeasureX: number
   staticNoteXById: Map<string, number>
@@ -305,6 +312,36 @@ export function renderVisibleSystems(params: {
     dragPreview = null,
   } = params
   const spacingConfig = timeAxisSpacingConfig ?? DEFAULT_TIME_AXIS_SPACING_CONFIG
+  const dragPreviewOverridesByPair = new Map<number, DragPreviewNoteOverride[]>()
+  if (dragPreview && dragPreview.previewStarted) {
+    const linkedTargets =
+      dragPreview.linkedTieTargets && dragPreview.linkedTieTargets.length > 0
+        ? dragPreview.linkedTieTargets
+        : [
+            {
+              pairIndex: dragPreview.pairIndex,
+              noteIndex: dragPreview.noteIndex,
+              staff: dragPreview.staff,
+              noteId: dragPreview.noteId,
+              keyIndex: dragPreview.keyIndex,
+              pitch: dragPreview.pitch,
+            },
+          ]
+    linkedTargets.forEach((target) => {
+      const pairOverrides = dragPreviewOverridesByPair.get(target.pairIndex)
+      const override: DragPreviewNoteOverride = {
+        noteId: target.noteId,
+        staff: target.staff,
+        pitch: dragPreview.pitch,
+        keyIndex: target.keyIndex,
+      }
+      if (pairOverrides) {
+        pairOverrides.push(override)
+      } else {
+        dragPreviewOverridesByPair.set(target.pairIndex, [override])
+      }
+    })
+  }
 
   const nextLayouts: NoteLayout[] = []
   const nextLayoutsByPair = new Map<number, NoteLayout[]>()
@@ -558,23 +595,17 @@ export function renderVisibleSystems(params: {
     const incrementalPairIndex = shouldUseIncrementalPaint ? hintPairIndex : null
     if (measureFramesByPair !== null) {
       systemMeta.forEach((entry) => {
-        const isDragPreviewPair =
+        const previewNotes = dragPreviewOverridesByPair.get(entry.pairIndex) ?? null
+        const hasAnyPreviewInPair = Boolean(previewNotes && previewNotes.length > 0)
+        const isPrimaryDragPreviewPair =
           dragPreview !== null &&
           dragPreview.previewStarted &&
           dragPreview.pairIndex === entry.pairIndex
-        const previewNote = isDragPreviewPair
-          ? {
-              noteId: dragPreview.noteId,
-              staff: dragPreview.staff,
-              pitch: dragPreview.pitch,
-              keyIndex: dragPreview.keyIndex,
-            }
+        const previewAccidentalStateBeforeNote = hasAnyPreviewInPair
+          ? (dragPreview?.accidentalStateBeforeNote ?? null)
           : null
-        const previewAccidentalStateBeforeNote = isDragPreviewPair
-          ? dragPreview.accidentalStateBeforeNote
-          : null
-        const previewStaticNoteXById = isDragPreviewPair ? dragPreview.staticNoteXById : null
-        const previewStaticAccidentalRightXById = isDragPreviewPair
+        const previewStaticNoteXById = isPrimaryDragPreviewPair ? dragPreview.staticNoteXById : null
+        const previewStaticAccidentalRightXById = isPrimaryDragPreviewPair
           ? dragPreview.previewAccidentalRightXById
           : null
         if (incrementalPairIndex !== null && entry.pairIndex !== incrementalPairIndex) {
@@ -634,7 +665,7 @@ export function renderVisibleSystems(params: {
           staticNoteXById: previewStaticNoteXById ?? translatedFrozenSpacing?.staticNoteXById ?? null,
           staticAccidentalRightXById:
             previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
-          previewNote,
+          previewNotes,
           previewAccidentalStateBeforeNote,
           preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
           preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
@@ -702,23 +733,17 @@ export function renderVisibleSystems(params: {
     }
     if (stableSystemFrames) {
       systemMeta.forEach((entry, indexInSystem) => {
-        const isDragPreviewPair =
+        const previewNotes = dragPreviewOverridesByPair.get(entry.pairIndex) ?? null
+        const hasAnyPreviewInPair = Boolean(previewNotes && previewNotes.length > 0)
+        const isPrimaryDragPreviewPair =
           dragPreview !== null &&
           dragPreview.previewStarted &&
           dragPreview.pairIndex === entry.pairIndex
-        const previewNote = isDragPreviewPair
-          ? {
-              noteId: dragPreview.noteId,
-              staff: dragPreview.staff,
-              pitch: dragPreview.pitch,
-              keyIndex: dragPreview.keyIndex,
-            }
+        const previewAccidentalStateBeforeNote = hasAnyPreviewInPair
+          ? (dragPreview?.accidentalStateBeforeNote ?? null)
           : null
-        const previewAccidentalStateBeforeNote = isDragPreviewPair
-          ? dragPreview.accidentalStateBeforeNote
-          : null
-        const previewStaticNoteXById = isDragPreviewPair ? dragPreview.staticNoteXById : null
-        const previewStaticAccidentalRightXById = isDragPreviewPair
+        const previewStaticNoteXById = isPrimaryDragPreviewPair ? dragPreview.staticNoteXById : null
+        const previewStaticAccidentalRightXById = isPrimaryDragPreviewPair
           ? dragPreview.previewAccidentalRightXById
           : null
         if (incrementalPairIndex !== null && entry.pairIndex !== incrementalPairIndex) {
@@ -783,7 +808,7 @@ export function renderVisibleSystems(params: {
           staticNoteXById: previewStaticNoteXById ?? translatedFrozenSpacing?.staticNoteXById ?? null,
           staticAccidentalRightXById:
             previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
-          previewNote,
+          previewNotes,
           previewAccidentalStateBeforeNote,
           preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
           preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
@@ -1017,23 +1042,17 @@ export function renderVisibleSystems(params: {
 
     let measureCursorX = pagePaddingX
     systemMeta.forEach((entry, indexInSystem) => {
-      const isDragPreviewPair =
+      const previewNotes = dragPreviewOverridesByPair.get(entry.pairIndex) ?? null
+      const hasAnyPreviewInPair = Boolean(previewNotes && previewNotes.length > 0)
+      const isPrimaryDragPreviewPair =
         dragPreview !== null &&
         dragPreview.previewStarted &&
         dragPreview.pairIndex === entry.pairIndex
-      const previewNote = isDragPreviewPair
-        ? {
-            noteId: dragPreview.noteId,
-            staff: dragPreview.staff,
-            pitch: dragPreview.pitch,
-            keyIndex: dragPreview.keyIndex,
-          }
+      const previewAccidentalStateBeforeNote = hasAnyPreviewInPair
+        ? (dragPreview?.accidentalStateBeforeNote ?? null)
         : null
-      const previewAccidentalStateBeforeNote = isDragPreviewPair
-        ? dragPreview.accidentalStateBeforeNote
-        : null
-      const previewStaticNoteXById = isDragPreviewPair ? dragPreview.staticNoteXById : null
-      const previewStaticAccidentalRightXById = isDragPreviewPair
+      const previewStaticNoteXById = isPrimaryDragPreviewPair ? dragPreview.staticNoteXById : null
+      const previewStaticAccidentalRightXById = isPrimaryDragPreviewPair
         ? dragPreview.previewAccidentalRightXById
         : null
       const measureWidth = measureWidths[indexInSystem] ?? Math.floor(systemUsableWidth / Math.max(1, systemMeta.length))
@@ -1066,7 +1085,7 @@ export function renderVisibleSystems(params: {
         staticNoteXById: previewStaticNoteXById ?? translatedFrozenSpacing?.staticNoteXById ?? null,
         staticAccidentalRightXById:
           previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
-        previewNote,
+        previewNotes,
         previewAccidentalStateBeforeNote,
         preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
         preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,

@@ -50,6 +50,13 @@ function getRestAnchorPitch(staff: StaffKind): Pitch {
   return staff === 'treble' ? 'b/4' : 'd/3'
 }
 
+type PreviewNoteOverride = {
+  noteId: string
+  staff: StaffKind
+  pitch: Pitch
+  keyIndex: number
+}
+
 export type DrawMeasureParams = {
   context: ReturnType<Renderer['getContext']>
   measure: MeasurePair
@@ -67,6 +74,7 @@ export type DrawMeasureParams = {
   showEndTimeSignature?: boolean
   activeSelection: Selection | null
   draggingSelection: Selection | null
+  previewNotes?: PreviewNoteOverride[] | null
   previewNote?: { noteId: string; staff: StaffKind; pitch: Pitch; keyIndex: number } | null
   previewAccidentalStateBeforeNote?: Map<string, number> | null
   collectLayouts?: boolean
@@ -112,6 +120,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     showEndTimeSignature = false,
     activeSelection: selection,
     draggingSelection: dragging,
+    previewNotes = null,
     previewNote = null,
     previewAccidentalStateBeforeNote = null,
     collectLayouts = true,
@@ -137,7 +146,12 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   const timeSignatureLabel = `${timeSignature.beats}/${timeSignature.beatType}`
   const endTimeSignatureLabel =
     showEndTimeSignature && endTimeSignature ? `${endTimeSignature.beats}/${endTimeSignature.beatType}` : null
-  const lockPreviewAccidentalLayout = freezePreviewAccidentalLayout && previewNote !== null
+  const normalizedPreviewNotes = previewNotes ?? (previewNote ? [previewNote] : [])
+  const previewNoteByLayoutKey = new Map<string, PreviewNoteOverride>()
+  normalizedPreviewNotes.forEach((entry) => {
+    previewNoteByLayoutKey.set(getLayoutNoteKey(entry.staff, entry.noteId), entry)
+  })
+  const lockPreviewAccidentalLayout = freezePreviewAccidentalLayout && normalizedPreviewNotes.length > 0
   const previewAccidentalByRowKey = new Map<string, number>()
   const accidentalLockByRowKey = new Map<string, { targetRightX: number | null; applied: boolean; reason: string }>()
 
@@ -154,30 +168,31 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       }
     }
 
-    if (!previewNote || previewNote.noteId !== note.id || previewNote.staff !== staff) {
+    const previewEntry = previewNoteByLayoutKey.get(getLayoutNoteKey(staff, note.id))
+    if (!previewEntry) {
       return { rootPitch: note.pitch, chordPitches: note.chordPitches, previewedKeyIndex: null, isRest: false }
     }
 
-    if (previewNote.keyIndex <= 0) {
-      return { rootPitch: previewNote.pitch, chordPitches: note.chordPitches, previewedKeyIndex: 0, isRest: false }
+    if (previewEntry.keyIndex <= 0) {
+      return { rootPitch: previewEntry.pitch, chordPitches: note.chordPitches, previewedKeyIndex: 0, isRest: false }
     }
 
-    const chordIndex = previewNote.keyIndex - 1
+    const chordIndex = previewEntry.keyIndex - 1
     const sourceChordPitches = note.chordPitches
     if (!sourceChordPitches || chordIndex < 0 || chordIndex >= sourceChordPitches.length) {
       return { rootPitch: note.pitch, chordPitches: sourceChordPitches, previewedKeyIndex: null, isRest: false }
     }
 
     const chordPitches = sourceChordPitches.slice()
-    chordPitches[chordIndex] = previewNote.pitch
-    return { rootPitch: note.pitch, chordPitches, previewedKeyIndex: previewNote.keyIndex, isRest: false }
+    chordPitches[chordIndex] = previewEntry.pitch
+    return { rootPitch: note.pitch, chordPitches, previewedKeyIndex: previewEntry.keyIndex, isRest: false }
   }
 
   const buildPreviewAccidentalOverridesForStaff = (
     notes: ScoreNote[],
     staff: StaffKind,
   ): Map<string, Map<number, string | null>> | null => {
-    if (!previewNote || previewNote.staff !== staff || lockPreviewAccidentalLayout) return null
+    if (previewNoteByLayoutKey.size === 0 || lockPreviewAccidentalLayout) return null
 
     const state = new Map<string, number>()
     const overrides = new Map<string, Map<number, string | null>>()
