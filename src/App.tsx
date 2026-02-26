@@ -1117,7 +1117,9 @@ function App() {
     return Math.max(1, Math.min(totalScoreWidth, Math.min(MAX_CANVAS_RENDER_DIM_PX, targetWidth)))
   }, [totalScoreWidth, horizontalViewportWidthInScore])
   const horizontalRenderOffsetX = useMemo(() => {
-    const desiredOffset = Math.max(0, Math.floor(horizontalViewportXRange.startX))
+    // Keep a left buffer inside the render surface so partially visible
+    // measures at viewport start are not clipped when scrolling settles.
+    const desiredOffset = Math.max(0, Math.floor(horizontalViewportXRange.startX - HORIZONTAL_RENDER_BUFFER_PX))
     const maxOffset = Math.max(0, totalScoreWidth - horizontalRenderSurfaceWidth)
     return Math.max(0, Math.min(maxOffset, desiredOffset))
   }, [horizontalViewportXRange.startX, totalScoreWidth, horizontalRenderSurfaceWidth])
@@ -1142,8 +1144,10 @@ function App() {
         endX: renderWindowEndX,
       }
     }
-    const bufferedStartX = Math.max(0, renderWindowStartX - HORIZONTAL_RENDER_BUFFER_PX)
-    const bufferedEndX = Math.min(totalScoreWidth, renderWindowEndX + HORIZONTAL_RENDER_BUFFER_PX)
+    // The surface range already includes left/right buffer via horizontalRenderOffsetX
+    // and horizontalRenderSurfaceWidth, so use it directly for pair filtering.
+    const bufferedStartX = renderWindowStartX
+    const bufferedEndX = renderWindowEndX
 
     let startPairIndex = 0
     while (
