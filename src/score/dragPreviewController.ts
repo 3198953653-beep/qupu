@@ -36,6 +36,8 @@ type OverlayRuntime = {
   overlayLastRectRef: MutableRefObject<MeasureLayout['overlayRect'] | null>
   backend: number
   scoreScale: number
+  renderQualityScaleX?: number
+  renderQualityScaleY?: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
   spacingLayoutMode?: SpacingLayoutMode
 }
@@ -54,6 +56,8 @@ function buildOverlayAccessors(runtime: OverlayRuntime) {
         overlayRendererSizeRef: runtime.overlayRendererSizeRef,
         overlayLastRectRef: runtime.overlayLastRectRef,
         scoreScale: runtime.scoreScale,
+        renderQualityScaleX: runtime.renderQualityScaleX,
+        renderQualityScaleY: runtime.renderQualityScaleY,
       }),
     getContext: () =>
       getOverlayRendererContext({
@@ -61,6 +65,8 @@ function buildOverlayAccessors(runtime: OverlayRuntime) {
         overlayRendererRef: runtime.overlayRendererRef,
         overlayRendererSizeRef: runtime.overlayRendererSizeRef,
         backend: runtime.backend,
+        logicalWidth: runtime.overlayLastRectRef.current?.width ?? 1,
+        logicalHeight: runtime.overlayLastRectRef.current?.height ?? 1,
       }),
   }
 }
@@ -162,6 +168,7 @@ export function drawDragPreviewOverlay(params: {
     measurePairs,
     ensureOverlayCanvasForRect: overlay.ensureRect,
     getOverlayContext: overlay.getContext,
+    clearDragOverlay: overlay.clear,
     dragDebugFramesRef,
     timeAxisSpacingConfig: overlayRuntime.timeAxisSpacingConfig,
     spacingLayoutMode: overlayRuntime.spacingLayoutMode,
