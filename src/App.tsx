@@ -100,6 +100,7 @@ const OSMD_PREVIEW_FAST_STAGE_MEASURE_LIMIT = 12
 const PDF_CJK_FONT_FAMILY = 'NotoSansSC'
 const PDF_CJK_FONT_FILE_NAME = 'NotoSansSC-Regular.ttf'
 const PDF_CJK_FONT_URL = new URL('./assets/fonts/NotoSansSC-Regular.ttf', import.meta.url).href
+const UNDO_HISTORY_LIMIT = 120
 
 const PITCHES: Pitch[] = createPianoPitches()
 const INITIAL_BASS_NOTES: ScoreNote[] = buildBassMockNotes(INITIAL_NOTES)
@@ -117,6 +118,23 @@ function toSequencePreview(notes: ScoreNote[]): string {
     .map((note) => (note.isRest ? `Rest(${toDisplayDuration(note.duration)})` : toDisplayPitch(note.pitch)))
     .join('  |  ')
   return `${preview}  |  ...（还剩 ${notes.length - INSPECTOR_SEQUENCE_PREVIEW_LIMIT} 个）`
+}
+
+function cloneScoreNote(note: ScoreNote): ScoreNote {
+  return {
+    ...note,
+    chordPitches: note.chordPitches ? [...note.chordPitches] : undefined,
+    chordAccidentals: note.chordAccidentals ? [...note.chordAccidentals] : undefined,
+    chordTieStarts: note.chordTieStarts ? [...note.chordTieStarts] : undefined,
+    chordTieStops: note.chordTieStops ? [...note.chordTieStops] : undefined,
+  }
+}
+
+function cloneMeasurePairs(pairs: MeasurePair[]): MeasurePair[] {
+  return pairs.map((pair) => ({
+    treble: pair.treble.map(cloneScoreNote),
+    bass: pair.bass.map(cloneScoreNote),
+  }))
 }
 
 function getAutoScoreScale(measureCount: number): number {
@@ -878,6 +896,13 @@ type FirstMeasureSnapshot = {
   rows: FirstMeasureNoteDebugRow[]
 }
 
+type UndoSnapshot = {
+  pairs: MeasurePair[]
+  imported: boolean
+  selection: Selection
+  isSelectionVisible: boolean
+}
+
 function App() {
   const [notes, setNotes] = useState<ScoreNote[]>(INITIAL_NOTES)
   const [bassNotes, setBassNotes] = useState<ScoreNote[]>(INITIAL_BASS_NOTES)
@@ -985,6 +1010,9 @@ function App() {
   } | null>(null)
   const firstMeasureDebugRafRef = useRef<number | null>(null)
   const importFeedbackRef = useRef<ImportFeedback>(importFeedback)
+  const activeSelectionRef = useRef<Selection>(activeSelection)
+  const isSelectionVisibleRef = useRef<boolean>(isSelectionVisible)
+  const undoHistoryRef = useRef<UndoSnapshot[]>([])
   const layoutReflowHintRef = useRef<LayoutReflowHint | null>(null)
   const measurePairs = useMemo(
     () => measurePairsFromImport ?? buildMeasurePairs(notes, bassNotes),
@@ -1468,6 +1496,20 @@ function App() {
     overlayLastRectRef,
   })
 
+  const pushUndoSnapshot = useCallback((sourcePairs: MeasurePair[]) => {
+    if (!sourcePairs || sourcePairs.length === 0) return
+    const stack = undoHistoryRef.current
+    stack.push({
+      pairs: cloneMeasurePairs(sourcePairs),
+      imported: measurePairsFromImportRef.current !== null,
+      selection: { ...activeSelectionRef.current },
+      isSelectionVisible: isSelectionVisibleRef.current,
+    })
+    if (stack.length > UNDO_HISTORY_LIMIT) {
+      stack.splice(0, stack.length - UNDO_HISTORY_LIMIT)
+    }
+  }, [])
+
   const {
     clearDragOverlay,
     dumpDragDebugReport,
@@ -1503,6 +1545,9 @@ function App() {
     setDragPreviewState,
     setActiveSelection,
     setDraggingSelection,
+    onBeforeApplyScoreChange: (sourcePairs) => {
+      pushUndoSnapshot(sourcePairs)
+    },
     onBlankPointerDown: () => {
       setIsSelectionVisible(false)
     },
@@ -1619,11 +1664,58 @@ function App() {
   const importProgressPercent =
     typeof importFeedback.progress === 'number' ? Math.max(0, Math.min(100, importFeedback.progress)) : null
   useEffect(() => {
+    activeSelectionRef.current = activeSelection
+  }, [activeSelection])
+  useEffect(() => {
+    isSelectionVisibleRef.current = isSelectionVisible
+  }, [isSelectionVisible])
+  useEffect(() => {
     importFeedbackRef.current = importFeedback
   }, [importFeedback])
 
+  useEffect(() => {
+    // Import/reset can replace key signature/time signature context; clear undo chain
+    // to avoid replaying snapshots under mismatched score metadata.
+    undoHistoryRef.current = []
+  }, [
+    measureKeyFifthsFromImport,
+    measureDivisionsFromImport,
+    measureTimeSignaturesFromImport,
+    musicXmlMetadataFromImport,
+  ])
+
+  const undoLastScoreEdit = useCallback((): boolean => {
+    const stack = undoHistoryRef.current
+    if (stack.length === 0) return false
+    const snapshot = stack.pop()
+    if (!snapshot) return false
+
+    const restoredPairs = cloneMeasurePairs(snapshot.pairs)
+    setDragPreviewState(null)
+    dragRef.current = null
+    clearDragOverlay()
+    setDraggingSelection(null)
+
+    if (snapshot.imported) {
+      measurePairsFromImportRef.current = restoredPairs
+      setMeasurePairsFromImport(restoredPairs)
+    } else {
+      measurePairsFromImportRef.current = null
+      setMeasurePairsFromImport(null)
+    }
+    setNotes(flattenTrebleFromPairs(restoredPairs))
+    setBassNotes(flattenBassFromPairs(restoredPairs))
+    setIsSelectionVisible(snapshot.isSelectionVisible)
+    setActiveSelection(snapshot.selection)
+    return true
+  }, [clearDragOverlay, setBassNotes, setMeasurePairsFromImport, setNotes, setDraggingSelection])
+
   const applyKeyboardEditResult = useCallback(
     (nextPairs: MeasurePair[], nextSelection: Selection) => {
+      const sourcePairs = measurePairsRef.current
+      if (nextPairs !== sourcePairs) {
+        pushUndoSnapshot(sourcePairs)
+      }
       if (measurePairsFromImportRef.current) {
         measurePairsFromImportRef.current = nextPairs
         setMeasurePairsFromImport(nextPairs)
@@ -1633,7 +1725,7 @@ function App() {
       setIsSelectionVisible(true)
       setActiveSelection(nextSelection)
     },
-    [setBassNotes, setMeasurePairsFromImport, setNotes, setActiveSelection],
+    [pushUndoSnapshot, setBassNotes, setMeasurePairsFromImport, setNotes, setActiveSelection],
   )
   const closeOsmdPreview = useCallback(() => {
     if (osmdPreviewZoomCommitTimerRef.current !== null) {
@@ -2130,15 +2222,29 @@ function App() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (isOsmdPreviewOpen) return
       if (dragRef.current || draggingSelection) return
-      if (!isSelectionVisible) return
       if (isTextInputTarget(event.target)) return
-      if (event.metaKey || event.ctrlKey || event.altKey) return
 
       const scrollHost = scoreScrollRef.current
       if (!scrollHost) return
       const activeElement = document.activeElement
       if (!(activeElement instanceof HTMLElement)) return
       if (!(activeElement === scrollHost || scrollHost.contains(activeElement))) return
+
+      const isUndoShortcut =
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === 'z'
+      if (isUndoShortcut) {
+        const restored = undoLastScoreEdit()
+        if (restored) {
+          event.preventDefault()
+        }
+        return
+      }
+
+      if (!isSelectionVisible) return
+      if (event.metaKey || event.ctrlKey || event.altKey) return
 
       if (event.key === 'Delete') {
         const result = deleteSelectedKey({
@@ -2182,6 +2288,7 @@ function App() {
     activeSelection,
     measureKeyFifthsFromImport,
     applyKeyboardEditResult,
+    undoLastScoreEdit,
   ])
 
   useEffect(() => {

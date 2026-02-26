@@ -58,6 +58,7 @@ export function useDragHandlers(params: {
   setDragPreviewState: StateSetter<DragState | null>
   setActiveSelection: StateSetter<Selection>
   setDraggingSelection: StateSetter<Selection | null>
+  onBeforeApplyScoreChange?: (sourcePairs: MeasurePair[]) => void
   onBlankPointerDown?: () => void
   onSelectionActivated?: () => void
   measurePairsFromImportRef: MutableRefObject<MeasurePair[] | null>
@@ -116,6 +117,7 @@ export function useDragHandlers(params: {
     setDragPreviewState,
     setActiveSelection,
     setDraggingSelection,
+    onBeforeApplyScoreChange,
     onBlankPointerDown,
     onSelectionActivated,
     measurePairsFromImportRef,
@@ -204,12 +206,14 @@ export function useDragHandlers(params: {
   }
 
   const commitDragPitchToScore = (drag: DragState, pitch: Pitch) => {
+    const sourceImportedPairs = measurePairsFromImportRef.current
+    const sourceCurrentPairs = measurePairsRef.current
     const result = commitDragPitchToScoreData({
       drag,
       pitch,
-      importedPairs: measurePairsFromImportRef.current,
+      importedPairs: sourceImportedPairs,
       importedNoteLookup: importedNoteLookupRef.current,
-      currentPairs: measurePairsRef.current,
+      currentPairs: sourceCurrentPairs,
       importedKeyFifths: measureKeyFifthsFromImportRef.current,
     })
     if (result.layoutReflowHint.scoreContentChanged) {
@@ -218,6 +222,9 @@ export function useDragHandlers(params: {
       setLayoutReflowHint(null)
     }
     if (result.fromImported) {
+      if (result.normalizedPairs !== sourceImportedPairs) {
+        onBeforeApplyScoreChange?.(sourceImportedPairs ?? [])
+      }
       measurePairsFromImportRef.current = result.normalizedPairs
       setMeasurePairsFromImport(result.normalizedPairs)
       // Keep drag release responsive on large imported scores: sync flat note lists at low priority.
@@ -226,6 +233,9 @@ export function useDragHandlers(params: {
         setBassNotes(flattenBassFromPairs(result.normalizedPairs))
       })
       return
+    }
+    if (result.normalizedPairs !== sourceCurrentPairs) {
+      onBeforeApplyScoreChange?.(sourceCurrentPairs)
     }
     setNotes(result.trebleNotes)
     setBassNotes(result.bassNotes)
