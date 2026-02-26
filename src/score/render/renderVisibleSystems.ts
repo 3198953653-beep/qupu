@@ -245,6 +245,67 @@ function getMeasureEdgeExcessPx(params: {
   return leftExcess + rightExcess
 }
 
+type TieKeySpec = {
+  keyIndex: number
+  pitch: string
+  tieStart: boolean
+  tieStop: boolean
+}
+
+function getTieKeySpecs(note: ScoreNote): TieKeySpec[] {
+  if (note.isRest) return []
+  const specs: TieKeySpec[] = [
+    {
+      keyIndex: 0,
+      pitch: note.pitch,
+      tieStart: Boolean(note.tieStart),
+      tieStop: Boolean(note.tieStop),
+    },
+  ]
+  ;(note.chordPitches ?? []).forEach((pitch, chordIndex) => {
+    specs.push({
+      keyIndex: chordIndex + 1,
+      pitch,
+      tieStart: Boolean(note.chordTieStarts?.[chordIndex]),
+      tieStop: Boolean(note.chordTieStops?.[chordIndex]),
+    })
+  })
+  return specs
+}
+
+function findKeyIndexByPitch(note: ScoreNote | undefined, pitch: string): number | null {
+  if (!note || note.isRest) return null
+  if (note.pitch === pitch) return 0
+  const chordIndex = note.chordPitches?.findIndex((item) => item === pitch) ?? -1
+  return chordIndex >= 0 ? chordIndex + 1 : null
+}
+
+function drawTieCurve(
+  context: ReturnType<Renderer['getContext']>,
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+): void {
+  const safeStartX = Math.min(startX, endX - 0.5)
+  const safeEndX = Math.max(endX, startX + 0.5)
+  const span = Math.max(1, safeEndX - safeStartX)
+  const depth = Math.max(3.5, Math.min(10, span * 0.22))
+  const centerX = (safeStartX + safeEndX) * 0.5
+  const outerY = Math.max(startY, endY) + depth
+  const innerY = outerY - 1.8
+
+  context.save()
+  context.setFillStyle('#111111')
+  context.beginPath()
+  context.moveTo(safeStartX, startY)
+  context.quadraticCurveTo(centerX, outerY, safeEndX, endY)
+  context.quadraticCurveTo(centerX, innerY, safeStartX, startY)
+  context.closePath()
+  context.fill()
+  context.restore()
+}
+
 export function renderVisibleSystems(params: {
   context: ReturnType<Renderer['getContext']>
   measurePairs: MeasurePair[]
@@ -463,6 +524,123 @@ export function renderVisibleSystems(params: {
       })
     }
     if (systemMeta.length === 0) continue
+
+    const drawCrossMeasureTiesForSystem = () => {
+      const getNoteLayout = (pairIndex: number, staff: StaffKind, noteIndex: number): NoteLayout | null => {
+        const layouts = nextLayoutsByPair.get(pairIndex)
+        if (!layouts) return null
+        for (const layout of layouts) {
+          if (layout.staff === staff && layout.noteIndex === noteIndex) return layout
+        }
+        return null
+      }
+
+      const getHeadAnchor = (layout: NoteLayout | null, keyIndex: number, pitch: string) => {
+        if (!layout) return null
+        const head =
+          layout.noteHeads.find((item) => item.keyIndex === keyIndex) ??
+          layout.noteHeads.find((item) => item.pitch === pitch) ??
+          layout.noteHeads[0]
+        if (!head) return null
+        return {
+          x: head.x + 6,
+          y: head.y,
+        }
+      }
+
+      const hasIncomingTieInSameMeasure = (notes: ScoreNote[], noteIndex: number, pitch: string) => {
+        for (let prevIndex = noteIndex - 1; prevIndex >= 0; prevIndex -= 1) {
+          const prevSpecs = getTieKeySpecs(notes[prevIndex])
+          if (prevSpecs.some((spec) => spec.tieStart && spec.pitch === pitch)) return true
+        }
+        return false
+      }
+
+      const hasOutgoingTieInSameMeasure = (notes: ScoreNote[], noteIndex: number, pitch: string) => {
+        for (let nextIndex = noteIndex + 1; nextIndex < notes.length; nextIndex += 1) {
+          const keyIndex = findKeyIndexByPitch(notes[nextIndex], pitch)
+          if (keyIndex === null) continue
+          const nextSpecs = getTieKeySpecs(notes[nextIndex])
+          const matched = nextSpecs.find((spec) => spec.keyIndex === keyIndex)
+          if (matched?.tieStop) return true
+        }
+        return false
+      }
+
+      const hasIncomingTieFromPreviousEntry = (previousNotes: ScoreNote[] | null, pitch: string) => {
+        if (!previousNotes) return false
+        for (const previousNote of previousNotes) {
+          const specs = getTieKeySpecs(previousNote)
+          if (specs.some((spec) => spec.tieStart && spec.pitch === pitch)) return true
+        }
+        return false
+      }
+
+      const findStopTargetInNextEntry = (nextNotes: ScoreNote[] | null, pitch: string): { noteIndex: number; keyIndex: number } | null => {
+        if (!nextNotes) return null
+        for (let nextIndex = 0; nextIndex < nextNotes.length; nextIndex += 1) {
+          const keyIndex = findKeyIndexByPitch(nextNotes[nextIndex], pitch)
+          if (keyIndex === null) continue
+          const specs = getTieKeySpecs(nextNotes[nextIndex])
+          const matched = specs.find((spec) => spec.keyIndex === keyIndex)
+          if (matched?.tieStop) return { noteIndex: nextIndex, keyIndex }
+        }
+        return null
+      }
+
+      systemMeta.forEach((entry, entryIndex) => {
+        const nextEntry = systemMeta[entryIndex + 1] ?? null
+        const previousEntry = systemMeta[entryIndex - 1] ?? null
+        ;(['treble', 'bass'] as const).forEach((staff) => {
+          const staffNotes = staff === 'treble' ? entry.measure.treble : entry.measure.bass
+          const nextStaffNotes = nextEntry ? (staff === 'treble' ? nextEntry.measure.treble : nextEntry.measure.bass) : null
+          const previousStaffNotes = previousEntry ? (staff === 'treble' ? previousEntry.measure.treble : previousEntry.measure.bass) : null
+          const currentMeasureLayout = nextMeasureLayouts.get(entry.pairIndex)
+          if (!currentMeasureLayout) return
+
+          staffNotes.forEach((note, noteIndex) => {
+            const noteSpecs = getTieKeySpecs(note)
+            if (noteSpecs.length === 0) return
+            const noteLayout = getNoteLayout(entry.pairIndex, staff, noteIndex)
+            if (!noteLayout) return
+
+            noteSpecs.forEach((spec) => {
+              const fromAnchor = getHeadAnchor(noteLayout, spec.keyIndex, spec.pitch)
+              if (!fromAnchor) return
+
+              if (spec.tieStart) {
+                if (hasOutgoingTieInSameMeasure(staffNotes, noteIndex, spec.pitch)) return
+
+                const nextTarget = findStopTargetInNextEntry(nextStaffNotes, spec.pitch)
+                if (nextTarget && nextEntry) {
+                  const nextLayout = getNoteLayout(nextEntry.pairIndex, staff, nextTarget.noteIndex)
+                  const toAnchor = getHeadAnchor(nextLayout, nextTarget.keyIndex, spec.pitch)
+                  if (toAnchor) {
+                    drawTieCurve(context, fromAnchor.x, fromAnchor.y, toAnchor.x, toAnchor.y)
+                    return
+                  }
+                }
+
+                const rightBoundaryX = currentMeasureLayout.measureX + currentMeasureLayout.measureWidth - 1
+                if (rightBoundaryX > fromAnchor.x + 0.5) {
+                  drawTieCurve(context, fromAnchor.x, fromAnchor.y, rightBoundaryX, fromAnchor.y)
+                }
+              }
+
+              if (spec.tieStop) {
+                if (hasIncomingTieInSameMeasure(staffNotes, noteIndex, spec.pitch)) return
+                if (hasIncomingTieFromPreviousEntry(previousStaffNotes, spec.pitch)) return
+
+                const leftBoundaryX = currentMeasureLayout.measureX + 1
+                if (fromAnchor.x > leftBoundaryX + 0.5) {
+                  drawTieCurve(context, leftBoundaryX, fromAnchor.y, fromAnchor.x, fromAnchor.y)
+                }
+              }
+            })
+          })
+        })
+      })
+    }
     // Apply spacing freeze while dragging; optionally allow post-release freeze
     // when geometry is unchanged (caller controls this flag).
     const freezeSelection =
@@ -598,6 +776,7 @@ export function renderVisibleSystems(params: {
           staticAccidentalRightXById: translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
           preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
           preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
+          renderBoundaryPartialTies: false,
         })
 
         nextLayouts.push(...measureNoteLayouts)
@@ -650,6 +829,7 @@ export function renderVisibleSystems(params: {
           overlayRect,
         })
       })
+      drawCrossMeasureTiesForSystem()
       continue
     }
     const stableSystemFrames = shouldSkipSystemReflow
@@ -723,6 +903,7 @@ export function renderVisibleSystems(params: {
           staticAccidentalRightXById: translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
           preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
           preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
+          renderBoundaryPartialTies: false,
         })
 
         nextLayouts.push(...measureNoteLayouts)
@@ -775,6 +956,7 @@ export function renderVisibleSystems(params: {
           overlayRect,
         })
       })
+      drawCrossMeasureTiesForSystem()
       continue
     }
     const measureTicksBySystem = systemMeta.map((entry) =>
@@ -982,6 +1164,7 @@ export function renderVisibleSystems(params: {
         staticAccidentalRightXById: translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
         preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
         preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
+        renderBoundaryPartialTies: false,
       })
 
       nextLayouts.push(...measureNoteLayouts)
@@ -1034,6 +1217,7 @@ export function renderVisibleSystems(params: {
         overlayRect,
       })
     })
+    drawCrossMeasureTiesForSystem()
   }
 
   return {

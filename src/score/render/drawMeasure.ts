@@ -1,4 +1,4 @@
-import { Accidental, BarlineType, Beam, Dot, Formatter, Fraction, Renderer, Stave, StaveConnector, StaveNote, Voice } from 'vexflow'
+import { Accidental, BarlineType, Beam, Dot, Formatter, Fraction, Renderer, Stave, StaveConnector, StaveNote, StaveTie, Voice } from 'vexflow'
 import { PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX, TICKS_PER_BEAT } from '../constants'
 import {
   buildRenderedNoteKeys,
@@ -90,6 +90,7 @@ export type DrawMeasureParams = {
     staticByNoteKey: Map<string, DragDebugStaticRecord>
     pushSnapshot: (snapshot: DragDebugSnapshot) => void
   } | null
+  renderBoundaryPartialTies?: boolean
 }
 
 export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] => {
@@ -127,6 +128,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     preferMeasureEndBarlineAxis = !showEndTimeSignature,
     enableEdgeGapCap = true,
     debugCapture = null,
+    renderBoundaryPartialTies = true,
   } = params
   const isSpacingOnlyLayout = layoutDetail === 'spacing-only'
   const noteLayouts: NoteLayout[] = []
@@ -642,6 +644,115 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     trebleBeams.forEach((beam) => beam.setContext(context).draw())
     bassBeams.forEach((beam) => beam.setContext(context).draw())
   }
+
+  const getTieKeySpecs = (note: ScoreNote): Array<{ keyIndex: number; pitch: Pitch; tieStart: boolean; tieStop: boolean }> => {
+    if (note.isRest) return []
+    const specs: Array<{ keyIndex: number; pitch: Pitch; tieStart: boolean; tieStop: boolean }> = [
+      {
+        keyIndex: 0,
+        pitch: note.pitch,
+        tieStart: Boolean(note.tieStart),
+        tieStop: Boolean(note.tieStop),
+      },
+    ]
+    ;(note.chordPitches ?? []).forEach((pitch, chordIndex) => {
+      specs.push({
+        keyIndex: chordIndex + 1,
+        pitch,
+        tieStart: Boolean(note.chordTieStarts?.[chordIndex]),
+        tieStop: Boolean(note.chordTieStops?.[chordIndex]),
+      })
+    })
+    return specs
+  }
+
+  const findRenderedIndexByKeyIndex = (
+    rendered: { renderedKeys: RenderedNoteKey[] } | undefined,
+    keyIndex: number,
+  ): number => {
+    if (!rendered) return -1
+    return rendered.renderedKeys.findIndex((entry) => entry.keyIndex === keyIndex)
+  }
+
+  const findKeyIndexByPitch = (note: ScoreNote | undefined, pitch: Pitch): number | null => {
+    if (!note || note.isRest) return null
+    if (note.pitch === pitch) return 0
+    const chordIndex = note.chordPitches?.findIndex((item) => item === pitch) ?? -1
+    return chordIndex >= 0 ? chordIndex + 1 : null
+  }
+
+  const drawTiesForStaff = (
+    sourceNotes: ScoreNote[],
+    rendered: Array<{ vexNote: StaveNote; renderedKeys: RenderedNoteKey[] }>,
+  ) => {
+    if (isSpacingOnlyLayout || skipPainting) return
+
+    for (let noteIndex = 0; noteIndex < sourceNotes.length; noteIndex += 1) {
+      const sourceNote = sourceNotes[noteIndex]
+      if (sourceNote.isRest) continue
+      const renderedCurrent = rendered[noteIndex]
+      if (!renderedCurrent) continue
+
+      const tieSpecs = getTieKeySpecs(sourceNote)
+      tieSpecs.forEach((spec) => {
+        if (!spec.tieStart && !spec.tieStop) return
+
+        const currentRenderedIndex = findRenderedIndexByKeyIndex(renderedCurrent, spec.keyIndex)
+        if (currentRenderedIndex < 0) return
+
+        if (spec.tieStart) {
+          const nextNote = sourceNotes[noteIndex + 1]
+          const renderedNext = rendered[noteIndex + 1]
+          const nextKeyIndex = findKeyIndexByPitch(nextNote, spec.pitch)
+          const nextRenderedIndex = nextKeyIndex === null ? -1 : findRenderedIndexByKeyIndex(renderedNext, nextKeyIndex)
+          if (renderedNext && nextRenderedIndex >= 0) {
+            new StaveTie({
+              firstNote: renderedCurrent.vexNote,
+              lastNote: renderedNext.vexNote,
+              firstIndexes: [currentRenderedIndex],
+              lastIndexes: [nextRenderedIndex],
+            })
+              .setContext(context)
+              .draw()
+          } else if (renderBoundaryPartialTies) {
+            new StaveTie({
+              firstNote: renderedCurrent.vexNote,
+              lastNote: null,
+              firstIndexes: [currentRenderedIndex],
+              lastIndexes: [currentRenderedIndex],
+            })
+              .setContext(context)
+              .draw()
+          }
+        }
+
+        if (spec.tieStop) {
+          const previousNote = sourceNotes[noteIndex - 1]
+          const hasIncomingTieInCurrentMeasure =
+            noteIndex > 0 &&
+            Boolean(previousNote) &&
+            getTieKeySpecs(previousNote).some(
+              (previousSpec) => previousSpec.tieStart && previousSpec.pitch === spec.pitch,
+            )
+          if (hasIncomingTieInCurrentMeasure) return
+
+          if (renderBoundaryPartialTies) {
+            new StaveTie({
+              firstNote: null,
+              lastNote: renderedCurrent.vexNote,
+              firstIndexes: [currentRenderedIndex],
+              lastIndexes: [currentRenderedIndex],
+            })
+              .setContext(context)
+              .draw()
+          }
+        }
+      })
+    }
+  }
+
+  drawTiesForStaff(measure.treble, trebleRendered)
+  drawTiesForStaff(measure.bass, bassRendered)
 
   if (!collectLayouts) return noteLayouts
 

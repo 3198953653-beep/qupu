@@ -36,6 +36,10 @@ export type ScoreNote = {
   accidental?: string | null
   chordPitches?: Pitch[]
   chordAccidentals?: Array<string | null>
+  tieStart?: boolean
+  tieStop?: boolean
+  chordTieStarts?: boolean[]
+  chordTieStops?: boolean[]
 }
 
 export type ImportResult = {
