@@ -883,6 +883,7 @@ function App() {
   const [bassNotes, setBassNotes] = useState<ScoreNote[]>(INITIAL_BASS_NOTES)
   const [rhythmPreset, setRhythmPreset] = useState<RhythmPresetId>('quarter')
   const [activeSelection, setActiveSelection] = useState<Selection>({ noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 })
+  const [isSelectionVisible, setIsSelectionVisible] = useState(true)
   const [draggingSelection, setDraggingSelection] = useState<Selection | null>(null)
   const [dragPreviewState, setDragPreviewState] = useState<DragState | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -1352,7 +1353,7 @@ function App() {
     renderOffsetX: horizontalRenderOffsetX,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
-    activeSelection,
+    activeSelection: isSelectionVisible ? activeSelection : null,
     draggingSelection,
     layoutReflowHintRef,
     layoutStabilityKey,
@@ -1502,6 +1503,12 @@ function App() {
     setDragPreviewState,
     setActiveSelection,
     setDraggingSelection,
+    onBlankPointerDown: () => {
+      setIsSelectionVisible(false)
+    },
+    onSelectionActivated: () => {
+      setIsSelectionVisible(true)
+    },
     measurePairsFromImportRef,
     importedNoteLookupRef,
     measureKeyFifthsFromImportRef,
@@ -1573,10 +1580,12 @@ function App() {
     if (activeSelection.staff === 'treble') {
       if (hasActiveTreble) return
       if (notes[0]) {
+        setIsSelectionVisible(true)
         setActiveSelection({ noteId: notes[0].id, staff: 'treble', keyIndex: 0 })
         return
       }
       if (bassNotes[0]) {
+        setIsSelectionVisible(true)
         setActiveSelection({ noteId: bassNotes[0].id, staff: 'bass', keyIndex: 0 })
       }
       return
@@ -1584,10 +1593,12 @@ function App() {
 
     if (hasActiveBass) return
     if (bassNotes[0]) {
+      setIsSelectionVisible(true)
       setActiveSelection({ noteId: bassNotes[0].id, staff: 'bass', keyIndex: 0 })
       return
     }
     if (notes[0]) {
+      setIsSelectionVisible(true)
       setActiveSelection({ noteId: notes[0].id, staff: 'treble', keyIndex: 0 })
     }
   }, [activeSelection, notes, bassNotes])
@@ -1619,6 +1630,7 @@ function App() {
       }
       setNotes(flattenTrebleFromPairs(nextPairs))
       setBassNotes(flattenBassFromPairs(nextPairs))
+      setIsSelectionVisible(true)
       setActiveSelection(nextSelection)
     },
     [setBassNotes, setMeasurePairsFromImport, setNotes, setActiveSelection],
@@ -1859,6 +1871,7 @@ function App() {
 
   const jumpFromOsmdPreviewToEditor = useCallback((target: OsmdPreviewSelectionTarget) => {
     const { selection, pairIndex } = target
+    setIsSelectionVisible(true)
     setActiveSelection(selection)
     setDraggingSelection(null)
     closeOsmdPreview()
@@ -2117,6 +2130,7 @@ function App() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (isOsmdPreviewOpen) return
       if (dragRef.current || draggingSelection) return
+      if (!isSelectionVisible) return
       if (isTextInputTarget(event.target)) return
       if (event.metaKey || event.ctrlKey || event.altKey) return
 
@@ -2163,6 +2177,7 @@ function App() {
   }, [
     isOsmdPreviewOpen,
     draggingSelection,
+    isSelectionVisible,
     measurePairs,
     activeSelection,
     measureKeyFifthsFromImport,

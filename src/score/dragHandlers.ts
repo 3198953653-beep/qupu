@@ -58,6 +58,8 @@ export function useDragHandlers(params: {
   setDragPreviewState: StateSetter<DragState | null>
   setActiveSelection: StateSetter<Selection>
   setDraggingSelection: StateSetter<Selection | null>
+  onBlankPointerDown?: () => void
+  onSelectionActivated?: () => void
   measurePairsFromImportRef: MutableRefObject<MeasurePair[] | null>
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
   measureKeyFifthsFromImportRef: MutableRefObject<number[] | null>
@@ -114,6 +116,8 @@ export function useDragHandlers(params: {
     setDragPreviewState,
     setActiveSelection,
     setDraggingSelection,
+    onBlankPointerDown,
+    onSelectionActivated,
     measurePairsFromImportRef,
     importedNoteLookupRef,
     measureKeyFifthsFromImportRef,
@@ -268,6 +272,7 @@ export function useDragHandlers(params: {
       clearDragOverlay,
       setActiveSelection,
       setDraggingSelection,
+      onSelectionActivated,
     })
   }
 
@@ -291,6 +296,8 @@ export function useDragHandlers(params: {
       dragRef,
       setActiveSelection,
       setDraggingSelection,
+      onBlankPointerDown,
+      onSelectionActivated,
     })
   }
 

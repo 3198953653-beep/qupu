@@ -66,6 +66,8 @@ export function handleBeginDragPointer(params: {
   dragRef: MutableRefObject<DragState | null>
   setActiveSelection: StateSetter<Selection>
   setDraggingSelection: StateSetter<Selection | null>
+  onBlankPointerDown?: () => void
+  onSelectionActivated?: () => void
   hitRadius?: number
 }): void {
   const {
@@ -87,6 +89,8 @@ export function handleBeginDragPointer(params: {
     dragRef,
     setActiveSelection,
     setDraggingSelection,
+    onBlankPointerDown,
+    onSelectionActivated,
     hitRadius = 30,
   } = params
 
@@ -102,7 +106,10 @@ export function handleBeginDragPointer(params: {
   const y = (event.clientY - rect.top) * clientToScoreScaleY
   const logicalHitRadius = hitRadius * clientToScoreScaleX
   const hit = getHitNote(x, y, noteLayouts, logicalHitRadius, hitGrid)
-  if (!hit) return
+  if (!hit) {
+    onBlankPointerDown?.()
+    return
+  }
 
   event.preventDefault()
   dragPreviewFrameRef.current = 0
@@ -129,6 +136,7 @@ export function handleBeginDragPointer(params: {
   dragRef.current = dragState
   setActiveSelection(upsertSelection(selection))
   setDraggingSelection(upsertNullableSelection(selection))
+  onSelectionActivated?.()
   event.currentTarget.setPointerCapture(event.pointerId)
 }
 
@@ -173,6 +181,7 @@ export function handleEndDragPointer(params: {
   clearDragOverlay: () => void
   setActiveSelection: StateSetter<Selection>
   setDraggingSelection: StateSetter<Selection | null>
+  onSelectionActivated?: () => void
 }): void {
   const {
     event,
@@ -184,6 +193,7 @@ export function handleEndDragPointer(params: {
     clearDragOverlay,
     setActiveSelection,
     setDraggingSelection,
+    onSelectionActivated,
   } = params
 
   const drag = dragRef.current
@@ -205,6 +215,7 @@ export function handleEndDragPointer(params: {
     staff: drag.staff,
     keyIndex: drag.keyIndex,
   }))
+  onSelectionActivated?.()
   setDraggingSelection(null)
   clearDragOverlay()
   commitDragPitchToScore(drag, finalPitch)
