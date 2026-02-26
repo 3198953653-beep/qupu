@@ -5,6 +5,8 @@ export function ScoreBoard(props: {
   scoreScrollRef: RefObject<HTMLDivElement | null>
   displayScoreWidth: number
   displayScoreHeight: number
+  scoreSurfaceLogicalWidthPx: number
+  scoreSurfaceLogicalHeightPx: number
   scoreScaleX: number
   scoreScaleY: number
   scoreSurfaceOffsetXPx: number
@@ -38,6 +40,8 @@ export function ScoreBoard(props: {
     scoreScrollRef,
     displayScoreWidth,
     displayScoreHeight,
+    scoreSurfaceLogicalWidthPx,
+    scoreSurfaceLogicalHeightPx,
     scoreScaleX,
     scoreScaleY,
     scoreSurfaceOffsetXPx,
@@ -84,6 +88,8 @@ export function ScoreBoard(props: {
             style={{
               left: `${scoreSurfaceOffsetXPx}px`,
               top: `${scoreSurfaceOffsetYPx}px`,
+              width: `${scoreSurfaceLogicalWidthPx}px`,
+              height: `${scoreSurfaceLogicalHeightPx}px`,
               transform: `scale(${scoreScaleX}, ${scoreScaleY})`,
               transformOrigin: 'left top',
             }}
@@ -100,6 +106,8 @@ export function ScoreBoard(props: {
             style={{
               left: `${scoreSurfaceOffsetXPx}px`,
               top: `${scoreSurfaceOffsetYPx}px`,
+              width: `${scoreSurfaceLogicalWidthPx}px`,
+              height: `${scoreSurfaceLogicalHeightPx}px`,
               transform: `scale(${scoreScaleX}, ${scoreScaleY})`,
               transformOrigin: 'left top',
             }}

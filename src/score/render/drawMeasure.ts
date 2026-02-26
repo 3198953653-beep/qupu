@@ -91,6 +91,7 @@ export type DrawMeasureParams = {
     pushSnapshot: (snapshot: DragDebugSnapshot) => void
   } | null
   renderBoundaryPartialTies?: boolean
+  forceLeadingConnector?: boolean
 }
 
 export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] => {
@@ -129,6 +130,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     enableEdgeGapCap = true,
     debugCapture = null,
     renderBoundaryPartialTies = true,
+    forceLeadingConnector = false,
   } = params
   const isSpacingOnlyLayout = layoutDetail === 'spacing-only'
   const noteLayouts: NoteLayout[] = []
@@ -303,9 +305,11 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     }
   }
 
-  if (!suppressSystemDecorations && !skipPainting) {
-    if (isSystemStart) {
+  if (!skipPainting) {
+    if (!suppressSystemDecorations && isSystemStart) {
       new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.BRACE).setContext(context).draw()
+      new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.SINGLE_LEFT).setContext(context).draw()
+    } else if (forceLeadingConnector) {
       new StaveConnector(trebleStave, bassStave).setType(StaveConnector.type.SINGLE_LEFT).setContext(context).draw()
     }
     if (!showEndTimeSignature) {

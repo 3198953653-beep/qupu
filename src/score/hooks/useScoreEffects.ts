@@ -169,6 +169,8 @@ export function useScoreRenderEffect(params: {
   pagePaddingX?: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
   spacingLayoutMode?: SpacingLayoutMode
+  renderScaleX?: number
+  renderScaleY?: number
   onAfterRender?: () => void
 }): void {
   const {
@@ -200,11 +202,27 @@ export function useScoreRenderEffect(params: {
     pagePaddingX,
     timeAxisSpacingConfig,
     spacingLayoutMode = 'custom',
+    renderScaleX = 1,
+    renderScaleY = 1,
     onAfterRender,
   } = params
   useLayoutEffect(() => {
     const root = scoreRef.current
     if (!root) return
+
+    const maxBackingStoreDim = 32760
+    const devicePixelRatio =
+      typeof window !== 'undefined' && Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0
+        ? window.devicePixelRatio
+        : 1
+    const targetQualityX = Math.max(1, devicePixelRatio, Math.abs(renderScaleX))
+    const targetQualityY = Math.max(1, devicePixelRatio, Math.abs(renderScaleY))
+    const maxQualityX = Math.max(1, maxBackingStoreDim / Math.max(1, scoreWidth))
+    const maxQualityY = Math.max(1, maxBackingStoreDim / Math.max(1, scoreHeight))
+    const renderQualityScaleX = Math.max(1, Math.min(targetQualityX, maxQualityX))
+    const renderQualityScaleY = Math.max(1, Math.min(targetQualityY, maxQualityY))
+    const backingWidth = Math.max(1, Math.round(scoreWidth * renderQualityScaleX))
+    const backingHeight = Math.max(1, Math.round(scoreHeight * renderQualityScaleY))
 
     let renderer = rendererRef.current
     if (!renderer) {
@@ -212,11 +230,18 @@ export function useScoreRenderEffect(params: {
       rendererRef.current = renderer
     }
     const currentSize = rendererSizeRef.current
-    if (currentSize.width !== scoreWidth || currentSize.height !== scoreHeight) {
-      renderer.resize(scoreWidth, scoreHeight)
-      rendererSizeRef.current = { width: scoreWidth, height: scoreHeight }
+    if (currentSize.width !== backingWidth || currentSize.height !== backingHeight) {
+      renderer.resize(backingWidth, backingHeight)
+      rendererSizeRef.current = { width: backingWidth, height: backingHeight }
     }
+    // Renderer.resize updates CSS size to backing-store size; keep visual size in logical score units.
+    root.style.width = `${scoreWidth}px`
+    root.style.height = `${scoreHeight}px`
     const context = renderer.getContext()
+    const context2D = (context as unknown as { context2D?: CanvasRenderingContext2D }).context2D
+    if (context2D) {
+      context2D.setTransform(renderQualityScaleX, 0, 0, renderQualityScaleY, 0, 0)
+    }
     const previousNoteLayoutsByPair = noteLayoutsByPairRef.current
     const previousMeasureLayouts = measureLayoutsRef.current
     const layoutReflowHint = layoutReflowHintRef?.current ?? null
@@ -281,6 +306,8 @@ export function useScoreRenderEffect(params: {
     pagePaddingX,
     timeAxisSpacingConfig,
     spacingLayoutMode,
+    renderScaleX,
+    renderScaleY,
     onAfterRender,
   ])
 }

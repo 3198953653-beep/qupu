@@ -67,6 +67,10 @@ export function useDragHandlers(params: {
   previewStartThresholdPx: number
   backend: number
   scoreScale: number
+  renderQualityScaleX?: number
+  renderQualityScaleY?: number
+  viewportXRange?: { startX: number; endX: number } | null
+  renderOffsetX?: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
   spacingLayoutMode?: SpacingLayoutMode
 }): {
@@ -117,6 +121,10 @@ export function useDragHandlers(params: {
     previewStartThresholdPx,
     backend,
     scoreScale,
+    renderQualityScaleX = 1,
+    renderQualityScaleY = 1,
+    viewportXRange = null,
+    renderOffsetX = 0,
     timeAxisSpacingConfig,
     spacingLayoutMode = 'custom',
   } = params
@@ -151,6 +159,10 @@ export function useDragHandlers(params: {
         overlayLastRectRef,
         backend,
         scoreScale,
+        renderQualityScaleX,
+        renderQualityScaleY,
+        viewportXRange,
+        renderOffsetX,
         timeAxisSpacingConfig,
         spacingLayoutMode,
       },
@@ -174,6 +186,10 @@ export function useDragHandlers(params: {
         overlayLastRectRef,
         backend,
         scoreScale,
+        renderQualityScaleX,
+        renderQualityScaleY,
+        viewportXRange,
+        renderOffsetX,
         timeAxisSpacingConfig,
         spacingLayoutMode,
       },

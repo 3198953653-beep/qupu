@@ -38,6 +38,8 @@ type OverlayRuntime = {
   scoreScale: number
   renderQualityScaleX?: number
   renderQualityScaleY?: number
+  viewportXRange?: { startX: number; endX: number } | null
+  renderOffsetX?: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
   spacingLayoutMode?: SpacingLayoutMode
 }
@@ -125,6 +127,8 @@ export function drawSelectionOverlay(params: {
     ensureOverlayCanvasForRect: overlay.ensureRect,
     getOverlayContext: overlay.getContext,
     clearDragOverlay: overlay.clear,
+    viewportXRange: overlayRuntime.viewportXRange,
+    renderOffsetX: overlayRuntime.renderOffsetX ?? 0,
     timeAxisSpacingConfig: overlayRuntime.timeAxisSpacingConfig,
     spacingLayoutMode: overlayRuntime.spacingLayoutMode,
   })
@@ -169,6 +173,8 @@ export function drawDragPreviewOverlay(params: {
     ensureOverlayCanvasForRect: overlay.ensureRect,
     getOverlayContext: overlay.getContext,
     clearDragOverlay: overlay.clear,
+    viewportXRange: overlayRuntime.viewportXRange,
+    renderOffsetX: overlayRuntime.renderOffsetX ?? 0,
     dragDebugFramesRef,
     timeAxisSpacingConfig: overlayRuntime.timeAxisSpacingConfig,
     spacingLayoutMode: overlayRuntime.spacingLayoutMode,

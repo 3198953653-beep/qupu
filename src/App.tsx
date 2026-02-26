@@ -1345,6 +1345,8 @@ function App() {
     pagePaddingX: pageHorizontalPaddingPx,
     timeAxisSpacingConfig,
     spacingLayoutMode,
+    renderScaleX: scoreScaleX,
+    renderScaleY: scoreScaleY,
     onAfterRender: handleScoreRendered,
   })
 
@@ -1486,6 +1488,10 @@ function App() {
     previewStartThresholdPx: PREVIEW_START_THRESHOLD_PX,
     backend: SCORE_RENDER_BACKEND,
     scoreScale: scoreScaleY,
+    renderQualityScaleX: scoreScaleX,
+    renderQualityScaleY: scoreScaleY,
+    viewportXRange: horizontalViewportXRange,
+    renderOffsetX: horizontalRenderOffsetX,
     timeAxisSpacingConfig,
     spacingLayoutMode,
   })
@@ -3152,6 +3158,8 @@ function App() {
         scoreScrollRef={scoreScrollRef}
         displayScoreWidth={displayScoreWidth}
         displayScoreHeight={displayScoreHeight}
+        scoreSurfaceLogicalWidthPx={scoreWidth}
+        scoreSurfaceLogicalHeightPx={scoreHeight}
         scoreScaleX={scoreScaleX}
         scoreScaleY={scoreScaleY}
         scoreSurfaceOffsetXPx={scoreSurfaceOffsetXPx}

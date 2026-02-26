@@ -2,7 +2,6 @@ import type { MutableRefObject } from 'react'
 import { getLayoutNoteKey } from '../layout/renderPosition'
 import { drawMeasureToContext } from './drawMeasure'
 import { drawCrossMeasureTies } from './drawCrossMeasureTies'
-import { resolveTieRedrawRange } from './tieRedrawRange'
 import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
 import type {
   DragDebugStaticRecord,
@@ -19,12 +18,14 @@ import type {
 
 type OverlayFrame = { x: number; y: number; width: number; height: number }
 
-type VisibleTieOverlayRange = {
+type VisibleOverlayRange = {
   pairIndices: number[]
   startPairIndex: number
   endPairIndexExclusive: number
   clipped: boolean
 }
+
+const OVERLAY_BOUNDARY_GUTTER_PX = 2
 
 function buildOverlayRectForPairRange(
   pairIndices: number[],
@@ -50,39 +51,44 @@ function buildOverlayRectForPairRange(
     return null
   }
 
+  const firstPairIndex = pairIndices[0]
+  const lastPairIndex = pairIndices[pairIndices.length - 1]
+  const firstMeasureLayout = firstPairIndex !== undefined ? measureLayouts.get(firstPairIndex) : null
+  const lastMeasureLayout = lastPairIndex !== undefined ? measureLayouts.get(lastPairIndex) : null
+  const rangeStartX = firstMeasureLayout
+    ? firstMeasureLayout.measureX - OVERLAY_BOUNDARY_GUTTER_PX
+    : minX
+  const rangeEndX = lastMeasureLayout
+    ? lastMeasureLayout.measureX + lastMeasureLayout.measureWidth + OVERLAY_BOUNDARY_GUTTER_PX
+    : maxRight
+  const clampedMinX = Math.max(minX, rangeStartX)
+  const clampedMaxRight = Math.min(maxRight, rangeEndX)
+
   return {
-    x: minX,
+    x: clampedMinX,
     y: minY,
-    width: Math.max(1, maxRight - minX),
+    width: Math.max(1, clampedMaxRight - clampedMinX),
     height: Math.max(1, maxBottom - minY),
   }
 }
 
-function resolveVisibleTieOverlayRange(params: {
-  measurePairs: MeasurePair[]
+function resolveVisibleViewportOverlayRange(params: {
+  measurePairCount: number
   measureLayouts: Map<number, MeasureLayout>
+  viewportXRange?: { startX: number; endX: number } | null
+  renderOffsetX: number
   anchorPairIndex: number
-  staff: StaffKind
-  noteIndex: number
-  keyIndex: number
-}): VisibleTieOverlayRange {
+}): VisibleOverlayRange {
   const {
-    measurePairs,
+    measurePairCount,
     measureLayouts,
+    viewportXRange = null,
+    renderOffsetX,
     anchorPairIndex,
-    staff,
-    noteIndex,
-    keyIndex,
   } = params
 
-  const tieRange = resolveTieRedrawRange({
-    measurePairs,
-    pairIndex: anchorPairIndex,
-    staff,
-    noteIndex,
-    keyIndex,
-  })
-  if (tieRange.pairIndices.length === 0) {
+  const sortedRenderedPairIndices = [...measureLayouts.keys()].sort((left, right) => left - right)
+  if (sortedRenderedPairIndices.length === 0) {
     return {
       pairIndices: [],
       startPairIndex: anchorPairIndex,
@@ -91,45 +97,51 @@ function resolveVisibleTieOverlayRange(params: {
     }
   }
 
-  if (tieRange.pairIndices.every((pairIndex) => measureLayouts.has(pairIndex))) {
-    return {
-      pairIndices: tieRange.pairIndices,
-      startPairIndex: tieRange.startPairIndex,
-      endPairIndexExclusive: tieRange.endPairIndexExclusive,
-      clipped: false,
-    }
-  }
-
-  if (!measureLayouts.has(anchorPairIndex)) {
-    return {
-      pairIndices: [],
-      startPairIndex: anchorPairIndex,
-      endPairIndexExclusive: anchorPairIndex + 1,
-      clipped: true,
-    }
-  }
-
-  let startPairIndex = anchorPairIndex
-  let endPairIndexExclusive = anchorPairIndex + 1
-
-  while (
-    startPairIndex - 1 >= tieRange.startPairIndex &&
-    measureLayouts.has(startPairIndex - 1)
+  let candidatePairIndices = sortedRenderedPairIndices
+  if (
+    viewportXRange &&
+    Number.isFinite(viewportXRange.startX) &&
+    Number.isFinite(viewportXRange.endX)
   ) {
+    const viewportStartX = Math.min(viewportXRange.startX, viewportXRange.endX)
+    const viewportEndX = Math.max(viewportXRange.startX, viewportXRange.endX)
+    candidatePairIndices = sortedRenderedPairIndices.filter((pairIndex) => {
+      const layout = measureLayouts.get(pairIndex)
+      if (!layout) return false
+      const globalMeasureStartX = layout.measureX + renderOffsetX
+      const globalMeasureEndX = globalMeasureStartX + layout.measureWidth
+      return globalMeasureEndX >= viewportStartX && globalMeasureStartX <= viewportEndX
+    })
+  }
+
+  if (candidatePairIndices.length === 0) {
+    if (measureLayouts.has(anchorPairIndex)) {
+      candidatePairIndices = [anchorPairIndex]
+    } else {
+      candidatePairIndices = [sortedRenderedPairIndices[0]]
+    }
+  }
+
+  const candidateSet = new Set(candidatePairIndices)
+  const anchorPairInRange = candidateSet.has(anchorPairIndex)
+  let rangeAnchorPairIndex = anchorPairInRange ? anchorPairIndex : candidatePairIndices[0]
+  if (!Number.isInteger(rangeAnchorPairIndex) || rangeAnchorPairIndex === undefined) {
+    rangeAnchorPairIndex = sortedRenderedPairIndices[0]
+  }
+  let startPairIndex = rangeAnchorPairIndex
+  let endPairIndexExclusive = rangeAnchorPairIndex + 1
+  while (candidateSet.has(startPairIndex - 1)) {
     startPairIndex -= 1
   }
-  while (
-    endPairIndexExclusive < tieRange.endPairIndexExclusive &&
-    measureLayouts.has(endPairIndexExclusive)
-  ) {
+  while (candidateSet.has(endPairIndexExclusive)) {
     endPairIndexExclusive += 1
   }
 
   const pairIndices: number[] = []
   for (let pairIndex = startPairIndex; pairIndex < endPairIndexExclusive; pairIndex += 1) {
-    if (!measureLayouts.has(pairIndex)) break
-    pairIndices.push(pairIndex)
+    if (candidateSet.has(pairIndex)) pairIndices.push(pairIndex)
   }
+
   if (pairIndices.length === 0) {
     return {
       pairIndices: [anchorPairIndex],
@@ -144,8 +156,8 @@ function resolveVisibleTieOverlayRange(params: {
     startPairIndex: pairIndices[0] ?? anchorPairIndex,
     endPairIndexExclusive: (pairIndices[pairIndices.length - 1] ?? anchorPairIndex) + 1,
     clipped:
-      (pairIndices[0] ?? anchorPairIndex) > tieRange.startPairIndex ||
-      ((pairIndices[pairIndices.length - 1] ?? anchorPairIndex) + 1) < tieRange.endPairIndexExclusive,
+      (pairIndices[0] ?? anchorPairIndex) > 0 ||
+      ((pairIndices[pairIndices.length - 1] ?? anchorPairIndex) + 1) < measurePairCount,
   }
 }
 
@@ -226,7 +238,7 @@ function drawOverlayRange(params: {
   if (!beginOverlayPaint(overlayContext, overlayFrame)) return
 
   const overlayLayoutsByPair = new Map<number, NoteLayout[]>()
-  pairIndices.forEach((pairIndex) => {
+  pairIndices.forEach((pairIndex, pairOffset) => {
     const measureLayout = measureLayouts.get(pairIndex)
     const measure = measurePairs[pairIndex]
     if (!measureLayout || !measure) return
@@ -259,6 +271,7 @@ function drawOverlayRange(params: {
       timeAxisSpacingConfig,
       spacingLayoutMode,
       renderBoundaryPartialTies: false,
+      forceLeadingConnector: pairOffset === 0,
       previewNote: preview?.previewNote ?? null,
       previewAccidentalStateBeforeNote: preview?.previewAccidentalStateBeforeNote ?? null,
       staticNoteXById: preview?.staticNoteXById ?? null,
@@ -295,6 +308,8 @@ export function drawSelectionMeasureOverlay(params: {
   noteLayoutByKey: Map<string, NoteLayout>
   measureLayouts: Map<number, MeasureLayout>
   measurePairs: MeasurePair[]
+  viewportXRange?: { startX: number; endX: number } | null
+  renderOffsetX?: number
   ensureOverlayCanvasForRect: (rect: MeasureLayout['overlayRect']) => OverlayFrame | null
   getOverlayContext: () => ReturnType<import('vexflow').Renderer['getContext']> | null
   clearDragOverlay: () => void
@@ -306,6 +321,8 @@ export function drawSelectionMeasureOverlay(params: {
     noteLayoutByKey,
     measureLayouts,
     measurePairs,
+    viewportXRange = null,
+    renderOffsetX = 0,
     ensureOverlayCanvasForRect,
     getOverlayContext,
     clearDragOverlay,
@@ -320,13 +337,12 @@ export function drawSelectionMeasureOverlay(params: {
     return
   }
 
-  const visibleRange = resolveVisibleTieOverlayRange({
-    measurePairs,
+  const visibleRange = resolveVisibleViewportOverlayRange({
+    measurePairCount: measurePairs.length,
     measureLayouts,
+    viewportXRange,
+    renderOffsetX,
     anchorPairIndex: selectedLayout.pairIndex,
-    staff: selection.staff,
-    noteIndex: selectedLayout.noteIndex,
-    keyIndex: selection.keyIndex,
   })
 
   drawOverlayRange({
@@ -349,6 +365,8 @@ export function drawDragMeasurePreview(params: {
   dragPreviewFrameRef: MutableRefObject<number>
   measureLayouts: Map<number, MeasureLayout>
   measurePairs: MeasurePair[]
+  viewportXRange?: { startX: number; endX: number } | null
+  renderOffsetX?: number
   ensureOverlayCanvasForRect: (rect: MeasureLayout['overlayRect']) => OverlayFrame | null
   getOverlayContext: () => ReturnType<import('vexflow').Renderer['getContext']> | null
   clearDragOverlay: () => void
@@ -362,6 +380,8 @@ export function drawDragMeasurePreview(params: {
     dragPreviewFrameRef,
     measureLayouts,
     measurePairs,
+    viewportXRange = null,
+    renderOffsetX = 0,
     ensureOverlayCanvasForRect,
     getOverlayContext,
     clearDragOverlay,
@@ -372,13 +392,12 @@ export function drawDragMeasurePreview(params: {
 
   const dragWithLayout = ensureDragLayoutCache(drag)
   dragPreviewFrameRef.current += 1
-  const visibleRange = resolveVisibleTieOverlayRange({
-    measurePairs,
+  const visibleRange = resolveVisibleViewportOverlayRange({
+    measurePairCount: measurePairs.length,
     measureLayouts,
+    viewportXRange,
+    renderOffsetX,
     anchorPairIndex: dragWithLayout.pairIndex,
-    staff: dragWithLayout.staff,
-    noteIndex: dragWithLayout.noteIndex,
-    keyIndex: dragWithLayout.keyIndex,
   })
 
   drawOverlayRange({
