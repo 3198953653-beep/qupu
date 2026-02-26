@@ -23,6 +23,7 @@ import {
   type TimeAxisSpacingConfig,
 } from '../layout/timeAxisSpacing'
 import type {
+  DragState,
   LayoutReflowHint,
   MeasureLayout,
   MeasurePair,
@@ -270,6 +271,7 @@ export function renderVisibleSystems(params: {
   pagePaddingX?: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
   spacingLayoutMode?: SpacingLayoutMode
+  dragPreview?: DragState | null
 }): {
   nextLayouts: NoteLayout[]
   nextLayoutsByPair: Map<number, NoteLayout[]>
@@ -300,6 +302,7 @@ export function renderVisibleSystems(params: {
     pagePaddingX = SCORE_PAGE_PADDING_X,
     timeAxisSpacingConfig,
     spacingLayoutMode = 'custom',
+    dragPreview = null,
   } = params
   const spacingConfig = timeAxisSpacingConfig ?? DEFAULT_TIME_AXIS_SPACING_CONFIG
 
@@ -555,6 +558,25 @@ export function renderVisibleSystems(params: {
     const incrementalPairIndex = shouldUseIncrementalPaint ? hintPairIndex : null
     if (measureFramesByPair !== null) {
       systemMeta.forEach((entry) => {
+        const isDragPreviewPair =
+          dragPreview !== null &&
+          dragPreview.previewStarted &&
+          dragPreview.pairIndex === entry.pairIndex
+        const previewNote = isDragPreviewPair
+          ? {
+              noteId: dragPreview.noteId,
+              staff: dragPreview.staff,
+              pitch: dragPreview.pitch,
+              keyIndex: dragPreview.keyIndex,
+            }
+          : null
+        const previewAccidentalStateBeforeNote = isDragPreviewPair
+          ? dragPreview.accidentalStateBeforeNote
+          : null
+        const previewStaticNoteXById = isDragPreviewPair ? dragPreview.staticNoteXById : null
+        const previewStaticAccidentalRightXById = isDragPreviewPair
+          ? dragPreview.previewAccidentalRightXById
+          : null
         if (incrementalPairIndex !== null && entry.pairIndex !== incrementalPairIndex) {
           const previousLayouts = previousNoteLayoutsByPair?.get(entry.pairIndex)
           const previousMeasureLayout = previousMeasureLayouts?.get(entry.pairIndex)
@@ -609,8 +631,11 @@ export function renderVisibleSystems(params: {
           formatWidthOverride: formatWidth,
           timeAxisSpacingConfig: spacingConfig,
           spacingLayoutMode,
-          staticNoteXById: translatedFrozenSpacing?.staticNoteXById ?? null,
-          staticAccidentalRightXById: translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
+          staticNoteXById: previewStaticNoteXById ?? translatedFrozenSpacing?.staticNoteXById ?? null,
+          staticAccidentalRightXById:
+            previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
+          previewNote,
+          previewAccidentalStateBeforeNote,
           preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
           preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
           renderBoundaryPartialTies: false,
@@ -677,6 +702,25 @@ export function renderVisibleSystems(params: {
     }
     if (stableSystemFrames) {
       systemMeta.forEach((entry, indexInSystem) => {
+        const isDragPreviewPair =
+          dragPreview !== null &&
+          dragPreview.previewStarted &&
+          dragPreview.pairIndex === entry.pairIndex
+        const previewNote = isDragPreviewPair
+          ? {
+              noteId: dragPreview.noteId,
+              staff: dragPreview.staff,
+              pitch: dragPreview.pitch,
+              keyIndex: dragPreview.keyIndex,
+            }
+          : null
+        const previewAccidentalStateBeforeNote = isDragPreviewPair
+          ? dragPreview.accidentalStateBeforeNote
+          : null
+        const previewStaticNoteXById = isDragPreviewPair ? dragPreview.staticNoteXById : null
+        const previewStaticAccidentalRightXById = isDragPreviewPair
+          ? dragPreview.previewAccidentalRightXById
+          : null
         if (incrementalPairIndex !== null && entry.pairIndex !== incrementalPairIndex) {
           const previousLayouts = previousNoteLayoutsByPair?.get(entry.pairIndex)
           const previousMeasureLayout = previousMeasureLayouts?.get(entry.pairIndex)
@@ -736,8 +780,11 @@ export function renderVisibleSystems(params: {
           formatWidthOverride: formatWidth,
           timeAxisSpacingConfig: spacingConfig,
           spacingLayoutMode,
-          staticNoteXById: translatedFrozenSpacing?.staticNoteXById ?? null,
-          staticAccidentalRightXById: translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
+          staticNoteXById: previewStaticNoteXById ?? translatedFrozenSpacing?.staticNoteXById ?? null,
+          staticAccidentalRightXById:
+            previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
+          previewNote,
+          previewAccidentalStateBeforeNote,
           preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
           preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
           renderBoundaryPartialTies: false,
@@ -970,6 +1017,25 @@ export function renderVisibleSystems(params: {
 
     let measureCursorX = pagePaddingX
     systemMeta.forEach((entry, indexInSystem) => {
+      const isDragPreviewPair =
+        dragPreview !== null &&
+        dragPreview.previewStarted &&
+        dragPreview.pairIndex === entry.pairIndex
+      const previewNote = isDragPreviewPair
+        ? {
+            noteId: dragPreview.noteId,
+            staff: dragPreview.staff,
+            pitch: dragPreview.pitch,
+            keyIndex: dragPreview.keyIndex,
+          }
+        : null
+      const previewAccidentalStateBeforeNote = isDragPreviewPair
+        ? dragPreview.accidentalStateBeforeNote
+        : null
+      const previewStaticNoteXById = isDragPreviewPair ? dragPreview.staticNoteXById : null
+      const previewStaticAccidentalRightXById = isDragPreviewPair
+        ? dragPreview.previewAccidentalRightXById
+        : null
       const measureWidth = measureWidths[indexInSystem] ?? Math.floor(systemUsableWidth / Math.max(1, systemMeta.length))
       const measureX = measureCursorX
       measureCursorX += measureWidth
@@ -997,8 +1063,11 @@ export function renderVisibleSystems(params: {
         formatWidthOverride: formatWidth,
         timeAxisSpacingConfig: spacingConfig,
         spacingLayoutMode,
-        staticNoteXById: translatedFrozenSpacing?.staticNoteXById ?? null,
-        staticAccidentalRightXById: translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
+        staticNoteXById: previewStaticNoteXById ?? translatedFrozenSpacing?.staticNoteXById ?? null,
+        staticAccidentalRightXById:
+          previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
+        previewNote,
+        previewAccidentalStateBeforeNote,
         preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
         preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
         renderBoundaryPartialTies: false,

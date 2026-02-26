@@ -8,9 +8,9 @@ import {
 } from './dragPointerHandlers'
 import {
   clearDragOverlayCanvas,
-  drawDragPreviewOverlay,
   drawSelectionOverlay,
   getDragDebugReportText,
+  ensureDragLayoutCache,
 } from './dragPreviewController'
 import { flushPendingDragFrame, scheduleDragCommitFrame } from './dragScheduler'
 import { flattenBassFromPairs, flattenTrebleFromPairs } from './scoreOps'
@@ -55,6 +55,7 @@ export function useDragHandlers(params: {
   setMeasurePairsFromImport: StateSetter<MeasurePair[] | null>
   setNotes: StateSetter<ScoreNote[]>
   setBassNotes: StateSetter<ScoreNote[]>
+  setDragPreviewState: StateSetter<DragState | null>
   setActiveSelection: StateSetter<Selection>
   setDraggingSelection: StateSetter<Selection | null>
   measurePairsFromImportRef: MutableRefObject<MeasurePair[] | null>
@@ -66,7 +67,8 @@ export function useDragHandlers(params: {
   previewDefaultAccidentalOffsetPx: number
   previewStartThresholdPx: number
   backend: number
-  scoreScale: number
+  scoreScaleX: number
+  scoreScaleY: number
   renderQualityScaleX?: number
   renderQualityScaleY?: number
   viewportXRange?: { startX: number; endX: number } | null
@@ -109,6 +111,7 @@ export function useDragHandlers(params: {
     setMeasurePairsFromImport,
     setNotes,
     setBassNotes,
+    setDragPreviewState,
     setActiveSelection,
     setDraggingSelection,
     measurePairsFromImportRef,
@@ -120,7 +123,8 @@ export function useDragHandlers(params: {
     previewDefaultAccidentalOffsetPx,
     previewStartThresholdPx,
     backend,
-    scoreScale,
+    scoreScaleX,
+    scoreScaleY,
     renderQualityScaleX = 1,
     renderQualityScaleY = 1,
     viewportXRange = null,
@@ -130,6 +134,7 @@ export function useDragHandlers(params: {
   } = params
 
   const clearDragOverlay = () => {
+    setDragPreviewState(null)
     clearDragOverlayCanvas({
       overlay: scoreOverlayRef.current,
       overlayLastRectRef,
@@ -158,7 +163,8 @@ export function useDragHandlers(params: {
         overlayRendererSizeRef,
         overlayLastRectRef,
         backend,
-        scoreScale,
+        scoreScaleX,
+        scoreScaleY,
         renderQualityScaleX,
         renderQualityScaleY,
         viewportXRange,
@@ -170,31 +176,20 @@ export function useDragHandlers(params: {
   }
 
   const drawDragMeasurePreview = (drag: DragState) => {
-    drawDragPreviewOverlay({
+    // Use main-canvas visible-window repaint during drag preview to avoid
+    // overlay/main transform drift and keep geometry in a single render path.
+    const cachedDrag = ensureDragLayoutCache({
       drag,
       noteLayoutsByPair: noteLayoutsByPairRef.current,
-      dragRef,
       previewDefaultAccidentalOffsetPx,
-      dragPreviewFrameRef,
-      measureLayouts: measureLayoutsRef.current,
-      measurePairs: measurePairsRef.current,
-      overlayRuntime: {
-        overlay: scoreOverlayRef.current,
-        surface: scoreRef.current,
-        overlayRendererRef,
-        overlayRendererSizeRef,
-        overlayLastRectRef,
-        backend,
-        scoreScale,
-        renderQualityScaleX,
-        renderQualityScaleY,
-        viewportXRange,
-        renderOffsetX,
-        timeAxisSpacingConfig,
-        spacingLayoutMode,
-      },
-      dragDebugFramesRef,
+      dragRef,
     })
+    dragPreviewFrameRef.current += 1
+    setDragPreviewState(cachedDrag)
+    // Keep existing debug report path available; frames are captured by overlay mode only.
+    if (dragDebugFramesRef.current.length > 360) {
+      dragDebugFramesRef.current.splice(0, dragDebugFramesRef.current.length - 360)
+    }
   }
 
   const applyDragPreview = (drag: DragState, pitch: Pitch) => {

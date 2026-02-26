@@ -171,6 +171,9 @@ export function useScoreRenderEffect(params: {
   spacingLayoutMode?: SpacingLayoutMode
   renderScaleX?: number
   renderScaleY?: number
+  renderQualityScaleX?: number
+  renderQualityScaleY?: number
+  dragPreview?: DragState | null
   onAfterRender?: () => void
 }): void {
   const {
@@ -204,6 +207,9 @@ export function useScoreRenderEffect(params: {
     spacingLayoutMode = 'custom',
     renderScaleX = 1,
     renderScaleY = 1,
+    renderQualityScaleX: forcedRenderQualityScaleX,
+    renderQualityScaleY: forcedRenderQualityScaleY,
+    dragPreview = null,
     onAfterRender,
   } = params
   useLayoutEffect(() => {
@@ -219,8 +225,14 @@ export function useScoreRenderEffect(params: {
     const targetQualityY = Math.max(1, devicePixelRatio, Math.abs(renderScaleY))
     const maxQualityX = Math.max(1, maxBackingStoreDim / Math.max(1, scoreWidth))
     const maxQualityY = Math.max(1, maxBackingStoreDim / Math.max(1, scoreHeight))
-    const renderQualityScaleX = Math.max(1, Math.min(targetQualityX, maxQualityX))
-    const renderQualityScaleY = Math.max(1, Math.min(targetQualityY, maxQualityY))
+    const renderQualityScaleX =
+      Number.isFinite(forcedRenderQualityScaleX) && (forcedRenderQualityScaleX ?? 0) > 0
+        ? Math.max(1, Math.min(forcedRenderQualityScaleX as number, maxQualityX))
+        : Math.max(1, Math.min(targetQualityX, maxQualityX))
+    const renderQualityScaleY =
+      Number.isFinite(forcedRenderQualityScaleY) && (forcedRenderQualityScaleY ?? 0) > 0
+        ? Math.max(1, Math.min(forcedRenderQualityScaleY as number, maxQualityY))
+        : Math.max(1, Math.min(targetQualityY, maxQualityY))
     const backingWidth = Math.max(1, Math.round(scoreWidth * renderQualityScaleX))
     const backingHeight = Math.max(1, Math.round(scoreHeight * renderQualityScaleY))
 
@@ -240,7 +252,12 @@ export function useScoreRenderEffect(params: {
     const context = renderer.getContext()
     const context2D = (context as unknown as { context2D?: CanvasRenderingContext2D }).context2D
     if (context2D) {
-      context2D.setTransform(renderQualityScaleX, 0, 0, renderQualityScaleY, 0, 0)
+      // Keep logical score-space to CSS pixels strictly 1:1 after browser scaling.
+      // Use actual backing/store ratio instead of nominal quality factor to avoid
+      // sub-pixel drift between main canvas and overlay canvas.
+      const scaleX = scoreWidth > 0 ? backingWidth / scoreWidth : 1
+      const scaleY = scoreHeight > 0 ? backingHeight / scoreHeight : 1
+      context2D.setTransform(scaleX, 0, 0, scaleY, 0, 0)
     }
     const previousNoteLayoutsByPair = noteLayoutsByPairRef.current
     const previousMeasureLayouts = measureLayoutsRef.current
@@ -270,6 +287,7 @@ export function useScoreRenderEffect(params: {
       pagePaddingX,
       timeAxisSpacingConfig,
       spacingLayoutMode,
+      dragPreview,
     })
     noteLayoutsRef.current = nextLayouts
     noteLayoutsByPairRef.current = nextLayoutsByPair
@@ -308,6 +326,9 @@ export function useScoreRenderEffect(params: {
     spacingLayoutMode,
     renderScaleX,
     renderScaleY,
+    forcedRenderQualityScaleX,
+    forcedRenderQualityScaleY,
+    dragPreview,
     onAfterRender,
   ])
 }

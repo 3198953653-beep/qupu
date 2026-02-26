@@ -884,6 +884,7 @@ function App() {
   const [rhythmPreset, setRhythmPreset] = useState<RhythmPresetId>('quarter')
   const [activeSelection, setActiveSelection] = useState<Selection>({ noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 })
   const [draggingSelection, setDraggingSelection] = useState<Selection | null>(null)
+  const [dragPreviewState, setDragPreviewState] = useState<DragState | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [musicXmlInput, setMusicXmlInput] = useState<string>('')
   const [importFeedback, setImportFeedback] = useState<ImportFeedback>({ kind: 'idle', message: '' })
@@ -1128,6 +1129,21 @@ function App() {
   const scaledScoreContentHeight = Math.max(1, HORIZONTAL_VIEW_HEIGHT_PX * viewportHeightScaleByZoom)
   const displayScoreHeight = Math.max(1, Math.round(scaledScoreContentHeight * canvasHeightScale))
   const scoreHeight = Math.max(1, Math.round(scaledScoreContentHeight / scoreScaleY))
+  const renderQualityScale = useMemo(() => {
+    const maxBackingStoreDim = 32760
+    const devicePixelRatio =
+      typeof window !== 'undefined' && Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0
+        ? window.devicePixelRatio
+        : 1
+    const targetQualityX = Math.max(1, devicePixelRatio, Math.abs(scoreScaleX))
+    const targetQualityY = Math.max(1, devicePixelRatio, Math.abs(scoreScaleY))
+    const maxQualityX = Math.max(1, maxBackingStoreDim / Math.max(1, scoreWidth))
+    const maxQualityY = Math.max(1, maxBackingStoreDim / Math.max(1, scoreHeight))
+    return {
+      x: Math.max(1, Math.min(targetQualityX, maxQualityX)),
+      y: Math.max(1, Math.min(targetQualityY, maxQualityY)),
+    }
+  }, [scoreScaleX, scoreScaleY, scoreWidth, scoreHeight])
   const systemsPerPage = 1
   const pageCount = 1
   const safeCurrentPage = 0
@@ -1351,6 +1367,9 @@ function App() {
     spacingLayoutMode,
     renderScaleX: scoreScaleX,
     renderScaleY: scoreScaleY,
+    renderQualityScaleX: renderQualityScale.x,
+    renderQualityScaleY: renderQualityScale.y,
+    dragPreview: draggingSelection ? dragPreviewState : null,
     onAfterRender: handleScoreRendered,
   })
 
@@ -1480,6 +1499,7 @@ function App() {
     setMeasurePairsFromImport,
     setNotes,
     setBassNotes,
+    setDragPreviewState,
     setActiveSelection,
     setDraggingSelection,
     measurePairsFromImportRef,
@@ -1491,9 +1511,10 @@ function App() {
     previewDefaultAccidentalOffsetPx: PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX,
     previewStartThresholdPx: PREVIEW_START_THRESHOLD_PX,
     backend: SCORE_RENDER_BACKEND,
-    scoreScale: scoreScaleY,
-    renderQualityScaleX: scoreScaleX,
-    renderQualityScaleY: scoreScaleY,
+    scoreScaleX,
+    scoreScaleY,
+    renderQualityScaleX: renderQualityScale.x,
+    renderQualityScaleY: renderQualityScale.y,
     viewportXRange: horizontalViewportXRange,
     renderOffsetX: horizontalRenderOffsetX,
     timeAxisSpacingConfig,

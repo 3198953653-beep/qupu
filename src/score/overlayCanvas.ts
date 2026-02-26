@@ -2,31 +2,6 @@ import { Renderer } from 'vexflow'
 import type { MutableRefObject } from 'react'
 import type { MeasureLayout } from './types'
 
-function getElementTransformScale(element: HTMLElement): { x: number; y: number } | null {
-  const transform = window.getComputedStyle(element).transform
-  if (!transform || transform === 'none') return null
-
-  const matrix3dMatch = transform.match(/^matrix3d\((.+)\)$/)
-  if (matrix3dMatch) {
-    const parts = matrix3dMatch[1]?.split(',').map((item) => Number(item.trim())) ?? []
-    if (parts.length === 16 && Number.isFinite(parts[0]) && Number.isFinite(parts[5])) {
-      return { x: parts[0], y: parts[5] }
-    }
-    return null
-  }
-
-  const matrixMatch = transform.match(/^matrix\((.+)\)$/)
-  if (matrixMatch) {
-    const parts = matrixMatch[1]?.split(',').map((item) => Number(item.trim())) ?? []
-    if (parts.length === 6 && Number.isFinite(parts[0]) && Number.isFinite(parts[3])) {
-      return { x: parts[0], y: parts[3] }
-    }
-    return null
-  }
-
-  return null
-}
-
 export function clearOverlayCanvas(
   overlay: HTMLCanvasElement | null,
   overlayLastRectRef: MutableRefObject<MeasureLayout['overlayRect'] | null>,
@@ -46,9 +21,11 @@ export function ensureOverlayCanvasForRect(params: {
   overlayRendererRef: MutableRefObject<Renderer | null>
   overlayRendererSizeRef: MutableRefObject<{ width: number; height: number }>
   overlayLastRectRef: MutableRefObject<MeasureLayout['overlayRect'] | null>
-  scoreScale?: number
+  scoreScaleX?: number
+  scoreScaleY?: number
   renderQualityScaleX?: number
   renderQualityScaleY?: number
+  lockToExistingFrame?: boolean
 }): { x: number; y: number; width: number; height: number } | null {
   const {
     overlay,
@@ -57,34 +34,45 @@ export function ensureOverlayCanvasForRect(params: {
     overlayRendererRef,
     overlayRendererSizeRef,
     overlayLastRectRef,
-    scoreScale = 1,
+    scoreScaleX = 1,
+    scoreScaleY = 1,
     renderQualityScaleX = 1,
     renderQualityScaleY = 1,
+    lockToExistingFrame = false,
   } = params
   if (!overlay) return null
 
-  const nextWidth = Math.max(1, Math.ceil(rect.width))
-  const nextHeight = Math.max(1, Math.ceil(rect.height))
-  const nextLeft = Number.isFinite(rect.x) ? rect.x : 0
-  const nextTop = Number.isFinite(rect.y) ? rect.y : 0
-  const fallbackScale = Number.isFinite(scoreScale) && scoreScale > 0 ? scoreScale : 1
-  let effectiveScaleX = fallbackScale
-  let effectiveScaleY = fallbackScale
-  if (surface) {
-    const transformScale = getElementTransformScale(surface)
-    if (transformScale) {
-      if (Number.isFinite(transformScale.x) && transformScale.x > 0) {
-        effectiveScaleX = transformScale.x
-      }
-      if (Number.isFinite(transformScale.y) && transformScale.y > 0) {
-        effectiveScaleY = transformScale.y
-      }
-    }
+  let nextLeft = Number.isFinite(rect.x) ? rect.x : 0
+  let nextTop = Number.isFinite(rect.y) ? rect.y : 0
+  let nextWidth = Math.max(1, Number.isFinite(rect.width) ? rect.width : 1)
+  let nextHeight = Math.max(1, Number.isFinite(rect.height) ? rect.height : 1)
+  const previousRect = overlayLastRectRef.current
+  if (lockToExistingFrame && previousRect) {
+    const prevLeft = previousRect.x
+    const prevTop = previousRect.y
+    const prevRight = previousRect.x + previousRect.width
+    const prevBottom = previousRect.y + previousRect.height
+    const nextRight = nextLeft + nextWidth
+    const nextBottom = nextTop + nextHeight
+    nextLeft = Math.min(prevLeft, nextLeft)
+    nextTop = Math.min(prevTop, nextTop)
+    nextWidth = Math.max(prevRight, nextRight) - nextLeft
+    nextHeight = Math.max(prevBottom, nextBottom) - nextTop
   }
+  nextWidth = Math.max(1, Math.ceil(nextWidth))
+  nextHeight = Math.max(1, Math.ceil(nextHeight))
+  const effectiveScaleX = Number.isFinite(scoreScaleX) && scoreScaleX > 0 ? scoreScaleX : 1
+  const effectiveScaleY = Number.isFinite(scoreScaleY) && scoreScaleY > 0 ? scoreScaleY : 1
   const devicePixelRatio =
     Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1
-  const targetQualityScaleX = Math.max(1, devicePixelRatio, renderQualityScaleX, effectiveScaleX)
-  const targetQualityScaleY = Math.max(1, devicePixelRatio, renderQualityScaleY, effectiveScaleY)
+  const targetQualityScaleX =
+    Number.isFinite(renderQualityScaleX) && renderQualityScaleX > 0
+      ? renderQualityScaleX
+      : Math.max(1, devicePixelRatio, effectiveScaleX)
+  const targetQualityScaleY =
+    Number.isFinite(renderQualityScaleY) && renderQualityScaleY > 0
+      ? renderQualityScaleY
+      : Math.max(1, devicePixelRatio, effectiveScaleY)
   const maxBackingStoreDim = 32760
   const maxQualityScaleX = Math.max(1, maxBackingStoreDim / Math.max(1, nextWidth))
   const maxQualityScaleY = Math.max(1, maxBackingStoreDim / Math.max(1, nextHeight))
@@ -94,8 +82,20 @@ export function ensureOverlayCanvasForRect(params: {
   const nextBackingHeight = Math.max(1, Math.round(nextHeight * backingQualityScaleY))
   const displayLeft = nextLeft * effectiveScaleX
   const displayTop = nextTop * effectiveScaleY
-  const surfaceOffsetLeft = surface ? surface.offsetLeft : 0
-  const surfaceOffsetTop = surface ? surface.offsetTop : 0
+  const surfaceStyleLeft = surface ? Number.parseFloat(surface.style.left || '0') : 0
+  const surfaceStyleTop = surface ? Number.parseFloat(surface.style.top || '0') : 0
+  const surfaceOffsetLeft =
+    Number.isFinite(surfaceStyleLeft) && surfaceStyleLeft !== 0
+      ? surfaceStyleLeft
+      : surface
+        ? surface.offsetLeft
+        : 0
+  const surfaceOffsetTop =
+    Number.isFinite(surfaceStyleTop) && surfaceStyleTop !== 0
+      ? surfaceStyleTop
+      : surface
+        ? surface.offsetTop
+        : 0
 
   if (overlay.width !== nextBackingWidth || overlay.height !== nextBackingHeight) {
     overlay.width = nextBackingWidth
@@ -109,7 +109,12 @@ export function ensureOverlayCanvasForRect(params: {
   overlay.style.width = `${nextWidth}px`
   overlay.style.height = `${nextHeight}px`
   overlay.style.display = 'block'
-  overlayLastRectRef.current = rect
+  overlayLastRectRef.current = {
+    x: nextLeft,
+    y: nextTop,
+    width: nextWidth,
+    height: nextHeight,
+  }
 
   return { x: nextLeft, y: nextTop, width: nextWidth, height: nextHeight }
 }
@@ -122,7 +127,14 @@ export function getOverlayRendererContext(params: {
   logicalWidth: number
   logicalHeight: number
 }): ReturnType<Renderer['getContext']> | null {
-  const { overlay, overlayRendererRef, overlayRendererSizeRef, backend, logicalWidth, logicalHeight } = params
+  const {
+    overlay,
+    overlayRendererRef,
+    overlayRendererSizeRef,
+    backend,
+    logicalWidth,
+    logicalHeight,
+  } = params
   if (!overlay) return null
 
   let renderer = overlayRendererRef.current
@@ -144,6 +156,8 @@ export function getOverlayRendererContext(params: {
   const context = renderer.getContext()
   const context2D = (context as unknown as { context2D?: CanvasRenderingContext2D }).context2D
   if (context2D) {
+    // Same mapping rule as main canvas: real backing/store ratio.
+    // This avoids subtle drift from nominal quality factor rounding.
     const scaleX = logicalWidth > 0 ? overlayWidth / logicalWidth : 1
     const scaleY = logicalHeight > 0 ? overlayHeight / logicalHeight : 1
     context2D.setTransform(scaleX, 0, 0, scaleY, 0, 0)

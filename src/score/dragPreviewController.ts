@@ -35,7 +35,8 @@ type OverlayRuntime = {
   overlayRendererSizeRef: MutableRefObject<{ width: number; height: number }>
   overlayLastRectRef: MutableRefObject<MeasureLayout['overlayRect'] | null>
   backend: number
-  scoreScale: number
+  scoreScaleX: number
+  scoreScaleY: number
   renderQualityScaleX?: number
   renderQualityScaleY?: number
   viewportXRange?: { startX: number; endX: number } | null
@@ -49,7 +50,7 @@ function buildOverlayAccessors(runtime: OverlayRuntime) {
     clear: () => {
       clearOverlayCanvas(runtime.overlay, runtime.overlayLastRectRef)
     },
-    ensureRect: (rect: MeasureLayout['overlayRect']) =>
+    ensureRect: (rect: MeasureLayout['overlayRect'], options?: { lockToExistingFrame?: boolean }) =>
       ensureOverlayCanvasForRectHelper({
         overlay: runtime.overlay,
         surface: runtime.surface,
@@ -57,9 +58,11 @@ function buildOverlayAccessors(runtime: OverlayRuntime) {
         overlayRendererRef: runtime.overlayRendererRef,
         overlayRendererSizeRef: runtime.overlayRendererSizeRef,
         overlayLastRectRef: runtime.overlayLastRectRef,
-        scoreScale: runtime.scoreScale,
+        scoreScaleX: runtime.scoreScaleX,
+        scoreScaleY: runtime.scoreScaleY,
         renderQualityScaleX: runtime.renderQualityScaleX,
         renderQualityScaleY: runtime.renderQualityScaleY,
+        lockToExistingFrame: options?.lockToExistingFrame ?? false,
       }),
     getContext: () =>
       getOverlayRendererContext({
@@ -124,7 +127,7 @@ export function drawSelectionOverlay(params: {
     noteLayoutByKey,
     measureLayouts,
     measurePairs,
-    ensureOverlayCanvasForRect: overlay.ensureRect,
+    ensureOverlayCanvasForRect: (rect) => overlay.ensureRect(rect, { lockToExistingFrame: false }),
     getOverlayContext: overlay.getContext,
     clearDragOverlay: overlay.clear,
     viewportXRange: overlayRuntime.viewportXRange,
@@ -170,7 +173,7 @@ export function drawDragPreviewOverlay(params: {
     dragPreviewFrameRef,
     measureLayouts,
     measurePairs,
-    ensureOverlayCanvasForRect: overlay.ensureRect,
+    ensureOverlayCanvasForRect: (rect) => overlay.ensureRect(rect, { lockToExistingFrame: true }),
     getOverlayContext: overlay.getContext,
     clearDragOverlay: overlay.clear,
     viewportXRange: overlayRuntime.viewportXRange,
