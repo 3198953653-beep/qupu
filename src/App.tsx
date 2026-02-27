@@ -73,7 +73,7 @@ const HORIZONTAL_VIEW_MEASURE_WIDTH_PX = 220
 const HORIZONTAL_VIEW_MIN_MEASURE_WIDTH_PX = 1
 const HORIZONTAL_VIEW_HEIGHT_PX = SCORE_TOP_PADDING * 2 + SYSTEM_HEIGHT + 26
 const MAX_CANVAS_RENDER_DIM_PX = 32760
-const HORIZONTAL_RENDER_BUFFER_PX = 1200
+const HORIZONTAL_RENDER_BUFFER_PX = 400
 const HORIZONTAL_RENDER_EDGE_BUFFER_MEASURES = 1
 const OSMD_PREVIEW_ZOOM_DEBOUNCE_MS = 120
 const DEFAULT_OSMD_PREVIEW_HORIZONTAL_MARGIN_PX = 9
@@ -974,6 +974,7 @@ function App() {
   const rendererRef = useRef<Renderer | null>(null)
   const rendererSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 })
   const widthProbeRendererRef = useRef<Renderer | null>(null)
+  const horizontalMeasureWidthCacheRef = useRef<Map<string, number>>(new Map())
   const overlayRendererRef = useRef<Renderer | null>(null)
   const overlayRendererSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 })
   const overlayLastRectRef = useRef<MeasureLayout['overlayRect'] | null>(null)
@@ -1023,6 +1024,10 @@ function App() {
     if (!probeContext) {
       return measurePairs.map(() => HORIZONTAL_VIEW_MEASURE_WIDTH_PX)
     }
+    const solverMaxIterations =
+      measurePairs.length > 120 ? 4 : measurePairs.length > 48 ? 6 : 10
+    const eagerProbeMeasureLimit =
+      measurePairs.length > 120 ? 16 : measurePairs.length > 60 ? 24 : Number.POSITIVE_INFINITY
     return solveHorizontalMeasureWidths({
       context: probeContext,
       measurePairs,
@@ -1030,6 +1035,9 @@ function App() {
       measureTimeSignaturesByPair: measureTimeSignaturesFromImport,
       spacingConfig: timeAxisSpacingConfig,
       minMeasureWidthPx: HORIZONTAL_VIEW_MIN_MEASURE_WIDTH_PX,
+      maxIterations: solverMaxIterations,
+      eagerProbeMeasureLimit,
+      widthCache: horizontalMeasureWidthCacheRef.current,
     })
   }, [
     getWidthProbeContext,
@@ -1321,6 +1329,23 @@ function App() {
       widthProbeRendererRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    if (horizontalMeasureWidthCacheRef.current.size === 0) return
+    horizontalMeasureWidthCacheRef.current.clear()
+  }, [
+    timeAxisSpacingConfig.baseMinGap32Px,
+    timeAxisSpacingConfig.minBarlineEdgeGapPx,
+    timeAxisSpacingConfig.maxBarlineEdgeGapPx,
+    timeAxisSpacingConfig.leftEdgePaddingPx,
+    timeAxisSpacingConfig.rightEdgePaddingPx,
+    timeAxisSpacingConfig.interOnsetPaddingPx,
+    timeAxisSpacingConfig.durationGapRatios.thirtySecond,
+    timeAxisSpacingConfig.durationGapRatios.sixteenth,
+    timeAxisSpacingConfig.durationGapRatios.eighth,
+    timeAxisSpacingConfig.durationGapRatios.quarter,
+    timeAxisSpacingConfig.durationGapRatios.half,
+  ])
 
   const pushUndoSnapshot = useCallback((sourcePairs: MeasurePair[]) => {
     if (!sourcePairs || sourcePairs.length === 0) return

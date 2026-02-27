@@ -2,7 +2,7 @@ import { BarlineType, Renderer, Stave } from 'vexflow'
 import { getKeySignatureSpecFromFifths } from '../accidentals'
 import { SYSTEM_BASS_OFFSET_Y, SYSTEM_TREBLE_OFFSET_Y, TICKS_PER_BEAT } from '../constants'
 import { drawMeasureToContext } from '../render/drawMeasure'
-import type { MeasurePair, TimeSignature } from '../types'
+import type { MeasurePair, ScoreNote, TimeSignature } from '../types'
 import type { TimeAxisSpacingConfig } from './timeAxisSpacing'
 import { getMeasureUniformTimelineWeightSpan, getUniformTickSpacingPadding } from './timeAxisSpacing'
 import { resolveEffectiveBoundary } from './effectiveBoundary'
@@ -31,6 +31,8 @@ export type SolveHorizontalMeasureWidthsParams = {
   spacingConfig: TimeAxisSpacingConfig
   minMeasureWidthPx: number
   maxIterations?: number
+  eagerProbeMeasureLimit?: number
+  widthCache?: Map<string, number>
 }
 
 type MeasureProbeGeometry = {
@@ -48,6 +50,10 @@ type MeasureSpacingProbe = {
 const MIN_FORMAT_WIDTH_PX = 8
 const EPS = 0.05
 const STEP_PAD_PX = 0.5
+const SOLVER_CACHE_VERSION = 'v1'
+const SOLVER_CACHE_MAX_ENTRIES = 12000
+const EST_SYSTEM_START_DECORATION_PX = 96
+const EST_INLINE_DECORATION_PX = 24
 
 function toTimeSignatureKey(signature: TimeSignature): string {
   return `${signature.beats}/${signature.beatType}`
@@ -100,6 +106,61 @@ function resolveMeasureMeta(params: {
     previousTimeSignature = timeSignature
   }
   return metas
+}
+
+function serializeScoreNoteForWidthCache(note: ScoreNote): string {
+  const chordPitchCount = note.chordPitches?.length ?? 0
+  const chordAccidentals =
+    note.chordAccidentals && note.chordAccidentals.length > 0
+      ? note.chordAccidentals.map((value) => value ?? '.').join(',')
+      : '-'
+  return [
+    note.duration,
+    note.isRest ? '1' : '0',
+    note.accidental ?? '.',
+    String(chordPitchCount),
+    chordAccidentals,
+  ].join('|')
+}
+
+function serializeStaffNotesForWidthCache(notes: ScoreNote[]): string {
+  if (notes.length === 0) return '-'
+  return notes.map(serializeScoreNoteForWidthCache).join(';')
+}
+
+function buildMeasureWidthCacheKey(params: {
+  meta: SolverMeasureMeta
+  spacingConfig: TimeAxisSpacingConfig
+  minMeasureWidthPx: number
+}): string {
+  const { meta, spacingConfig, minMeasureWidthPx } = params
+  const ratios = spacingConfig.durationGapRatios
+  return [
+    SOLVER_CACHE_VERSION,
+    `pair=${meta.pairIndex}`,
+    `sys=${meta.isSystemStart ? 1 : 0}`,
+    `key=${meta.keyFifths}`,
+    `ts=${meta.timeSignature.beats}/${meta.timeSignature.beatType}`,
+    `showK=${meta.showKeySignature ? 1 : 0}`,
+    `showT=${meta.showTimeSignature ? 1 : 0}`,
+    `showEndT=${meta.showEndTimeSignature ? 1 : 0}`,
+    `startDecor=${meta.showStartDecorations ? 1 : 0}`,
+    `endDecor=${meta.showEndDecorations ? 1 : 0}`,
+    `minW=${minMeasureWidthPx.toFixed(3)}`,
+    `g32=${spacingConfig.baseMinGap32Px}`,
+    `minEdge=${spacingConfig.minBarlineEdgeGapPx}`,
+    `maxEdge=${spacingConfig.maxBarlineEdgeGapPx}`,
+    `leftPad=${spacingConfig.leftEdgePaddingPx}`,
+    `rightPad=${spacingConfig.rightEdgePaddingPx}`,
+    `inter=${spacingConfig.interOnsetPaddingPx}`,
+    `r32=${ratios.thirtySecond}`,
+    `r16=${ratios.sixteenth}`,
+    `r8=${ratios.eighth}`,
+    `r4=${ratios.quarter}`,
+    `r2=${ratios.half}`,
+    `treble=${serializeStaffNotesForWidthCache(meta.measure.treble)}`,
+    `bass=${serializeStaffNotesForWidthCache(meta.measure.bass)}`,
+  ].join('||')
 }
 
 function buildMeasureProbeGeometry(meta: SolverMeasureMeta, measureWidth: number): MeasureProbeGeometry {
@@ -252,8 +313,14 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
     spacingConfig,
     minMeasureWidthPx,
     maxIterations = 20,
+    eagerProbeMeasureLimit = Number.POSITIVE_INFINITY,
+    widthCache,
   } = params
   if (measurePairs.length === 0) return []
+
+  if (widthCache && widthCache.size > SOLVER_CACHE_MAX_ENTRIES) {
+    widthCache.clear()
+  }
 
   const maxGapPx = Math.max(0, spacingConfig.maxBarlineEdgeGapPx)
   const minGapCandidate = Math.max(0, spacingConfig.minBarlineEdgeGapPx)
@@ -272,15 +339,44 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
   })
 
   return metas.map((meta) => {
+    const shouldProbePrecisely = meta.pairIndex < eagerProbeMeasureLimit
+    const cacheKey =
+      shouldProbePrecisely && widthCache !== undefined
+        ? buildMeasureWidthCacheKey({
+            meta,
+            spacingConfig,
+            minMeasureWidthPx,
+          })
+        : null
+    if (cacheKey && widthCache) {
+      const cachedWidth = widthCache.get(cacheKey)
+      if (Number.isFinite(cachedWidth)) {
+        return Math.max(minMeasureWidthPx, cachedWidth as number)
+      }
+    }
+
     const measureTicks = Math.max(
       1,
       Math.round(meta.timeSignature.beats * TICKS_PER_BEAT * (4 / meta.timeSignature.beatType)),
     )
     const timelineSpan = getMeasureUniformTimelineWeightSpan(meta.measure, measureTicks, spacingConfig)
+    const estimatedDecorationWidth =
+      meta.isSystemStart
+        ? EST_SYSTEM_START_DECORATION_PX
+        : meta.showKeySignature || meta.showTimeSignature
+          ? EST_INLINE_DECORATION_PX
+          : 0
     let width = Math.max(
       minMeasureWidthPx,
-      Number((sharedAxisPaddingPx + edgeGapBudgetPx + timelineSpan).toFixed(3)),
+      Number((sharedAxisPaddingPx + edgeGapBudgetPx + timelineSpan + estimatedDecorationWidth).toFixed(3)),
     )
+
+    if (!shouldProbePrecisely) {
+      if (cacheKey && widthCache) {
+        widthCache.set(cacheKey, width)
+      }
+      return width
+    }
 
     for (let iteration = 0; iteration < maxIterations; iteration += 1) {
       const probe = probeMeasureSpacing(context, meta, width, spacingConfig)
@@ -313,6 +409,9 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
       width = nextWidth
     }
 
+    if (cacheKey && widthCache) {
+      widthCache.set(cacheKey, width)
+    }
     return width
   })
 }
