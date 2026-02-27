@@ -1,11 +1,7 @@
 import { BarlineType, Renderer, Stave } from 'vexflow'
 import {
-  CHROMATIC_STEPS,
-  PIANO_MAX_MIDI,
-  PIANO_MIN_MIDI,
   SCORE_PAGE_PADDING_X,
   SCORE_TOP_PADDING,
-  STEP_TO_SEMITONE,
   SYSTEM_BASS_OFFSET_Y,
   DURATION_TICKS,
   SYSTEM_GAP_Y,
@@ -27,7 +23,7 @@ import {
   type TimeAxisSpacingConfig,
 } from '../layout/timeAxisSpacing'
 import { resolveEffectiveBoundary } from '../layout/effectiveBoundary'
-import { getStepOctaveAlterFromPitch } from '../pitchMath'
+import { getStaffStepDelta, resolveGroupedTargetPitch } from '../dragPitchTransform'
 import type {
   DragState,
   LayoutReflowHint,
@@ -46,20 +42,6 @@ const OVERFLOW_RECOVERY_PAD_PX = 2
 const EDGE_EXCESS_SHRINK_MAX_STEP_PX = 48
 const MIN_TIMELINE_WEIGHT = 0.0001
 const MIN_FORMAT_WIDTH_PX = 8
-
-function pitchToMidi(pitch: string): number | null {
-  const { step, octave, alter } = getStepOctaveAlterFromPitch(pitch)
-  const semitone = STEP_TO_SEMITONE[step]
-  if (semitone === undefined) return null
-  return (octave + 1) * 12 + semitone + alter
-}
-
-function midiToPitch(midi: number): string {
-  const clampedMidi = Math.max(PIANO_MIN_MIDI, Math.min(PIANO_MAX_MIDI, Math.round(midi)))
-  const note = CHROMATIC_STEPS[clampedMidi % 12]
-  const octave = Math.floor(clampedMidi / 12) - 1
-  return `${note}/${octave}`
-}
 
 type DragPreviewNoteOverride = {
   noteId: string
@@ -381,15 +363,12 @@ export function renderVisibleSystems(params: {
     })
 
     if (dragPreview.groupMoveTargets && dragPreview.groupMoveTargets.length > 0) {
-      const originMidi = pitchToMidi(dragPreview.originPitch ?? dragPreview.pitch)
-      const currentMidi = pitchToMidi(dragPreview.pitch)
-      const pitchDelta = originMidi === null || currentMidi === null ? null : currentMidi - originMidi
+      const staffStepDelta = getStaffStepDelta(dragPreview.originPitch ?? dragPreview.pitch, dragPreview.pitch)
       dragPreview.groupMoveTargets.forEach((target) => {
         const targetKey = `${target.staff}:${target.pairIndex}:${target.noteIndex}:${target.noteId}:${target.keyIndex}`
         if (linkedTargetKeys.has(targetKey)) return
-        const sourceMidi = pitchToMidi(target.pitch)
-        if (sourceMidi === null) return
-        const overridePitch = pitchDelta === null ? target.pitch : midiToPitch(sourceMidi + pitchDelta)
+        const overridePitch = resolveGroupedTargetPitch(target, staffStepDelta)
+        if (!overridePitch) return
         appendPreviewOverride({
           noteId: target.noteId,
           staff: target.staff,

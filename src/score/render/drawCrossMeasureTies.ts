@@ -1,5 +1,6 @@
-import type { Renderer } from 'vexflow'
+import { StaveTie, type Renderer } from 'vexflow'
 import type { MeasureLayout, MeasurePair, NoteLayout, Pitch, ScoreNote, StaffKind } from '../types'
+import { getPitchLine } from '../pitchUtils'
 
 type TieKeySpec = {
   keyIndex: number
@@ -42,24 +43,29 @@ function drawTieCurve(
   startY: number,
   endX: number,
   endY: number,
+  direction: number,
 ): void {
   const safeStartX = Math.min(startX, endX - 0.5)
   const safeEndX = Math.max(endX, startX + 0.5)
-  const span = Math.max(1, safeEndX - safeStartX)
-  const depth = Math.max(3.5, Math.min(10, span * 0.22))
-  const centerX = (safeStartX + safeEndX) * 0.5
-  const outerY = Math.max(startY, endY) + depth
-  const innerY = outerY - 1.8
+  const tie = new StaveTie({
+    firstNote: { getYs: () => [startY] } as any,
+    lastNote: { getYs: () => [endY] } as any,
+    firstIndexes: [0],
+    lastIndexes: [0],
+  })
+  tie.setContext(context)
+  tie.renderTie({
+    firstX: safeStartX,
+    lastX: safeEndX,
+    firstYs: [startY],
+    lastYs: [endY],
+    direction,
+  })
+}
 
-  context.save()
-  context.setFillStyle('#111111')
-  context.beginPath()
-  context.moveTo(safeStartX, startY)
-  context.quadraticCurveTo(centerX, outerY, safeEndX, endY)
-  context.quadraticCurveTo(centerX, innerY, safeStartX, startY)
-  context.closePath()
-  context.fill()
-  context.restore()
+function resolveTieDirection(staff: StaffKind, pitch: Pitch): number {
+  const line = getPitchLine(staff, pitch)
+  return line < 3 ? 1 : -1
 }
 
 function getStaffNotes(measurePair: MeasurePair | undefined, staff: StaffKind): ScoreNote[] {
@@ -191,7 +197,14 @@ export function drawCrossMeasureTies(params: {
                 )
                 const toAnchor = getHeadAnchor(nextLayout, nextTarget.keyIndex, spec.pitch)
                 if (toAnchor) {
-                  drawTieCurve(context, fromAnchor.x, fromAnchor.y, toAnchor.x, toAnchor.y)
+                  drawTieCurve(
+                    context,
+                    fromAnchor.x,
+                    fromAnchor.y,
+                    toAnchor.x,
+                    toAnchor.y,
+                    resolveTieDirection(staff, spec.pitch),
+                  )
                   return
                 }
               }
@@ -200,7 +213,14 @@ export function drawCrossMeasureTies(params: {
             if (allowBoundaryPartialTies) {
               const rightBoundaryX = currentLayout.measureX + currentLayout.measureWidth - 1
               if (rightBoundaryX > fromAnchor.x + 0.5) {
-                drawTieCurve(context, fromAnchor.x, fromAnchor.y, rightBoundaryX, fromAnchor.y)
+                drawTieCurve(
+                  context,
+                  fromAnchor.x,
+                  fromAnchor.y,
+                  rightBoundaryX,
+                  fromAnchor.y,
+                  resolveTieDirection(staff, spec.pitch),
+                )
               }
             }
           }
@@ -220,7 +240,14 @@ export function drawCrossMeasureTies(params: {
             if (allowBoundaryPartialTies) {
               const leftBoundaryX = currentLayout.measureX + 1
               if (fromAnchor.x > leftBoundaryX + 0.5) {
-                drawTieCurve(context, leftBoundaryX, fromAnchor.y, fromAnchor.x, fromAnchor.y)
+                drawTieCurve(
+                  context,
+                  leftBoundaryX,
+                  fromAnchor.y,
+                  fromAnchor.x,
+                  fromAnchor.y,
+                  resolveTieDirection(staff, spec.pitch),
+                )
               }
             }
           }

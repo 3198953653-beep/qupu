@@ -162,6 +162,8 @@ export type DragTieTarget = {
   noteId: string
   keyIndex: number
   pitch: Pitch
+  contextKeyFifths?: number
+  contextAccidentalStateBeforeNote?: Map<string, number>
 }
 
 export type MeasureLayout = {

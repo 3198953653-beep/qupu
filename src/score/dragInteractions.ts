@@ -4,9 +4,8 @@ import {
   isSameStaffPositionPitch,
   normalizeMeasurePairAt,
 } from './accidentals'
-import { CHROMATIC_STEPS, PIANO_MAX_MIDI, PIANO_MIN_MIDI, STEP_TO_SEMITONE } from './constants'
 import { createDragStateFromHit, resolveCurrentNoteForHit, resolveKeyFifthsForPair, resolveMeasureStaffNotesForHit } from './dragStart'
-import { getStepOctaveAlterFromPitch } from './pitchMath'
+import { getStaffStepDelta, resolveGroupedTargetPitch } from './dragPitchTransform'
 import { getNearestPitchByY } from './pitchUtils'
 import {
   flattenBassFromPairs,
@@ -154,61 +153,28 @@ function updatePairsPitchAtAbsoluteTargets(params: {
   }
 }
 
-function pitchToMidi(pitch: Pitch): number | null {
-  const { step, octave, alter } = getStepOctaveAlterFromPitch(pitch)
-  const semitone = STEP_TO_SEMITONE[step]
-  if (semitone === undefined) return null
-  return (octave + 1) * 12 + semitone + alter
-}
-
-function midiToPitch(midi: number): Pitch {
-  const clamped = Math.max(PIANO_MIN_MIDI, Math.min(PIANO_MAX_MIDI, Math.round(midi)))
-  const note = CHROMATIC_STEPS[clamped % 12]
-  const octave = Math.floor(clamped / 12) - 1
-  return `${note}/${octave}`
-}
-
-function resolvePitchDeltaSemitones(from: Pitch, to: Pitch): number | null {
-  const fromMidi = pitchToMidi(from)
-  const toMidi = pitchToMidi(to)
-  if (fromMidi === null || toMidi === null) return null
-  return toMidi - fromMidi
-}
-
 function toTargetKey(target: DragTieTarget): string {
   return `${target.staff}:${target.pairIndex}:${target.noteIndex}:${target.noteId}:${target.keyIndex}`
 }
 
 function buildGroupAbsoluteTargets(params: {
-  sourcePairs: MeasurePair[]
   groupTargets: DragTieTarget[] | undefined
-  pitchDeltaSemitones: number
+  staffStepDelta: number | null
   reservedTargetKeys: Set<string>
 }): AbsolutePitchTarget[] {
-  const { sourcePairs, groupTargets, pitchDeltaSemitones, reservedTargetKeys } = params
-  if (!groupTargets || groupTargets.length === 0 || pitchDeltaSemitones === 0) return []
+  const { groupTargets, staffStepDelta, reservedTargetKeys } = params
+  if (!groupTargets || groupTargets.length === 0 || staffStepDelta === null || staffStepDelta === 0) return []
   const result: AbsolutePitchTarget[] = []
   const seen = new Set<string>()
   groupTargets.forEach((target) => {
     const key = toTargetKey(target)
     if (reservedTargetKeys.has(key) || seen.has(key)) return
-    const pair = sourcePairs[target.pairIndex]
-    const sourceNote =
-      target.staff === 'treble'
-        ? pair?.treble[target.noteIndex]
-        : pair?.bass[target.noteIndex]
-    const sourcePitch =
-      sourceNote && !sourceNote.isRest
-        ? (target.keyIndex <= 0
-            ? sourceNote.pitch
-            : sourceNote.chordPitches?.[target.keyIndex - 1] ?? sourceNote.pitch)
-        : target.pitch
-    const sourceMidi = pitchToMidi(sourcePitch)
-    if (sourceMidi === null) return
+    const targetPitch = resolveGroupedTargetPitch(target, staffStepDelta)
+    if (!targetPitch) return
     seen.add(key)
     result.push({
       ...target,
-      targetPitch: midiToPitch(sourceMidi + pitchDeltaSemitones),
+      targetPitch,
     })
   })
   return result
@@ -338,7 +304,7 @@ export function commitDragPitchToScoreData(params: {
   | { normalizedPairs: MeasurePair[]; fromImported: true; layoutReflowHint: LayoutReflowHint }
   | { normalizedPairs: MeasurePair[]; trebleNotes: ScoreNote[]; bassNotes: ScoreNote[]; fromImported: false; layoutReflowHint: LayoutReflowHint } {
   const { drag, pitch, importedPairs, importedNoteLookup, currentPairs, importedKeyFifths } = params
-  const pitchDeltaSemitones = resolvePitchDeltaSemitones(drag.originPitch ?? drag.pitch, pitch)
+  const staffStepDelta = getStaffStepDelta(drag.originPitch ?? drag.pitch, pitch)
 
   if (importedPairs) {
     const sourcePairs = importedPairs
@@ -371,14 +337,11 @@ export function commitDragPitchToScoreData(params: {
           }
     const primaryTargetKeys = new Set<string>(tieTargets.map((target) => toTargetKey(target)))
     const groupAbsoluteTargets =
-      pitchDeltaSemitones === null
-        ? []
-        : buildGroupAbsoluteTargets({
-            sourcePairs: updatedByPrimary,
-            groupTargets: drag.groupMoveTargets,
-            pitchDeltaSemitones,
-            reservedTargetKeys: primaryTargetKeys,
-          })
+      buildGroupAbsoluteTargets({
+        groupTargets: drag.groupMoveTargets,
+        staffStepDelta,
+        reservedTargetKeys: primaryTargetKeys,
+      })
     const { nextPairs: updated, changedPairIndices: groupChangedPairIndices } = updatePairsPitchAtAbsoluteTargets({
       pairs: updatedByPrimary,
       targets: groupAbsoluteTargets,
@@ -419,14 +382,11 @@ export function commitDragPitchToScoreData(params: {
         }
   const primaryTargetKeys = new Set<string>(tieTargets.map((target) => toTargetKey(target)))
   const groupAbsoluteTargets =
-    pitchDeltaSemitones === null
-      ? []
-      : buildGroupAbsoluteTargets({
-          sourcePairs: updatedByPrimary,
-          groupTargets: drag.groupMoveTargets,
-          pitchDeltaSemitones,
-          reservedTargetKeys: primaryTargetKeys,
-        })
+    buildGroupAbsoluteTargets({
+      groupTargets: drag.groupMoveTargets,
+      staffStepDelta,
+      reservedTargetKeys: primaryTargetKeys,
+    })
   const { nextPairs: updated, changedPairIndices: groupChangedPairIndices } = updatePairsPitchAtAbsoluteTargets({
     pairs: updatedByPrimary,
     targets: groupAbsoluteTargets,

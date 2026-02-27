@@ -1,4 +1,6 @@
 import type { Dispatch, MutableRefObject, PointerEvent, SetStateAction } from 'react'
+import { buildAccidentalStateBeforeNote } from './accidentals'
+import { resolveKeyFifthsForPair } from './dragStart'
 import { getHitNote } from './layout/hitTest'
 import type { HitGridIndex } from './layout/hitTest'
 import { buildDragStateForHit, getDragMovePitch } from './dragInteractions'
@@ -94,8 +96,17 @@ function buildSelectionGroupMoveTargets(params: {
   primarySelection: Selection
   measurePairs: MeasurePair[]
   importedNoteLookup: Map<string, ImportedNoteLocation>
+  measureLayouts: Map<number, MeasureLayout>
+  importedKeyFifths: number[] | null
 }): DragTieTarget[] {
-  const { effectiveSelections, primarySelection, measurePairs, importedNoteLookup } = params
+  const {
+    effectiveSelections,
+    primarySelection,
+    measurePairs,
+    importedNoteLookup,
+    measureLayouts,
+    importedKeyFifths,
+  } = params
   if (effectiveSelections.length <= 1) return []
 
   const targets: DragTieTarget[] = []
@@ -134,8 +145,24 @@ function buildSelectionGroupMoveTargets(params: {
     normalizedTargets.forEach((target) => {
       const key = makeTargetKey(target)
       if (seen.has(key)) return
+      const targetPair = measurePairs[target.pairIndex]
+      const targetStaffNotes = target.staff === 'treble' ? targetPair?.treble : targetPair?.bass
+      const targetNote = targetStaffNotes?.[target.noteIndex]
+      const contextKeyFifths = resolveKeyFifthsForPair({
+        pairIndex: target.pairIndex,
+        measureLayouts,
+        importedKeyFifths,
+      })
+      const contextAccidentalStateBeforeNote =
+        targetStaffNotes && targetNote?.id === target.noteId
+          ? buildAccidentalStateBeforeNote(targetStaffNotes, target.noteIndex, contextKeyFifths)
+          : new Map<string, number>()
       seen.add(key)
-      targets.push(target)
+      targets.push({
+        ...target,
+        contextKeyFifths,
+        contextAccidentalStateBeforeNote,
+      })
     })
   })
 
@@ -243,6 +270,8 @@ export function handleBeginDragPointer(params: {
     primarySelection: selection,
     measurePairs: importedPairs ?? currentMeasurePairs,
     importedNoteLookup,
+    measureLayouts,
+    importedKeyFifths,
   })
   onSelectionPointerDown?.(selection, appendSelection)
   setActiveSelection(upsertSelection(selection))
