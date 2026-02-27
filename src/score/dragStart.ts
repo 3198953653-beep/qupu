@@ -91,6 +91,7 @@ export function createDragStateFromHit(params: {
     surfaceTop,
     surfaceClientToScoreScaleY,
     startClientY,
+    originPitch: pitch,
     pitch,
     previewStarted: false,
     grabOffsetY,

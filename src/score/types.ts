@@ -137,10 +137,12 @@ export type DragState = {
   pairIndex: number
   noteIndex: number
   linkedTieTargets?: DragTieTarget[]
+  groupMoveTargets?: DragTieTarget[]
   pointerId: number
   surfaceTop: number
   surfaceClientToScoreScaleY: number
   startClientY: number
+  originPitch: Pitch
   pitch: Pitch
   previewStarted: boolean
   grabOffsetY: number

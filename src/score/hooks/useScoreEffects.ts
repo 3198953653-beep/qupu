@@ -158,6 +158,8 @@ export function useScoreRenderEffect(params: {
   measureTimeSignaturesFromImport: TimeSignature[] | null
   activeSelection?: Selection | null
   draggingSelection?: Selection | null
+  activeSelections?: Selection[] | null
+  draggingSelections?: Selection[] | null
   layoutReflowHintRef?: MutableRefObject<LayoutReflowHint | null>
   layoutStabilityKey?: string
   noteLayoutsRef: MutableRefObject<NoteLayout[]>
@@ -194,6 +196,8 @@ export function useScoreRenderEffect(params: {
     measureTimeSignaturesFromImport,
     activeSelection = null,
     draggingSelection = null,
+    activeSelections = null,
+    draggingSelections = null,
     layoutReflowHintRef,
     layoutStabilityKey,
     noteLayoutsRef,
@@ -279,6 +283,8 @@ export function useScoreRenderEffect(params: {
       measureTimeSignaturesFromImport,
       activeSelection,
       draggingSelection,
+      activeSelections,
+      draggingSelections,
       layoutReflowHint,
       layoutStabilityKey,
       previousNoteLayoutsByPair,
@@ -313,6 +319,8 @@ export function useScoreRenderEffect(params: {
     measureTimeSignaturesFromImport,
     activeSelection,
     draggingSelection,
+    activeSelections,
+    draggingSelections,
     layoutReflowHintRef,
     layoutStabilityKey,
     noteLayoutsRef,

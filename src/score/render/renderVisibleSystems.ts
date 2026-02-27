@@ -1,7 +1,11 @@
 import { BarlineType, Renderer, Stave } from 'vexflow'
 import {
+  CHROMATIC_STEPS,
+  PIANO_MAX_MIDI,
+  PIANO_MIN_MIDI,
   SCORE_PAGE_PADDING_X,
   SCORE_TOP_PADDING,
+  STEP_TO_SEMITONE,
   SYSTEM_BASS_OFFSET_Y,
   DURATION_TICKS,
   SYSTEM_GAP_Y,
@@ -23,6 +27,7 @@ import {
   type TimeAxisSpacingConfig,
 } from '../layout/timeAxisSpacing'
 import { resolveEffectiveBoundary } from '../layout/effectiveBoundary'
+import { getStepOctaveAlterFromPitch } from '../pitchMath'
 import type {
   DragState,
   LayoutReflowHint,
@@ -41,6 +46,20 @@ const OVERFLOW_RECOVERY_PAD_PX = 2
 const EDGE_EXCESS_SHRINK_MAX_STEP_PX = 48
 const MIN_TIMELINE_WEIGHT = 0.0001
 const MIN_FORMAT_WIDTH_PX = 8
+
+function pitchToMidi(pitch: string): number | null {
+  const { step, octave, alter } = getStepOctaveAlterFromPitch(pitch)
+  const semitone = STEP_TO_SEMITONE[step]
+  if (semitone === undefined) return null
+  return (octave + 1) * 12 + semitone + alter
+}
+
+function midiToPitch(midi: number): string {
+  const clampedMidi = Math.max(PIANO_MIN_MIDI, Math.min(PIANO_MAX_MIDI, Math.round(midi)))
+  const note = CHROMATIC_STEPS[clampedMidi % 12]
+  const octave = Math.floor(clampedMidi / 12) - 1
+  return `${note}/${octave}`
+}
 
 type DragPreviewNoteOverride = {
   noteId: string
@@ -271,6 +290,8 @@ export function renderVisibleSystems(params: {
   measureTimeSignaturesFromImport: TimeSignature[] | null
   activeSelection: Selection | null
   draggingSelection: Selection | null
+  activeSelections?: Selection[] | null
+  draggingSelections?: Selection[] | null
   previousNoteLayoutsByPair?: Map<number, NoteLayout[]> | null
   previousMeasureLayouts?: Map<number, MeasureLayout> | null
   allowSelectionFreezeWhenNotDragging?: boolean
@@ -302,6 +323,8 @@ export function renderVisibleSystems(params: {
     measureTimeSignaturesFromImport,
     activeSelection,
     draggingSelection,
+    activeSelections = null,
+    draggingSelections = null,
     previousNoteLayoutsByPair = null,
     previousMeasureLayouts = null,
     allowSelectionFreezeWhenNotDragging = true,
@@ -315,6 +338,23 @@ export function renderVisibleSystems(params: {
   const spacingConfig = timeAxisSpacingConfig ?? DEFAULT_TIME_AXIS_SPACING_CONFIG
   const dragPreviewOverridesByPair = new Map<number, DragPreviewNoteOverride[]>()
   if (dragPreview && dragPreview.previewStarted) {
+    const appendPreviewOverride = (override: DragPreviewNoteOverride, pairIndex: number) => {
+      const pairOverrides = dragPreviewOverridesByPair.get(pairIndex)
+      if (!pairOverrides) {
+        dragPreviewOverridesByPair.set(pairIndex, [override])
+        return
+      }
+      const exists = pairOverrides.some(
+        (entry) =>
+          entry.noteId === override.noteId &&
+          entry.staff === override.staff &&
+          entry.keyIndex === override.keyIndex,
+      )
+      if (!exists) {
+        pairOverrides.push(override)
+      }
+    }
+
     const linkedTargets =
       dragPreview.linkedTieTargets && dragPreview.linkedTieTargets.length > 0
         ? dragPreview.linkedTieTargets
@@ -328,20 +368,36 @@ export function renderVisibleSystems(params: {
               pitch: dragPreview.pitch,
             },
           ]
+    const linkedTargetKeys = new Set<string>()
     linkedTargets.forEach((target) => {
-      const pairOverrides = dragPreviewOverridesByPair.get(target.pairIndex)
+      linkedTargetKeys.add(`${target.staff}:${target.pairIndex}:${target.noteIndex}:${target.noteId}:${target.keyIndex}`)
       const override: DragPreviewNoteOverride = {
         noteId: target.noteId,
         staff: target.staff,
         pitch: dragPreview.pitch,
         keyIndex: target.keyIndex,
       }
-      if (pairOverrides) {
-        pairOverrides.push(override)
-      } else {
-        dragPreviewOverridesByPair.set(target.pairIndex, [override])
-      }
+      appendPreviewOverride(override, target.pairIndex)
     })
+
+    if (dragPreview.groupMoveTargets && dragPreview.groupMoveTargets.length > 0) {
+      const originMidi = pitchToMidi(dragPreview.originPitch ?? dragPreview.pitch)
+      const currentMidi = pitchToMidi(dragPreview.pitch)
+      const pitchDelta = originMidi === null || currentMidi === null ? null : currentMidi - originMidi
+      dragPreview.groupMoveTargets.forEach((target) => {
+        const targetKey = `${target.staff}:${target.pairIndex}:${target.noteIndex}:${target.noteId}:${target.keyIndex}`
+        if (linkedTargetKeys.has(targetKey)) return
+        const sourceMidi = pitchToMidi(target.pitch)
+        if (sourceMidi === null) return
+        const overridePitch = pitchDelta === null ? target.pitch : midiToPitch(sourceMidi + pitchDelta)
+        appendPreviewOverride({
+          noteId: target.noteId,
+          staff: target.staff,
+          pitch: overridePitch,
+          keyIndex: target.keyIndex,
+        }, target.pairIndex)
+      })
+    }
   }
 
   const nextLayouts: NoteLayout[] = []
@@ -718,6 +774,8 @@ export function renderVisibleSystems(params: {
           showEndTimeSignature: entry.showEndTimeSignature,
           activeSelection,
           draggingSelection,
+          activeSelections,
+          draggingSelections,
           formatWidthOverride: formatWidth,
           timeAxisSpacingConfig: spacingConfig,
           spacingLayoutMode,
@@ -885,6 +943,8 @@ export function renderVisibleSystems(params: {
           showEndTimeSignature: entry.showEndTimeSignature,
           activeSelection,
           draggingSelection,
+          activeSelections,
+          draggingSelections,
           formatWidthOverride: formatWidth,
           timeAxisSpacingConfig: spacingConfig,
           spacingLayoutMode,
@@ -1075,6 +1135,8 @@ export function renderVisibleSystems(params: {
         showEndTimeSignature: entry.showEndTimeSignature,
         activeSelection: null,
         draggingSelection: null,
+        activeSelections: null,
+        draggingSelections: null,
         collectLayouts: true,
         skipPainting: true,
         formatWidthOverride: formatWidth,
@@ -1186,6 +1248,8 @@ export function renderVisibleSystems(params: {
         showEndTimeSignature: entry.showEndTimeSignature,
         activeSelection,
         draggingSelection,
+        activeSelections,
+        draggingSelections,
         formatWidthOverride: formatWidth,
         timeAxisSpacingConfig: spacingConfig,
         spacingLayoutMode,

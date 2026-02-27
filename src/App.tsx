@@ -542,6 +542,15 @@ function getSelectionKey(selection: Selection): string {
   return `${selection.staff}|${selection.noteId}|${selection.keyIndex}`
 }
 
+function isSameSelection(left: Selection, right: Selection): boolean {
+  return left.noteId === right.noteId && left.staff === right.staff && left.keyIndex === right.keyIndex
+}
+
+function appendUniqueSelection(current: Selection[], next: Selection): Selection[] {
+  if (current.some((entry) => isSameSelection(entry, next))) return current
+  return [...current, next]
+}
+
 function buildMeasureStaffOnsetEntries(notes: ScoreNote[]): MeasureStaffOnsetEntry[] {
   const entries: MeasureStaffOnsetEntry[] = []
   let cursorTicks = 0
@@ -928,6 +937,9 @@ function App() {
   const [bassNotes, setBassNotes] = useState<ScoreNote[]>(INITIAL_BASS_NOTES)
   const [rhythmPreset, setRhythmPreset] = useState<RhythmPresetId>('quarter')
   const [activeSelection, setActiveSelection] = useState<Selection>({ noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 })
+  const [selectedSelections, setSelectedSelections] = useState<Selection[]>([
+    { noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 },
+  ])
   const [isSelectionVisible, setIsSelectionVisible] = useState(true)
   const [draggingSelection, setDraggingSelection] = useState<Selection | null>(null)
   const [dragPreviewState, setDragPreviewState] = useState<DragState | null>(null)
@@ -1328,6 +1340,8 @@ function App() {
     measureTimeSignaturesFromImport,
     activeSelection: isSelectionVisible ? activeSelection : null,
     draggingSelection,
+    activeSelections: isSelectionVisible ? selectedSelections : [],
+    draggingSelections: draggingSelection ? [draggingSelection] : [],
     layoutReflowHintRef,
     layoutStabilityKey,
     noteLayoutsRef,
@@ -1433,11 +1447,21 @@ function App() {
     setDragPreviewState,
     setActiveSelection,
     setDraggingSelection,
+    currentSelections: selectedSelections,
+    onSelectionPointerDown: (selection, append) => {
+      setSelectedSelections((current) => {
+        if (append) return appendUniqueSelection(current, selection)
+        const alreadySelected = current.some((entry) => isSameSelection(entry, selection))
+        if (alreadySelected && current.length > 0) return current
+        return [selection]
+      })
+    },
     onBeforeApplyScoreChange: (sourcePairs) => {
       pushUndoSnapshot(sourcePairs)
     },
     onBlankPointerDown: () => {
       setIsSelectionVisible(false)
+      setSelectedSelections([])
     },
     onSelectionActivated: () => {
       setIsSelectionVisible(true)
@@ -1558,6 +1582,29 @@ function App() {
     isSelectionVisibleRef.current = isSelectionVisible
   }, [isSelectionVisible])
   useEffect(() => {
+    const exists = (selection: Selection): boolean =>
+      selection.staff === 'treble'
+        ? trebleNoteById.has(selection.noteId)
+        : bassNoteById.has(selection.noteId)
+
+    setSelectedSelections((current) => {
+      if (!isSelectionVisible) {
+        return current.length === 0 ? current : []
+      }
+      const filtered = current.filter((selection) => exists(selection))
+      const withActive = exists(activeSelection)
+        ? appendUniqueSelection(filtered, activeSelection)
+        : filtered
+      if (
+        withActive.length === current.length &&
+        withActive.every((entry, index) => isSameSelection(entry, current[index]))
+      ) {
+        return current
+      }
+      return withActive
+    })
+  }, [activeSelection, isSelectionVisible, trebleNoteById, bassNoteById])
+  useEffect(() => {
     importFeedbackRef.current = importFeedback
   }, [importFeedback])
 
@@ -1595,6 +1642,7 @@ function App() {
     setBassNotes(flattenBassFromPairs(restoredPairs))
     setIsSelectionVisible(snapshot.isSelectionVisible)
     setActiveSelection(snapshot.selection)
+    setSelectedSelections(snapshot.isSelectionVisible ? [snapshot.selection] : [])
     return true
   }, [clearDragOverlay, setBassNotes, setMeasurePairsFromImport, setNotes, setDraggingSelection])
 
@@ -1612,6 +1660,7 @@ function App() {
       setBassNotes(flattenBassFromPairs(nextPairs))
       setIsSelectionVisible(true)
       setActiveSelection(nextSelection)
+      setSelectedSelections([nextSelection])
     },
     [pushUndoSnapshot, setBassNotes, setMeasurePairsFromImport, setNotes, setActiveSelection],
   )
@@ -1685,6 +1734,7 @@ function App() {
       surfaceTop: 0,
       surfaceClientToScoreScaleY: 1,
       startClientY: 0,
+      originPitch: selectedPitch,
       pitch: selectedPitch,
       previewStarted: false,
       grabOffsetY: 0,
@@ -1972,6 +2022,7 @@ function App() {
     const { selection, pairIndex } = target
     setIsSelectionVisible(true)
     setActiveSelection(selection)
+    setSelectedSelections([selection])
     setDraggingSelection(null)
     closeOsmdPreview()
 

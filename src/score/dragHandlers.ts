@@ -58,6 +58,8 @@ export function useDragHandlers(params: {
   setDragPreviewState: StateSetter<DragState | null>
   setActiveSelection: StateSetter<Selection>
   setDraggingSelection: StateSetter<Selection | null>
+  currentSelections: Selection[]
+  onSelectionPointerDown?: (selection: Selection, append: boolean) => void
   onBeforeApplyScoreChange?: (sourcePairs: MeasurePair[]) => void
   onBlankPointerDown?: () => void
   onSelectionActivated?: () => void
@@ -117,6 +119,8 @@ export function useDragHandlers(params: {
     setDragPreviewState,
     setActiveSelection,
     setDraggingSelection,
+    currentSelections,
+    onSelectionPointerDown,
     onBeforeApplyScoreChange,
     onBlankPointerDown,
     onSelectionActivated,
@@ -304,8 +308,10 @@ export function useDragHandlers(params: {
       importedKeyFifths: measureKeyFifthsFromImportRef.current,
       pitches,
       dragRef,
+      currentSelections,
       setActiveSelection,
       setDraggingSelection,
+      onSelectionPointerDown,
       onBlankPointerDown,
       onSelectionActivated,
     })

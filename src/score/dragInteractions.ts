@@ -4,7 +4,9 @@ import {
   isSameStaffPositionPitch,
   normalizeMeasurePairAt,
 } from './accidentals'
+import { CHROMATIC_STEPS, PIANO_MAX_MIDI, PIANO_MIN_MIDI, STEP_TO_SEMITONE } from './constants'
 import { createDragStateFromHit, resolveCurrentNoteForHit, resolveKeyFifthsForPair, resolveMeasureStaffNotesForHit } from './dragStart'
+import { getStepOctaveAlterFromPitch } from './pitchMath'
 import { getNearestPitchByY } from './pitchUtils'
 import {
   flattenBassFromPairs,
@@ -108,6 +110,108 @@ function updatePairsPitchAtTieTargets(params: {
     nextPairs,
     changedPairIndices: [...changedPairIndices].sort((left, right) => left - right),
   }
+}
+
+type AbsolutePitchTarget = DragTieTarget & {
+  targetPitch: Pitch
+}
+
+function updatePairsPitchAtAbsoluteTargets(params: {
+  pairs: MeasurePair[]
+  targets: AbsolutePitchTarget[]
+}): { nextPairs: MeasurePair[]; changedPairIndices: number[] } {
+  const { pairs, targets } = params
+  if (targets.length === 0) return { nextPairs: pairs, changedPairIndices: [] }
+
+  let nextPairs = pairs
+  const changedPairIndices = new Set<number>()
+
+  targets.forEach((target) => {
+    const pair = nextPairs[target.pairIndex]
+    if (!pair) return
+    const sourceNotes = target.staff === 'treble' ? pair.treble : pair.bass
+    const sourceNote = sourceNotes[target.noteIndex]
+    if (!sourceNote || sourceNote.id !== target.noteId) return
+    const nextNote = updateScoreNotePitchAtKey(sourceNote, target.targetPitch, target.keyIndex)
+    if (nextNote === sourceNote) return
+
+    if (nextPairs === pairs) {
+      nextPairs = pairs.slice()
+    }
+    const nextPair = nextPairs[target.pairIndex] ?? pair
+    const nextStaffNotes = sourceNotes.slice()
+    nextStaffNotes[target.noteIndex] = nextNote
+    nextPairs[target.pairIndex] =
+      target.staff === 'treble'
+        ? { treble: nextStaffNotes, bass: nextPair.bass }
+        : { treble: nextPair.treble, bass: nextStaffNotes }
+    changedPairIndices.add(target.pairIndex)
+  })
+
+  return {
+    nextPairs,
+    changedPairIndices: [...changedPairIndices].sort((left, right) => left - right),
+  }
+}
+
+function pitchToMidi(pitch: Pitch): number | null {
+  const { step, octave, alter } = getStepOctaveAlterFromPitch(pitch)
+  const semitone = STEP_TO_SEMITONE[step]
+  if (semitone === undefined) return null
+  return (octave + 1) * 12 + semitone + alter
+}
+
+function midiToPitch(midi: number): Pitch {
+  const clamped = Math.max(PIANO_MIN_MIDI, Math.min(PIANO_MAX_MIDI, Math.round(midi)))
+  const note = CHROMATIC_STEPS[clamped % 12]
+  const octave = Math.floor(clamped / 12) - 1
+  return `${note}/${octave}`
+}
+
+function resolvePitchDeltaSemitones(from: Pitch, to: Pitch): number | null {
+  const fromMidi = pitchToMidi(from)
+  const toMidi = pitchToMidi(to)
+  if (fromMidi === null || toMidi === null) return null
+  return toMidi - fromMidi
+}
+
+function toTargetKey(target: DragTieTarget): string {
+  return `${target.staff}:${target.pairIndex}:${target.noteIndex}:${target.noteId}:${target.keyIndex}`
+}
+
+function buildGroupAbsoluteTargets(params: {
+  sourcePairs: MeasurePair[]
+  groupTargets: DragTieTarget[] | undefined
+  pitchDeltaSemitones: number
+  reservedTargetKeys: Set<string>
+}): AbsolutePitchTarget[] {
+  const { sourcePairs, groupTargets, pitchDeltaSemitones, reservedTargetKeys } = params
+  if (!groupTargets || groupTargets.length === 0 || pitchDeltaSemitones === 0) return []
+  const result: AbsolutePitchTarget[] = []
+  const seen = new Set<string>()
+  groupTargets.forEach((target) => {
+    const key = toTargetKey(target)
+    if (reservedTargetKeys.has(key) || seen.has(key)) return
+    const pair = sourcePairs[target.pairIndex]
+    const sourceNote =
+      target.staff === 'treble'
+        ? pair?.treble[target.noteIndex]
+        : pair?.bass[target.noteIndex]
+    const sourcePitch =
+      sourceNote && !sourceNote.isRest
+        ? (target.keyIndex <= 0
+            ? sourceNote.pitch
+            : sourceNote.chordPitches?.[target.keyIndex - 1] ?? sourceNote.pitch)
+        : target.pitch
+    const sourceMidi = pitchToMidi(sourcePitch)
+    if (sourceMidi === null) return
+    seen.add(key)
+    result.push({
+      ...target,
+      targetPitch: midiToPitch(sourceMidi + pitchDeltaSemitones),
+    })
+  })
+  return result
 }
 
 export function buildDragStateForHit(params: {
@@ -230,10 +334,11 @@ export function commitDragPitchToScoreData(params: {
   importedNoteLookup: Map<string, ImportedNoteLocation>
   currentPairs: MeasurePair[]
   importedKeyFifths: number[] | null
-}):
+}): 
   | { normalizedPairs: MeasurePair[]; fromImported: true; layoutReflowHint: LayoutReflowHint }
   | { normalizedPairs: MeasurePair[]; trebleNotes: ScoreNote[]; bassNotes: ScoreNote[]; fromImported: false; layoutReflowHint: LayoutReflowHint } {
   const { drag, pitch, importedPairs, importedNoteLookup, currentPairs, importedKeyFifths } = params
+  const pitchDeltaSemitones = resolvePitchDeltaSemitones(drag.originPitch ?? drag.pitch, pitch)
 
   if (importedPairs) {
     const sourcePairs = importedPairs
@@ -251,7 +356,7 @@ export function commitDragPitchToScoreData(params: {
               pitch: drag.pitch,
             }]
           : []
-    const { nextPairs: updated, changedPairIndices } =
+    const { nextPairs: updatedByPrimary, changedPairIndices: primaryChangedPairIndices } =
       tieTargets.length > 0
         ? updatePairsPitchAtTieTargets({
             pairs: sourcePairs,
@@ -264,6 +369,21 @@ export function commitDragPitchToScoreData(params: {
               : updateMeasurePairsPitch(sourcePairs, drag.noteId, pitch, drag.keyIndex),
             changedPairIndices: [location?.pairIndex ?? drag.pairIndex],
           }
+    const primaryTargetKeys = new Set<string>(tieTargets.map((target) => toTargetKey(target)))
+    const groupAbsoluteTargets =
+      pitchDeltaSemitones === null
+        ? []
+        : buildGroupAbsoluteTargets({
+            sourcePairs: updatedByPrimary,
+            groupTargets: drag.groupMoveTargets,
+            pitchDeltaSemitones,
+            reservedTargetKeys: primaryTargetKeys,
+          })
+    const { nextPairs: updated, changedPairIndices: groupChangedPairIndices } = updatePairsPitchAtAbsoluteTargets({
+      pairs: updatedByPrimary,
+      targets: groupAbsoluteTargets,
+    })
+    const changedPairIndices = [...new Set([...primaryChangedPairIndices, ...groupChangedPairIndices])].sort((left, right) => left - right)
     let normalizedPairs = updated
     changedPairIndices.forEach((pairIndex) => {
       normalizedPairs = normalizeMeasurePairAt(normalizedPairs, pairIndex, importedKeyFifths)
@@ -286,7 +406,7 @@ export function commitDragPitchToScoreData(params: {
     drag.linkedTieTargets && drag.linkedTieTargets.length > 0
       ? drag.linkedTieTargets
       : []
-  const { nextPairs: updated, changedPairIndices } =
+  const { nextPairs: updatedByPrimary, changedPairIndices: primaryChangedPairIndices } =
     tieTargets.length > 0
       ? updatePairsPitchAtTieTargets({
           pairs: sourcePairs,
@@ -297,6 +417,21 @@ export function commitDragPitchToScoreData(params: {
           nextPairs: updateMeasurePairsPitch(sourcePairs, drag.noteId, pitch, drag.keyIndex),
           changedPairIndices: [drag.pairIndex],
         }
+  const primaryTargetKeys = new Set<string>(tieTargets.map((target) => toTargetKey(target)))
+  const groupAbsoluteTargets =
+    pitchDeltaSemitones === null
+      ? []
+      : buildGroupAbsoluteTargets({
+          sourcePairs: updatedByPrimary,
+          groupTargets: drag.groupMoveTargets,
+          pitchDeltaSemitones,
+          reservedTargetKeys: primaryTargetKeys,
+        })
+  const { nextPairs: updated, changedPairIndices: groupChangedPairIndices } = updatePairsPitchAtAbsoluteTargets({
+    pairs: updatedByPrimary,
+    targets: groupAbsoluteTargets,
+  })
+  const changedPairIndices = [...new Set([...primaryChangedPairIndices, ...groupChangedPairIndices])].sort((left, right) => left - right)
   let normalizedPairs = updated
   changedPairIndices.forEach((pairIndex) => {
     normalizedPairs = normalizeMeasurePairAt(normalizedPairs, pairIndex, null)

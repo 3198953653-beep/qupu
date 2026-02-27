@@ -74,6 +74,8 @@ export type DrawMeasureParams = {
   showEndTimeSignature?: boolean
   activeSelection: Selection | null
   draggingSelection: Selection | null
+  activeSelections?: Selection[] | null
+  draggingSelections?: Selection[] | null
   previewNotes?: PreviewNoteOverride[] | null
   previewNote?: { noteId: string; staff: StaffKind; pitch: Pitch; keyIndex: number } | null
   previewAccidentalStateBeforeNote?: Map<string, number> | null
@@ -121,6 +123,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     showEndTimeSignature = false,
     activeSelection: selection,
     draggingSelection: dragging,
+    activeSelections = null,
+    draggingSelections = null,
     previewNotes = null,
     previewNote = null,
     previewAccidentalStateBeforeNote = null,
@@ -153,6 +157,26 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   normalizedPreviewNotes.forEach((entry) => {
     previewNoteByLayoutKey.set(getLayoutNoteKey(entry.staff, entry.noteId), entry)
   })
+  const selectionEntries: Selection[] = selection ? [selection] : []
+  const draggingEntries: Selection[] = dragging ? [dragging] : []
+  activeSelections?.forEach((entry) => selectionEntries.push(entry))
+  draggingSelections?.forEach((entry) => draggingEntries.push(entry))
+  const selectionKeySetByLayout = new Map<string, Set<number>>()
+  const draggingKeySetByLayout = new Map<string, Set<number>>()
+  const appendSelectionKey = (
+    store: Map<string, Set<number>>,
+    selectionEntry: Selection,
+  ) => {
+    const key = getLayoutNoteKey(selectionEntry.staff, selectionEntry.noteId)
+    const current = store.get(key)
+    if (current) {
+      current.add(selectionEntry.keyIndex)
+      return
+    }
+    store.set(key, new Set([selectionEntry.keyIndex]))
+  }
+  selectionEntries.forEach((entry) => appendSelectionKey(selectionKeySetByLayout, entry))
+  draggingEntries.forEach((entry) => appendSelectionKey(draggingKeySetByLayout, entry))
   const lockPreviewAccidentalLayout = freezePreviewAccidentalLayout && normalizedPreviewNotes.length > 0
   const previewAccidentalByRowKey = new Map<string, number>()
   const accidentalLockByRowKey = new Map<string, { targetRightX: number | null; applied: boolean; reason: string }>()
@@ -425,24 +449,30 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
 
   trebleRendered.forEach(({ vexNote, renderedKeys }, noteIndex) => {
     const noteId = measure.treble[noteIndex].id
-    if (dragging?.staff === 'treble' && dragging.noteId === noteId) {
-      const renderedKeyIndex = renderedKeys.findIndex((entry) => entry.keyIndex === dragging.keyIndex)
-      vexNote.setKeyStyle(Math.max(0, renderedKeyIndex), { fillStyle: '#0e9ac7', strokeStyle: '#0e9ac7' })
-    } else if (selection && selection.staff === 'treble' && selection.noteId === noteId) {
-      const renderedKeyIndex = renderedKeys.findIndex((entry) => entry.keyIndex === selection.keyIndex)
-      vexNote.setKeyStyle(Math.max(0, renderedKeyIndex), { fillStyle: '#1f7aa8', strokeStyle: '#1f7aa8' })
-    }
+    const layoutKey = getLayoutNoteKey('treble', noteId)
+    const draggingKeySet = draggingKeySetByLayout.get(layoutKey)
+    const selectedKeySet = selectionKeySetByLayout.get(layoutKey)
+    renderedKeys.forEach((entry, renderedIndex) => {
+      if (draggingKeySet?.has(entry.keyIndex)) {
+        vexNote.setKeyStyle(Math.max(0, renderedIndex), { fillStyle: '#0e9ac7', strokeStyle: '#0e9ac7' })
+      } else if (selectedKeySet?.has(entry.keyIndex)) {
+        vexNote.setKeyStyle(Math.max(0, renderedIndex), { fillStyle: '#1f7aa8', strokeStyle: '#1f7aa8' })
+      }
+    })
   })
 
   bassRendered.forEach(({ vexNote, renderedKeys }, noteIndex) => {
     const noteId = measure.bass[noteIndex].id
-    if (dragging?.staff === 'bass' && dragging.noteId === noteId) {
-      const renderedKeyIndex = renderedKeys.findIndex((entry) => entry.keyIndex === dragging.keyIndex)
-      vexNote.setKeyStyle(Math.max(0, renderedKeyIndex), { fillStyle: '#0e9ac7', strokeStyle: '#0e9ac7' })
-    } else if (selection && selection.staff === 'bass' && selection.noteId === noteId) {
-      const renderedKeyIndex = renderedKeys.findIndex((entry) => entry.keyIndex === selection.keyIndex)
-      vexNote.setKeyStyle(Math.max(0, renderedKeyIndex), { fillStyle: '#1f7aa8', strokeStyle: '#1f7aa8' })
-    }
+    const layoutKey = getLayoutNoteKey('bass', noteId)
+    const draggingKeySet = draggingKeySetByLayout.get(layoutKey)
+    const selectedKeySet = selectionKeySetByLayout.get(layoutKey)
+    renderedKeys.forEach((entry, renderedIndex) => {
+      if (draggingKeySet?.has(entry.keyIndex)) {
+        vexNote.setKeyStyle(Math.max(0, renderedIndex), { fillStyle: '#0e9ac7', strokeStyle: '#0e9ac7' })
+      } else if (selectedKeySet?.has(entry.keyIndex)) {
+        vexNote.setKeyStyle(Math.max(0, renderedIndex), { fillStyle: '#1f7aa8', strokeStyle: '#1f7aa8' })
+      }
+    })
   })
 
   const trebleVoice = new Voice({ numBeats: timeSignature.beats, beatValue: timeSignature.beatType }).addTickables(trebleVexNotes)
