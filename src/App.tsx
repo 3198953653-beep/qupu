@@ -19,9 +19,9 @@ import {
 import { getLayoutNoteKey } from './score/layout/renderPosition'
 import {
   DEFAULT_TIME_AXIS_SPACING_CONFIG,
-  getMeasureUniformTimelineWeightSpan,
-  getUniformTickSpacingPadding,
 } from './score/layout/timeAxisSpacing'
+import { solveHorizontalMeasureWidths } from './score/layout/horizontalMeasureWidthSolver'
+import { resolveEffectiveBoundary } from './score/layout/effectiveBoundary'
 import { useDragHandlers } from './score/dragHandlers'
 import { useEditorHandlers } from './score/editorHandlers'
 import { buildMusicXmlExportPayload } from './score/musicXmlActions'
@@ -70,18 +70,11 @@ const MANUAL_SCALE_BASELINE = 0.91
 const DEFAULT_PAGE_HORIZONTAL_PADDING_PX = 86
 const ENABLE_AUTO_FIRST_MEASURE_DRAG_DEBUG = false
 const HORIZONTAL_VIEW_MEASURE_WIDTH_PX = 220
-const HORIZONTAL_VIEW_SYSTEM_START_DECORATION_PX = 96
-const HORIZONTAL_VIEW_INLINE_DECORATION_PX = 24
 const HORIZONTAL_VIEW_MIN_MEASURE_WIDTH_PX = 1
 const HORIZONTAL_VIEW_HEIGHT_PX = SCORE_TOP_PADDING * 2 + SYSTEM_HEIGHT + 26
 const MAX_CANVAS_RENDER_DIM_PX = 32760
 const HORIZONTAL_RENDER_BUFFER_PX = 1200
 const HORIZONTAL_RENDER_EDGE_BUFFER_MEASURES = 1
-const HORIZONTAL_OVERFLOW_RECOVERY_PAD_PX = 2
-const HORIZONTAL_OVERFLOW_RECOVERY_EPS_PX = 0.5
-const HORIZONTAL_OVERFLOW_GLOBAL_SCALE_EPS = 0.001
-const ENABLE_HORIZONTAL_OVERFLOW_AUTO_GROW = true
-const DEFAULT_TIME_SIGNATURE: TimeSignature = { beats: 4, beatType: 4 }
 const OSMD_PREVIEW_ZOOM_DEBOUNCE_MS = 120
 const DEFAULT_OSMD_PREVIEW_HORIZONTAL_MARGIN_PX = 9
 const DEFAULT_OSMD_PREVIEW_FIRST_PAGE_TOP_MARGIN_PX = 23
@@ -217,16 +210,6 @@ function isTextInputTarget(target: EventTarget | null): boolean {
   if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') return true
   if (target.isContentEditable) return true
   return Boolean(target.closest('[contenteditable="true"]'))
-}
-
-function hasTimeSignatureChanged(current: TimeSignature, previous: TimeSignature): boolean {
-  return current.beats !== previous.beats || current.beatType !== previous.beatType
-}
-
-function getNoteLayoutRightEdge(layout: NoteLayout): number {
-  if (Number.isFinite(layout.spacingRightX)) return layout.spacingRightX
-  if (Number.isFinite(layout.rightX)) return layout.rightX
-  return layout.x
 }
 
 function collectOsmdPreviewPages(container: HTMLElement): HTMLElement[] {
@@ -951,7 +934,6 @@ function App() {
   const [osmdPreviewBottomMarginPx, setOsmdPreviewBottomMarginPx] = useState(
     DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX,
   )
-  const [horizontalMeasureWidthOverrides, setHorizontalMeasureWidthOverrides] = useState<Record<number, number>>({})
   const [horizontalViewportXRange, setHorizontalViewportXRange] = useState<{ startX: number; endX: number }>({
     startX: 0,
     endX: A4_PAGE_WIDTH,
@@ -991,6 +973,7 @@ function App() {
   const dragPendingRef = useRef<{ drag: DragState; pitch: Pitch } | null>(null)
   const rendererRef = useRef<Renderer | null>(null)
   const rendererSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 })
+  const widthProbeRendererRef = useRef<Renderer | null>(null)
   const overlayRendererRef = useRef<Renderer | null>(null)
   const overlayRendererSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 })
   const overlayLastRectRef = useRef<MeasureLayout['overlayRect'] | null>(null)
@@ -1019,79 +1002,42 @@ function App() {
     [measurePairsFromImport, notes, bassNotes],
   )
   const spacingLayoutMode: SpacingLayoutMode = 'custom'
-  const horizontalRawMeasureWidths = useMemo(() => {
-    if (measurePairs.length === 0) return []
-
-    const uniformPadding = getUniformTickSpacingPadding(timeAxisSpacingConfig)
-    const maxBarlineEdgeGapPx = Math.max(0, timeAxisSpacingConfig.maxBarlineEdgeGapPx)
-    const sharedAxisPaddingPx = Math.max(
-      0,
-      Math.min(Math.max(0, uniformPadding.startPadPx), maxBarlineEdgeGapPx) +
-        Math.min(Math.max(0, uniformPadding.endPadPx), maxBarlineEdgeGapPx),
-    )
-    // Width model for horizontal view:
-    // 1) timeline span comes from global gap + duration ratios
-    // 2) edge-cap slider contributes explicit per-measure edge budget
-    // This keeps edge-cap meaningful (changes measure width) while timeline
-    // spacing remains controlled by duration/global sliders.
-    const edgeGapBudgetPx = maxBarlineEdgeGapPx * 2
-    const widths: number[] = []
-    let previousKeyFifths = 0
-    let previousTimeSignature = DEFAULT_TIME_SIGNATURE
-
-    for (let pairIndex = 0; pairIndex < measurePairs.length; pairIndex += 1) {
-      const measure = measurePairs[pairIndex]
-      const keyFifths = measureKeyFifthsFromImport?.[pairIndex] ?? previousKeyFifths
-      const timeSignature = measureTimeSignaturesFromImport?.[pairIndex] ?? previousTimeSignature
-      const isSystemStart = pairIndex === 0
-      const showKeySignature = isSystemStart || keyFifths !== previousKeyFifths
-      const showTimeSignature = pairIndex === 0 || hasTimeSignatureChanged(timeSignature, previousTimeSignature)
-      const measureTicks = Math.max(
-        1,
-        Math.round(timeSignature.beats * TICKS_PER_BEAT * (4 / timeSignature.beatType)),
-      )
-      const weightSpan = getMeasureUniformTimelineWeightSpan(measure, measureTicks, timeAxisSpacingConfig)
-      const decorationFixedPx = isSystemStart
-        ? HORIZONTAL_VIEW_SYSTEM_START_DECORATION_PX
-        : (showKeySignature || showTimeSignature ? HORIZONTAL_VIEW_INLINE_DECORATION_PX : 0)
-      const estimatedWidth = Math.max(
-        HORIZONTAL_VIEW_MIN_MEASURE_WIDTH_PX,
-        Number(
-          (
-            sharedAxisPaddingPx +
-            edgeGapBudgetPx +
-            decorationFixedPx +
-            weightSpan
-          ).toFixed(3),
-        ),
-      )
-      widths.push(estimatedWidth)
-      previousKeyFifths = keyFifths
-      previousTimeSignature = timeSignature
+  const getWidthProbeContext = useCallback((): ReturnType<Renderer['getContext']> | null => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return null
+    const probeWidth = 2048
+    const probeHeight = 768
+    const existing = widthProbeRendererRef.current
+    if (existing) {
+      existing.resize(probeWidth, probeHeight)
+      return existing.getContext()
     }
-
-    return widths
+    const canvas = document.createElement('canvas')
+    const renderer = new Renderer(canvas, SCORE_RENDER_BACKEND)
+    renderer.resize(probeWidth, probeHeight)
+    widthProbeRendererRef.current = renderer
+    return renderer.getContext()
+  }, [])
+  const horizontalMeasureWidths = useMemo(() => {
+    if (measurePairs.length === 0) return []
+    const probeContext = getWidthProbeContext()
+    if (!probeContext) {
+      return measurePairs.map(() => HORIZONTAL_VIEW_MEASURE_WIDTH_PX)
+    }
+    return solveHorizontalMeasureWidths({
+      context: probeContext,
+      measurePairs,
+      measureKeyFifthsByPair: measureKeyFifthsFromImport,
+      measureTimeSignaturesByPair: measureTimeSignaturesFromImport,
+      spacingConfig: timeAxisSpacingConfig,
+      minMeasureWidthPx: HORIZONTAL_VIEW_MIN_MEASURE_WIDTH_PX,
+    })
   }, [
+    getWidthProbeContext,
     measurePairs,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
-    timeAxisSpacingConfig.leftEdgePaddingPx,
-    timeAxisSpacingConfig.rightEdgePaddingPx,
-    timeAxisSpacingConfig.baseMinGap32Px,
-    timeAxisSpacingConfig.maxBarlineEdgeGapPx,
-    timeAxisSpacingConfig.durationGapRatios,
-    timeAxisSpacingConfig.minGapBeats,
-    timeAxisSpacingConfig.gapGamma,
-    timeAxisSpacingConfig.gapBaseWeight,
+    timeAxisSpacingConfig,
   ])
-  const horizontalMeasureWidths = useMemo(() => {
-    if (horizontalRawMeasureWidths.length === 0) return []
-    return horizontalRawMeasureWidths.map((baseWidth, pairIndex) => {
-      const overrideWidth = horizontalMeasureWidthOverrides[pairIndex]
-      if (!Number.isFinite(overrideWidth)) return baseWidth
-      return Math.max(baseWidth, overrideWidth)
-    })
-  }, [horizontalRawMeasureWidths, horizontalMeasureWidthOverrides])
   const horizontalEstimatedMeasureWidthTotal = useMemo(() => {
     if (horizontalMeasureWidths.length === 0) return HORIZONTAL_VIEW_MEASURE_WIDTH_PX
     const total = horizontalMeasureWidths.reduce((sum, width) => sum + width, 0)
@@ -1295,52 +1241,6 @@ function App() {
     }
   }, [scoreScaleX, totalScoreWidth, displayScoreWidth])
 
-  useEffect(() => {
-    setHorizontalMeasureWidthOverrides((current) => {
-      if (Object.keys(current).length === 0) return current
-      return {}
-    })
-  }, [
-    measurePairs.length,
-    measureKeyFifthsFromImport,
-    measureTimeSignaturesFromImport,
-    timeAxisSpacingConfig.baseMinGap32Px,
-    timeAxisSpacingConfig.minBarlineEdgeGapPx,
-    timeAxisSpacingConfig.maxBarlineEdgeGapPx,
-    timeAxisSpacingConfig.durationGapRatios.thirtySecond,
-    timeAxisSpacingConfig.durationGapRatios.sixteenth,
-    timeAxisSpacingConfig.durationGapRatios.eighth,
-    timeAxisSpacingConfig.durationGapRatios.quarter,
-    timeAxisSpacingConfig.durationGapRatios.half,
-  ])
-
-  useEffect(() => {
-    setHorizontalMeasureWidthOverrides((current) => {
-      const currentKeys = Object.keys(current)
-      if (currentKeys.length === 0) return current
-      let changed = false
-      const next: Record<number, number> = {}
-      currentKeys.forEach((key) => {
-        const pairIndex = Number(key)
-        const width = current[pairIndex]
-        const baseWidth = horizontalRawMeasureWidths[pairIndex]
-        if (
-          Number.isInteger(pairIndex) &&
-          pairIndex >= 0 &&
-          pairIndex < horizontalRawMeasureWidths.length &&
-          Number.isFinite(width) &&
-          Number.isFinite(baseWidth) &&
-          width > baseWidth + HORIZONTAL_OVERFLOW_GLOBAL_SCALE_EPS
-        ) {
-          next[pairIndex] = width
-        } else {
-          changed = true
-        }
-      })
-      return changed ? next : current
-    })
-  }, [horizontalRawMeasureWidths])
-
   useImportedRefsSync({
     measurePairsFromImport,
     measurePairsFromImportRef,
@@ -1402,86 +1302,6 @@ function App() {
     onAfterRender: handleScoreRendered,
   })
 
-  useEffect(() => {
-    if (!ENABLE_HORIZONTAL_OVERFLOW_AUTO_GROW) return
-    if (draggingSelection) return
-    if (horizontalMeasureWidths.length === 0) return
-
-    const measureLayouts = measureLayoutsRef.current
-    const noteLayoutsByPair = noteLayoutsByPairRef.current
-    if (measureLayouts.size === 0 || noteLayoutsByPair.size === 0) return
-    const maxBarlineEdgeGapPx = Math.max(0, timeAxisSpacingConfig.maxBarlineEdgeGapPx)
-    const minBarlineEdgeGapCandidatePx = Math.max(0, timeAxisSpacingConfig.minBarlineEdgeGapPx)
-    const effectiveMinBarlineEdgeGapPx =
-      minBarlineEdgeGapCandidatePx <= maxBarlineEdgeGapPx ? minBarlineEdgeGapCandidatePx : maxBarlineEdgeGapPx
-
-    setHorizontalMeasureWidthOverrides((current) => {
-      let changed = false
-      const next: Record<number, number> = { ...current }
-
-      measureLayouts.forEach((measureLayout, pairIndex) => {
-        const pairLayouts = noteLayoutsByPair.get(pairIndex)
-        if (!pairLayouts || pairLayouts.length === 0) return
-
-        let maxLayoutRightX = Number.NEGATIVE_INFINITY
-        pairLayouts.forEach((layout) => {
-          maxLayoutRightX = Math.max(maxLayoutRightX, getNoteLayoutRightEdge(layout))
-        })
-        if (!Number.isFinite(maxLayoutRightX)) return
-
-        const measureEndBarX = measureLayout.measureX + measureLayout.measureWidth
-        const rightLimitX = measureLayout.showEndTimeSignature
-          ? (Number.isFinite(measureLayout.noteEndX) ? measureLayout.noteEndX : measureEndBarX)
-          : measureEndBarX
-        const overflow = maxLayoutRightX - rightLimitX
-        const overflowPx =
-          Number.isFinite(overflow) && overflow > HORIZONTAL_OVERFLOW_RECOVERY_EPS_PX
-            ? overflow
-            : 0
-        const rightGapToBoundaryPx = rightLimitX - maxLayoutRightX
-        const minGapDeficitPx =
-          effectiveMinBarlineEdgeGapPx > 0 && Number.isFinite(rightGapToBoundaryPx)
-            ? Math.max(0, effectiveMinBarlineEdgeGapPx - rightGapToBoundaryPx)
-            : 0
-        if (overflowPx <= HORIZONTAL_OVERFLOW_RECOVERY_EPS_PX && minGapDeficitPx <= HORIZONTAL_OVERFLOW_RECOVERY_EPS_PX) {
-          return
-        }
-
-        const baseWidth = horizontalRawMeasureWidths[pairIndex] ?? measureLayout.measureWidth
-        const currentEffectiveWidth = Math.max(
-          baseWidth,
-          horizontalMeasureWidths[pairIndex] ?? baseWidth,
-          current[pairIndex] ?? Number.NEGATIVE_INFINITY,
-        )
-        if (!Number.isFinite(currentEffectiveWidth) || currentEffectiveWidth <= 0) return
-        const overflowRecoveryPadPx =
-          overflowPx <= HORIZONTAL_OVERFLOW_RECOVERY_EPS_PX || maxBarlineEdgeGapPx <= 0
-            ? 0
-            : HORIZONTAL_OVERFLOW_RECOVERY_PAD_PX
-        const desiredWidth =
-          Math.ceil((currentEffectiveWidth + overflowPx + overflowRecoveryPadPx + minGapDeficitPx) * 1000) / 1000
-        const existingOverride = next[pairIndex]
-        const nextWidth = Number.isFinite(existingOverride) ? Math.max(existingOverride, desiredWidth) : desiredWidth
-        if (Math.abs(nextWidth - (existingOverride ?? Number.NEGATIVE_INFINITY)) > HORIZONTAL_OVERFLOW_GLOBAL_SCALE_EPS) {
-          next[pairIndex] = nextWidth
-          changed = true
-        }
-      })
-
-      return changed ? next : current
-    })
-  }, [
-    draggingSelection,
-    horizontalMeasureWidths,
-    horizontalRawMeasureWidths,
-    horizontalRenderWindow.startPairIndex,
-    horizontalRenderWindow.endPairIndexExclusive,
-    timeAxisSpacingConfig.minBarlineEdgeGapPx,
-    timeAxisSpacingConfig.maxBarlineEdgeGapPx,
-    notes,
-    bassNotes,
-  ])
-
   useSynthLifecycle({
     synthRef,
   })
@@ -1495,6 +1315,12 @@ function App() {
     overlayRendererSizeRef,
     overlayLastRectRef,
   })
+
+  useEffect(() => {
+    return () => {
+      widthProbeRendererRef.current = null
+    }
+  }, [])
 
   const pushUndoSnapshot = useCallback((sourcePairs: MeasurePair[]) => {
     if (!sourcePairs || sourcePairs.length === 0) return
@@ -2926,12 +2752,72 @@ function App() {
           }
         })
 
+      const onsetRows = layoutRows.filter(
+        (row): row is (typeof layoutRows)[number] & { onsetTicksInMeasure: number } =>
+          typeof row.onsetTicksInMeasure === 'number' && Number.isFinite(row.onsetTicksInMeasure),
+      )
+      const firstOnsetTicks =
+        onsetRows.length > 0
+          ? onsetRows.reduce((minValue, row) => Math.min(minValue, row.onsetTicksInMeasure), Number.POSITIVE_INFINITY)
+          : null
+      const lastOnsetTicks =
+        onsetRows.length > 0
+          ? onsetRows.reduce((maxValue, row) => Math.max(maxValue, row.onsetTicksInMeasure), Number.NEGATIVE_INFINITY)
+          : null
+
+      const firstOnsetRows =
+        typeof firstOnsetTicks === 'number' && Number.isFinite(firstOnsetTicks)
+          ? onsetRows.filter((row) => row.onsetTicksInMeasure === firstOnsetTicks)
+          : []
+      const lastOnsetRows =
+        typeof lastOnsetTicks === 'number' && Number.isFinite(lastOnsetTicks)
+          ? onsetRows.filter((row) => row.onsetTicksInMeasure === lastOnsetTicks)
+          : []
+
+      const firstVisualLeftX = firstOnsetRows.reduce((minValue, row) => {
+        let rowMin = Number.POSITIVE_INFINITY
+        if (Number.isFinite(row.x)) rowMin = Math.min(rowMin, row.x)
+        row.noteHeads.forEach((head) => {
+          if (Number.isFinite(head.x)) rowMin = Math.min(rowMin, head.x)
+        })
+        row.accidentalCoords.forEach((accidental) => {
+          if (Number.isFinite(accidental.rightX)) {
+            rowMin = Math.min(rowMin, accidental.rightX - 9)
+          }
+        })
+        return Number.isFinite(rowMin) ? Math.min(minValue, rowMin) : minValue
+      }, Number.POSITIVE_INFINITY)
+
+      const lastVisualRightX = lastOnsetRows.reduce((maxValue, row) => {
+        const rowRightX = Number.isFinite(row.spacingRightX)
+          ? row.spacingRightX
+          : Number.isFinite(row.rightX)
+            ? row.rightX
+            : Number.NEGATIVE_INFINITY
+        return Number.isFinite(rowRightX) ? Math.max(maxValue, rowRightX) : maxValue
+      }, Number.NEGATIVE_INFINITY)
+
       const maxVisualRightX =
         layoutRows.length > 0 ? layoutRows.reduce((maxX, row) => Math.max(maxX, row.rightX), Number.NEGATIVE_INFINITY) : null
       const maxSpacingRightX =
         layoutRows.length > 0
           ? layoutRows.reduce((maxX, row) => Math.max(maxX, row.spacingRightX), Number.NEGATIVE_INFINITY)
           : null
+
+      const effectiveBoundary = measureLayout
+        ? resolveEffectiveBoundary({
+            measureX: measureLayout.measureX,
+            measureWidth: measureLayout.measureWidth,
+            noteStartX: measureLayout.noteStartX,
+            noteEndX: measureLayout.noteEndX,
+            showStartDecorations:
+              measureLayout.isSystemStart ||
+              measureLayout.showKeySignature ||
+              measureLayout.showTimeSignature ||
+              measureLayout.includeMeasureStartDecorations,
+            showEndDecorations: measureLayout.showEndTimeSignature,
+          })
+        : null
 
       return {
         pairIndex,
@@ -2945,6 +2831,30 @@ function App() {
         measureEndBarX: measureLayout ? measureLayout.measureX + measureLayout.measureWidth : null,
         noteStartX: measureLayout?.noteStartX ?? null,
         noteEndX: measureLayout?.noteEndX ?? null,
+        effectiveBoundaryStartX:
+          measureLayout && Number.isFinite(measureLayout.effectiveBoundaryStartX)
+            ? Number((measureLayout.effectiveBoundaryStartX as number).toFixed(3))
+            : effectiveBoundary
+              ? Number(effectiveBoundary.effectiveStartX.toFixed(3))
+              : null,
+        effectiveBoundaryEndX:
+          measureLayout && Number.isFinite(measureLayout.effectiveBoundaryEndX)
+            ? Number((measureLayout.effectiveBoundaryEndX as number).toFixed(3))
+            : effectiveBoundary
+              ? Number(effectiveBoundary.effectiveEndX.toFixed(3))
+              : null,
+        effectiveLeftGapPx:
+          measureLayout && Number.isFinite(measureLayout.effectiveLeftGapPx)
+            ? Number((measureLayout.effectiveLeftGapPx as number).toFixed(3))
+            : effectiveBoundary && Number.isFinite(firstVisualLeftX)
+              ? Number((firstVisualLeftX - effectiveBoundary.effectiveStartX).toFixed(3))
+              : null,
+        effectiveRightGapPx:
+          measureLayout && Number.isFinite(measureLayout.effectiveRightGapPx)
+            ? Number((measureLayout.effectiveRightGapPx as number).toFixed(3))
+            : effectiveBoundary && Number.isFinite(lastVisualRightX)
+              ? Number((effectiveBoundary.effectiveEndX - lastVisualRightX).toFixed(3))
+              : null,
         timeAxisTicksPerBeat: TICKS_PER_BEAT,
         timeAxisPoints,
         maxVisualRightX,
@@ -3286,7 +3196,6 @@ function App() {
             ...DEFAULT_TIME_AXIS_SPACING_CONFIG,
             durationGapRatios: { ...DEFAULT_TIME_AXIS_SPACING_CONFIG.durationGapRatios },
           })
-          setHorizontalMeasureWidthOverrides({})
           setPageHorizontalPaddingPx(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
         }}
         onOpenMusicXmlFilePicker={openMusicXmlFilePicker}

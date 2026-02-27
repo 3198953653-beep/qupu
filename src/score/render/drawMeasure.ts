@@ -18,7 +18,7 @@ import {
   getRenderedNoteVisualX,
 } from '../layout/renderPosition'
 import { applyUnifiedTimeAxisSpacing } from '../layout/timeAxisSpacing'
-import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
+import type { AppliedTimeAxisSpacingMetrics, TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
 import { getStepOctaveAlterFromPitch } from '../pitchMath'
 import { buildPitchLineMap, createPianoPitches, getPitchLine, getStrictStemDirection } from '../pitchUtils'
 import type { RenderedNoteKey } from '../accidentals'
@@ -91,6 +91,7 @@ export type DrawMeasureParams = {
   preferMeasureBarlineAxis?: boolean
   preferMeasureEndBarlineAxis?: boolean
   enableEdgeGapCap?: boolean
+  onSpacingMetrics?: (metrics: AppliedTimeAxisSpacingMetrics | null) => void
   debugCapture?: {
     frame: number
     draggedNoteId: string
@@ -137,6 +138,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     preferMeasureBarlineAxis = !isSystemStart && !showKeySignature && !showTimeSignature,
     preferMeasureEndBarlineAxis = !showEndTimeSignature,
     enableEdgeGapCap = true,
+    onSpacingMetrics,
     debugCapture = null,
     renderBoundaryPartialTies = true,
     forceLeadingConnector = false,
@@ -452,8 +454,9 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
 
   new Formatter().joinVoices([trebleVoice]).joinVoices([bassVoice]).format([trebleVoice, bassVoice], formatWidth)
 
+  let appliedSpacingMetrics: AppliedTimeAxisSpacingMetrics | null = null
   if (spacingLayoutMode === 'custom') {
-    applyUnifiedTimeAxisSpacing({
+    appliedSpacingMetrics = applyUnifiedTimeAxisSpacing({
       measure,
       noteStartX: trebleStave.getNoteStartX(),
       formatWidth,
@@ -470,6 +473,9 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       preferMeasureEndBarlineAxis,
       enableEdgeGapCap,
     })
+  }
+  if (onSpacingMetrics) {
+    onSpacingMetrics(appliedSpacingMetrics)
   }
 
   if (staticNoteXById && staticNoteXById.size > 0) {

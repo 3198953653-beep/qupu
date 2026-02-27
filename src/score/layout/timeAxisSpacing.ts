@@ -2,6 +2,7 @@ import { Accidental, type StaveNote } from 'vexflow'
 import { DURATION_TICKS } from '../constants'
 import { getAccidentalVisualX, getRenderedNoteVisualX } from './renderPosition'
 import type { MeasurePair, ScoreNote } from '../types'
+import { resolveEffectiveBoundary } from './effectiveBoundary'
 
 type RenderedStaffNote = {
   vexNote: StaveNote
@@ -95,7 +96,7 @@ function resolveEffectiveEdgeGapRange(
   const minCandidate = Number.isFinite(spacingConfig.minBarlineEdgeGapPx)
     ? Math.max(0, spacingConfig.minBarlineEdgeGapPx)
     : 0
-  const minGapPx = minCandidate <= maxGapPx ? minCandidate : 0
+  const minGapPx = minCandidate <= maxGapPx ? minCandidate : maxGapPx
   return { minGapPx, maxGapPx }
 }
 
@@ -240,6 +241,13 @@ type UniformTimelineWeightMap = {
   orderedTicks: number[]
   cumulativeWeightByTick: Map<number, number>
   totalWeight: number
+}
+
+export type AppliedTimeAxisSpacingMetrics = {
+  effectiveBoundaryStartX: number
+  effectiveBoundaryEndX: number
+  effectiveLeftGapPx: number
+  effectiveRightGapPx: number
 }
 
 export function getUniformTickTimeline(noteOnsets: number[], measureTicks: number): UniformTickTimeline {
@@ -398,8 +406,8 @@ function applyMeasureEdgeGapCap(params: {
   if (!Number.isFinite(maxBarlineEdgeGapPx)) return
   const maxGap = Math.max(0, maxBarlineEdgeGapPx)
   const minGapCandidate = Number.isFinite(minBarlineEdgeGapPx) ? Math.max(0, minBarlineEdgeGapPx) : 0
-  const hasEffectiveMinGap = minGapCandidate <= maxGap
-  const minGap = hasEffectiveMinGap ? minGapCandidate : 0
+  const minGap = minGapCandidate <= maxGap ? minGapCandidate : maxGap
+  const hasEffectiveMinGap = minGap > 0
   if (noteOnsets.length === 0) return
 
   const positions = noteOnsets.map((onset) => targetXByOnset.get(onset))
@@ -481,7 +489,7 @@ export function getMeasureUniformTimelineWeightSpan(
   return Math.max(0, totalGapPx)
 }
 
-export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingParams): void {
+export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingParams): AppliedTimeAxisSpacingMetrics | null {
   const {
     measure,
     noteStartX,
@@ -504,7 +512,7 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     ...buildTimeAxisRefs(measure.treble, trebleRendered),
     ...buildTimeAxisRefs(measure.bass, bassRendered),
   ]
-  if (refs.length === 0) return
+  if (refs.length === 0) return null
 
   const refsByOnset = new Map<number, TimeAxisNoteRef[]>()
   refs.forEach((ref) => {
@@ -517,7 +525,7 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
   })
 
   const noteOnsets = [...refsByOnset.keys()].sort((a, b) => a - b)
-  if (noteOnsets.length === 0) return
+  if (noteOnsets.length === 0) return null
 
   const measuredTotalTicks = Math.max(getStaffTotalTicks(measure.treble), getStaffTotalTicks(measure.bass))
   const measureTotalTicks =
@@ -542,7 +550,7 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     }
   }
   const onsetTicks = [...timelineOnsetsSet].sort((a, b) => a - b)
-  if (onsetTicks.length === 0) return
+  if (onsetTicks.length === 0) return null
 
   const firstOnsetRefs = refsByOnset.get(firstNoteOnset) ?? []
   const lastOnsetRefs = refsByOnset.get(lastNoteOnset) ?? []
@@ -562,10 +570,16 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     typeof measureEndBarX === 'number' && Number.isFinite(measureEndBarX)
       ? measureEndBarX
       : defaultAxisBoundaryEnd
-  const axisBoundaryStart =
-    uniformSpacingByTicks && preferMeasureBarlineAxis ? barlineAxisBoundaryStart : defaultAxisBoundaryStart
-  const axisBoundaryEnd =
-    uniformSpacingByTicks && preferMeasureEndBarlineAxis ? barlineAxisBoundaryEnd : defaultAxisBoundaryEnd
+  const effectiveBoundary = resolveEffectiveBoundary({
+    measureX: barlineAxisBoundaryStart,
+    measureWidth: barlineAxisBoundaryEnd - barlineAxisBoundaryStart,
+    noteStartX: defaultAxisBoundaryStart,
+    noteEndX: defaultAxisBoundaryEnd,
+    showStartDecorations: !preferMeasureBarlineAxis,
+    showEndDecorations: !preferMeasureEndBarlineAxis,
+  })
+  const axisBoundaryStart = uniformSpacingByTicks ? effectiveBoundary.effectiveStartX : defaultAxisBoundaryStart
+  const axisBoundaryEnd = uniformSpacingByTicks ? effectiveBoundary.effectiveEndX : defaultAxisBoundaryEnd
 
   const edgeLegalStartInset = firstLeftExtent
   const edgeLegalEndInset = lastRightExtent
@@ -783,4 +797,24 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     if (Math.abs(delta) < 0.001) return
     ref.vexNote.setXShift(ref.vexNote.getXShift() + delta)
   })
+
+  const firstOnset = noteOnsets[0]
+  const lastOnset = noteOnsets[noteOnsets.length - 1]
+  const resolvedFirstX = targetXByOnset.get(firstOnset)
+  const resolvedLastX = targetXByOnset.get(lastOnset)
+  if (
+    typeof resolvedFirstX !== 'number' ||
+    !Number.isFinite(resolvedFirstX) ||
+    typeof resolvedLastX !== 'number' ||
+    !Number.isFinite(resolvedLastX)
+  ) {
+    return null
+  }
+
+  return {
+    effectiveBoundaryStartX: axisBoundaryStart,
+    effectiveBoundaryEndX: axisBoundaryEnd,
+    effectiveLeftGapPx: resolvedFirstX - firstLeftExtent - axisBoundaryStart,
+    effectiveRightGapPx: axisBoundaryEnd - (resolvedLastX + lastRightExtent),
+  }
 }

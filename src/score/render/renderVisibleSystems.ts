@@ -22,6 +22,7 @@ import {
   getUniformTickSpacingPadding,
   type TimeAxisSpacingConfig,
 } from '../layout/timeAxisSpacing'
+import { resolveEffectiveBoundary } from '../layout/effectiveBoundary'
 import type {
   DragState,
   LayoutReflowHint,
@@ -586,6 +587,56 @@ export function renderVisibleSystems(params: {
         formatWidth: geometry.formatWidth,
       }
     }
+    const resolveEffectiveLayoutMetrics = (params: {
+      measureX: number
+      measureWidth: number
+      noteStartX: number
+      noteEndX: number
+      showStartDecorations: boolean
+      showEndDecorations: boolean
+      spacingMetrics:
+        | {
+            effectiveBoundaryStartX: number
+            effectiveBoundaryEndX: number
+            effectiveLeftGapPx: number
+            effectiveRightGapPx: number
+          }
+        | null
+        | undefined
+    }) => {
+      const {
+        measureX,
+        measureWidth,
+        noteStartX,
+        noteEndX,
+        showStartDecorations,
+        showEndDecorations,
+        spacingMetrics,
+      } = params
+      if (
+        spacingMetrics &&
+        Number.isFinite(spacingMetrics.effectiveBoundaryStartX) &&
+        Number.isFinite(spacingMetrics.effectiveBoundaryEndX) &&
+        Number.isFinite(spacingMetrics.effectiveLeftGapPx) &&
+        Number.isFinite(spacingMetrics.effectiveRightGapPx)
+      ) {
+        return spacingMetrics
+      }
+      const fallbackBoundary = resolveEffectiveBoundary({
+        measureX,
+        measureWidth,
+        noteStartX,
+        noteEndX,
+        showStartDecorations,
+        showEndDecorations,
+      })
+      return {
+        effectiveBoundaryStartX: fallbackBoundary.effectiveStartX,
+        effectiveBoundaryEndX: fallbackBoundary.effectiveEndX,
+        effectiveLeftGapPx: Number.NaN,
+        effectiveRightGapPx: Number.NaN,
+      }
+    }
 
     const shouldSkipSystemReflow =
       layoutReflowHint !== null &&
@@ -642,6 +693,14 @@ export function renderVisibleSystems(params: {
           }
         }
 
+        let spacingMetrics:
+          | {
+              effectiveBoundaryStartX: number
+              effectiveBoundaryEndX: number
+              effectiveLeftGapPx: number
+              effectiveRightGapPx: number
+            }
+          | null = null
         const measureNoteLayouts = drawMeasureToContext({
           context,
           measure: entry.measure,
@@ -669,6 +728,9 @@ export function renderVisibleSystems(params: {
           previewAccidentalStateBeforeNote,
           preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
           preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
+          onSpacingMetrics: (metrics) => {
+            spacingMetrics = metrics
+          },
           renderBoundaryPartialTies: false,
         })
 
@@ -701,6 +763,15 @@ export function renderVisibleSystems(params: {
           entry.isSystemStart,
           entry.includeMeasureStartDecorations,
         )
+        const effectiveLayoutMetrics = resolveEffectiveLayoutMetrics({
+          measureX,
+          measureWidth,
+          noteStartX,
+          noteEndX,
+          showStartDecorations: !entry.preferMeasureStartBarlineAxis,
+          showEndDecorations: !entry.preferMeasureEndBarlineAxis,
+          spacingMetrics,
+        })
         nextMeasureLayouts.set(entry.pairIndex, {
           pairIndex: entry.pairIndex,
           measureX,
@@ -719,6 +790,10 @@ export function renderVisibleSystems(params: {
           noteStartX,
           noteEndX,
           formatWidth,
+          effectiveBoundaryStartX: effectiveLayoutMetrics.effectiveBoundaryStartX,
+          effectiveBoundaryEndX: effectiveLayoutMetrics.effectiveBoundaryEndX,
+          effectiveLeftGapPx: effectiveLayoutMetrics.effectiveLeftGapPx,
+          effectiveRightGapPx: effectiveLayoutMetrics.effectiveRightGapPx,
           overlayRect,
         })
       })
@@ -785,6 +860,14 @@ export function renderVisibleSystems(params: {
             context.restore()
           }
         }
+        let spacingMetrics:
+          | {
+              effectiveBoundaryStartX: number
+              effectiveBoundaryEndX: number
+              effectiveLeftGapPx: number
+              effectiveRightGapPx: number
+            }
+          | null = null
         const measureNoteLayouts = drawMeasureToContext({
           context,
           measure: entry.measure,
@@ -812,6 +895,9 @@ export function renderVisibleSystems(params: {
           previewAccidentalStateBeforeNote,
           preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
           preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
+          onSpacingMetrics: (metrics) => {
+            spacingMetrics = metrics
+          },
           renderBoundaryPartialTies: false,
         })
 
@@ -844,6 +930,15 @@ export function renderVisibleSystems(params: {
           entry.isSystemStart,
           entry.includeMeasureStartDecorations,
         )
+        const effectiveLayoutMetrics = resolveEffectiveLayoutMetrics({
+          measureX,
+          measureWidth,
+          noteStartX,
+          noteEndX,
+          showStartDecorations: !entry.preferMeasureStartBarlineAxis,
+          showEndDecorations: !entry.preferMeasureEndBarlineAxis,
+          spacingMetrics,
+        })
         nextMeasureLayouts.set(entry.pairIndex, {
           pairIndex: entry.pairIndex,
           measureX,
@@ -862,6 +957,10 @@ export function renderVisibleSystems(params: {
           noteStartX,
           noteEndX,
           formatWidth,
+          effectiveBoundaryStartX: effectiveLayoutMetrics.effectiveBoundaryStartX,
+          effectiveBoundaryEndX: effectiveLayoutMetrics.effectiveBoundaryEndX,
+          effectiveLeftGapPx: effectiveLayoutMetrics.effectiveLeftGapPx,
+          effectiveRightGapPx: effectiveLayoutMetrics.effectiveRightGapPx,
           overlayRect,
         })
       })
@@ -1062,6 +1161,14 @@ export function renderVisibleSystems(params: {
       const frozenSpacing = frozenSpacingByPairIndex.get(entry.pairIndex) ?? null
       const translatedFrozenSpacing =
         frozenSpacing !== null ? translateFrozenSpacingToMeasureX(frozenSpacing, measureX) : null
+      let spacingMetrics:
+        | {
+            effectiveBoundaryStartX: number
+            effectiveBoundaryEndX: number
+            effectiveLeftGapPx: number
+            effectiveRightGapPx: number
+          }
+        | null = null
       const measureNoteLayouts = drawMeasureToContext({
         context,
         measure: entry.measure,
@@ -1089,6 +1196,9 @@ export function renderVisibleSystems(params: {
         previewAccidentalStateBeforeNote,
         preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
         preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
+        onSpacingMetrics: (metrics) => {
+          spacingMetrics = metrics
+        },
         renderBoundaryPartialTies: false,
       })
 
@@ -1121,6 +1231,15 @@ export function renderVisibleSystems(params: {
         entry.isSystemStart,
         entry.includeMeasureStartDecorations,
       )
+      const effectiveLayoutMetrics = resolveEffectiveLayoutMetrics({
+        measureX,
+        measureWidth,
+        noteStartX,
+        noteEndX,
+        showStartDecorations: !entry.preferMeasureStartBarlineAxis,
+        showEndDecorations: !entry.preferMeasureEndBarlineAxis,
+        spacingMetrics,
+      })
       nextMeasureLayouts.set(entry.pairIndex, {
         pairIndex: entry.pairIndex,
         measureX,
@@ -1139,6 +1258,10 @@ export function renderVisibleSystems(params: {
         noteStartX,
         noteEndX,
         formatWidth,
+        effectiveBoundaryStartX: effectiveLayoutMetrics.effectiveBoundaryStartX,
+        effectiveBoundaryEndX: effectiveLayoutMetrics.effectiveBoundaryEndX,
+        effectiveLeftGapPx: effectiveLayoutMetrics.effectiveLeftGapPx,
+        effectiveRightGapPx: effectiveLayoutMetrics.effectiveRightGapPx,
         overlayRect,
       })
     })

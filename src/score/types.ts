@@ -180,12 +180,23 @@ export type MeasureLayout = {
   noteStartX: number
   noteEndX: number
   formatWidth: number
+  effectiveBoundaryStartX?: number
+  effectiveBoundaryEndX?: number
+  effectiveLeftGapPx?: number
+  effectiveRightGapPx?: number
   overlayRect: {
     x: number
     y: number
     width: number
     height: number
   }
+}
+
+export type EffectiveMeasureBoundary = {
+  measureStartBarX: number
+  measureEndBarX: number
+  effectiveStartX: number
+  effectiveEndX: number
 }
 
 export type MeasurePair = {
