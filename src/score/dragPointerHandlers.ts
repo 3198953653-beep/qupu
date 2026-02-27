@@ -3,6 +3,7 @@ import { getHitNote } from './layout/hitTest'
 import type { HitGridIndex } from './layout/hitTest'
 import { buildDragStateForHit, getDragMovePitch } from './dragInteractions'
 import { buildSelectionGroupMoveTargets } from './selectionGroupTargets'
+import { buildSelectionsInTimelineRange } from './selectionTimelineRange'
 import type {
   DragDebugSnapshot,
   DragState,
@@ -16,6 +17,7 @@ import type {
 } from './types'
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>
+export type SelectionPointerMode = 'replace' | 'append' | 'range'
 
 function upsertSelection(
   selection: Selection,
@@ -77,7 +79,11 @@ export function handleBeginDragPointer(params: {
   currentSelections: Selection[]
   setActiveSelection: StateSetter<Selection>
   setDraggingSelection: StateSetter<Selection | null>
-  onSelectionPointerDown?: (selection: Selection, append: boolean) => void
+  onSelectionPointerDown?: (
+    selection: Selection,
+    nextSelections: Selection[],
+    mode: SelectionPointerMode,
+  ) => void
   onBlankPointerDown?: () => void
   onSelectionActivated?: () => void
   hitRadius?: number
@@ -148,11 +154,22 @@ export function handleBeginDragPointer(params: {
   })
 
   dragRef.current = dragState
-  const appendSelection = Boolean(event.ctrlKey)
+  const selectionMode: SelectionPointerMode = event.shiftKey ? 'range' : event.ctrlKey ? 'append' : 'replace'
   const alreadySelected = currentSelections.some((entry) => isSameSelection(entry, selection))
-  const effectiveSelections = appendSelection
-    ? appendUniqueSelection(currentSelections, selection)
-    : (alreadySelected && currentSelections.length > 0 ? currentSelections : [selection])
+  const effectiveSelections =
+    selectionMode === 'range'
+      ? (() => {
+          const anchors = appendUniqueSelection(currentSelections, selection)
+          const rangeSelections = buildSelectionsInTimelineRange({
+            anchors,
+            measurePairs: importedPairs ?? currentMeasurePairs,
+            importedNoteLookup,
+          })
+          return rangeSelections.length > 0 ? rangeSelections : [selection]
+        })()
+      : selectionMode === 'append'
+        ? appendUniqueSelection(currentSelections, selection)
+        : (alreadySelected && currentSelections.length > 0 ? currentSelections : [selection])
   dragState.groupMoveTargets = buildSelectionGroupMoveTargets({
     effectiveSelections,
     primarySelection: selection,
@@ -161,7 +178,7 @@ export function handleBeginDragPointer(params: {
     measureLayouts,
     importedKeyFifths,
   })
-  onSelectionPointerDown?.(selection, appendSelection)
+  onSelectionPointerDown?.(selection, effectiveSelections, selectionMode)
   setActiveSelection(upsertSelection(selection))
   setDraggingSelection(upsertNullableSelection(selection))
   onSelectionActivated?.()

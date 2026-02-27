@@ -6,6 +6,7 @@ import {
   handleEndDragPointer,
   handleSurfacePointerMove,
 } from './dragPointerHandlers'
+import type { SelectionPointerMode } from './dragPointerHandlers'
 import {
   clearDragOverlayCanvas,
   drawSelectionOverlay,
@@ -59,7 +60,11 @@ export function useDragHandlers(params: {
   setActiveSelection: StateSetter<Selection>
   setDraggingSelection: StateSetter<Selection | null>
   currentSelections: Selection[]
-  onSelectionPointerDown?: (selection: Selection, append: boolean) => void
+  onSelectionPointerDown?: (
+    selection: Selection,
+    nextSelections: Selection[],
+    mode: SelectionPointerMode,
+  ) => void
   onBeforeApplyScoreChange?: (sourcePairs: MeasurePair[]) => void
   onBlankPointerDown?: () => void
   onSelectionActivated?: () => void

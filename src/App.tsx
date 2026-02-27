@@ -1450,12 +1450,17 @@ function App() {
     setActiveSelection,
     setDraggingSelection,
     currentSelections: selectedSelections,
-    onSelectionPointerDown: (selection, append) => {
+    onSelectionPointerDown: (selection, nextSelections, mode) => {
+      void selection
+      void mode
       setSelectedSelections((current) => {
-        if (append) return appendUniqueSelection(current, selection)
-        const alreadySelected = current.some((entry) => isSameSelection(entry, selection))
-        if (alreadySelected && current.length > 0) return current
-        return [selection]
+        if (
+          current.length === nextSelections.length &&
+          current.every((entry, index) => isSameSelection(entry, nextSelections[index]))
+        ) {
+          return current
+        }
+        return nextSelections
       })
     },
     onBeforeApplyScoreChange: (sourcePairs) => {
