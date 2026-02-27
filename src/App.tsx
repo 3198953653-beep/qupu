@@ -52,6 +52,7 @@ import { commitDragPitchToScoreData } from './score/dragInteractions'
 import { appendIntervalKey, deleteSelectedKey, findSelectionLocationInPairs } from './score/keyboardEdits'
 import { getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './score/pitchMath'
 import { resolveConnectedTieTargets } from './score/tieChain'
+import { buildSelectionGroupMoveTargets } from './score/selectionGroupTargets'
 import type { HitGridIndex } from './score/layout/hitTest'
 import type {
   DragDebugSnapshot,
@@ -171,12 +172,13 @@ function resolvePairKeyFifthsForKeyboard(pairIndex: number, keyFifthsByMeasure?:
   return 0
 }
 
-function shiftPitchByStaffStep(pitch: Pitch, direction: 'up' | 'down'): Pitch | null {
+function shiftPitchByStaffSteps(pitch: Pitch, direction: 'up' | 'down', staffSteps = 1): Pitch | null {
   const diatonicSteps = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
   const { step, octave } = getStepOctaveAlterFromPitch(pitch)
   const sourceIndex = diatonicSteps.indexOf(step)
   if (sourceIndex < 0) return null
-  const shiftedRawIndex = sourceIndex + (direction === 'up' ? 1 : -1)
+  const shift = Math.max(1, Math.trunc(staffSteps))
+  const shiftedRawIndex = sourceIndex + (direction === 'up' ? shift : -shift)
   const octaveShift = Math.floor(shiftedRawIndex / diatonicSteps.length)
   const wrappedIndex = ((shiftedRawIndex % diatonicSteps.length) + diatonicSteps.length) % diatonicSteps.length
   const targetStep = diatonicSteps[wrappedIndex]
@@ -1665,7 +1667,11 @@ function App() {
     [pushUndoSnapshot, setBassNotes, setMeasurePairsFromImport, setNotes, setActiveSelection],
   )
 
-  const moveSelectionByKeyboardArrow = useCallback((direction: 'up' | 'down'): boolean => {
+  const moveSelectionsByKeyboardSteps = useCallback((
+    direction: 'up' | 'down',
+    staffSteps: number,
+    scope: 'active' | 'selected' = 'active',
+  ): boolean => {
     const currentSelection = activeSelectionRef.current
     const sourcePairs = measurePairsRef.current
     const importedLookup = importedNoteLookupRef.current
@@ -1688,7 +1694,7 @@ function App() {
         : sourceNote.pitch
     if (!selectedPitch) return false
 
-    const shiftedStaffPositionPitch = shiftPitchByStaffStep(selectedPitch, direction)
+    const shiftedStaffPositionPitch = shiftPitchByStaffSteps(selectedPitch, direction, staffSteps)
     if (!shiftedStaffPositionPitch) return false
 
     const keyFifths = resolvePairKeyFifthsForKeyboard(selectionLocation.pairIndex, measureKeyFifthsFromImportRef.current)
@@ -1730,6 +1736,17 @@ function App() {
                 pitch: selectedPitch,
               },
             ],
+      groupMoveTargets:
+        scope === 'selected'
+          ? buildSelectionGroupMoveTargets({
+              effectiveSelections: appendUniqueSelection(selectedSelections, currentSelection),
+              primarySelection: currentSelection,
+              measurePairs: activePairs,
+              importedNoteLookup: importedLookup,
+              measureLayouts: measureLayoutsRef.current,
+              importedKeyFifths: measureKeyFifthsFromImportRef.current,
+            })
+          : [],
       pointerId: -1,
       surfaceTop: 0,
       surfaceClientToScoreScaleY: 1,
@@ -1781,8 +1798,23 @@ function App() {
       staff: currentSelection.staff,
       keyIndex: currentSelection.keyIndex,
     })
+    if (scope === 'selected') {
+      setSelectedSelections((current) => appendUniqueSelection(current, currentSelection))
+    }
     return true
-  }, [layoutStabilityKey, pushUndoSnapshot, setBassNotes, setMeasurePairsFromImport, setNotes, setActiveSelection])
+  }, [
+    layoutStabilityKey,
+    pushUndoSnapshot,
+    selectedSelections,
+    setBassNotes,
+    setMeasurePairsFromImport,
+    setNotes,
+    setActiveSelection,
+  ])
+
+  const moveSelectionByKeyboardArrow = useCallback((direction: 'up' | 'down'): boolean => {
+    return moveSelectionsByKeyboardSteps(direction, 1, 'active')
+  }, [moveSelectionsByKeyboardSteps])
 
   const closeOsmdPreview = useCallback(() => {
     if (osmdPreviewZoomCommitTimerRef.current !== null) {
@@ -2302,6 +2334,20 @@ function App() {
       }
 
       if (!isSelectionVisible) return
+
+      if (
+        event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+      ) {
+        const moved = moveSelectionsByKeyboardSteps(event.key === 'ArrowUp' ? 'up' : 'down', 7, 'selected')
+        if (moved) {
+          event.preventDefault()
+        }
+        return
+      }
+
       if (event.metaKey || event.ctrlKey || event.altKey) return
 
       if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
@@ -2354,6 +2400,7 @@ function App() {
     activeSelection,
     measureKeyFifthsFromImport,
     applyKeyboardEditResult,
+    moveSelectionsByKeyboardSteps,
     moveSelectionByKeyboardArrow,
     undoLastScoreEdit,
   ])
