@@ -232,21 +232,35 @@ function normalizeFrozenFromKeyIndex(value: number | null | undefined): number {
   return 0
 }
 
-function reconcileFrozenIncomingForSource(params: {
+function getSourcePitchByFrozenKey(params: {
   pairs: MeasurePair[]
-  sourceTarget: DragTieTarget | null | undefined
-}): { nextPairs: MeasurePair[]; changedPairIndices: number[] } {
-  const { pairs, sourceTarget } = params
-  if (!sourceTarget) return { nextPairs: pairs, changedPairIndices: [] }
+  sourceTargets: DragTieTarget[]
+}): Map<string, Pitch> {
+  const { pairs, sourceTargets } = params
+  const sourcePitchByFrozenKey = new Map<string, Pitch>()
+  sourceTargets.forEach((sourceTarget) => {
+    const sourcePair = pairs[sourceTarget.pairIndex]
+    const sourceNotes = sourceTarget.staff === 'treble' ? sourcePair?.treble : sourcePair?.bass
+    const sourceNote = sourceNotes?.[sourceTarget.noteIndex]
+    if (!sourcePair || !sourceNote || sourceNote.id !== sourceTarget.noteId || sourceNote.isRest) return
+    const sourcePitch = getPitchAtKey(sourceNote, sourceTarget.keyIndex)
+    if (!sourcePitch) return
+    sourcePitchByFrozenKey.set(
+      `${sourceTarget.noteId}:${sourceTarget.keyIndex}`,
+      sourcePitch,
+    )
+  })
+  return sourcePitchByFrozenKey
+}
 
-  const sourcePair = pairs[sourceTarget.pairIndex]
-  const sourceNotes = sourceTarget.staff === 'treble' ? sourcePair?.treble : sourcePair?.bass
-  const sourceNote = sourceNotes?.[sourceTarget.noteIndex]
-  if (!sourcePair || !sourceNote || sourceNote.id !== sourceTarget.noteId || sourceNote.isRest) {
-    return { nextPairs: pairs, changedPairIndices: [] }
-  }
-  const sourcePitch = getPitchAtKey(sourceNote, sourceTarget.keyIndex)
-  if (!sourcePitch) return { nextPairs: pairs, changedPairIndices: [] }
+function reconcileFrozenIncomingForSources(params: {
+  pairs: MeasurePair[]
+  sourceTargets: DragTieTarget[]
+}): { nextPairs: MeasurePair[]; changedPairIndices: number[] } {
+  const { pairs, sourceTargets } = params
+  if (sourceTargets.length === 0) return { nextPairs: pairs, changedPairIndices: [] }
+  const sourcePitchByFrozenKey = getSourcePitchByFrozenKey({ pairs, sourceTargets })
+  if (sourcePitchByFrozenKey.size === 0) return { nextPairs: pairs, changedPairIndices: [] }
 
   let nextPairs = pairs
   const changedPairIndices = new Set<number>()
@@ -264,14 +278,15 @@ function reconcileFrozenIncomingForSource(params: {
       let nextNote = note
 
       const rootFrozen = getTieFrozenIncoming(nextNote, 0)
-      if (
-        rootFrozen &&
-        rootFrozen.fromNoteId === sourceTarget.noteId &&
-        normalizeFrozenFromKeyIndex(rootFrozen.fromKeyIndex) === sourceTarget.keyIndex
-      ) {
-        const targetPitch = getPitchAtKey(nextNote, 0)
-        if (targetPitch && targetPitch === sourcePitch) {
-          nextNote = clearTieFrozenIncoming(nextNote, 0)
+      if (rootFrozen && rootFrozen.fromNoteId) {
+        const sourcePitch = sourcePitchByFrozenKey.get(
+          `${rootFrozen.fromNoteId}:${normalizeFrozenFromKeyIndex(rootFrozen.fromKeyIndex)}`,
+        )
+        if (sourcePitch) {
+          const targetPitch = getPitchAtKey(nextNote, 0)
+          if (targetPitch && targetPitch === sourcePitch) {
+            nextNote = clearTieFrozenIncoming(nextNote, 0)
+          }
         }
       }
 
@@ -279,15 +294,14 @@ function reconcileFrozenIncomingForSource(params: {
       for (let chordIndex = 0; chordIndex < chordCount; chordIndex += 1) {
         const keyIndex = chordIndex + 1
         const chordFrozen = getTieFrozenIncoming(nextNote, keyIndex)
-        if (
-          chordFrozen &&
-          chordFrozen.fromNoteId === sourceTarget.noteId &&
-          normalizeFrozenFromKeyIndex(chordFrozen.fromKeyIndex) === sourceTarget.keyIndex
-        ) {
-          const targetPitch = getPitchAtKey(nextNote, keyIndex)
-          if (targetPitch && targetPitch === sourcePitch) {
-            nextNote = clearTieFrozenIncoming(nextNote, keyIndex)
-          }
+        if (!chordFrozen || !chordFrozen.fromNoteId) continue
+        const sourcePitch = sourcePitchByFrozenKey.get(
+          `${chordFrozen.fromNoteId}:${normalizeFrozenFromKeyIndex(chordFrozen.fromKeyIndex)}`,
+        )
+        if (!sourcePitch) continue
+        const targetPitch = getPitchAtKey(nextNote, keyIndex)
+        if (targetPitch && targetPitch === sourcePitch) {
+          nextNote = clearTieFrozenIncoming(nextNote, keyIndex)
         }
       }
 
@@ -532,10 +546,16 @@ export function commitDragPitchToScoreData(params: {
       sourceTarget: sourceTieTarget,
       sourceOriginPitch: drag.originPitch ?? drag.pitch,
     })
+    const reconcileSourceTargets =
+      tieTargets.length > 0
+        ? tieTargets
+        : sourceTieTarget
+          ? [sourceTieTarget]
+          : []
     const { nextPairs: updatedWithReconciledFrozenTargets, changedPairIndices: reconciledFrozenTargetPairIndices } =
-      reconcileFrozenIncomingForSource({
+      reconcileFrozenIncomingForSources({
         pairs: updated,
-        sourceTarget: sourceTieTarget,
+        sourceTargets: reconcileSourceTargets,
       })
     const changedPairIndices = [
       ...new Set([
@@ -596,10 +616,16 @@ export function commitDragPitchToScoreData(params: {
     sourceTarget: sourceTieTarget,
     sourceOriginPitch: drag.originPitch ?? drag.pitch,
   })
+  const reconcileSourceTargets =
+    tieTargets.length > 0
+      ? tieTargets
+      : sourceTieTarget
+        ? [sourceTieTarget]
+        : []
   const { nextPairs: updatedWithReconciledFrozenTargets, changedPairIndices: reconciledFrozenTargetPairIndices } =
-    reconcileFrozenIncomingForSource({
+    reconcileFrozenIncomingForSources({
       pairs: updated,
-      sourceTarget: sourceTieTarget,
+      sourceTargets: reconcileSourceTargets,
     })
   const changedPairIndices = [
     ...new Set([
