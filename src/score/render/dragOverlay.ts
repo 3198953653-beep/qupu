@@ -2,6 +2,7 @@ import type { MutableRefObject } from 'react'
 import { getLayoutNoteKey } from '../layout/renderPosition'
 import { drawMeasureToContext } from './drawMeasure'
 import { drawCrossMeasureTies } from './drawCrossMeasureTies'
+import { buildDragPreviewOverrides, type DragPreviewFrozenBoundaryCurve, type DragPreviewNoteOverride } from './dragPreviewOverrides'
 import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
 import type {
   DragDebugStaticRecord,
@@ -182,7 +183,6 @@ function beginOverlayPaint(
 
 function drawOverlayRange(params: {
   pairIndices: number[]
-  clipped: boolean
   measureLayouts: Map<number, MeasureLayout>
   measurePairs: MeasurePair[]
   ensureOverlayCanvasForRect: (rect: MeasureLayout['overlayRect']) => OverlayFrame | null
@@ -191,10 +191,12 @@ function drawOverlayRange(params: {
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
   spacingLayoutMode?: SpacingLayoutMode
   activeSelection: Selection | null
+  previewPitchByTargetKey?: Map<string, Pitch> | null
+  previewFrozenBoundaryCurve?: DragPreviewFrozenBoundaryCurve | null
   getPreviewForPair?: (
     pairIndex: number,
   ) => {
-    previewNote?: { noteId: string; staff: StaffKind; pitch: Pitch; keyIndex: number } | null
+    previewNotes?: DragPreviewNoteOverride[] | null
     previewAccidentalStateBeforeNote?: Map<string, number> | null
     staticNoteXById?: Map<string, number> | null
     staticAccidentalRightXById?: Map<string, Map<number, number>> | null
@@ -209,7 +211,6 @@ function drawOverlayRange(params: {
 }): void {
   const {
     pairIndices,
-    clipped,
     measureLayouts,
     measurePairs,
     ensureOverlayCanvasForRect,
@@ -218,6 +219,8 @@ function drawOverlayRange(params: {
     timeAxisSpacingConfig,
     spacingLayoutMode = 'custom',
     activeSelection,
+    previewPitchByTargetKey = null,
+    previewFrozenBoundaryCurve = null,
     getPreviewForPair,
   } = params
   if (pairIndices.length === 0) {
@@ -272,8 +275,9 @@ function drawOverlayRange(params: {
       spacingLayoutMode,
       renderBoundaryPartialTies: false,
       forceLeadingConnector: pairOffset === 0,
-      previewNote: preview?.previewNote ?? null,
+      previewNotes: preview?.previewNotes ?? null,
       previewAccidentalStateBeforeNote: preview?.previewAccidentalStateBeforeNote ?? null,
+      previewFrozenBoundaryCurve,
       staticNoteXById: preview?.staticNoteXById ?? null,
       staticAccidentalRightXById: preview?.staticAccidentalRightXById ?? null,
       debugCapture:
@@ -297,7 +301,9 @@ function drawOverlayRange(params: {
     measureLayouts,
     startPairIndex: pairIndices[0] ?? 0,
     endPairIndexExclusive: (pairIndices[pairIndices.length - 1] ?? 0) + 1,
-    allowBoundaryPartialTies: clipped,
+    previewPitchByTargetKey,
+    previewFrozenBoundaryCurve,
+    allowBoundaryPartialTies: false,
   })
 
   overlayContext.restore()
@@ -347,7 +353,6 @@ export function drawSelectionMeasureOverlay(params: {
 
   drawOverlayRange({
     pairIndices: visibleRange.pairIndices,
-    clipped: visibleRange.clipped,
     measureLayouts,
     measurePairs,
     ensureOverlayCanvasForRect,
@@ -392,6 +397,11 @@ export function drawDragMeasurePreview(params: {
 
   const dragWithLayout = ensureDragLayoutCache(drag)
   dragPreviewFrameRef.current += 1
+  const {
+    previewNotesByPair,
+    previewPitchByTargetKey,
+    previewFrozenBoundaryCurve,
+  } = buildDragPreviewOverrides({ drag: dragWithLayout })
   const visibleRange = resolveVisibleViewportOverlayRange({
     measurePairCount: measurePairs.length,
     measureLayouts,
@@ -402,7 +412,6 @@ export function drawDragMeasurePreview(params: {
 
   drawOverlayRange({
     pairIndices: visibleRange.pairIndices,
-    clipped: visibleRange.clipped,
     measureLayouts,
     measurePairs,
     ensureOverlayCanvasForRect,
@@ -411,18 +420,17 @@ export function drawDragMeasurePreview(params: {
     timeAxisSpacingConfig,
     spacingLayoutMode,
     activeSelection: null,
+    previewPitchByTargetKey,
+    previewFrozenBoundaryCurve,
     getPreviewForPair: (pairIndex) => {
-      if (pairIndex !== dragWithLayout.pairIndex) return {}
+      const previewNotes = previewNotesByPair.get(pairIndex) ?? null
+      if (!previewNotes) return {}
+      const isPrimaryDragPreviewPair = pairIndex === dragWithLayout.pairIndex
       return {
-        previewNote: {
-          noteId: dragWithLayout.noteId,
-          staff: dragWithLayout.staff,
-          pitch: dragWithLayout.pitch,
-          keyIndex: dragWithLayout.keyIndex,
-        },
+        previewNotes,
         previewAccidentalStateBeforeNote: dragWithLayout.accidentalStateBeforeNote,
-        staticNoteXById: dragWithLayout.staticNoteXById,
-        staticAccidentalRightXById: dragWithLayout.previewAccidentalRightXById,
+        staticNoteXById: isPrimaryDragPreviewPair ? dragWithLayout.staticNoteXById : null,
+        staticAccidentalRightXById: isPrimaryDragPreviewPair ? dragWithLayout.previewAccidentalRightXById : null,
         debugCapture: {
           frame: dragPreviewFrameRef.current,
           draggedNoteId: dragWithLayout.noteId,

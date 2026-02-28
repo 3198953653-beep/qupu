@@ -21,6 +21,7 @@ import { applyUnifiedTimeAxisSpacing } from '../layout/timeAxisSpacing'
 import type { AppliedTimeAxisSpacingMetrics, TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
 import { getStepOctaveAlterFromPitch } from '../pitchMath'
 import { buildPitchLineMap, createPianoPitches, getPitchLine, getStrictStemDirection } from '../pitchUtils'
+import { getTieFrozenIncoming } from '../tieFrozen'
 import type { RenderedNoteKey } from '../accidentals'
 import type {
   DragDebugRow,
@@ -79,6 +80,20 @@ export type DrawMeasureParams = {
   previewNotes?: PreviewNoteOverride[] | null
   previewNote?: { noteId: string; staff: StaffKind; pitch: Pitch; keyIndex: number } | null
   previewAccidentalStateBeforeNote?: Map<string, number> | null
+  previewFrozenBoundaryCurve?: {
+    fromPairIndex: number
+    fromStaff: StaffKind
+    fromNoteId: string
+    fromKeyIndex: number
+    toPairIndex: number
+    toStaff: StaffKind
+    toNoteId: string
+    toKeyIndex: number
+    startX: number
+    startY: number
+    endX: number
+    endY: number
+  } | null
   collectLayouts?: boolean
   suppressSystemDecorations?: boolean
   noteStartXOverride?: number
@@ -128,6 +143,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     previewNotes = null,
     previewNote = null,
     previewAccidentalStateBeforeNote = null,
+    previewFrozenBoundaryCurve = null,
     collectLayouts = true,
     suppressSystemDecorations = false,
     noteStartXOverride,
@@ -700,22 +716,55 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     bassBeams.forEach((beam) => beam.setContext(context).draw())
   }
 
-  const getTieKeySpecs = (note: ScoreNote): Array<{ keyIndex: number; pitch: Pitch; tieStart: boolean; tieStop: boolean }> => {
+  const getTieKeySpecs = (
+    note: ScoreNote,
+    renderedNote: { renderedKeys: RenderedNoteKey[] } | undefined,
+  ): Array<{
+    keyIndex: number
+    pitch: Pitch
+    tieStart: boolean
+    tieStop: boolean
+    frozenIncomingPitch: Pitch | null
+    frozenIncomingFromNoteId: string | null
+    frozenIncomingFromKeyIndex: number | null
+  }> => {
     if (note.isRest) return []
-    const specs: Array<{ keyIndex: number; pitch: Pitch; tieStart: boolean; tieStop: boolean }> = [
+    const renderedPitchByKeyIndex = new Map<number, Pitch>()
+    renderedNote?.renderedKeys.forEach((entry) => {
+      renderedPitchByKeyIndex.set(entry.keyIndex, entry.pitch)
+    })
+    const resolvePitch = (keyIndex: number, fallbackPitch: Pitch): Pitch =>
+      renderedPitchByKeyIndex.get(keyIndex) ?? fallbackPitch
+    const rootFrozenIncoming = getTieFrozenIncoming(note, 0)
+    const specs: Array<{
+      keyIndex: number
+      pitch: Pitch
+      tieStart: boolean
+      tieStop: boolean
+      frozenIncomingPitch: Pitch | null
+      frozenIncomingFromNoteId: string | null
+      frozenIncomingFromKeyIndex: number | null
+    }> = [
       {
         keyIndex: 0,
-        pitch: note.pitch,
+        pitch: resolvePitch(0, note.pitch),
         tieStart: Boolean(note.tieStart),
         tieStop: Boolean(note.tieStop),
+        frozenIncomingPitch: rootFrozenIncoming?.pitch ?? null,
+        frozenIncomingFromNoteId: rootFrozenIncoming?.fromNoteId ?? null,
+        frozenIncomingFromKeyIndex: rootFrozenIncoming?.fromKeyIndex ?? null,
       },
     ]
     ;(note.chordPitches ?? []).forEach((pitch, chordIndex) => {
+      const frozenIncoming = getTieFrozenIncoming(note, chordIndex + 1)
       specs.push({
         keyIndex: chordIndex + 1,
-        pitch,
+        pitch: resolvePitch(chordIndex + 1, pitch),
         tieStart: Boolean(note.chordTieStarts?.[chordIndex]),
         tieStop: Boolean(note.chordTieStops?.[chordIndex]),
+        frozenIncomingPitch: frozenIncoming?.pitch ?? null,
+        frozenIncomingFromNoteId: frozenIncoming?.fromNoteId ?? null,
+        frozenIncomingFromKeyIndex: frozenIncoming?.fromKeyIndex ?? null,
       })
     })
     return specs
@@ -729,16 +778,78 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     return rendered.renderedKeys.findIndex((entry) => entry.keyIndex === keyIndex)
   }
 
-  const findKeyIndexByPitch = (note: ScoreNote | undefined, pitch: Pitch): number | null => {
-    if (!note || note.isRest) return null
-    if (note.pitch === pitch) return 0
-    const chordIndex = note.chordPitches?.findIndex((item) => item === pitch) ?? -1
-    return chordIndex >= 0 ? chordIndex + 1 : null
+  const findRenderedIndexByPitch = (
+    rendered: { renderedKeys: RenderedNoteKey[] } | undefined,
+    pitch: Pitch,
+  ): number => {
+    if (!rendered) return -1
+    return rendered.renderedKeys.findIndex((entry) => entry.pitch === pitch)
+  }
+
+  const drawTieCurveByAnchors = (
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number,
+    direction: number,
+  ) => {
+    const safeStartX = Math.min(startX, endX - 0.5)
+    const safeEndX = Math.max(endX, startX + 0.5)
+    const tie = new StaveTie({
+      firstNote: { getYs: () => [startY] } as any,
+      lastNote: { getYs: () => [endY] } as any,
+      firstIndexes: [0],
+      lastIndexes: [0],
+    })
+    tie.setContext(context)
+    tie.renderTie({
+      firstX: safeStartX,
+      lastX: safeEndX,
+      firstYs: [startY],
+      lastYs: [endY],
+      direction,
+    })
+  }
+
+  const findFrozenIncomingTargetInMeasure = (params: {
+    sourceNotes: ScoreNote[]
+    rendered: Array<{ vexNote: StaveNote; renderedKeys: RenderedNoteKey[] }>
+    sourceNoteIndex: number
+    sourceNoteId: string
+    sourceKeyIndex: number
+  }): { noteIndex: number; keyIndex: number; frozenPitch: Pitch } | null => {
+    const {
+      sourceNotes,
+      rendered,
+      sourceNoteIndex,
+      sourceNoteId,
+      sourceKeyIndex,
+    } = params
+    for (let candidateIndex = sourceNoteIndex + 1; candidateIndex < sourceNotes.length; candidateIndex += 1) {
+      const candidate = sourceNotes[candidateIndex]
+      if (!candidate || candidate.isRest) continue
+      const specs = getTieKeySpecs(candidate, rendered[candidateIndex])
+      const matched = specs.find(
+        (spec) =>
+          spec.tieStop &&
+          spec.frozenIncomingPitch &&
+          spec.frozenIncomingFromNoteId === sourceNoteId &&
+          spec.frozenIncomingFromKeyIndex === sourceKeyIndex,
+      )
+      if (!matched || !matched.frozenIncomingPitch) continue
+      return {
+        noteIndex: candidateIndex,
+        keyIndex: matched.keyIndex,
+        frozenPitch: matched.frozenIncomingPitch,
+      }
+    }
+    return null
   }
 
   const drawTiesForStaff = (
     sourceNotes: ScoreNote[],
     rendered: Array<{ vexNote: StaveNote; renderedKeys: RenderedNoteKey[] }>,
+    staff: StaffKind,
   ) => {
     if (isSpacingOnlyLayout || skipPainting) return
 
@@ -748,7 +859,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       const renderedCurrent = rendered[noteIndex]
       if (!renderedCurrent) continue
 
-      const tieSpecs = getTieKeySpecs(sourceNote)
+      const tieSpecs = getTieKeySpecs(sourceNote, renderedCurrent)
       tieSpecs.forEach((spec) => {
         if (!spec.tieStart && !spec.tieStop) return
 
@@ -756,10 +867,56 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         if (currentRenderedIndex < 0) return
 
         if (spec.tieStart) {
-          const nextNote = sourceNotes[noteIndex + 1]
+          if (
+            previewFrozenBoundaryCurve &&
+            previewFrozenBoundaryCurve.fromPairIndex === pairIndex &&
+            previewFrozenBoundaryCurve.fromStaff === staff &&
+            previewFrozenBoundaryCurve.fromNoteId === sourceNote.id &&
+            previewFrozenBoundaryCurve.fromKeyIndex === spec.keyIndex
+          ) {
+            drawTieCurveByAnchors(
+              previewFrozenBoundaryCurve.startX,
+              previewFrozenBoundaryCurve.startY,
+              previewFrozenBoundaryCurve.endX,
+              previewFrozenBoundaryCurve.endY,
+              getPitchLine(staff, spec.pitch) < 3 ? 1 : -1,
+            )
+            return
+          }
+
+          const frozenTarget = findFrozenIncomingTargetInMeasure({
+            sourceNotes,
+            rendered,
+            sourceNoteIndex: noteIndex,
+            sourceNoteId: sourceNote.id,
+            sourceKeyIndex: spec.keyIndex,
+          })
+          if (frozenTarget) {
+              const renderedNext = rendered[frozenTarget.noteIndex]
+              const nextRenderedIndex = findRenderedIndexByKeyIndex(renderedNext, frozenTarget.keyIndex)
+              if (renderedNext && nextRenderedIndex >= 0) {
+                const startY = renderedCurrent.vexNote.getYs()[currentRenderedIndex] ?? renderedCurrent.vexNote.getYs()[0]
+                const endX = renderedNext.vexNote.noteHeads[nextRenderedIndex]?.getAbsoluteX() ?? renderedNext.vexNote.getAbsoluteX()
+                const staffStave = renderedNext.vexNote.getStave()
+                const endY =
+                  (staffStave ? staffStave.getYForNote(getPitchLine(staff, frozenTarget.frozenPitch)) : null) ??
+                  renderedNext.vexNote.getYs()[nextRenderedIndex] ??
+                  renderedNext.vexNote.getYs()[0]
+                if (Number.isFinite(startY) && Number.isFinite(endX) && Number.isFinite(endY)) {
+                drawTieCurveByAnchors(
+                  renderedCurrent.vexNote.noteHeads[currentRenderedIndex]?.getAbsoluteX() ?? renderedCurrent.vexNote.getAbsoluteX(),
+                  startY,
+                  endX,
+                  endY,
+                  getPitchLine(staff, spec.pitch) < 3 ? 1 : -1,
+                )
+                return
+              }
+            }
+          }
+
           const renderedNext = rendered[noteIndex + 1]
-          const nextKeyIndex = findKeyIndexByPitch(nextNote, spec.pitch)
-          const nextRenderedIndex = nextKeyIndex === null ? -1 : findRenderedIndexByKeyIndex(renderedNext, nextKeyIndex)
+          const nextRenderedIndex = findRenderedIndexByPitch(renderedNext, spec.pitch)
           if (renderedNext && nextRenderedIndex >= 0) {
             new StaveTie({
               firstNote: renderedCurrent.vexNote,
@@ -782,11 +939,13 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         }
 
         if (spec.tieStop) {
+          if (spec.frozenIncomingPitch) return
           const previousNote = sourceNotes[noteIndex - 1]
+          const previousRendered = rendered[noteIndex - 1]
           const hasIncomingTieInCurrentMeasure =
             noteIndex > 0 &&
             Boolean(previousNote) &&
-            getTieKeySpecs(previousNote).some(
+            getTieKeySpecs(previousNote, previousRendered).some(
               (previousSpec) => previousSpec.tieStart && previousSpec.pitch === spec.pitch,
             )
           if (hasIncomingTieInCurrentMeasure) return
@@ -806,8 +965,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     }
   }
 
-  drawTiesForStaff(measure.treble, trebleRendered)
-  drawTiesForStaff(measure.bass, bassRendered)
+  drawTiesForStaff(measure.treble, trebleRendered, 'treble')
+  drawTiesForStaff(measure.bass, bassRendered, 'bass')
 
   if (!collectLayouts) return noteLayouts
 

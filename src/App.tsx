@@ -51,7 +51,7 @@ import {
 import { commitDragPitchToScoreData } from './score/dragInteractions'
 import { appendIntervalKey, deleteSelectedKey, findSelectionLocationInPairs } from './score/keyboardEdits'
 import { getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './score/pitchMath'
-import { resolveConnectedTieTargets } from './score/tieChain'
+import { resolveForwardTieTargets, resolvePreviousTieTarget } from './score/tieChain'
 import { buildSelectionGroupMoveTargets } from './score/selectionGroupTargets'
 import type { HitGridIndex } from './score/layout/hitTest'
 import type {
@@ -128,6 +128,13 @@ function cloneScoreNote(note: ScoreNote): ScoreNote {
     chordAccidentals: note.chordAccidentals ? [...note.chordAccidentals] : undefined,
     chordTieStarts: note.chordTieStarts ? [...note.chordTieStarts] : undefined,
     chordTieStops: note.chordTieStops ? [...note.chordTieStops] : undefined,
+    chordTieFrozenIncomingPitches: note.chordTieFrozenIncomingPitches ? [...note.chordTieFrozenIncomingPitches] : undefined,
+    chordTieFrozenIncomingFromNoteIds: note.chordTieFrozenIncomingFromNoteIds
+      ? [...note.chordTieFrozenIncomingFromNoteIds]
+      : undefined,
+    chordTieFrozenIncomingFromKeyIndices: note.chordTieFrozenIncomingFromKeyIndices
+      ? [...note.chordTieFrozenIncomingFromKeyIndices]
+      : undefined,
   }
 }
 
@@ -241,6 +248,202 @@ function clampOsmdPreviewTopMarginPx(value: number): number {
 function clampOsmdPreviewBottomMarginPx(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX
   return Math.max(0, Math.min(180, Math.round(value)))
+}
+
+function sanitizeMusicXmlForOsmdPreview(xmlText: string, measurePairs: MeasurePair[]): string {
+  const source = xmlText.trim()
+  if (!source) return xmlText
+  try {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(source, 'application/xml')
+    const parseError = doc.querySelector('parsererror')
+    if (parseError) return xmlText
+
+    const partElement = doc.getElementsByTagName('part')[0]
+    if (!partElement) return xmlText
+
+    const toNoteKey = (noteId: string, keyIndex: number): string => `${noteId}:${keyIndex}`
+
+    const getDirectChildElements = (parent: Element, tagName: string): Element[] =>
+      Array.from(parent.children).filter((child): child is Element => child.tagName === tagName)
+
+    const getStaffNumber = (noteElement: Element): number => {
+      const staffElement = getDirectChildElements(noteElement, 'staff')[0]
+      if (!staffElement) return 1
+      const value = Number.parseInt(staffElement.textContent ?? '1', 10)
+      if (!Number.isFinite(value)) return 1
+      return value
+    }
+
+    const noteElementByKey = new Map<string, Element>()
+    const measureElements = Array.from(partElement.getElementsByTagName('measure'))
+    const measureCount = Math.min(measureElements.length, measurePairs.length)
+    for (let pairIndex = 0; pairIndex < measureCount; pairIndex += 1) {
+      const pair = measurePairs[pairIndex]
+      const measureElement = measureElements[pairIndex]
+      if (!pair || !measureElement) continue
+      const measureNotes = getDirectChildElements(measureElement, 'note')
+      const trebleElements = measureNotes.filter((noteElement) => getStaffNumber(noteElement) === 1)
+      const bassElements = measureNotes.filter((noteElement) => getStaffNumber(noteElement) === 2)
+
+      const assignStaffElements = (staffNotes: ScoreNote[], staffElements: Element[]) => {
+        let cursor = 0
+        staffNotes.forEach((staffNote) => {
+          const keyCount = 1 + (staffNote.chordPitches?.length ?? 0)
+          for (let keyIndex = 0; keyIndex < keyCount; keyIndex += 1) {
+            const noteElement = staffElements[cursor]
+            cursor += 1
+            if (!noteElement) return
+            noteElementByKey.set(toNoteKey(staffNote.id, keyIndex), noteElement)
+          }
+        })
+      }
+
+      assignStaffElements(pair.treble, trebleElements)
+      assignStaffElements(pair.bass, bassElements)
+    }
+
+    const ensureNotationsElement = (noteElement: Element): Element => {
+      const existing = getDirectChildElements(noteElement, 'notations')[0]
+      if (existing) return existing
+      const next = doc.createElement('notations')
+      noteElement.appendChild(next)
+      return next
+    }
+
+    const removeTieByType = (noteElement: Element, tieType: 'start' | 'stop'): boolean => {
+      let removed = false
+      getDirectChildElements(noteElement, 'tie').forEach((tieElement) => {
+        const type = tieElement.getAttribute('type')?.trim().toLowerCase()
+        if (type !== tieType) return
+        noteElement.removeChild(tieElement)
+        removed = true
+      })
+      return removed
+    }
+
+    const removeNotationByType = (
+      noteElement: Element,
+      tagName: 'tied' | 'slur',
+      type: 'start' | 'stop',
+    ): boolean => {
+      let removed = false
+      getDirectChildElements(noteElement, 'notations').forEach((notationsElement) => {
+        Array.from(notationsElement.children).forEach((child) => {
+          if (child.tagName !== tagName) return
+          const childType = child.getAttribute('type')?.trim().toLowerCase()
+          if (childType !== type) return
+          notationsElement.removeChild(child)
+          removed = true
+        })
+      })
+      return removed
+    }
+
+    const removeTieFrozenNotation = (noteElement: Element): boolean => {
+      let removed = false
+      getDirectChildElements(noteElement, 'notations').forEach((notationsElement) => {
+        Array.from(notationsElement.children).forEach((child) => {
+          if (child.tagName !== 'other-notation') return
+          const notationType = child.getAttribute('type')?.trim().toLowerCase() ?? ''
+          if (!notationType.startsWith('tie-frozen-in')) return
+          notationsElement.removeChild(child)
+          removed = true
+        })
+      })
+      return removed
+    }
+
+    const appendSlur = (
+      noteElement: Element,
+      type: 'start' | 'stop',
+      number: number,
+    ): boolean => {
+      const notationsElement = ensureNotationsElement(noteElement)
+      const exists = Array.from(notationsElement.children).some((child) => {
+        if (child.tagName !== 'slur') return false
+        const childType = child.getAttribute('type')?.trim().toLowerCase()
+        const childNumber = child.getAttribute('number')?.trim()
+        return childType === type && childNumber === String(number)
+      })
+      if (exists) return false
+      const slur = doc.createElement('slur')
+      slur.setAttribute('type', type)
+      slur.setAttribute('number', String(number))
+      notationsElement.appendChild(slur)
+      return true
+    }
+
+    type FrozenBoundaryOperation = {
+      sourceNoteId: string
+      sourceKeyIndex: number
+      targetNoteId: string
+      targetKeyIndex: number
+    }
+    const operations: FrozenBoundaryOperation[] = []
+    const operationKeySet = new Set<string>()
+    const pushOperation = (operation: FrozenBoundaryOperation) => {
+      const key = `${operation.sourceNoteId}:${operation.sourceKeyIndex}->${operation.targetNoteId}:${operation.targetKeyIndex}`
+      if (operationKeySet.has(key)) return
+      operationKeySet.add(key)
+      operations.push(operation)
+    }
+
+    measurePairs.forEach((pair) => {
+      ;(['treble', 'bass'] as const).forEach((staff) => {
+        const staffNotes = staff === 'treble' ? pair.treble : pair.bass
+        staffNotes.forEach((staffNote) => {
+          if (staffNote.tieFrozenIncomingPitch && staffNote.tieFrozenIncomingFromNoteId) {
+            pushOperation({
+              sourceNoteId: staffNote.tieFrozenIncomingFromNoteId,
+              sourceKeyIndex: Number.isFinite(staffNote.tieFrozenIncomingFromKeyIndex)
+                ? Math.max(0, Math.trunc(staffNote.tieFrozenIncomingFromKeyIndex as number))
+                : 0,
+              targetNoteId: staffNote.id,
+              targetKeyIndex: 0,
+            })
+          }
+          const chordLength = staffNote.chordPitches?.length ?? 0
+          for (let chordIndex = 0; chordIndex < chordLength; chordIndex += 1) {
+            const frozenPitch = staffNote.chordTieFrozenIncomingPitches?.[chordIndex]
+            const fromNoteId = staffNote.chordTieFrozenIncomingFromNoteIds?.[chordIndex] ?? null
+            if (!frozenPitch || !fromNoteId) continue
+            pushOperation({
+              sourceNoteId: fromNoteId,
+              sourceKeyIndex: Number.isFinite(staffNote.chordTieFrozenIncomingFromKeyIndices?.[chordIndex])
+                ? Math.max(0, Math.trunc(staffNote.chordTieFrozenIncomingFromKeyIndices?.[chordIndex] as number))
+                : 0,
+              targetNoteId: staffNote.id,
+              targetKeyIndex: chordIndex + 1,
+            })
+          }
+        })
+      })
+    })
+
+    let changed = false
+
+    operations.forEach((operation, index) => {
+      const sourceElement = noteElementByKey.get(toNoteKey(operation.sourceNoteId, operation.sourceKeyIndex))
+      const targetElement = noteElementByKey.get(toNoteKey(operation.targetNoteId, operation.targetKeyIndex))
+      if (!sourceElement || !targetElement) return
+
+      if (removeTieByType(sourceElement, 'start')) changed = true
+      if (removeNotationByType(sourceElement, 'tied', 'start')) changed = true
+      if (removeTieByType(targetElement, 'stop')) changed = true
+      if (removeNotationByType(targetElement, 'tied', 'stop')) changed = true
+      if (removeTieFrozenNotation(targetElement)) changed = true
+
+      const slurNumber = 200 + index
+      if (appendSlur(sourceElement, 'start', slurNumber)) changed = true
+      if (appendSlur(targetElement, 'stop', slurNumber)) changed = true
+    })
+
+    if (!changed) return xmlText
+    return new XMLSerializer().serializeToString(doc)
+  } catch {
+    return xmlText
+  }
 }
 
 function isTextInputTarget(target: EventTarget | null): boolean {
@@ -1713,7 +1916,15 @@ function App() {
 
     const importedPairs = measurePairsFromImportRef.current
     const activePairs = importedPairs ?? sourcePairs
-    const linkedTieTargets = resolveConnectedTieTargets({
+    const linkedTieTargets = resolveForwardTieTargets({
+      measurePairs: activePairs,
+      pairIndex: selectionLocation.pairIndex,
+      noteIndex: selectionLocation.noteIndex,
+      keyIndex: currentSelection.keyIndex,
+      staff: currentSelection.staff,
+      pitchHint: selectedPitch,
+    })
+    const previousTieTarget = resolvePreviousTieTarget({
       measurePairs: activePairs,
       pairIndex: selectionLocation.pairIndex,
       noteIndex: selectionLocation.noteIndex,
@@ -1741,6 +1952,7 @@ function App() {
                 pitch: selectedPitch,
               },
             ],
+      previousTieTarget,
       groupMoveTargets:
         scope === 'selected'
           ? buildSelectionGroupMoveTargets({
@@ -2122,7 +2334,8 @@ function App() {
       timeSignaturesByMeasure: measureTimeSignaturesFromImportRef.current,
       metadata: musicXmlMetadataFromImportRef.current,
     })
-    setOsmdPreviewXml(xmlText)
+    const previewXmlText = sanitizeMusicXmlForOsmdPreview(xmlText, measurePairs)
+    setOsmdPreviewXml(previewXmlText)
     setOsmdPreviewStatusText('正在生成OSMD预览...')
     setOsmdPreviewError('')
     setOsmdPreviewPageIndex(0)

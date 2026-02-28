@@ -40,6 +40,12 @@ export type ScoreNote = {
   tieStop?: boolean
   chordTieStarts?: boolean[]
   chordTieStops?: boolean[]
+  tieFrozenIncomingPitch?: Pitch | null
+  tieFrozenIncomingFromNoteId?: string | null
+  tieFrozenIncomingFromKeyIndex?: number | null
+  chordTieFrozenIncomingPitches?: Array<Pitch | null>
+  chordTieFrozenIncomingFromNoteIds?: Array<string | null>
+  chordTieFrozenIncomingFromKeyIndices?: Array<number | null>
 }
 
 export type ImportResult = {
@@ -137,6 +143,16 @@ export type DragState = {
   pairIndex: number
   noteIndex: number
   linkedTieTargets?: DragTieTarget[]
+  previousTieTarget?: DragTieTarget | null
+  previewFrozenBoundary?: {
+    fromTarget: DragTieTarget
+    toTarget: DragTieTarget
+    startX: number
+    startY: number
+    endX: number
+    endY: number
+    frozenPitch: Pitch
+  } | null
   groupMoveTargets?: DragTieTarget[]
   pointerId: number
   surfaceTop: number

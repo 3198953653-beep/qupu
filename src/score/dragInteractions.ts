@@ -14,7 +14,8 @@ import {
   updateMeasurePairsPitch,
   updateScoreNotePitchAtKey,
 } from './scoreOps'
-import { resolveConnectedTieTargets } from './tieChain'
+import { resolveForwardTieTargets, resolvePreviousTieTarget } from './tieChain'
+import { clearTieFrozenIncoming, setTieFrozenIncoming } from './tieFrozen'
 import type { HitNote } from './layout/hitTest'
 import type {
   DragState,
@@ -153,6 +154,67 @@ function updatePairsPitchAtAbsoluteTargets(params: {
   }
 }
 
+function getPitchAtKey(note: ScoreNote | undefined, keyIndex: number): Pitch | null {
+  if (!note || note.isRest) return null
+  if (keyIndex <= 0) return note.pitch
+  const chordIndex = keyIndex - 1
+  if (!note.chordPitches || chordIndex < 0 || chordIndex >= note.chordPitches.length) return null
+  return note.chordPitches[chordIndex] ?? null
+}
+
+function updatePairsTieFreezeAtBoundary(params: {
+  pairs: MeasurePair[]
+  previousTarget: DragTieTarget | null | undefined
+  sourceTarget: DragTieTarget | null | undefined
+  sourceOriginPitch: Pitch
+}): { nextPairs: MeasurePair[]; changedPairIndices: number[] } {
+  const { pairs, previousTarget, sourceTarget, sourceOriginPitch } = params
+  if (!sourceTarget) return { nextPairs: pairs, changedPairIndices: [] }
+
+  const sourcePair = pairs[sourceTarget.pairIndex]
+  const sourceStaffNotes = sourceTarget.staff === 'treble' ? sourcePair?.treble : sourcePair?.bass
+  const sourceNote = sourceStaffNotes?.[sourceTarget.noteIndex]
+  if (!sourcePair || !sourceNote || sourceNote.id !== sourceTarget.noteId || sourceNote.isRest) {
+    return { nextPairs: pairs, changedPairIndices: [] }
+  }
+
+  let shouldFreeze = false
+  if (previousTarget) {
+    const previousPair = pairs[previousTarget.pairIndex]
+    const previousStaffNotes = previousTarget.staff === 'treble' ? previousPair?.treble : previousPair?.bass
+    const previousNote = previousStaffNotes?.[previousTarget.noteIndex]
+    if (previousPair && previousNote && previousNote.id === previousTarget.noteId && !previousNote.isRest) {
+      const previousPitch = getPitchAtKey(previousNote, previousTarget.keyIndex)
+      const sourcePitch = getPitchAtKey(sourceNote, sourceTarget.keyIndex)
+      shouldFreeze = Boolean(previousPitch && sourcePitch && previousPitch !== sourcePitch)
+    }
+  }
+
+  const nextSourceNote = shouldFreeze
+    ? setTieFrozenIncoming(sourceNote, sourceTarget.keyIndex, {
+        pitch: sourceOriginPitch,
+        fromNoteId: previousTarget?.noteId ?? null,
+        fromKeyIndex: previousTarget?.keyIndex ?? null,
+      })
+    : clearTieFrozenIncoming(sourceNote, sourceTarget.keyIndex)
+  if (nextSourceNote === sourceNote) {
+    return { nextPairs: pairs, changedPairIndices: [] }
+  }
+
+  const nextPairs = pairs.slice()
+  const nextPair = nextPairs[sourceTarget.pairIndex] ?? sourcePair
+  const nextStaffNotes = sourceStaffNotes.slice()
+  nextStaffNotes[sourceTarget.noteIndex] = nextSourceNote
+  nextPairs[sourceTarget.pairIndex] =
+    sourceTarget.staff === 'treble'
+      ? { treble: nextStaffNotes, bass: nextPair.bass }
+      : { treble: nextPair.treble, bass: nextStaffNotes }
+  return {
+    nextPairs,
+    changedPairIndices: [sourceTarget.pairIndex],
+  }
+}
+
 function toTargetKey(target: DragTieTarget): string {
   return `${target.staff}:${target.pairIndex}:${target.noteIndex}:${target.noteId}:${target.keyIndex}`
 }
@@ -243,7 +305,7 @@ export function buildDragStateForHit(params: {
   const tieSourcePairIndex = importedLocation?.pairIndex ?? hitNote.pairIndex
   const tieSourceNoteIndex = importedLocation?.noteIndex ?? hitNote.noteIndex
   const linkedTieTargets =
-    resolveConnectedTieTargets({
+    resolveForwardTieTargets({
       measurePairs: activeMeasurePairs,
       pairIndex: tieSourcePairIndex,
       noteIndex: tieSourceNoteIndex,
@@ -251,6 +313,14 @@ export function buildDragStateForHit(params: {
       staff: hitNote.staff,
       pitchHint: pitch,
     }) ?? []
+  const previousTieTarget = resolvePreviousTieTarget({
+    measurePairs: activeMeasurePairs,
+    pairIndex: tieSourcePairIndex,
+    noteIndex: tieSourceNoteIndex,
+    keyIndex: hitKeyIndex,
+    staff: hitNote.staff,
+    pitchHint: pitch,
+  })
 
   const dragState: DragState = createDragStateFromHit({
     hit,
@@ -275,6 +345,7 @@ export function buildDragStateForHit(params: {
           pitch,
         },
       ]
+  dragState.previousTieTarget = previousTieTarget
 
   return {
     dragState,
@@ -342,11 +413,24 @@ export function commitDragPitchToScoreData(params: {
         staffStepDelta,
         reservedTargetKeys: primaryTargetKeys,
       })
-    const { nextPairs: updated, changedPairIndices: groupChangedPairIndices } = updatePairsPitchAtAbsoluteTargets({
+    const { nextPairs: updatedByGroup, changedPairIndices: groupChangedPairIndices } = updatePairsPitchAtAbsoluteTargets({
       pairs: updatedByPrimary,
       targets: groupAbsoluteTargets,
     })
-    const changedPairIndices = [...new Set([...primaryChangedPairIndices, ...groupChangedPairIndices])].sort((left, right) => left - right)
+    const sourceTieTarget = tieTargets.find((target) => target.noteId === drag.noteId && target.keyIndex === drag.keyIndex) ?? tieTargets[0] ?? null
+    const { nextPairs: updated, changedPairIndices: tieFreezeChangedPairIndices } = updatePairsTieFreezeAtBoundary({
+      pairs: updatedByGroup,
+      previousTarget: drag.previousTieTarget,
+      sourceTarget: sourceTieTarget,
+      sourceOriginPitch: drag.originPitch ?? drag.pitch,
+    })
+    const changedPairIndices = [
+      ...new Set([
+        ...primaryChangedPairIndices,
+        ...groupChangedPairIndices,
+        ...tieFreezeChangedPairIndices,
+      ]),
+    ].sort((left, right) => left - right)
     let normalizedPairs = updated
     changedPairIndices.forEach((pairIndex) => {
       normalizedPairs = normalizeMeasurePairAt(normalizedPairs, pairIndex, importedKeyFifths)
@@ -387,11 +471,24 @@ export function commitDragPitchToScoreData(params: {
       staffStepDelta,
       reservedTargetKeys: primaryTargetKeys,
     })
-  const { nextPairs: updated, changedPairIndices: groupChangedPairIndices } = updatePairsPitchAtAbsoluteTargets({
+  const { nextPairs: updatedByGroup, changedPairIndices: groupChangedPairIndices } = updatePairsPitchAtAbsoluteTargets({
     pairs: updatedByPrimary,
     targets: groupAbsoluteTargets,
   })
-  const changedPairIndices = [...new Set([...primaryChangedPairIndices, ...groupChangedPairIndices])].sort((left, right) => left - right)
+  const sourceTieTarget = tieTargets.find((target) => target.noteId === drag.noteId && target.keyIndex === drag.keyIndex) ?? tieTargets[0] ?? null
+  const { nextPairs: updated, changedPairIndices: tieFreezeChangedPairIndices } = updatePairsTieFreezeAtBoundary({
+    pairs: updatedByGroup,
+    previousTarget: drag.previousTieTarget,
+    sourceTarget: sourceTieTarget,
+    sourceOriginPitch: drag.originPitch ?? drag.pitch,
+  })
+  const changedPairIndices = [
+    ...new Set([
+      ...primaryChangedPairIndices,
+      ...groupChangedPairIndices,
+      ...tieFreezeChangedPairIndices,
+    ]),
+  ].sort((left, right) => left - right)
   let normalizedPairs = updated
   changedPairIndices.forEach((pairIndex) => {
     normalizedPairs = normalizeMeasurePairAt(normalizedPairs, pairIndex, null)

@@ -64,6 +64,27 @@ const NOTE_TYPE_TO_BEATS: Record<string, number> = {
   '64th': 0.0625,
 }
 
+function normalizeTieFrozenPitchText(value: string): Pitch | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const slashIndex = trimmed.indexOf('/')
+  if (slashIndex > 0) {
+    const stepPart = trimmed.slice(0, slashIndex).toLowerCase()
+    const octavePart = trimmed.slice(slashIndex + 1)
+    const octaveValue = Number(octavePart)
+    if (!Number.isFinite(octaveValue)) return null
+    return `${stepPart}/${Math.trunc(octaveValue)}` as Pitch
+  }
+  const match = /^([A-Ga-g])([#b]{0,2}|n)?(-?\d+)$/.exec(trimmed)
+  if (!match) return null
+  const [, stepRaw, accidentalRaw = '', octaveRaw] = match
+  const step = stepRaw.toLowerCase()
+  const accidental = accidentalRaw.toLowerCase() === 'n' ? '' : accidentalRaw.toLowerCase()
+  const octaveValue = Number(octaveRaw)
+  if (!Number.isFinite(octaveValue)) return null
+  return `${step}${accidental}/${Math.trunc(octaveValue)}` as Pitch
+}
+
 function getFirstTagText(root: Element | Document, tagName: string): string | undefined {
   const node = root.getElementsByTagName(tagName)[0]
   const text = node?.textContent?.trim()
@@ -76,6 +97,9 @@ type FastNoteData = {
   isRest: boolean
   tieStart: boolean
   tieStop: boolean
+  tieFrozenIncomingPitch: Pitch | null
+  tieFrozenIncomingFromNoteId: string | null
+  tieFrozenIncomingFromKeyIndex: number | null
   staffText?: string
   typeText?: string
   durationValue: number | null
@@ -93,6 +117,9 @@ function collectFastNoteData(noteEl: Element): FastNoteData {
     isRest: false,
     tieStart: false,
     tieStop: false,
+    tieFrozenIncomingPitch: null,
+    tieFrozenIncomingFromNoteId: null,
+    tieFrozenIncomingFromKeyIndex: null,
     durationValue: null,
     dots: 0,
     pitchAlter: null,
@@ -150,10 +177,24 @@ function collectFastNoteData(noteEl: Element): FastNoteData {
       const notationChildren = child.children
       for (let notationIndex = 0; notationIndex < notationChildren.length; notationIndex += 1) {
         const notationChild = notationChildren[notationIndex]
-        if (notationChild.tagName.toLowerCase() !== 'tied') continue
-        const tiedType = notationChild.getAttribute('type')?.trim().toLowerCase()
-        if (tiedType === 'start') data.tieStart = true
-        if (tiedType === 'stop') data.tieStop = true
+        const notationTag = notationChild.tagName.toLowerCase()
+        if (notationTag === 'tied') {
+          const tiedType = notationChild.getAttribute('type')?.trim().toLowerCase()
+          if (tiedType === 'start') data.tieStart = true
+          if (tiedType === 'stop') data.tieStop = true
+          continue
+        }
+        if (notationTag !== 'other-notation') continue
+        const notationType = notationChild.getAttribute('type')?.trim().toLowerCase() ?? ''
+        if (!notationType.startsWith('tie-frozen-in')) continue
+        const frozenPitch = normalizeTieFrozenPitchText(notationChild.textContent ?? '')
+        if (!frozenPitch) continue
+        data.tieFrozenIncomingPitch = frozenPitch
+        const fromNoteId = notationChild.getAttribute('from-note-id')?.trim()
+        data.tieFrozenIncomingFromNoteId = fromNoteId && fromNoteId.length > 0 ? fromNoteId : null
+        const fromKeyIndexText = notationChild.getAttribute('from-key-index')
+        const fromKeyIndex = fromKeyIndexText !== null ? Number(fromKeyIndexText) : Number.NaN
+        data.tieFrozenIncomingFromKeyIndex = Number.isFinite(fromKeyIndex) ? Math.trunc(fromKeyIndex) : null
       }
       continue
     }
@@ -392,13 +433,32 @@ export function buildMusicXmlFromMeasurePairs(params: {
     isRest: boolean
     tieStart?: boolean
     tieStop?: boolean
+    tieFrozenIncomingPitch?: Pitch | null
+    tieFrozenIncomingFromNoteId?: string | null
+    tieFrozenIncomingFromKeyIndex?: number | null
     divisions: number
     staff: 1 | 2
     voice: 1 | 2
     isChord: boolean
     beamTags: Record<number, BeamTag>
   }) => {
-    const { destination, pitch, duration, accidental, isRest, tieStart = false, tieStop = false, divisions, staff, voice, isChord, beamTags } = noteParams
+    const {
+      destination,
+      pitch,
+      duration,
+      accidental,
+      isRest,
+      tieStart = false,
+      tieStop = false,
+      tieFrozenIncomingPitch = null,
+      tieFrozenIncomingFromNoteId = null,
+      tieFrozenIncomingFromKeyIndex = null,
+      divisions,
+      staff,
+      voice,
+      isChord,
+      beamTags,
+    } = noteParams
     const { step, octave, alter } = getStepOctaveAlterFromPitch(pitch)
     const durationType = DURATION_MUSIC_XML[duration]
     const accidentalXml = !isRest && accidental ? ACCIDENTAL_TO_MUSIC_XML[accidental] : undefined
@@ -434,10 +494,23 @@ export function buildMusicXmlFromMeasurePairs(params: {
       if (!beamValue) return
       destination.push(`    <beam number="${beamNumber}">${beamValue}</beam>`)
     })
-    if (!isRest && (tieStart || tieStop)) {
+    if (!isRest && (tieStart || tieStop || tieFrozenIncomingPitch)) {
       destination.push('    <notations>')
       if (tieStart) destination.push('     <tied type="start"/>')
       if (tieStop) destination.push('     <tied type="stop"/>')
+      if (tieFrozenIncomingPitch) {
+        const fromNoteIdAttr =
+          tieFrozenIncomingFromNoteId && tieFrozenIncomingFromNoteId.length > 0
+            ? ` from-note-id="${escapeXml(tieFrozenIncomingFromNoteId)}"`
+            : ''
+        const fromKeyIndexAttr =
+          Number.isFinite(tieFrozenIncomingFromKeyIndex)
+            ? ` from-key-index="${Math.trunc(tieFrozenIncomingFromKeyIndex as number)}"`
+            : ''
+        destination.push(
+          `     <other-notation type="tie-frozen-in"${fromNoteIdAttr}${fromKeyIndexAttr}>${escapeXml(tieFrozenIncomingPitch)}</other-notation>`,
+        )
+      }
       destination.push('    </notations>')
     }
     destination.push('   </note>')
@@ -463,6 +536,9 @@ export function buildMusicXmlFromMeasurePairs(params: {
         isRest: Boolean(note.isRest),
         tieStart: Boolean(note.tieStart),
         tieStop: Boolean(note.tieStop),
+        tieFrozenIncomingPitch: note.tieFrozenIncomingPitch ?? null,
+        tieFrozenIncomingFromNoteId: note.tieFrozenIncomingFromNoteId ?? null,
+        tieFrozenIncomingFromKeyIndex: note.tieFrozenIncomingFromKeyIndex ?? null,
         divisions,
         staff,
         voice,
@@ -481,6 +557,9 @@ export function buildMusicXmlFromMeasurePairs(params: {
           isRest: false,
           tieStart: Boolean(note.chordTieStarts?.[chordIndex]),
           tieStop: Boolean(note.chordTieStops?.[chordIndex]),
+          tieFrozenIncomingPitch: note.chordTieFrozenIncomingPitches?.[chordIndex] ?? null,
+          tieFrozenIncomingFromNoteId: note.chordTieFrozenIncomingFromNoteIds?.[chordIndex] ?? null,
+          tieFrozenIncomingFromKeyIndex: note.chordTieFrozenIncomingFromKeyIndices?.[chordIndex] ?? null,
           divisions,
           staff,
           voice,
@@ -737,6 +816,18 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
             ? [...previous.chordTieStops]
             : new Array(nextChordPitches.length - 1).fill(false)
           sourceChordTieStops.push(Boolean(noteData.tieStop))
+          const sourceChordTieFrozenIncomingPitches = previous.chordTieFrozenIncomingPitches
+            ? [...previous.chordTieFrozenIncomingPitches]
+            : new Array(nextChordPitches.length - 1).fill(null)
+          sourceChordTieFrozenIncomingPitches.push(noteData.tieFrozenIncomingPitch ?? null)
+          const sourceChordTieFrozenIncomingFromNoteIds = previous.chordTieFrozenIncomingFromNoteIds
+            ? [...previous.chordTieFrozenIncomingFromNoteIds]
+            : new Array(nextChordPitches.length - 1).fill(null)
+          sourceChordTieFrozenIncomingFromNoteIds.push(noteData.tieFrozenIncomingFromNoteId ?? null)
+          const sourceChordTieFrozenIncomingFromKeyIndices = previous.chordTieFrozenIncomingFromKeyIndices
+            ? [...previous.chordTieFrozenIncomingFromKeyIndices]
+            : new Array(nextChordPitches.length - 1).fill(null)
+          sourceChordTieFrozenIncomingFromKeyIndices.push(noteData.tieFrozenIncomingFromKeyIndex ?? null)
 
           slot.notes[staff][slot.notes[staff].length - 1] = {
             ...previous,
@@ -744,6 +835,9 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
             chordAccidentals: nextChordAccidentals,
             chordTieStarts: sourceChordTieStarts,
             chordTieStops: sourceChordTieStops,
+            chordTieFrozenIncomingPitches: sourceChordTieFrozenIncomingPitches,
+            chordTieFrozenIncomingFromNoteIds: sourceChordTieFrozenIncomingFromNoteIds,
+            chordTieFrozenIncomingFromKeyIndices: sourceChordTieFrozenIncomingFromKeyIndices,
           }
           continue
         }
@@ -801,6 +895,11 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
             if (patternIndex === 0) {
               if (noteData.tieStart) nextNote.tieStart = true
               if (noteData.tieStop) nextNote.tieStop = true
+              if (noteData.tieFrozenIncomingPitch) {
+                nextNote.tieFrozenIncomingPitch = noteData.tieFrozenIncomingPitch
+                nextNote.tieFrozenIncomingFromNoteId = noteData.tieFrozenIncomingFromNoteId
+                nextNote.tieFrozenIncomingFromKeyIndex = noteData.tieFrozenIncomingFromKeyIndex
+              }
             }
           }
           slot.notes[staff].push(nextNote)

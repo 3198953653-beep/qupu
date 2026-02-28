@@ -16,6 +16,7 @@ import { buildMeasureOverlayRect } from '../layout/viewport'
 import { clamp } from '../math'
 import { drawMeasureToContext } from './drawMeasure'
 import { drawCrossMeasureTies } from './drawCrossMeasureTies'
+import { buildDragPreviewOverrides } from './dragPreviewOverrides'
 import {
   DEFAULT_TIME_AXIS_SPACING_CONFIG,
   getMeasureUniformTimelineWeightSpan,
@@ -23,7 +24,6 @@ import {
   type TimeAxisSpacingConfig,
 } from '../layout/timeAxisSpacing'
 import { resolveEffectiveBoundary } from '../layout/effectiveBoundary'
-import { getStaffStepDelta, resolveGroupedTargetPitch } from '../dragPitchTransform'
 import type {
   DragState,
   LayoutReflowHint,
@@ -42,13 +42,6 @@ const OVERFLOW_RECOVERY_PAD_PX = 2
 const EDGE_EXCESS_SHRINK_MAX_STEP_PX = 48
 const MIN_TIMELINE_WEIGHT = 0.0001
 const MIN_FORMAT_WIDTH_PX = 8
-
-type DragPreviewNoteOverride = {
-  noteId: string
-  staff: StaffKind
-  pitch: string
-  keyIndex: number
-}
 
 type FrozenMeasureSpacing = {
   baselineMeasureX: number
@@ -318,66 +311,11 @@ export function renderVisibleSystems(params: {
     dragPreview = null,
   } = params
   const spacingConfig = timeAxisSpacingConfig ?? DEFAULT_TIME_AXIS_SPACING_CONFIG
-  const dragPreviewOverridesByPair = new Map<number, DragPreviewNoteOverride[]>()
-  if (dragPreview && dragPreview.previewStarted) {
-    const appendPreviewOverride = (override: DragPreviewNoteOverride, pairIndex: number) => {
-      const pairOverrides = dragPreviewOverridesByPair.get(pairIndex)
-      if (!pairOverrides) {
-        dragPreviewOverridesByPair.set(pairIndex, [override])
-        return
-      }
-      const exists = pairOverrides.some(
-        (entry) =>
-          entry.noteId === override.noteId &&
-          entry.staff === override.staff &&
-          entry.keyIndex === override.keyIndex,
-      )
-      if (!exists) {
-        pairOverrides.push(override)
-      }
-    }
-
-    const linkedTargets =
-      dragPreview.linkedTieTargets && dragPreview.linkedTieTargets.length > 0
-        ? dragPreview.linkedTieTargets
-        : [
-            {
-              pairIndex: dragPreview.pairIndex,
-              noteIndex: dragPreview.noteIndex,
-              staff: dragPreview.staff,
-              noteId: dragPreview.noteId,
-              keyIndex: dragPreview.keyIndex,
-              pitch: dragPreview.pitch,
-            },
-          ]
-    const linkedTargetKeys = new Set<string>()
-    linkedTargets.forEach((target) => {
-      linkedTargetKeys.add(`${target.staff}:${target.pairIndex}:${target.noteIndex}:${target.noteId}:${target.keyIndex}`)
-      const override: DragPreviewNoteOverride = {
-        noteId: target.noteId,
-        staff: target.staff,
-        pitch: dragPreview.pitch,
-        keyIndex: target.keyIndex,
-      }
-      appendPreviewOverride(override, target.pairIndex)
-    })
-
-    if (dragPreview.groupMoveTargets && dragPreview.groupMoveTargets.length > 0) {
-      const staffStepDelta = getStaffStepDelta(dragPreview.originPitch ?? dragPreview.pitch, dragPreview.pitch)
-      dragPreview.groupMoveTargets.forEach((target) => {
-        const targetKey = `${target.staff}:${target.pairIndex}:${target.noteIndex}:${target.noteId}:${target.keyIndex}`
-        if (linkedTargetKeys.has(targetKey)) return
-        const overridePitch = resolveGroupedTargetPitch(target, staffStepDelta)
-        if (!overridePitch) return
-        appendPreviewOverride({
-          noteId: target.noteId,
-          staff: target.staff,
-          pitch: overridePitch,
-          keyIndex: target.keyIndex,
-        }, target.pairIndex)
-      })
-    }
-  }
+  const {
+    previewNotesByPair: dragPreviewOverridesByPair,
+    previewPitchByTargetKey: dragPreviewPitchByTargetKey,
+    previewFrozenBoundaryCurve: dragPreviewFrozenBoundaryCurve,
+  } = buildDragPreviewOverrides({ drag: dragPreview })
 
   const nextLayouts: NoteLayout[] = []
   const nextLayoutsByPair = new Map<number, NoteLayout[]>()
@@ -551,7 +489,9 @@ export function renderVisibleSystems(params: {
         measureLayouts: nextMeasureLayouts,
         startPairIndex,
         endPairIndexExclusive,
-        allowBoundaryPartialTies: true,
+        previewPitchByTargetKey: dragPreviewPitchByTargetKey,
+        previewFrozenBoundaryCurve: dragPreviewFrozenBoundaryCurve,
+        allowBoundaryPartialTies: !(dragPreview && dragPreview.previewStarted),
       })
     }
     // Apply spacing freeze while dragging; optionally allow post-release freeze
@@ -763,6 +703,7 @@ export function renderVisibleSystems(params: {
             previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
           previewNotes,
           previewAccidentalStateBeforeNote,
+          previewFrozenBoundaryCurve: dragPreviewFrozenBoundaryCurve,
           preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
           preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
           onSpacingMetrics: (metrics) => {
@@ -932,6 +873,7 @@ export function renderVisibleSystems(params: {
             previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
           previewNotes,
           previewAccidentalStateBeforeNote,
+          previewFrozenBoundaryCurve: dragPreviewFrozenBoundaryCurve,
           preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
           preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
           onSpacingMetrics: (metrics) => {
@@ -1237,6 +1179,7 @@ export function renderVisibleSystems(params: {
           previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
         previewNotes,
         previewAccidentalStateBeforeNote,
+        previewFrozenBoundaryCurve: dragPreviewFrozenBoundaryCurve,
         preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
         preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
         onSpacingMetrics: (metrics) => {

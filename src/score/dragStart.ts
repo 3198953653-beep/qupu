@@ -94,6 +94,7 @@ export function createDragStateFromHit(params: {
     originPitch: pitch,
     pitch,
     previewStarted: false,
+    previewFrozenBoundary: null,
     grabOffsetY,
     pitchYMap: hit.layout.pitchYMap,
     keyFifths,

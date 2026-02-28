@@ -59,6 +59,43 @@ function appendUniqueSelection(current: Selection[], next: Selection): Selection
   return [...current, next]
 }
 
+function findLayoutForTarget(params: {
+  noteLayouts: NoteLayout[]
+  target: { noteId: string; staff: Selection['staff']; pairIndex: number; noteIndex: number }
+}): NoteLayout | null {
+  const { noteLayouts, target } = params
+  const exact = noteLayouts.find(
+    (layout) =>
+      layout.id === target.noteId &&
+      layout.staff === target.staff &&
+      layout.pairIndex === target.pairIndex &&
+      layout.noteIndex === target.noteIndex,
+  )
+  if (exact) return exact
+  return (
+    noteLayouts.find((layout) => layout.id === target.noteId && layout.staff === target.staff) ??
+    null
+  )
+}
+
+function resolveHeadAnchor(params: {
+  layout: NoteLayout | null
+  keyIndex: number
+  pitchHint?: Pitch | null
+}): { x: number; y: number } | null {
+  const { layout, keyIndex, pitchHint = null } = params
+  if (!layout) return null
+  const head =
+    layout.noteHeads.find((item) => item.keyIndex === keyIndex) ??
+    (pitchHint ? layout.noteHeads.find((item) => item.pitch === pitchHint) : undefined) ??
+    layout.noteHeads[0]
+  if (!head) return null
+  return {
+    x: head.x + 6,
+    y: head.y,
+  }
+}
+
 export function handleBeginDragPointer(params: {
   event: PointerEvent<HTMLCanvasElement>
   surface: HTMLCanvasElement | null
@@ -130,6 +167,7 @@ export function handleBeginDragPointer(params: {
     onBlankPointerDown?.()
     return
   }
+  const hitHead = hit.head
 
   event.preventDefault()
   dragPreviewFrameRef.current = 0
@@ -178,6 +216,67 @@ export function handleBeginDragPointer(params: {
     measureLayouts,
     importedKeyFifths,
   })
+  const sourceTarget =
+    dragState.linkedTieTargets?.find(
+      (target) =>
+        target.noteId === selection.noteId &&
+        target.staff === selection.staff &&
+        target.keyIndex === selection.keyIndex,
+    ) ??
+    dragState.linkedTieTargets?.[0] ??
+    null
+  const previousTarget = dragState.previousTieTarget ?? null
+  if (sourceTarget && previousTarget) {
+    const previousLayout = findLayoutForTarget({
+      noteLayouts,
+      target: {
+        noteId: previousTarget.noteId,
+        staff: previousTarget.staff,
+        pairIndex: previousTarget.pairIndex,
+        noteIndex: previousTarget.noteIndex,
+      },
+    })
+    const previousAnchor = resolveHeadAnchor({
+      layout: previousLayout,
+      keyIndex: previousTarget.keyIndex,
+      pitchHint: previousTarget.pitch,
+    })
+    const sourceLayout = findLayoutForTarget({
+      noteLayouts,
+      target: {
+        noteId: sourceTarget.noteId,
+        staff: sourceTarget.staff,
+        pairIndex: sourceTarget.pairIndex,
+        noteIndex: sourceTarget.noteIndex,
+      },
+    })
+    const fallbackSourceAnchor = resolveHeadAnchor({
+      layout: sourceLayout,
+      keyIndex: sourceTarget.keyIndex,
+      pitchHint: sourceTarget.pitch,
+    })
+    const sourceAnchor =
+      selection.noteId === sourceTarget.noteId &&
+      selection.staff === sourceTarget.staff &&
+      selection.keyIndex === sourceTarget.keyIndex
+        ? { x: hitHead.x + 6, y: hitHead.y }
+        : fallbackSourceAnchor
+    if (previousAnchor && sourceAnchor) {
+      dragState.previewFrozenBoundary = {
+        fromTarget: previousTarget,
+        toTarget: sourceTarget,
+        startX: previousAnchor.x,
+        startY: previousAnchor.y,
+        endX: sourceAnchor.x,
+        endY: sourceAnchor.y,
+        frozenPitch: sourceTarget.pitch,
+      }
+    } else {
+      dragState.previewFrozenBoundary = null
+    }
+  } else {
+    dragState.previewFrozenBoundary = null
+  }
   onSelectionPointerDown?.(selection, effectiveSelections, selectionMode)
   setActiveSelection(upsertSelection(selection))
   setDraggingSelection(upsertNullableSelection(selection))

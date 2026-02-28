@@ -1,6 +1,6 @@
 import { buildAccidentalStateBeforeNote } from './accidentals'
 import { resolveKeyFifthsForPair } from './dragStart'
-import { resolveConnectedTieTargets } from './tieChain'
+import { resolveForwardTieTargets } from './tieChain'
 import type {
   DragTieTarget,
   ImportedNoteLocation,
@@ -79,7 +79,7 @@ export function buildSelectionGroupMoveTargets(params: {
     const pitch = getSelectedPitch(note, selection.keyIndex)
     if (!note || !pitch) return
 
-    const tieTargets = resolveConnectedTieTargets({
+    const tieTargets = resolveForwardTieTargets({
       measurePairs,
       pairIndex: location.pairIndex,
       noteIndex: location.noteIndex,
