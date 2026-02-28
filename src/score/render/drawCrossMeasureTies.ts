@@ -242,6 +242,31 @@ function findStopTargetInNextMeasure(params: {
   return null
 }
 
+function findGhostStopTargetInNextMeasure(params: {
+  notes: ScoreNote[]
+  pairIndex: number
+  staff: StaffKind
+  previewPitchByTargetKey?: Map<string, Pitch> | null
+}): { noteIndex: number; keyIndex: number } | null {
+  const { notes, pairIndex, staff, previewPitchByTargetKey = null } = params
+  for (let nextIndex = 0; nextIndex < notes.length; nextIndex += 1) {
+    const specs = getTieKeySpecs({
+      note: notes[nextIndex],
+      pairIndex,
+      staff,
+      previewPitchByTargetKey,
+    })
+    if (specs.length === 0) continue
+    const preferred = specs.find((spec) => spec.tieStop) ?? specs[0]
+    if (!preferred) continue
+    return {
+      noteIndex: nextIndex,
+      keyIndex: preferred.keyIndex,
+    }
+  }
+  return null
+}
+
 function findFrozenStopTargetInNextMeasure(params: {
   notes: ScoreNote[]
   pairIndex: number
@@ -402,7 +427,7 @@ export function drawCrossMeasureTies(params: {
                     translatedY,
                     toAnchor.x,
                     translatedY,
-                    resolveTieDirection(staff, frozenTarget.frozenPitch),
+                    resolveTieDirection(staff, spec.pitch),
                   )
                   return
                 }
@@ -423,12 +448,41 @@ export function drawCrossMeasureTies(params: {
                 )
                 const toAnchor = getHeadAnchor(nextLayout, nextTarget.keyIndex, spec.pitch)
                 if (toAnchor) {
+                  const translatedY = fromAnchor.y
                   drawTieCurve(
                     context,
                     fromAnchor.x,
-                    fromAnchor.y,
+                    translatedY,
                     toAnchor.x,
-                    toAnchor.y,
+                    translatedY,
+                    resolveTieDirection(staff, spec.pitch),
+                  )
+                  return
+                }
+              }
+
+              const ghostTarget = findGhostStopTargetInNextMeasure({
+                notes: nextStaffNotes,
+                pairIndex: nextPairIndex,
+                staff,
+                previewPitchByTargetKey,
+              })
+              if (ghostTarget) {
+                const nextLayout = getNoteLayout(
+                  noteLayoutsByPair,
+                  nextPairIndex,
+                  staff,
+                  ghostTarget.noteIndex,
+                )
+                const toAnchor = getHeadAnchor(nextLayout, ghostTarget.keyIndex, spec.pitch)
+                if (toAnchor) {
+                  const translatedY = fromAnchor.y
+                  drawTieCurve(
+                    context,
+                    fromAnchor.x,
+                    translatedY,
+                    toAnchor.x,
+                    translatedY,
                     resolveTieDirection(staff, spec.pitch),
                   )
                   return

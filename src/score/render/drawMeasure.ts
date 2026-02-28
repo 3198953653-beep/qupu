@@ -811,6 +811,17 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     })
   }
 
+  const getTieAnchorX = (
+    renderedNote: { vexNote: StaveNote; renderedKeys: RenderedNoteKey[] } | undefined,
+    renderedIndex: number,
+  ): number | null => {
+    if (!renderedNote) return null
+    const raw = renderedNote.vexNote.noteHeads[renderedIndex]?.getAbsoluteX()
+    if (Number.isFinite(raw)) return raw + 6
+    const fallback = renderedNote.vexNote.getAbsoluteX()
+    return Number.isFinite(fallback) ? fallback : null
+  }
+
   const findFrozenIncomingTargetInMeasure = (params: {
     sourceNotes: ScoreNote[]
     rendered: Array<{ vexNote: StaveNote; renderedKeys: RenderedNoteKey[] }>
@@ -841,6 +852,26 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         noteIndex: candidateIndex,
         keyIndex: matched.keyIndex,
         frozenPitch: matched.frozenIncomingPitch,
+      }
+    }
+    return null
+  }
+
+  const findGhostTargetInMeasure = (params: {
+    sourceNotes: ScoreNote[]
+    rendered: Array<{ vexNote: StaveNote; renderedKeys: RenderedNoteKey[] }>
+    sourceNoteIndex: number
+  }): { noteIndex: number; keyIndex: number } | null => {
+    const { sourceNotes, rendered, sourceNoteIndex } = params
+    for (let candidateIndex = sourceNoteIndex + 1; candidateIndex < sourceNotes.length; candidateIndex += 1) {
+      const candidate = sourceNotes[candidateIndex]
+      if (!candidate || candidate.isRest) continue
+      const renderedNext = rendered[candidateIndex]
+      if (!renderedNext || renderedNext.renderedKeys.length === 0) continue
+      const keyIndex = renderedNext.renderedKeys[0]?.keyIndex ?? 0
+      return {
+        noteIndex: candidateIndex,
+        keyIndex: Number.isFinite(keyIndex) ? keyIndex : 0,
       }
     }
     return null
@@ -897,14 +928,21 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
               if (renderedNext && nextRenderedIndex >= 0) {
                 const translatedY =
                   renderedCurrent.vexNote.getYs()[currentRenderedIndex] ?? renderedCurrent.vexNote.getYs()[0]
-                const endX = renderedNext.vexNote.noteHeads[nextRenderedIndex]?.getAbsoluteX() ?? renderedNext.vexNote.getAbsoluteX()
-                if (Number.isFinite(translatedY) && Number.isFinite(endX)) {
+                const startX = getTieAnchorX(renderedCurrent, currentRenderedIndex)
+                const endX = getTieAnchorX(renderedNext, nextRenderedIndex)
+                if (
+                  Number.isFinite(translatedY) &&
+                  typeof startX === 'number' &&
+                  Number.isFinite(startX) &&
+                  typeof endX === 'number' &&
+                  Number.isFinite(endX)
+                ) {
                 drawTieCurveByAnchors(
-                  renderedCurrent.vexNote.noteHeads[currentRenderedIndex]?.getAbsoluteX() ?? renderedCurrent.vexNote.getAbsoluteX(),
+                  startX,
                   translatedY,
                   endX,
                   translatedY,
-                  getPitchLine(staff, frozenTarget.frozenPitch) < 3 ? 1 : -1,
+                  getPitchLine(staff, spec.pitch) < 3 ? 1 : -1,
                 )
                 return
               }
@@ -914,14 +952,58 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           const renderedNext = rendered[noteIndex + 1]
           const nextRenderedIndex = findRenderedIndexByPitch(renderedNext, spec.pitch)
           if (renderedNext && nextRenderedIndex >= 0) {
-            new StaveTie({
-              firstNote: renderedCurrent.vexNote,
-              lastNote: renderedNext.vexNote,
-              firstIndexes: [currentRenderedIndex],
-              lastIndexes: [nextRenderedIndex],
-            })
-              .setContext(context)
-              .draw()
+            const translatedY =
+              renderedCurrent.vexNote.getYs()[currentRenderedIndex] ?? renderedCurrent.vexNote.getYs()[0]
+            const startX = getTieAnchorX(renderedCurrent, currentRenderedIndex)
+            const endX = getTieAnchorX(renderedNext, nextRenderedIndex)
+            if (
+              Number.isFinite(translatedY) &&
+              typeof startX === 'number' &&
+              Number.isFinite(startX) &&
+              typeof endX === 'number' &&
+              Number.isFinite(endX)
+            ) {
+              drawTieCurveByAnchors(
+                startX,
+                translatedY,
+                endX,
+                translatedY,
+                getPitchLine(staff, spec.pitch) < 3 ? 1 : -1,
+              )
+              return
+            }
+          }
+
+          const ghostTarget = findGhostTargetInMeasure({
+            sourceNotes,
+            rendered,
+            sourceNoteIndex: noteIndex,
+          })
+          if (ghostTarget) {
+            const renderedGhost = rendered[ghostTarget.noteIndex]
+            const ghostRenderedIndex = findRenderedIndexByKeyIndex(renderedGhost, ghostTarget.keyIndex)
+            if (renderedGhost && ghostRenderedIndex >= 0) {
+              const translatedY =
+                renderedCurrent.vexNote.getYs()[currentRenderedIndex] ?? renderedCurrent.vexNote.getYs()[0]
+              const startX = getTieAnchorX(renderedCurrent, currentRenderedIndex)
+              const endX = getTieAnchorX(renderedGhost, ghostRenderedIndex)
+              if (
+                Number.isFinite(translatedY) &&
+                typeof startX === 'number' &&
+                Number.isFinite(startX) &&
+                typeof endX === 'number' &&
+                Number.isFinite(endX)
+              ) {
+                drawTieCurveByAnchors(
+                  startX,
+                  translatedY,
+                  endX,
+                  translatedY,
+                  getPitchLine(staff, spec.pitch) < 3 ? 1 : -1,
+                )
+                return
+              }
+            }
           } else if (renderBoundaryPartialTies) {
             new StaveTie({
               firstNote: renderedCurrent.vexNote,

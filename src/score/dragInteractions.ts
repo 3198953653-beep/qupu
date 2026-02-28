@@ -225,6 +225,104 @@ function updatePairsTieFreezeAtBoundary(params: {
   }
 }
 
+function normalizeFrozenFromKeyIndex(value: number | null | undefined): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(0, Math.trunc(value))
+  }
+  return 0
+}
+
+function reconcileFrozenIncomingForSource(params: {
+  pairs: MeasurePair[]
+  sourceTarget: DragTieTarget | null | undefined
+}): { nextPairs: MeasurePair[]; changedPairIndices: number[] } {
+  const { pairs, sourceTarget } = params
+  if (!sourceTarget) return { nextPairs: pairs, changedPairIndices: [] }
+
+  const sourcePair = pairs[sourceTarget.pairIndex]
+  const sourceNotes = sourceTarget.staff === 'treble' ? sourcePair?.treble : sourcePair?.bass
+  const sourceNote = sourceNotes?.[sourceTarget.noteIndex]
+  if (!sourcePair || !sourceNote || sourceNote.id !== sourceTarget.noteId || sourceNote.isRest) {
+    return { nextPairs: pairs, changedPairIndices: [] }
+  }
+  const sourcePitch = getPitchAtKey(sourceNote, sourceTarget.keyIndex)
+  if (!sourcePitch) return { nextPairs: pairs, changedPairIndices: [] }
+
+  let nextPairs = pairs
+  const changedPairIndices = new Set<number>()
+
+  const reconcileStaff = (pairIndex: number, staff: 'treble' | 'bass') => {
+    const pair = nextPairs[pairIndex]
+    if (!pair) return
+    const originalStaffNotes = staff === 'treble' ? pair.treble : pair.bass
+    let nextStaffNotes = originalStaffNotes
+    let staffChanged = false
+
+    for (let noteIndex = 0; noteIndex < originalStaffNotes.length; noteIndex += 1) {
+      const note = nextStaffNotes[noteIndex]
+      if (!note || note.isRest) continue
+      let nextNote = note
+
+      const rootFrozen = getTieFrozenIncoming(nextNote, 0)
+      if (
+        rootFrozen &&
+        rootFrozen.fromNoteId === sourceTarget.noteId &&
+        normalizeFrozenFromKeyIndex(rootFrozen.fromKeyIndex) === sourceTarget.keyIndex
+      ) {
+        const targetPitch = getPitchAtKey(nextNote, 0)
+        if (targetPitch && targetPitch === sourcePitch) {
+          nextNote = clearTieFrozenIncoming(nextNote, 0)
+        }
+      }
+
+      const chordCount = nextNote.chordPitches?.length ?? 0
+      for (let chordIndex = 0; chordIndex < chordCount; chordIndex += 1) {
+        const keyIndex = chordIndex + 1
+        const chordFrozen = getTieFrozenIncoming(nextNote, keyIndex)
+        if (
+          chordFrozen &&
+          chordFrozen.fromNoteId === sourceTarget.noteId &&
+          normalizeFrozenFromKeyIndex(chordFrozen.fromKeyIndex) === sourceTarget.keyIndex
+        ) {
+          const targetPitch = getPitchAtKey(nextNote, keyIndex)
+          if (targetPitch && targetPitch === sourcePitch) {
+            nextNote = clearTieFrozenIncoming(nextNote, keyIndex)
+          }
+        }
+      }
+
+      if (nextNote !== note) {
+        if (nextStaffNotes === originalStaffNotes) {
+          nextStaffNotes = originalStaffNotes.slice()
+        }
+        nextStaffNotes[noteIndex] = nextNote
+        staffChanged = true
+      }
+    }
+
+    if (!staffChanged) return
+    if (nextPairs === pairs) {
+      nextPairs = pairs.slice()
+    }
+    const nextPair = nextPairs[pairIndex] ?? pair
+    nextPairs[pairIndex] =
+      staff === 'treble'
+        ? { treble: nextStaffNotes, bass: nextPair.bass }
+        : { treble: nextPair.treble, bass: nextStaffNotes }
+    changedPairIndices.add(pairIndex)
+  }
+
+  for (let pairIndex = 0; pairIndex < nextPairs.length; pairIndex += 1) {
+    reconcileStaff(pairIndex, 'treble')
+    reconcileStaff(pairIndex, 'bass')
+  }
+
+  return {
+    nextPairs,
+    changedPairIndices: [...changedPairIndices].sort((left, right) => left - right),
+  }
+}
+
 function toTargetKey(target: DragTieTarget): string {
   return `${target.staff}:${target.pairIndex}:${target.noteIndex}:${target.noteId}:${target.keyIndex}`
 }
@@ -434,14 +532,20 @@ export function commitDragPitchToScoreData(params: {
       sourceTarget: sourceTieTarget,
       sourceOriginPitch: drag.originPitch ?? drag.pitch,
     })
+    const { nextPairs: updatedWithReconciledFrozenTargets, changedPairIndices: reconciledFrozenTargetPairIndices } =
+      reconcileFrozenIncomingForSource({
+        pairs: updated,
+        sourceTarget: sourceTieTarget,
+      })
     const changedPairIndices = [
       ...new Set([
         ...primaryChangedPairIndices,
         ...groupChangedPairIndices,
         ...tieFreezeChangedPairIndices,
+        ...reconciledFrozenTargetPairIndices,
       ]),
     ].sort((left, right) => left - right)
-    let normalizedPairs = updated
+    let normalizedPairs = updatedWithReconciledFrozenTargets
     changedPairIndices.forEach((pairIndex) => {
       normalizedPairs = normalizeMeasurePairAt(normalizedPairs, pairIndex, importedKeyFifths)
     })
@@ -492,14 +596,20 @@ export function commitDragPitchToScoreData(params: {
     sourceTarget: sourceTieTarget,
     sourceOriginPitch: drag.originPitch ?? drag.pitch,
   })
+  const { nextPairs: updatedWithReconciledFrozenTargets, changedPairIndices: reconciledFrozenTargetPairIndices } =
+    reconcileFrozenIncomingForSource({
+      pairs: updated,
+      sourceTarget: sourceTieTarget,
+    })
   const changedPairIndices = [
     ...new Set([
       ...primaryChangedPairIndices,
       ...groupChangedPairIndices,
       ...tieFreezeChangedPairIndices,
+      ...reconciledFrozenTargetPairIndices,
     ]),
   ].sort((left, right) => left - right)
-  let normalizedPairs = updated
+  let normalizedPairs = updatedWithReconciledFrozenTargets
   changedPairIndices.forEach((pairIndex) => {
     normalizedPairs = normalizeMeasurePairAt(normalizedPairs, pairIndex, null)
   })
