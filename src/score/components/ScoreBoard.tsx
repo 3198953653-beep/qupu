@@ -29,12 +29,6 @@ export function ScoreBoard(props: {
   selectedPoolSize: number
   trebleSequenceText: string
   bassSequenceText: string
-  dragDebugReport: string
-  onDumpDragLog: () => void
-  onClearDragLog: () => void
-  measureEdgeDebugReport: string
-  onDumpMeasureEdgeLog: () => void
-  onClearMeasureEdgeLog: () => void
 }) {
   const {
     scoreScrollRef,
@@ -60,12 +54,6 @@ export function ScoreBoard(props: {
     selectedPoolSize,
     trebleSequenceText,
     bassSequenceText,
-    dragDebugReport,
-    onDumpDragLog,
-    onClearDragLog,
-    measureEdgeDebugReport,
-    onDumpMeasureEdgeLog,
-    onClearMeasureEdgeLog,
   } = props
 
   return (
@@ -123,12 +111,6 @@ export function ScoreBoard(props: {
         selectedPoolSize={selectedPoolSize}
         trebleSequenceText={trebleSequenceText}
         bassSequenceText={bassSequenceText}
-        dragDebugReport={dragDebugReport}
-        onDumpDragLog={onDumpDragLog}
-        onClearDragLog={onClearDragLog}
-        measureEdgeDebugReport={measureEdgeDebugReport}
-        onDumpMeasureEdgeLog={onDumpMeasureEdgeLog}
-        onClearMeasureEdgeLog={onClearMeasureEdgeLog}
       />
     </section>
   )

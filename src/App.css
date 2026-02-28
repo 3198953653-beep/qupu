@@ -508,13 +508,13 @@
   left: 0;
   top: 0;
   touch-action: none;
-  cursor: grab;
+  cursor: default;
   z-index: 2;
 }
 
 .score-surface.is-dragging,
 .score-surface.is-dragging * {
-  cursor: grabbing;
+  cursor: default;
 }
 
 .score-overlay {

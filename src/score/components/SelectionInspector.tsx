@@ -1,4 +1,4 @@
-export function SelectionInspector(props: {
+﻿export function SelectionInspector(props: {
   selectedStaffLabel: string
   selectedPitchLabel: string
   selectedDurationLabel: string
@@ -6,12 +6,6 @@ export function SelectionInspector(props: {
   selectedPoolSize: number
   trebleSequenceText: string
   bassSequenceText: string
-  dragDebugReport: string
-  onDumpDragLog: () => void
-  onClearDragLog: () => void
-  measureEdgeDebugReport: string
-  onDumpMeasureEdgeLog: () => void
-  onClearMeasureEdgeLog: () => void
 }) {
   const {
     selectedStaffLabel,
@@ -21,12 +15,6 @@ export function SelectionInspector(props: {
     selectedPoolSize,
     trebleSequenceText,
     bassSequenceText,
-    dragDebugReport,
-    onDumpDragLog,
-    onClearDragLog,
-    measureEdgeDebugReport,
-    onDumpMeasureEdgeLog,
-    onClearMeasureEdgeLog,
   } = props
 
   return (
@@ -46,34 +34,6 @@ export function SelectionInspector(props: {
       </p>
       <p className="sequence">高音谱表：{trebleSequenceText}</p>
       <p className="sequence">低音谱表：{bassSequenceText}</p>
-      <div className="debug-tools">
-        <button type="button" onClick={onDumpDragLog}>
-          导出拖拽日志
-        </button>
-        <button type="button" onClick={onClearDragLog}>
-          清空拖拽日志
-        </button>
-        <button type="button" onClick={onDumpMeasureEdgeLog}>
-          导出小节边界日志
-        </button>
-        <button type="button" onClick={onClearMeasureEdgeLog}>
-          清空小节边界日志
-        </button>
-      </div>
-      <textarea
-        className="debug-log"
-        value={dragDebugReport}
-        readOnly
-        placeholder="先拖动一个音符，再点击“导出拖拽日志”。"
-        spellCheck={false}
-      />
-      <textarea
-        className="debug-log"
-        value={measureEdgeDebugReport}
-        readOnly
-        placeholder="点击“导出小节边界日志”，查看每个小节最后音符与小节线的坐标。"
-        spellCheck={false}
-      />
     </div>
   )
 }
