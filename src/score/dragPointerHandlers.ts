@@ -4,6 +4,7 @@ import type { HitGridIndex } from './layout/hitTest'
 import { buildDragStateForHit, getDragMovePitch } from './dragInteractions'
 import { buildSelectionGroupMoveTargets } from './selectionGroupTargets'
 import { buildSelectionsInTimelineRange } from './selectionTimelineRange'
+import { getTieFrozenIncoming } from './tieFrozen'
 import type {
   DragDebugSnapshot,
   DragState,
@@ -227,6 +228,13 @@ export function handleBeginDragPointer(params: {
     null
   const previousTarget = dragState.previousTieTarget ?? null
   if (sourceTarget && previousTarget) {
+    const sourcePair = (importedPairs ?? currentMeasurePairs)[sourceTarget.pairIndex]
+    const sourceStaffNotes = sourceTarget.staff === 'treble' ? sourcePair?.treble : sourcePair?.bass
+    const sourceStaffNote = sourceStaffNotes?.[sourceTarget.noteIndex]
+    const sourceFrozenIncoming =
+      sourceStaffNote && sourceStaffNote.id === sourceTarget.noteId
+        ? getTieFrozenIncoming(sourceStaffNote, sourceTarget.keyIndex)
+        : null
     const previousLayout = findLayoutForTarget({
       noteLayouts,
       target: {
@@ -259,7 +267,17 @@ export function handleBeginDragPointer(params: {
       selection.noteId === sourceTarget.noteId &&
       selection.staff === sourceTarget.staff &&
       selection.keyIndex === sourceTarget.keyIndex
-        ? { x: hitHead.x + 6, y: hitHead.y }
+        ? {
+            x: hitHead.x + 6,
+            y:
+              previousAnchor &&
+              sourceFrozenIncoming?.fromNoteId === previousTarget.noteId &&
+              (typeof sourceFrozenIncoming.fromKeyIndex === 'number'
+                ? sourceFrozenIncoming.fromKeyIndex
+                : 0) === previousTarget.keyIndex
+                ? previousAnchor.y
+                : hitHead.y,
+          }
         : fallbackSourceAnchor
     if (previousAnchor && sourceAnchor) {
       dragState.previewFrozenBoundary = {

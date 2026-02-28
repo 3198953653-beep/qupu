@@ -3516,8 +3516,42 @@ function App() {
           noteIndex: drag.noteIndex,
           pitch: drag.pitch,
           previewStarted: drag.previewStarted,
+          linkedTieTargets: drag.linkedTieTargets?.map((target) => ({ ...target })) ?? [],
+          previousTieTarget: drag.previousTieTarget ? { ...drag.previousTieTarget } : null,
+          previewFrozenBoundary: drag.previewFrozenBoundary
+            ? {
+                fromTarget: { ...drag.previewFrozenBoundary.fromTarget },
+                toTarget: { ...drag.previewFrozenBoundary.toTarget },
+                startX: drag.previewFrozenBoundary.startX,
+                startY: drag.previewFrozenBoundary.startY,
+                endX: drag.previewFrozenBoundary.endX,
+                endY: drag.previewFrozenBoundary.endY,
+                frozenPitch: drag.previewFrozenBoundary.frozenPitch,
+              }
+            : null,
         }
       },
+      getTieStateSnapshot: () =>
+        measurePairsRef.current.map((pair, pairIndex) => {
+          const mapNote = (note: ScoreNote, noteIndex: number) => ({
+            noteIndex,
+            noteId: note.id,
+            pitch: note.pitch,
+            tieStart: Boolean(note.tieStart),
+            tieStop: Boolean(note.tieStop),
+            tieFrozenIncomingPitch: note.tieFrozenIncomingPitch ?? null,
+            tieFrozenIncomingFromNoteId: note.tieFrozenIncomingFromNoteId ?? null,
+            tieFrozenIncomingFromKeyIndex:
+              typeof note.tieFrozenIncomingFromKeyIndex === 'number' && Number.isFinite(note.tieFrozenIncomingFromKeyIndex)
+                ? Math.max(0, Math.trunc(note.tieFrozenIncomingFromKeyIndex))
+                : null,
+          })
+          return {
+            pairIndex,
+            treble: pair.treble.map(mapNote),
+            bass: pair.bass.map(mapNote),
+          }
+        }),
       getOverlayDebugInfo: () => {
         const overlay = scoreOverlayRef.current
         const surface = scoreRef.current

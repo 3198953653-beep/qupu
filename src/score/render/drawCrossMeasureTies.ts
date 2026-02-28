@@ -395,14 +395,14 @@ export function drawCrossMeasureTies(params: {
                 )
                 const toAnchor = getHeadAnchor(nextLayout, frozenTarget.keyIndex, frozenTarget.frozenPitch)
                 if (toAnchor) {
-                  const frozenY = nextLayout?.pitchYMap[frozenTarget.frozenPitch] ?? toAnchor.y
+                  const translatedY = fromAnchor.y
                   drawTieCurve(
                     context,
                     fromAnchor.x,
-                    fromAnchor.y,
+                    translatedY,
                     toAnchor.x,
-                    frozenY,
-                    resolveTieDirection(staff, spec.pitch),
+                    translatedY,
+                    resolveTieDirection(staff, frozenTarget.frozenPitch),
                   )
                   return
                 }

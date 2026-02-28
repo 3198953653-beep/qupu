@@ -895,20 +895,16 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
               const renderedNext = rendered[frozenTarget.noteIndex]
               const nextRenderedIndex = findRenderedIndexByKeyIndex(renderedNext, frozenTarget.keyIndex)
               if (renderedNext && nextRenderedIndex >= 0) {
-                const startY = renderedCurrent.vexNote.getYs()[currentRenderedIndex] ?? renderedCurrent.vexNote.getYs()[0]
+                const translatedY =
+                  renderedCurrent.vexNote.getYs()[currentRenderedIndex] ?? renderedCurrent.vexNote.getYs()[0]
                 const endX = renderedNext.vexNote.noteHeads[nextRenderedIndex]?.getAbsoluteX() ?? renderedNext.vexNote.getAbsoluteX()
-                const staffStave = renderedNext.vexNote.getStave()
-                const endY =
-                  (staffStave ? staffStave.getYForNote(getPitchLine(staff, frozenTarget.frozenPitch)) : null) ??
-                  renderedNext.vexNote.getYs()[nextRenderedIndex] ??
-                  renderedNext.vexNote.getYs()[0]
-                if (Number.isFinite(startY) && Number.isFinite(endX) && Number.isFinite(endY)) {
+                if (Number.isFinite(translatedY) && Number.isFinite(endX)) {
                 drawTieCurveByAnchors(
                   renderedCurrent.vexNote.noteHeads[currentRenderedIndex]?.getAbsoluteX() ?? renderedCurrent.vexNote.getAbsoluteX(),
-                  startY,
+                  translatedY,
                   endX,
-                  endY,
-                  getPitchLine(staff, spec.pitch) < 3 ? 1 : -1,
+                  translatedY,
+                  getPitchLine(staff, frozenTarget.frozenPitch) < 3 ? 1 : -1,
                 )
                 return
               }

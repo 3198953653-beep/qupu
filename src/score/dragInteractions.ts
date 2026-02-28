@@ -15,7 +15,7 @@ import {
   updateScoreNotePitchAtKey,
 } from './scoreOps'
 import { resolveForwardTieTargets, resolvePreviousTieTarget } from './tieChain'
-import { clearTieFrozenIncoming, setTieFrozenIncoming } from './tieFrozen'
+import { clearTieFrozenIncoming, getTieFrozenIncoming, setTieFrozenIncoming } from './tieFrozen'
 import type { HitNote } from './layout/hitTest'
 import type {
   DragState,
@@ -191,11 +191,21 @@ function updatePairsTieFreezeAtBoundary(params: {
   }
 
   const nextSourceNote = shouldFreeze
-    ? setTieFrozenIncoming(sourceNote, sourceTarget.keyIndex, {
-        pitch: sourceOriginPitch,
-        fromNoteId: previousTarget?.noteId ?? null,
-        fromKeyIndex: previousTarget?.keyIndex ?? null,
-      })
+    ? (() => {
+        const previousFreeze = getTieFrozenIncoming(sourceNote, sourceTarget.keyIndex)
+        const freezePayload =
+          previousFreeze &&
+          previousFreeze.fromNoteId === (previousTarget?.noteId ?? null) &&
+          (typeof previousFreeze.fromKeyIndex === 'number' ? previousFreeze.fromKeyIndex : null) ===
+            (previousTarget?.keyIndex ?? null)
+            ? previousFreeze
+            : {
+                pitch: sourceOriginPitch,
+                fromNoteId: previousTarget?.noteId ?? null,
+                fromKeyIndex: previousTarget?.keyIndex ?? null,
+              }
+        return setTieFrozenIncoming(sourceNote, sourceTarget.keyIndex, freezePayload)
+      })()
     : clearTieFrozenIncoming(sourceNote, sourceTarget.keyIndex)
   if (nextSourceNote === sourceNote) {
     return { nextPairs: pairs, changedPairIndices: [] }
