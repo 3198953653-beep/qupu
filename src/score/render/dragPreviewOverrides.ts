@@ -85,15 +85,21 @@ export function buildDragPreviewOverrides(params: {
   previewNotesByPair: Map<number, DragPreviewNoteOverride[]>
   previewPitchByTargetKey: Map<string, Pitch>
   previewFrozenBoundaryCurve: DragPreviewFrozenBoundaryCurve | null
+  suppressedTieStartKeys: Set<string>
+  suppressedTieStopKeys: Set<string>
 } {
   const { drag } = params
   const previewNotesByPair = new Map<number, DragPreviewNoteOverride[]>()
   const previewPitchByTargetKey = new Map<string, Pitch>()
+  const suppressedTieStartKeys = new Set<string>()
+  const suppressedTieStopKeys = new Set<string>()
   if (!drag || !drag.previewStarted) {
     return {
       previewNotesByPair,
       previewPitchByTargetKey,
       previewFrozenBoundaryCurve: null,
+      suppressedTieStartKeys,
+      suppressedTieStopKeys,
     }
   }
 
@@ -163,6 +169,10 @@ export function buildDragPreviewOverrides(params: {
     Boolean(previousTarget) &&
     Boolean(sourceTarget) &&
     previousTarget!.pitch !== drag.pitch
+  if (shouldFreezeBoundary && previousTarget && sourceTarget) {
+    suppressedTieStartKeys.add(toTargetKey(previousTarget))
+    suppressedTieStopKeys.add(toTargetKey(sourceTarget))
+  }
   const previewFrozenBoundaryCurve =
     shouldFreezeBoundary &&
     snapshot &&
@@ -191,5 +201,7 @@ export function buildDragPreviewOverrides(params: {
     previewNotesByPair,
     previewPitchByTargetKey,
     previewFrozenBoundaryCurve,
+    suppressedTieStartKeys,
+    suppressedTieStopKeys,
   }
 }

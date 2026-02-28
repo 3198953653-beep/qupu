@@ -315,6 +315,8 @@ export function renderVisibleSystems(params: {
     previewNotesByPair: dragPreviewOverridesByPair,
     previewPitchByTargetKey: dragPreviewPitchByTargetKey,
     previewFrozenBoundaryCurve: dragPreviewFrozenBoundaryCurve,
+    suppressedTieStartKeys: dragPreviewSuppressedTieStartKeys,
+    suppressedTieStopKeys: dragPreviewSuppressedTieStopKeys,
   } = buildDragPreviewOverrides({ drag: dragPreview })
 
   const nextLayouts: NoteLayout[] = []
@@ -491,6 +493,8 @@ export function renderVisibleSystems(params: {
         endPairIndexExclusive,
         previewPitchByTargetKey: dragPreviewPitchByTargetKey,
         previewFrozenBoundaryCurve: dragPreviewFrozenBoundaryCurve,
+        suppressedTieStartKeys: dragPreviewSuppressedTieStartKeys,
+        suppressedTieStopKeys: dragPreviewSuppressedTieStopKeys,
         allowBoundaryPartialTies: !(dragPreview && dragPreview.previewStarted),
       })
     }
@@ -704,6 +708,8 @@ export function renderVisibleSystems(params: {
           previewNotes,
           previewAccidentalStateBeforeNote,
           previewFrozenBoundaryCurve: dragPreviewFrozenBoundaryCurve,
+          suppressedTieStartKeys: dragPreviewSuppressedTieStartKeys,
+          suppressedTieStopKeys: dragPreviewSuppressedTieStopKeys,
           preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
           preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
           onSpacingMetrics: (metrics) => {
@@ -874,6 +880,8 @@ export function renderVisibleSystems(params: {
           previewNotes,
           previewAccidentalStateBeforeNote,
           previewFrozenBoundaryCurve: dragPreviewFrozenBoundaryCurve,
+          suppressedTieStartKeys: dragPreviewSuppressedTieStartKeys,
+          suppressedTieStopKeys: dragPreviewSuppressedTieStopKeys,
           preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
           preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
           onSpacingMetrics: (metrics) => {
@@ -1180,6 +1188,8 @@ export function renderVisibleSystems(params: {
         previewNotes,
         previewAccidentalStateBeforeNote,
         previewFrozenBoundaryCurve: dragPreviewFrozenBoundaryCurve,
+        suppressedTieStartKeys: dragPreviewSuppressedTieStartKeys,
+        suppressedTieStopKeys: dragPreviewSuppressedTieStopKeys,
         preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
         preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
         onSpacingMetrics: (metrics) => {

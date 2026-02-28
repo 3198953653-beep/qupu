@@ -10,9 +10,12 @@ export function ScoreControls(props: {
   onLoadSampleMusicXml: () => void
   onExportMusicXmlFile: () => void
   onOpenOsmdPreview: () => void
+  onOpenDirectOsmdFilePicker: () => void
   onImportMusicXmlFromTextarea: () => void
   fileInputRef: RefObject<HTMLInputElement | null>
+  osmdDirectFileInputRef: RefObject<HTMLInputElement | null>
   onMusicXmlFileChange: (event: ChangeEvent<HTMLInputElement>) => void
+  onOsmdDirectFileChange: (event: ChangeEvent<HTMLInputElement>) => void
   importFeedback: ImportFeedback
   rhythmPreset: RhythmPresetId
   onApplyRhythmPreset: (presetId: RhythmPresetId) => void
@@ -51,9 +54,12 @@ export function ScoreControls(props: {
     onLoadSampleMusicXml,
     onExportMusicXmlFile,
     onOpenOsmdPreview,
+    onOpenDirectOsmdFilePicker,
     onImportMusicXmlFromTextarea,
     fileInputRef,
+    osmdDirectFileInputRef,
     onMusicXmlFileChange,
+    onOsmdDirectFileChange,
     importFeedback,
     rhythmPreset,
     onApplyRhythmPreset,
@@ -424,6 +430,7 @@ export function ScoreControls(props: {
       <section className="import-panel">
         <div className="import-actions">
           <button type="button" onClick={onOpenMusicXmlFilePicker}>加载乐谱文件</button>
+          <button type="button" onClick={onOpenDirectOsmdFilePicker}>直接预览文件</button>
           <button type="button" onClick={onLoadSampleMusicXml}>加载示例乐谱</button>
           <button type="button" onClick={onExportMusicXmlFile}>导出乐谱文件</button>
           <button type="button" onClick={onOpenOsmdPreview}>OSMD预览</button>
@@ -436,6 +443,13 @@ export function ScoreControls(props: {
           type="file"
           accept=".musicxml,.xml,text/xml,application/xml"
           onChange={onMusicXmlFileChange}
+        />
+        <input
+          ref={osmdDirectFileInputRef}
+          className="xml-file-input"
+          type="file"
+          accept=".musicxml,.xml,text/xml,application/xml"
+          onChange={onOsmdDirectFileChange}
         />
 
         {importFeedback.kind === 'loading' && (

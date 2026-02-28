@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+﻿import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import * as Tone from 'tone'
 import { Renderer } from 'vexflow'
 import './App.css'
@@ -303,14 +303,6 @@ function sanitizeMusicXmlForOsmdPreview(xmlText: string, measurePairs: MeasurePa
       assignStaffElements(pair.bass, bassElements)
     }
 
-    const ensureNotationsElement = (noteElement: Element): Element => {
-      const existing = getDirectChildElements(noteElement, 'notations')[0]
-      if (existing) return existing
-      const next = doc.createElement('notations')
-      noteElement.appendChild(next)
-      return next
-    }
-
     const removeTieByType = (noteElement: Element, tieType: 'start' | 'stop'): boolean => {
       let removed = false
       getDirectChildElements(noteElement, 'tie').forEach((tieElement) => {
@@ -340,6 +332,18 @@ function sanitizeMusicXmlForOsmdPreview(xmlText: string, measurePairs: MeasurePa
       return removed
     }
 
+    const appendTie = (noteElement: Element, tieType: 'start' | 'stop'): boolean => {
+      const exists = getDirectChildElements(noteElement, 'tie').some((tieElement) => {
+        const type = tieElement.getAttribute('type')?.trim().toLowerCase()
+        return type === tieType
+      })
+      if (exists) return false
+      const tieElement = doc.createElement('tie')
+      tieElement.setAttribute('type', tieType)
+      noteElement.appendChild(tieElement)
+      return true
+    }
+
     const removeTieFrozenNotation = (noteElement: Element): boolean => {
       let removed = false
       getDirectChildElements(noteElement, 'notations').forEach((notationsElement) => {
@@ -354,24 +358,91 @@ function sanitizeMusicXmlForOsmdPreview(xmlText: string, measurePairs: MeasurePa
       return removed
     }
 
-    const appendSlur = (
+    const ensureNotationsElement = (noteElement: Element): Element => {
+      const existing = getDirectChildElements(noteElement, 'notations')[0]
+      if (existing) return existing
+      const next = doc.createElement('notations')
+      noteElement.appendChild(next)
+      return next
+    }
+
+    const appendTied = (
       noteElement: Element,
       type: 'start' | 'stop',
-      number: number,
     ): boolean => {
       const notationsElement = ensureNotationsElement(noteElement)
       const exists = Array.from(notationsElement.children).some((child) => {
-        if (child.tagName !== 'slur') return false
+        if (child.tagName !== 'tied') return false
         const childType = child.getAttribute('type')?.trim().toLowerCase()
-        const childNumber = child.getAttribute('number')?.trim()
-        return childType === type && childNumber === String(number)
+        return childType === type
       })
       if (exists) return false
-      const slur = doc.createElement('slur')
-      slur.setAttribute('type', type)
-      slur.setAttribute('number', String(number))
-      notationsElement.appendChild(slur)
+      const tied = doc.createElement('tied')
+      tied.setAttribute('type', type)
+      notationsElement.appendChild(tied)
       return true
+    }
+
+    const setPitchOnNoteElement = (noteElement: Element, pitch: Pitch): boolean => {
+      const restElements = getDirectChildElements(noteElement, 'rest')
+      let changed = false
+      restElements.forEach((restElement) => {
+        noteElement.removeChild(restElement)
+        changed = true
+      })
+
+      let pitchElement = getDirectChildElements(noteElement, 'pitch')[0]
+      if (!pitchElement) {
+        pitchElement = doc.createElement('pitch')
+        const firstElementChild = noteElement.firstElementChild
+        if (firstElementChild) {
+          noteElement.insertBefore(pitchElement, firstElementChild.nextSibling)
+        } else {
+          noteElement.appendChild(pitchElement)
+        }
+        changed = true
+      }
+      while (pitchElement.firstChild) {
+        pitchElement.removeChild(pitchElement.firstChild)
+      }
+      const { step, alter, octave } = getStepOctaveAlterFromPitch(pitch)
+      const stepElement = doc.createElement('step')
+      stepElement.textContent = step
+      pitchElement.appendChild(stepElement)
+      if (alter !== 0) {
+        const alterElement = doc.createElement('alter')
+        alterElement.textContent = String(alter)
+        pitchElement.appendChild(alterElement)
+      }
+      const octaveElement = doc.createElement('octave')
+      octaveElement.textContent = String(octave)
+      pitchElement.appendChild(octaveElement)
+      return changed
+    }
+
+    const createFrozenTieStopAnchor = (targetElement: Element, frozenPitch: Pitch): Element | null => {
+      const hiddenAnchor = targetElement.cloneNode(true)
+      if (!(hiddenAnchor instanceof Element)) return null
+      hiddenAnchor.setAttribute('print-object', 'no')
+
+      if (!getDirectChildElements(hiddenAnchor, 'chord')[0]) {
+        const chordElement = doc.createElement('chord')
+        hiddenAnchor.insertBefore(chordElement, hiddenAnchor.firstChild)
+      }
+
+      getDirectChildElements(hiddenAnchor, 'tie').forEach((tieElement) => {
+        hiddenAnchor.removeChild(tieElement)
+      })
+      getDirectChildElements(hiddenAnchor, 'accidental').forEach((accidentalElement) => {
+        hiddenAnchor.removeChild(accidentalElement)
+      })
+      getDirectChildElements(hiddenAnchor, 'notations').forEach((notationsElement) => {
+        hiddenAnchor.removeChild(notationsElement)
+      })
+      setPitchOnNoteElement(hiddenAnchor, frozenPitch)
+      appendTie(hiddenAnchor, 'stop')
+      appendTied(hiddenAnchor, 'stop')
+      return hiddenAnchor
     }
 
     type FrozenBoundaryOperation = {
@@ -379,6 +450,7 @@ function sanitizeMusicXmlForOsmdPreview(xmlText: string, measurePairs: MeasurePa
       sourceKeyIndex: number
       targetNoteId: string
       targetKeyIndex: number
+      frozenPitch: Pitch
     }
     const operations: FrozenBoundaryOperation[] = []
     const operationKeySet = new Set<string>()
@@ -401,6 +473,7 @@ function sanitizeMusicXmlForOsmdPreview(xmlText: string, measurePairs: MeasurePa
                 : 0,
               targetNoteId: staffNote.id,
               targetKeyIndex: 0,
+              frozenPitch: staffNote.tieFrozenIncomingPitch,
             })
           }
           const chordLength = staffNote.chordPitches?.length ?? 0
@@ -415,6 +488,7 @@ function sanitizeMusicXmlForOsmdPreview(xmlText: string, measurePairs: MeasurePa
                 : 0,
               targetNoteId: staffNote.id,
               targetKeyIndex: chordIndex + 1,
+              frozenPitch,
             })
           }
         })
@@ -423,20 +497,27 @@ function sanitizeMusicXmlForOsmdPreview(xmlText: string, measurePairs: MeasurePa
 
     let changed = false
 
-    operations.forEach((operation, index) => {
+    operations.forEach((operation) => {
       const sourceElement = noteElementByKey.get(toNoteKey(operation.sourceNoteId, operation.sourceKeyIndex))
       const targetElement = noteElementByKey.get(toNoteKey(operation.targetNoteId, operation.targetKeyIndex))
       if (!sourceElement || !targetElement) return
 
-      if (removeTieByType(sourceElement, 'start')) changed = true
-      if (removeNotationByType(sourceElement, 'tied', 'start')) changed = true
+      if (removeNotationByType(sourceElement, 'slur', 'start')) changed = true
       if (removeTieByType(targetElement, 'stop')) changed = true
       if (removeNotationByType(targetElement, 'tied', 'stop')) changed = true
+      if (removeNotationByType(targetElement, 'slur', 'stop')) changed = true
       if (removeTieFrozenNotation(targetElement)) changed = true
 
-      const slurNumber = 200 + index
-      if (appendSlur(sourceElement, 'start', slurNumber)) changed = true
-      if (appendSlur(targetElement, 'stop', slurNumber)) changed = true
+      if (appendTie(sourceElement, 'start')) changed = true
+      if (appendTied(sourceElement, 'start')) changed = true
+      const hiddenStopAnchor = createFrozenTieStopAnchor(targetElement, operation.frozenPitch)
+      if (hiddenStopAnchor) {
+        const parent = targetElement.parentElement
+        if (parent) {
+          parent.insertBefore(hiddenStopAnchor, targetElement.nextSibling)
+          changed = true
+        }
+      }
     })
 
     if (!changed) return xmlText
@@ -1166,6 +1247,7 @@ function App() {
   const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
   const [timeAxisSpacingConfig, setTimeAxisSpacingConfig] = useState(DEFAULT_TIME_AXIS_SPACING_CONFIG)
   const [isOsmdPreviewOpen, setIsOsmdPreviewOpen] = useState(false)
+  const [osmdPreviewSourceMode, setOsmdPreviewSourceMode] = useState<'editor' | 'direct-file'>('editor')
   const [osmdPreviewXml, setOsmdPreviewXml] = useState<string>('')
   const [osmdPreviewStatusText, setOsmdPreviewStatusText] = useState<string>('')
   const [osmdPreviewError, setOsmdPreviewError] = useState<string>('')
@@ -1211,6 +1293,7 @@ function App() {
   const osmdPreviewZoomCommitTimerRef = useRef<number | null>(null)
   const osmdPreviewMarginApplyTimerRef = useRef<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const osmdDirectFileInputRef = useRef<HTMLInputElement | null>(null)
   const synthRef = useRef<Tone.PolySynth | null>(null)
 
   const noteLayoutsRef = useRef<NoteLayout[]>([])
@@ -2041,6 +2124,7 @@ function App() {
     setIsOsmdPreviewOpen(false)
     setOsmdPreviewStatusText('')
     setOsmdPreviewError('')
+    setOsmdPreviewSourceMode('editor')
     setOsmdPreviewPageIndex(0)
     setOsmdPreviewPageCount(1)
     osmdPreviewPagesRef.current = []
@@ -2122,6 +2206,12 @@ function App() {
     } | null
     const lookupByDomId = new Map<string, OsmdPreviewSelectionTarget>()
     const lookupBySelection = new Map<string, OsmdPreviewSelectionTarget>()
+    if (osmdPreviewSourceMode !== 'editor') {
+      osmdPreviewNoteLookupByDomIdRef.current = lookupByDomId
+      osmdPreviewNoteLookupBySelectionRef.current = lookupBySelection
+      clearOsmdPreviewNoteHighlight()
+      return
+    }
     if (!osmd?.GraphicSheet?.MusicPages?.length) {
       osmdPreviewNoteLookupByDomIdRef.current = lookupByDomId
       osmdPreviewNoteLookupBySelectionRef.current = lookupBySelection
@@ -2247,7 +2337,7 @@ function App() {
       return
     }
     applyOsmdPreviewNoteHighlight(lookupBySelection.get(selectedKey) ?? null)
-  }, [applyOsmdPreviewNoteHighlight, clearOsmdPreviewNoteHighlight, measurePairs])
+  }, [applyOsmdPreviewNoteHighlight, clearOsmdPreviewNoteHighlight, measurePairs, osmdPreviewSourceMode])
 
   const resolveOsmdPreviewTargetFromEvent = useCallback((eventTarget: EventTarget | null): OsmdPreviewSelectionTarget | null => {
     const container = osmdPreviewContainerRef.current
@@ -2306,6 +2396,7 @@ function App() {
   }, [closeOsmdPreview, horizontalMeasureFramesByPair, scoreScaleX])
 
   const onOsmdPreviewSurfaceClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (osmdPreviewSourceMode !== 'editor') return
     const target = resolveOsmdPreviewTargetFromEvent(event.target)
     if (!target) {
       osmdPreviewSelectedSelectionKeyRef.current = null
@@ -2314,9 +2405,10 @@ function App() {
     }
     osmdPreviewSelectedSelectionKeyRef.current = getSelectionKey(target.selection)
     applyOsmdPreviewNoteHighlight(target)
-  }, [applyOsmdPreviewNoteHighlight, clearOsmdPreviewNoteHighlight, resolveOsmdPreviewTargetFromEvent])
+  }, [applyOsmdPreviewNoteHighlight, clearOsmdPreviewNoteHighlight, osmdPreviewSourceMode, resolveOsmdPreviewTargetFromEvent])
 
   const onOsmdPreviewSurfaceDoubleClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (osmdPreviewSourceMode !== 'editor') return
     const target = resolveOsmdPreviewTargetFromEvent(event.target)
     if (!target) return
     event.preventDefault()
@@ -2324,7 +2416,17 @@ function App() {
     osmdPreviewSelectedSelectionKeyRef.current = getSelectionKey(target.selection)
     applyOsmdPreviewNoteHighlight(target)
     jumpFromOsmdPreviewToEditor(target)
-  }, [applyOsmdPreviewNoteHighlight, jumpFromOsmdPreviewToEditor, resolveOsmdPreviewTargetFromEvent])
+  }, [applyOsmdPreviewNoteHighlight, jumpFromOsmdPreviewToEditor, osmdPreviewSourceMode, resolveOsmdPreviewTargetFromEvent])
+
+  const openOsmdPreviewWithXml = useCallback((previewXmlText: string, sourceMode: 'editor' | 'direct-file') => {
+    setOsmdPreviewSourceMode(sourceMode)
+    setOsmdPreviewXml(previewXmlText)
+    setOsmdPreviewStatusText('正在生成OSMD预览...')
+    setOsmdPreviewError('')
+    setOsmdPreviewPageIndex(0)
+    setOsmdPreviewPageCount(1)
+    setIsOsmdPreviewOpen(true)
+  }, [])
 
   const openOsmdPreview = useCallback(() => {
     const { xmlText } = buildMusicXmlExportPayload({
@@ -2335,13 +2437,37 @@ function App() {
       metadata: musicXmlMetadataFromImportRef.current,
     })
     const previewXmlText = sanitizeMusicXmlForOsmdPreview(xmlText, measurePairs)
-    setOsmdPreviewXml(previewXmlText)
-    setOsmdPreviewStatusText('正在生成OSMD预览...')
-    setOsmdPreviewError('')
-    setOsmdPreviewPageIndex(0)
-    setOsmdPreviewPageCount(1)
-    setIsOsmdPreviewOpen(true)
-  }, [measurePairs])
+    openOsmdPreviewWithXml(previewXmlText, 'editor')
+  }, [measurePairs, openOsmdPreviewWithXml])
+
+  const openDirectOsmdFilePicker = useCallback(() => {
+    const input = osmdDirectFileInputRef.current
+    if (!input) return
+    input.value = ''
+    input.click()
+  }, [])
+
+  const onOsmdDirectFileChange = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.target
+    const selectedFile = input.files?.[0]
+    input.value = ''
+    if (!selectedFile) return
+    try {
+      setOsmdPreviewError('')
+      setOsmdPreviewStatusText('正在读取MusicXML文件...')
+      const xmlText = await selectedFile.text()
+      if (!xmlText.trim()) {
+        setOsmdPreviewStatusText('')
+        setOsmdPreviewError('所选文件为空，无法预览。')
+        return
+      }
+      openOsmdPreviewWithXml(xmlText, 'direct-file')
+    } catch (error) {
+      setOsmdPreviewStatusText('')
+      const message = error instanceof Error ? error.message : '读取MusicXML文件失败。'
+      setOsmdPreviewError(message)
+    }
+  }, [openOsmdPreviewWithXml])
   const exportOsmdPreviewPdf = useCallback(async () => {
     if (isOsmdPreviewExportingPdf) return
     const container = osmdPreviewContainerRef.current
@@ -3742,9 +3868,12 @@ function App() {
         onLoadSampleMusicXml={loadSampleMusicXml}
         onExportMusicXmlFile={exportMusicXmlFile}
         onOpenOsmdPreview={openOsmdPreview}
+        onOpenDirectOsmdFilePicker={openDirectOsmdFilePicker}
         onImportMusicXmlFromTextarea={importMusicXmlFromTextarea}
         fileInputRef={fileInputRef}
+        osmdDirectFileInputRef={osmdDirectFileInputRef}
         onMusicXmlFileChange={onMusicXmlFileChange}
+        onOsmdDirectFileChange={onOsmdDirectFileChange}
         importFeedback={importFeedback}
         rhythmPreset={rhythmPreset}
         onApplyRhythmPreset={applyRhythmPreset}
@@ -4042,4 +4171,5 @@ function App() {
 }
 
 export default App
+
 

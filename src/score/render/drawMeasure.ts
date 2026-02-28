@@ -22,6 +22,7 @@ import type { AppliedTimeAxisSpacingMetrics, TimeAxisSpacingConfig } from '../la
 import { getStepOctaveAlterFromPitch } from '../pitchMath'
 import { buildPitchLineMap, createPianoPitches, getPitchLine, getStrictStemDirection } from '../pitchUtils'
 import { getTieFrozenIncoming } from '../tieFrozen'
+import { getDragPreviewTargetKey } from './dragPreviewOverrides'
 import type { RenderedNoteKey } from '../accidentals'
 import type {
   DragDebugRow,
@@ -94,6 +95,8 @@ export type DrawMeasureParams = {
     endX: number
     endY: number
   } | null
+  suppressedTieStartKeys?: Set<string> | null
+  suppressedTieStopKeys?: Set<string> | null
   collectLayouts?: boolean
   suppressSystemDecorations?: boolean
   noteStartXOverride?: number
@@ -144,6 +147,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     previewNote = null,
     previewAccidentalStateBeforeNote = null,
     previewFrozenBoundaryCurve = null,
+    suppressedTieStartKeys = null,
+    suppressedTieStopKeys = null,
     collectLayouts = true,
     suppressSystemDecorations = false,
     noteStartXOverride,
@@ -896,8 +901,15 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
 
         const currentRenderedIndex = findRenderedIndexByKeyIndex(renderedCurrent, spec.keyIndex)
         if (currentRenderedIndex < 0) return
+        const tieTargetKey = getDragPreviewTargetKey({
+          pairIndex,
+          staff,
+          noteId: sourceNote.id,
+          keyIndex: spec.keyIndex,
+        })
 
         if (spec.tieStart) {
+          if (suppressedTieStartKeys?.has(tieTargetKey)) return
           if (
             previewFrozenBoundaryCurve &&
             previewFrozenBoundaryCurve.fromPairIndex === pairIndex &&
@@ -1017,6 +1029,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         }
 
         if (spec.tieStop) {
+          if (suppressedTieStopKeys?.has(tieTargetKey)) return
           if (spec.frozenIncomingPitch) return
           const previousNote = sourceNotes[noteIndex - 1]
           const previousRendered = rendered[noteIndex - 1]

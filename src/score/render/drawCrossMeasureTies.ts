@@ -313,6 +313,8 @@ export function drawCrossMeasureTies(params: {
   endPairIndexExclusive: number
   previewPitchByTargetKey?: Map<string, Pitch> | null
   previewFrozenBoundaryCurve?: DragPreviewFrozenBoundaryCurve | null
+  suppressedTieStartKeys?: Set<string> | null
+  suppressedTieStopKeys?: Set<string> | null
   allowBoundaryPartialTies?: boolean
 }): void {
   const {
@@ -324,6 +326,8 @@ export function drawCrossMeasureTies(params: {
     endPairIndexExclusive,
     previewPitchByTargetKey = null,
     previewFrozenBoundaryCurve = null,
+    suppressedTieStartKeys = null,
+    suppressedTieStopKeys = null,
     allowBoundaryPartialTies = true,
   } = params
   const safeStartPairIndex = Math.max(0, startPairIndex)
@@ -354,8 +358,15 @@ export function drawCrossMeasureTies(params: {
         noteSpecs.forEach((spec) => {
           const fromAnchor = getHeadAnchor(currentNoteLayout, spec.keyIndex, spec.pitch)
           if (!fromAnchor) return
+          const tieTargetKey = getDragPreviewTargetKey({
+            pairIndex,
+            staff,
+            noteId: note.id,
+            keyIndex: spec.keyIndex,
+          })
 
           if (spec.tieStart) {
+            if (suppressedTieStartKeys?.has(tieTargetKey)) return
             if (
               hasFrozenStopTargetInSameMeasure({
                 notes: currentStaffNotes,
@@ -500,6 +511,7 @@ export function drawCrossMeasureTies(params: {
           }
 
           if (spec.tieStop) {
+            if (suppressedTieStopKeys?.has(tieTargetKey)) return
             if (spec.frozenIncomingPitch) return
             if (
               hasIncomingTieInSameMeasure({

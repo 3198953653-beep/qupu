@@ -193,6 +193,8 @@ function drawOverlayRange(params: {
   activeSelection: Selection | null
   previewPitchByTargetKey?: Map<string, Pitch> | null
   previewFrozenBoundaryCurve?: DragPreviewFrozenBoundaryCurve | null
+  suppressedTieStartKeys?: Set<string> | null
+  suppressedTieStopKeys?: Set<string> | null
   getPreviewForPair?: (
     pairIndex: number,
   ) => {
@@ -221,6 +223,8 @@ function drawOverlayRange(params: {
     activeSelection,
     previewPitchByTargetKey = null,
     previewFrozenBoundaryCurve = null,
+    suppressedTieStartKeys = null,
+    suppressedTieStopKeys = null,
     getPreviewForPair,
   } = params
   if (pairIndices.length === 0) {
@@ -278,6 +282,8 @@ function drawOverlayRange(params: {
       previewNotes: preview?.previewNotes ?? null,
       previewAccidentalStateBeforeNote: preview?.previewAccidentalStateBeforeNote ?? null,
       previewFrozenBoundaryCurve,
+      suppressedTieStartKeys,
+      suppressedTieStopKeys,
       staticNoteXById: preview?.staticNoteXById ?? null,
       staticAccidentalRightXById: preview?.staticAccidentalRightXById ?? null,
       debugCapture:
@@ -303,6 +309,8 @@ function drawOverlayRange(params: {
     endPairIndexExclusive: (pairIndices[pairIndices.length - 1] ?? 0) + 1,
     previewPitchByTargetKey,
     previewFrozenBoundaryCurve,
+    suppressedTieStartKeys,
+    suppressedTieStopKeys,
     allowBoundaryPartialTies: false,
   })
 
@@ -401,6 +409,8 @@ export function drawDragMeasurePreview(params: {
     previewNotesByPair,
     previewPitchByTargetKey,
     previewFrozenBoundaryCurve,
+    suppressedTieStartKeys,
+    suppressedTieStopKeys,
   } = buildDragPreviewOverrides({ drag: dragWithLayout })
   const visibleRange = resolveVisibleViewportOverlayRange({
     measurePairCount: measurePairs.length,
@@ -422,6 +432,8 @@ export function drawDragMeasurePreview(params: {
     activeSelection: null,
     previewPitchByTargetKey,
     previewFrozenBoundaryCurve,
+    suppressedTieStartKeys,
+    suppressedTieStopKeys,
     getPreviewForPair: (pairIndex) => {
       const previewNotes = previewNotesByPair.get(pairIndex) ?? null
       if (!previewNotes) return {}

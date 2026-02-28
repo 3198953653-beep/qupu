@@ -15,7 +15,7 @@ import {
   updateScoreNotePitchAtKey,
 } from './scoreOps'
 import { resolveForwardTieTargets, resolvePreviousTieTarget } from './tieChain'
-import { clearTieFrozenIncoming, getTieFrozenIncoming, setTieFrozenIncoming } from './tieFrozen'
+import { clearTieFrozenIncoming, getTieFrozenIncoming } from './tieFrozen'
 import type { HitNote } from './layout/hitTest'
 import type {
   DragState,
@@ -162,14 +162,84 @@ function getPitchAtKey(note: ScoreNote | undefined, keyIndex: number): Pitch | n
   return note.chordPitches[chordIndex] ?? null
 }
 
+function updateScoreNoteTieStartAtKey(note: ScoreNote, keyIndex: number, enabled: boolean): ScoreNote {
+  if (note.isRest) return note
+  const nextEnabled = Boolean(enabled)
+  if (keyIndex <= 0) {
+    if (Boolean(note.tieStart) === nextEnabled) return note
+    if (nextEnabled) return { ...note, tieStart: true }
+    const next = { ...note }
+    delete next.tieStart
+    return next
+  }
+  const chordLength = note.chordPitches?.length ?? 0
+  const chordIndex = keyIndex - 1
+  if (chordLength <= 0 || chordIndex < 0 || chordIndex >= chordLength) return note
+  const nextChordTieStarts = note.chordTieStarts ? note.chordTieStarts.slice(0, chordLength) : []
+  while (nextChordTieStarts.length < chordLength) nextChordTieStarts.push(false)
+  if (Boolean(nextChordTieStarts[chordIndex]) === nextEnabled) return note
+  nextChordTieStarts[chordIndex] = nextEnabled
+  return {
+    ...note,
+    chordTieStarts: nextChordTieStarts,
+  }
+}
+
+function updateScoreNoteTieStopAtKey(note: ScoreNote, keyIndex: number, enabled: boolean): ScoreNote {
+  if (note.isRest) return note
+  const nextEnabled = Boolean(enabled)
+  if (keyIndex <= 0) {
+    if (Boolean(note.tieStop) === nextEnabled) return note
+    if (nextEnabled) return { ...note, tieStop: true }
+    const next = { ...note }
+    delete next.tieStop
+    return next
+  }
+  const chordLength = note.chordPitches?.length ?? 0
+  const chordIndex = keyIndex - 1
+  if (chordLength <= 0 || chordIndex < 0 || chordIndex >= chordLength) return note
+  const nextChordTieStops = note.chordTieStops ? note.chordTieStops.slice(0, chordLength) : []
+  while (nextChordTieStops.length < chordLength) nextChordTieStops.push(false)
+  if (Boolean(nextChordTieStops[chordIndex]) === nextEnabled) return note
+  nextChordTieStops[chordIndex] = nextEnabled
+  return {
+    ...note,
+    chordTieStops: nextChordTieStops,
+  }
+}
+
 function updatePairsTieFreezeAtBoundary(params: {
   pairs: MeasurePair[]
   previousTarget: DragTieTarget | null | undefined
   sourceTarget: DragTieTarget | null | undefined
-  sourceOriginPitch: Pitch
 }): { nextPairs: MeasurePair[]; changedPairIndices: number[] } {
-  const { pairs, previousTarget, sourceTarget, sourceOriginPitch } = params
+  const { pairs, previousTarget, sourceTarget } = params
   if (!sourceTarget) return { nextPairs: pairs, changedPairIndices: [] }
+
+  const applyNoteUpdate = (
+    nextPairsRef: { value: MeasurePair[] },
+    changedPairIndices: Set<number>,
+    target: DragTieTarget,
+    nextNote: ScoreNote,
+  ) => {
+    const pair = nextPairsRef.value[target.pairIndex]
+    if (!pair) return
+    const sourceNotes = target.staff === 'treble' ? pair.treble : pair.bass
+    const sourceNote = sourceNotes[target.noteIndex]
+    if (!sourceNote || sourceNote.id !== target.noteId) return
+    if (sourceNote === nextNote) return
+    if (nextPairsRef.value === pairs) {
+      nextPairsRef.value = pairs.slice()
+    }
+    const workingPair = nextPairsRef.value[target.pairIndex] ?? pair
+    const workingNotes = (target.staff === 'treble' ? workingPair.treble : workingPair.bass).slice()
+    workingNotes[target.noteIndex] = nextNote
+    nextPairsRef.value[target.pairIndex] =
+      target.staff === 'treble'
+        ? { treble: workingNotes, bass: workingPair.bass }
+        : { treble: workingPair.treble, bass: workingNotes }
+    changedPairIndices.add(target.pairIndex)
+  }
 
   const sourcePair = pairs[sourceTarget.pairIndex]
   const sourceStaffNotes = sourceTarget.staff === 'treble' ? sourcePair?.treble : sourcePair?.bass
@@ -178,50 +248,52 @@ function updatePairsTieFreezeAtBoundary(params: {
     return { nextPairs: pairs, changedPairIndices: [] }
   }
 
-  let shouldFreeze = false
-  if (previousTarget) {
-    const previousPair = pairs[previousTarget.pairIndex]
-    const previousStaffNotes = previousTarget.staff === 'treble' ? previousPair?.treble : previousPair?.bass
-    const previousNote = previousStaffNotes?.[previousTarget.noteIndex]
-    if (previousPair && previousNote && previousNote.id === previousTarget.noteId && !previousNote.isRest) {
-      const previousPitch = getPitchAtKey(previousNote, previousTarget.keyIndex)
-      const sourcePitch = getPitchAtKey(sourceNote, sourceTarget.keyIndex)
-      shouldFreeze = Boolean(previousPitch && sourcePitch && previousPitch !== sourcePitch)
+  const nextPairsRef = { value: pairs }
+  const changedPairIndices = new Set<number>()
+
+  if (!previousTarget) {
+    const clearedSource = clearTieFrozenIncoming(sourceNote, sourceTarget.keyIndex)
+    applyNoteUpdate(nextPairsRef, changedPairIndices, sourceTarget, clearedSource)
+    return {
+      nextPairs: nextPairsRef.value,
+      changedPairIndices: [...changedPairIndices].sort((left, right) => left - right),
     }
   }
 
-  const nextSourceNote = shouldFreeze
-    ? (() => {
-        const previousFreeze = getTieFrozenIncoming(sourceNote, sourceTarget.keyIndex)
-        const freezePayload =
-          previousFreeze &&
-          previousFreeze.fromNoteId === (previousTarget?.noteId ?? null) &&
-          (typeof previousFreeze.fromKeyIndex === 'number' ? previousFreeze.fromKeyIndex : null) ===
-            (previousTarget?.keyIndex ?? null)
-            ? previousFreeze
-            : {
-                pitch: sourceOriginPitch,
-                fromNoteId: previousTarget?.noteId ?? null,
-                fromKeyIndex: previousTarget?.keyIndex ?? null,
-              }
-        return setTieFrozenIncoming(sourceNote, sourceTarget.keyIndex, freezePayload)
-      })()
-    : clearTieFrozenIncoming(sourceNote, sourceTarget.keyIndex)
-  if (nextSourceNote === sourceNote) {
-    return { nextPairs: pairs, changedPairIndices: [] }
+  const previousPair = pairs[previousTarget.pairIndex]
+  const previousStaffNotes = previousTarget.staff === 'treble' ? previousPair?.treble : previousPair?.bass
+  const previousNote = previousStaffNotes?.[previousTarget.noteIndex]
+  if (!previousPair || !previousNote || previousNote.id !== previousTarget.noteId || previousNote.isRest) {
+    const clearedSource = clearTieFrozenIncoming(sourceNote, sourceTarget.keyIndex)
+    applyNoteUpdate(nextPairsRef, changedPairIndices, sourceTarget, clearedSource)
+    return {
+      nextPairs: nextPairsRef.value,
+      changedPairIndices: [...changedPairIndices].sort((left, right) => left - right),
+    }
   }
 
-  const nextPairs = pairs.slice()
-  const nextPair = nextPairs[sourceTarget.pairIndex] ?? sourcePair
-  const nextStaffNotes = sourceStaffNotes.slice()
-  nextStaffNotes[sourceTarget.noteIndex] = nextSourceNote
-  nextPairs[sourceTarget.pairIndex] =
-    sourceTarget.staff === 'treble'
-      ? { treble: nextStaffNotes, bass: nextPair.bass }
-      : { treble: nextPair.treble, bass: nextStaffNotes }
+  const previousPitch = getPitchAtKey(previousNote, previousTarget.keyIndex)
+  const sourcePitch = getPitchAtKey(sourceNote, sourceTarget.keyIndex)
+  const shouldBreakBoundaryTie = Boolean(previousPitch && sourcePitch && previousPitch !== sourcePitch)
+
+  if (!shouldBreakBoundaryTie) {
+    const clearedSource = clearTieFrozenIncoming(sourceNote, sourceTarget.keyIndex)
+    applyNoteUpdate(nextPairsRef, changedPairIndices, sourceTarget, clearedSource)
+    return {
+      nextPairs: nextPairsRef.value,
+      changedPairIndices: [...changedPairIndices].sort((left, right) => left - right),
+    }
+  }
+
+  const clearedSource = clearTieFrozenIncoming(sourceNote, sourceTarget.keyIndex)
+  const detachedSource = updateScoreNoteTieStopAtKey(clearedSource, sourceTarget.keyIndex, false)
+  const detachedPrevious = updateScoreNoteTieStartAtKey(previousNote, previousTarget.keyIndex, false)
+  applyNoteUpdate(nextPairsRef, changedPairIndices, sourceTarget, detachedSource)
+  applyNoteUpdate(nextPairsRef, changedPairIndices, previousTarget, detachedPrevious)
+
   return {
-    nextPairs,
-    changedPairIndices: [sourceTarget.pairIndex],
+    nextPairs: nextPairsRef.value,
+    changedPairIndices: [...changedPairIndices].sort((left, right) => left - right),
   }
 }
 
@@ -544,7 +616,6 @@ export function commitDragPitchToScoreData(params: {
       pairs: updatedByGroup,
       previousTarget: drag.previousTieTarget,
       sourceTarget: sourceTieTarget,
-      sourceOriginPitch: drag.originPitch ?? drag.pitch,
     })
     const reconcileSourceTargets =
       tieTargets.length > 0
@@ -614,7 +685,6 @@ export function commitDragPitchToScoreData(params: {
     pairs: updatedByGroup,
     previousTarget: drag.previousTieTarget,
     sourceTarget: sourceTieTarget,
-    sourceOriginPitch: drag.originPitch ?? drag.pitch,
   })
   const reconcileSourceTargets =
     tieTargets.length > 0
