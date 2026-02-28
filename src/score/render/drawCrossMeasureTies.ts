@@ -376,14 +376,8 @@ export function drawCrossMeasureTies(params: {
               note.id === previewFrozenBoundaryCurve.fromNoteId &&
               spec.keyIndex === previewFrozenBoundaryCurve.fromKeyIndex
             ) {
-              drawTieCurve(
-                context,
-                previewFrozenBoundaryCurve.startX,
-                previewFrozenBoundaryCurve.startY,
-                previewFrozenBoundaryCurve.endX,
-                previewFrozenBoundaryCurve.endY,
-                resolveTieDirection(staff, previewFrozenBoundaryCurve.frozenPitch),
-              )
+              // Preview frozen boundary segment is rendered in drawMeasure
+              // to keep a single drawing path and avoid duplicate ties.
               return
             }
             if (
