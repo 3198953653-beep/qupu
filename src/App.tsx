@@ -2438,6 +2438,15 @@ function App() {
     openOsmdPreviewWithXml(previewXmlText, 'editor')
   }, [measurePairs, openOsmdPreviewWithXml])
 
+  const openBeamGroupingTool = useCallback(() => {
+    window.alert('音值组合算法已就绪，暂未接入业务流程。')
+    setImportFeedback({
+      kind: 'success',
+      message: '音值组合算法模块已就绪（暂未接入业务流程）。',
+    })
+    console.info('[beam-grouping] 独立算法入口已就绪：src/score/beamGrouping.ts（当前仅占位提示，不改谱面）')
+  }, [])
+
   const openDirectOsmdFilePicker = useCallback(() => {
     const input = osmdDirectFileInputRef.current
     if (!input) return
@@ -3773,6 +3782,7 @@ function App() {
         onLoadSampleMusicXml={loadSampleMusicXml}
         onExportMusicXmlFile={exportMusicXmlFile}
         onOpenOsmdPreview={openOsmdPreview}
+        onOpenBeamGroupingTool={openBeamGroupingTool}
         onOpenDirectOsmdFilePicker={openDirectOsmdFilePicker}
         onImportMusicXmlFromTextarea={importMusicXmlFromTextarea}
         fileInputRef={fileInputRef}

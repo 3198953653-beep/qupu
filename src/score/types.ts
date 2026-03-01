@@ -5,6 +5,12 @@ export type NoteDurationBase = 'w' | 'h' | 'q' | '8' | '16' | '32'
 export type RhythmPresetId = 'quarter' | 'twoEighth' | 'fourSixteenth' | 'eightSixteenth' | 'shortDotted'
 export type StaffKind = 'treble' | 'bass'
 export type BeamTag = 'begin' | 'continue' | 'end'
+export type BeamLevelTag = 'begin' | 'continue' | 'end' | 'forward hook' | 'backward hook'
+export type BeamTagByLevel = Record<number, BeamLevelTag>
+export type MeasureStaffBeamResult = {
+  treble: BeamTagByLevel[]
+  bass: BeamTagByLevel[]
+}
 export type SpacingLayoutMode = 'custom' | 'legacy'
 
 export type TimeSignature = {

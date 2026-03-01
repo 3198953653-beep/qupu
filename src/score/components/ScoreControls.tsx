@@ -10,6 +10,7 @@ export function ScoreControls(props: {
   onLoadSampleMusicXml: () => void
   onExportMusicXmlFile: () => void
   onOpenOsmdPreview: () => void
+  onOpenBeamGroupingTool: () => void
   onOpenDirectOsmdFilePicker: () => void
   onImportMusicXmlFromTextarea: () => void
   fileInputRef: RefObject<HTMLInputElement | null>
@@ -54,6 +55,7 @@ export function ScoreControls(props: {
     onLoadSampleMusicXml,
     onExportMusicXmlFile,
     onOpenOsmdPreview,
+    onOpenBeamGroupingTool,
     onOpenDirectOsmdFilePicker,
     onImportMusicXmlFromTextarea,
     fileInputRef,
@@ -434,6 +436,7 @@ export function ScoreControls(props: {
           <button type="button" onClick={onLoadSampleMusicXml}>加载示例乐谱</button>
           <button type="button" onClick={onExportMusicXmlFile}>导出乐谱文件</button>
           <button type="button" onClick={onOpenOsmdPreview}>OSMD预览</button>
+          <button type="button" onClick={onOpenBeamGroupingTool}>音值组合</button>
           <button type="button" onClick={onImportMusicXmlFromTextarea}>导入文本</button>
         </div>
 
