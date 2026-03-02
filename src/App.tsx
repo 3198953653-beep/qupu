@@ -49,9 +49,11 @@ import {
   flattenTrebleFromPairs,
 } from './score/scoreOps'
 import { commitDragPitchToScoreData } from './score/dragInteractions'
-import { appendIntervalKey, deleteSelectedKey, findSelectionLocationInPairs } from './score/keyboardEdits'
+import { appendIntervalKey, deleteSelectedKey, findSelectionLocationInPairs, replaceSelectedKeyPitch } from './score/keyboardEdits'
+import { getMidiNoteNumber, toPitchFromMidiWithKeyPreference } from './score/midiInput'
 import { getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './score/pitchMath'
-import { resolveForwardTieTargets, resolvePreviousTieTarget } from './score/tieChain'
+import { compareTimelinePoint, resolveSelectionTimelinePoint } from './score/selectionTimelineRange'
+import { resolveForwardTieTargets, resolveFullTieTargets, resolvePreviousTieTarget } from './score/tieChain'
 import { buildSelectionGroupMoveTargets } from './score/selectionGroupTargets'
 import type { HitGridIndex } from './score/layout/hitTest'
 import type {
@@ -102,6 +104,7 @@ const PDF_CJK_FONT_FAMILY = 'NotoSansSC'
 const PDF_CJK_FONT_FILE_NAME = 'NotoSansSC-Regular.ttf'
 const PDF_CJK_FONT_URL = new URL('./assets/fonts/NotoSansSC-Regular.ttf', import.meta.url).href
 const UNDO_HISTORY_LIMIT = 120
+const LOCAL_STORAGE_MIDI_INPUT_KEY = 'score.midi.selectedInputId'
 
 const PITCHES: Pitch[] = createPianoPitches()
 const INITIAL_BASS_NOTES: ScoreNote[] = buildBassMockNotes(INITIAL_NOTES)
@@ -1218,6 +1221,52 @@ type UndoSnapshot = {
   isSelectionVisible: boolean
 }
 
+type MidiPermissionState = 'idle' | 'granted' | 'denied' | 'unsupported' | 'error'
+
+type MidiInputOption = {
+  id: string
+  name: string
+}
+
+type WebMidiMessageEventLike = {
+  data?: Uint8Array | number[] | null
+}
+
+type WebMidiInputLike = {
+  id: string
+  name?: string
+  onmidimessage: ((event: WebMidiMessageEventLike) => void) | null
+}
+
+type WebMidiAccessLike = {
+  inputs?: {
+    values?: () => IterableIterator<WebMidiInputLike>
+    forEach?: (callback: (value: WebMidiInputLike) => void) => void
+  }
+  onstatechange: ((event: unknown) => void) | null
+}
+
+function collectMidiInputs(access: WebMidiAccessLike | null): WebMidiInputLike[] {
+  if (!access?.inputs) return []
+  const values = access.inputs.values?.()
+  if (values) {
+    return Array.from(values).filter((input): input is WebMidiInputLike => Boolean(input?.id))
+  }
+  const list: WebMidiInputLike[] = []
+  access.inputs.forEach?.((input) => {
+    if (input?.id) list.push(input)
+  })
+  return list
+}
+
+function toMidiPermissionStateFromError(error: unknown): MidiPermissionState {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error ?? '').toLowerCase()
+  if (message.includes('denied') || message.includes('notallowed') || message.includes('permission')) {
+    return 'denied'
+  }
+  return 'error'
+}
+
 function App() {
   const [notes, setNotes] = useState<ScoreNote[]>(INITIAL_NOTES)
   const [bassNotes, setBassNotes] = useState<ScoreNote[]>(INITIAL_BASS_NOTES)
@@ -1247,6 +1296,9 @@ function App() {
   const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
   const [timeAxisSpacingConfig, setTimeAxisSpacingConfig] = useState(DEFAULT_TIME_AXIS_SPACING_CONFIG)
   const [isOsmdPreviewOpen, setIsOsmdPreviewOpen] = useState(false)
+  const [midiPermissionState, setMidiPermissionState] = useState<MidiPermissionState>('idle')
+  const [midiInputOptions, setMidiInputOptions] = useState<MidiInputOption[]>([])
+  const [selectedMidiInputId, setSelectedMidiInputId] = useState('')
   const [osmdPreviewSourceMode, setOsmdPreviewSourceMode] = useState<'editor' | 'direct-file'>('editor')
   const [osmdPreviewXml, setOsmdPreviewXml] = useState<string>('')
   const [osmdPreviewStatusText, setOsmdPreviewStatusText] = useState<string>('')
@@ -1332,9 +1384,15 @@ function App() {
   const firstMeasureDebugRafRef = useRef<number | null>(null)
   const importFeedbackRef = useRef<ImportFeedback>(importFeedback)
   const activeSelectionRef = useRef<Selection>(activeSelection)
+  const selectedSelectionsRef = useRef<Selection[]>(selectedSelections)
   const isSelectionVisibleRef = useRef<boolean>(isSelectionVisible)
+  const draggingSelectionRef = useRef<Selection | null>(draggingSelection)
+  const isOsmdPreviewOpenRef = useRef<boolean>(isOsmdPreviewOpen)
   const undoHistoryRef = useRef<UndoSnapshot[]>([])
   const layoutReflowHintRef = useRef<LayoutReflowHint | null>(null)
+  const midiAccessRef = useRef<WebMidiAccessLike | null>(null)
+  const midiInputsByIdRef = useRef<Map<string, WebMidiInputLike>>(new Map())
+  const boundMidiInputIdRef = useRef<string>('')
   const measurePairs = useMemo(
     () => measurePairsFromImport ?? buildMeasurePairs(notes, bassNotes),
     [measurePairsFromImport, notes, bassNotes],
@@ -1864,14 +1922,24 @@ function App() {
   const trebleSequenceText = useMemo(() => toSequencePreview(notes), [notes])
   const bassSequenceText = useMemo(() => toSequencePreview(bassNotes), [bassNotes])
   const isImportLoading = importFeedback.kind === 'loading'
+  const midiSupported = midiPermissionState !== 'unsupported'
   const importProgressPercent =
     typeof importFeedback.progress === 'number' ? Math.max(0, Math.min(100, importFeedback.progress)) : null
   useEffect(() => {
     activeSelectionRef.current = activeSelection
   }, [activeSelection])
   useEffect(() => {
+    selectedSelectionsRef.current = selectedSelections
+  }, [selectedSelections])
+  useEffect(() => {
     isSelectionVisibleRef.current = isSelectionVisible
   }, [isSelectionVisible])
+  useEffect(() => {
+    draggingSelectionRef.current = draggingSelection
+  }, [draggingSelection])
+  useEffect(() => {
+    isOsmdPreviewOpenRef.current = isOsmdPreviewOpen
+  }, [isOsmdPreviewOpen])
   useEffect(() => {
     const exists = (selection: Selection): boolean =>
       selection.staff === 'treble'
@@ -1955,6 +2023,278 @@ function App() {
     },
     [pushUndoSnapshot, setBassNotes, setMeasurePairsFromImport, setNotes, setActiveSelection],
   )
+
+  const refreshMidiInputs = useCallback((access: WebMidiAccessLike | null) => {
+    const inputs = collectMidiInputs(access)
+    const nextOptions: MidiInputOption[] = []
+    const nextInputMap = new Map<string, WebMidiInputLike>()
+    inputs.forEach((input) => {
+      if (!input?.id) return
+      nextInputMap.set(input.id, input)
+      nextOptions.push({
+        id: input.id,
+        name: input.name?.trim() || '未命名设备',
+      })
+    })
+    midiInputsByIdRef.current = nextInputMap
+    setMidiInputOptions(nextOptions)
+    setSelectedMidiInputId((current) => {
+      if (current && nextInputMap.has(current)) return current
+      const rememberedId = typeof window !== 'undefined' ? window.localStorage.getItem(LOCAL_STORAGE_MIDI_INPUT_KEY) : ''
+      if (rememberedId && nextInputMap.has(rememberedId)) return rememberedId
+      return nextOptions[0]?.id ?? ''
+    })
+  }, [])
+
+  const resolveMidiTargetSelection = useCallback((pairs: MeasurePair[]): Selection | null => {
+    if (pairs.length === 0) return null
+    const fallbackSelection = activeSelectionRef.current
+    const candidateSelections =
+      selectedSelectionsRef.current.length > 0 ? selectedSelectionsRef.current : [fallbackSelection]
+    const timelinePoints = candidateSelections
+      .map((selection) =>
+        resolveSelectionTimelinePoint({
+          pairs,
+          selection,
+          importedNoteLookup: importedNoteLookupRef.current,
+        }),
+      )
+      .filter((point): point is NonNullable<typeof point> => point !== null)
+    if (timelinePoints.length === 0) {
+      return candidateSelections[0] ?? null
+    }
+    timelinePoints.sort((left, right) => {
+      const byTime = compareTimelinePoint(left, right)
+      if (byTime !== 0) return byTime
+      if (left.staff !== right.staff) return left.staff === 'treble' ? -1 : 1
+      if (left.noteIndex !== right.noteIndex) return left.noteIndex - right.noteIndex
+      if (left.selection.keyIndex !== right.selection.keyIndex) return left.selection.keyIndex - right.selection.keyIndex
+      return left.selection.noteId.localeCompare(right.selection.noteId)
+    })
+    return timelinePoints[0]?.selection ?? candidateSelections[0] ?? null
+  }, [])
+
+  const applyMidiReplacementByNoteNumber = useCallback((midiNoteNumber: number) => {
+    if (isOsmdPreviewOpenRef.current) return
+    if (dragRef.current || draggingSelectionRef.current) return
+    if (!isSelectionVisibleRef.current) return
+
+    const sourcePairs = measurePairsRef.current
+    const targetSelection = resolveMidiTargetSelection(sourcePairs)
+    if (!targetSelection) return
+
+    const selectionLocation = findSelectionLocationInPairs({
+      pairs: sourcePairs,
+      selection: targetSelection,
+      importedNoteLookup: importedNoteLookupRef.current,
+    })
+    if (!selectionLocation) return
+
+    const sourcePair = sourcePairs[selectionLocation.pairIndex]
+    if (!sourcePair) return
+    const staffNotes = selectionLocation.staff === 'treble' ? sourcePair.treble : sourcePair.bass
+    const sourceNote = staffNotes[selectionLocation.noteIndex]
+    if (!sourceNote) return
+
+    const keyFifths = resolvePairKeyFifthsForKeyboard(selectionLocation.pairIndex, measureKeyFifthsFromImportRef.current)
+    const targetPitch = toPitchFromMidiWithKeyPreference(midiNoteNumber, keyFifths)
+
+    if (sourceNote.isRest) {
+      const replaceResult = replaceSelectedKeyPitch({
+        pairs: sourcePairs,
+        selection: targetSelection,
+        targetPitch,
+        keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
+        importedNoteLookup: importedNoteLookupRef.current,
+      })
+      if (!replaceResult) return
+      applyKeyboardEditResult(replaceResult.nextPairs, replaceResult.nextSelection)
+      return
+    }
+
+    const selectedPitch =
+      targetSelection.keyIndex > 0
+        ? sourceNote.chordPitches?.[targetSelection.keyIndex - 1] ?? null
+        : sourceNote.pitch
+    if (!selectedPitch || selectedPitch === targetPitch) return
+
+    const accidentalStateBeforeNote = buildAccidentalStateBeforeNote(staffNotes, selectionLocation.noteIndex, keyFifths)
+    const importedPairs = measurePairsFromImportRef.current
+    const activePairs = importedPairs ?? sourcePairs
+    const linkedTieTargets = resolveFullTieTargets({
+      measurePairs: activePairs,
+      pairIndex: selectionLocation.pairIndex,
+      noteIndex: selectionLocation.noteIndex,
+      keyIndex: targetSelection.keyIndex,
+      staff: targetSelection.staff,
+      pitchHint: selectedPitch,
+    })
+    const previousTieTarget = resolvePreviousTieTarget({
+      measurePairs: activePairs,
+      pairIndex: selectionLocation.pairIndex,
+      noteIndex: selectionLocation.noteIndex,
+      keyIndex: targetSelection.keyIndex,
+      staff: targetSelection.staff,
+      pitchHint: selectedPitch,
+    })
+    const dragState: DragState = {
+      noteId: targetSelection.noteId,
+      staff: targetSelection.staff,
+      keyIndex: targetSelection.keyIndex,
+      pairIndex: selectionLocation.pairIndex,
+      noteIndex: selectionLocation.noteIndex,
+      linkedTieTargets:
+        linkedTieTargets.length > 0
+          ? linkedTieTargets
+          : [
+              {
+                pairIndex: selectionLocation.pairIndex,
+                noteIndex: selectionLocation.noteIndex,
+                staff: targetSelection.staff,
+                noteId: targetSelection.noteId,
+                keyIndex: targetSelection.keyIndex,
+                pitch: selectedPitch,
+              },
+            ],
+      previousTieTarget,
+      groupMoveTargets: [],
+      pointerId: -1,
+      surfaceTop: 0,
+      surfaceClientToScoreScaleY: 1,
+      startClientY: 0,
+      originPitch: selectedPitch,
+      pitch: selectedPitch,
+      previewStarted: false,
+      grabOffsetY: 0,
+      pitchYMap: {} as Record<Pitch, number>,
+      keyFifths,
+      accidentalStateBeforeNote,
+      layoutCacheReady: false,
+      staticNoteXById: new Map(),
+      previewAccidentalRightXById: new Map(),
+      debugStaticByNoteKey: new Map(),
+    }
+    const commitResult = commitDragPitchToScoreData({
+      drag: dragState,
+      pitch: targetPitch,
+      importedPairs,
+      importedNoteLookup: importedNoteLookupRef.current,
+      currentPairs: sourcePairs,
+      importedKeyFifths: measureKeyFifthsFromImportRef.current,
+    })
+
+    const sourceSnapshotPairs = commitResult.fromImported ? (importedPairs ?? sourcePairs) : sourcePairs
+    if (commitResult.normalizedPairs !== sourceSnapshotPairs) {
+      pushUndoSnapshot(sourceSnapshotPairs)
+    }
+    const decoratedLayoutHint = commitResult.layoutReflowHint.scoreContentChanged
+      ? { ...commitResult.layoutReflowHint, layoutStabilityKey }
+      : null
+    layoutReflowHintRef.current = decoratedLayoutHint
+
+    if (commitResult.fromImported) {
+      measurePairsFromImportRef.current = commitResult.normalizedPairs
+      setMeasurePairsFromImport(commitResult.normalizedPairs)
+      setNotes(flattenTrebleFromPairs(commitResult.normalizedPairs))
+      setBassNotes(flattenBassFromPairs(commitResult.normalizedPairs))
+    } else {
+      setNotes(commitResult.trebleNotes)
+      setBassNotes(commitResult.bassNotes)
+    }
+    setIsSelectionVisible(true)
+    setActiveSelection(targetSelection)
+    setSelectedSelections((current) =>
+      current.length === 0 ? [targetSelection] : appendUniqueSelection(current, targetSelection),
+    )
+  }, [applyKeyboardEditResult, layoutStabilityKey, pushUndoSnapshot, resolveMidiTargetSelection, setActiveSelection, setBassNotes, setMeasurePairsFromImport, setNotes])
+
+  const handleMidiMessage = useCallback((event: WebMidiMessageEventLike) => {
+    const rawData = event?.data
+    const messageData =
+      rawData instanceof Uint8Array ? rawData : Array.isArray(rawData) ? new Uint8Array(rawData) : null
+    if (!messageData) return
+    const midiNoteNumber = getMidiNoteNumber(messageData)
+    if (midiNoteNumber === null) return
+    applyMidiReplacementByNoteNumber(midiNoteNumber)
+  }, [applyMidiReplacementByNoteNumber])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (selectedMidiInputId) {
+      window.localStorage.setItem(LOCAL_STORAGE_MIDI_INPUT_KEY, selectedMidiInputId)
+    } else {
+      window.localStorage.removeItem(LOCAL_STORAGE_MIDI_INPUT_KEY)
+    }
+  }, [selectedMidiInputId])
+
+  useEffect(() => {
+    const boundId = boundMidiInputIdRef.current
+    if (boundId) {
+      const previousInput = midiInputsByIdRef.current.get(boundId)
+      if (previousInput) previousInput.onmidimessage = null
+      boundMidiInputIdRef.current = ''
+    }
+    if (!selectedMidiInputId) return
+    const selectedInput = midiInputsByIdRef.current.get(selectedMidiInputId)
+    if (!selectedInput) return
+    selectedInput.onmidimessage = handleMidiMessage
+    boundMidiInputIdRef.current = selectedMidiInputId
+    return () => {
+      if (boundMidiInputIdRef.current !== selectedMidiInputId) return
+      selectedInput.onmidimessage = null
+      boundMidiInputIdRef.current = ''
+    }
+  }, [handleMidiMessage, selectedMidiInputId])
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined') {
+      setMidiPermissionState('unsupported')
+      return
+    }
+    const midiNavigator = navigator as Navigator & {
+      requestMIDIAccess?: () => Promise<WebMidiAccessLike>
+    }
+    if (typeof midiNavigator.requestMIDIAccess !== 'function') {
+      setMidiPermissionState('unsupported')
+      setMidiInputOptions([])
+      setSelectedMidiInputId('')
+      return
+    }
+
+    let cancelled = false
+    midiNavigator.requestMIDIAccess()
+      .then((access) => {
+        if (cancelled) return
+        const normalizedAccess = access as unknown as WebMidiAccessLike
+        midiAccessRef.current = normalizedAccess
+        setMidiPermissionState('granted')
+        refreshMidiInputs(normalizedAccess)
+        normalizedAccess.onstatechange = () => {
+          refreshMidiInputs(normalizedAccess)
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        midiAccessRef.current = null
+        midiInputsByIdRef.current = new Map()
+        setMidiInputOptions([])
+        setSelectedMidiInputId('')
+        setMidiPermissionState(toMidiPermissionStateFromError(error))
+      })
+
+    return () => {
+      cancelled = true
+      const boundId = boundMidiInputIdRef.current
+      if (boundId) {
+        const boundInput = midiInputsByIdRef.current.get(boundId)
+        if (boundInput) boundInput.onmidimessage = null
+        boundMidiInputIdRef.current = ''
+      }
+      const access = midiAccessRef.current
+      if (access) access.onstatechange = null
+      midiAccessRef.current = null
+    }
+  }, [refreshMidiInputs])
 
   const moveSelectionsByKeyboardSteps = useCallback((
     direction: 'up' | 'down',
@@ -3785,6 +4125,11 @@ function App() {
         onOpenBeamGroupingTool={openBeamGroupingTool}
         onOpenDirectOsmdFilePicker={openDirectOsmdFilePicker}
         onImportMusicXmlFromTextarea={importMusicXmlFromTextarea}
+        midiSupported={midiSupported}
+        midiPermissionState={midiPermissionState}
+        midiInputOptions={midiInputOptions}
+        selectedMidiInputId={selectedMidiInputId}
+        onSelectedMidiInputIdChange={setSelectedMidiInputId}
         fileInputRef={fileInputRef}
         osmdDirectFileInputRef={osmdDirectFileInputRef}
         onMusicXmlFileChange={onMusicXmlFileChange}

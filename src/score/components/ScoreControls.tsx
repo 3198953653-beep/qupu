@@ -13,6 +13,11 @@ export function ScoreControls(props: {
   onOpenBeamGroupingTool: () => void
   onOpenDirectOsmdFilePicker: () => void
   onImportMusicXmlFromTextarea: () => void
+  midiSupported: boolean
+  midiPermissionState: 'idle' | 'granted' | 'denied' | 'unsupported' | 'error'
+  midiInputOptions: Array<{ id: string; name: string }>
+  selectedMidiInputId: string
+  onSelectedMidiInputIdChange: (id: string) => void
   fileInputRef: RefObject<HTMLInputElement | null>
   osmdDirectFileInputRef: RefObject<HTMLInputElement | null>
   onMusicXmlFileChange: (event: ChangeEvent<HTMLInputElement>) => void
@@ -58,6 +63,11 @@ export function ScoreControls(props: {
     onOpenBeamGroupingTool,
     onOpenDirectOsmdFilePicker,
     onImportMusicXmlFromTextarea,
+    midiSupported,
+    midiPermissionState,
+    midiInputOptions,
+    selectedMidiInputId,
+    onSelectedMidiInputIdChange,
     fileInputRef,
     osmdDirectFileInputRef,
     onMusicXmlFileChange,
@@ -438,6 +448,30 @@ export function ScoreControls(props: {
           <button type="button" onClick={onOpenOsmdPreview}>OSMD预览</button>
           <button type="button" onClick={onOpenBeamGroupingTool}>音值组合</button>
           <button type="button" onClick={onImportMusicXmlFromTextarea}>导入文本</button>
+        </div>
+
+        <div className="midi-input-row">
+          <label htmlFor="midi-input-select">MIDI输入</label>
+          <select
+            id="midi-input-select"
+            value={selectedMidiInputId}
+            onChange={(event) => onSelectedMidiInputIdChange(event.target.value)}
+            disabled={!midiSupported || midiPermissionState === 'denied' || midiPermissionState === 'error'}
+          >
+            <option value="">关闭</option>
+            {midiInputOptions.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+          {midiPermissionState === 'idle' && <span className="midi-input-state">正在检测MIDI...</span>}
+          {midiPermissionState === 'unsupported' && <span className="midi-input-state">浏览器未启用Web MIDI</span>}
+          {midiPermissionState === 'denied' && <span className="midi-input-state">MIDI权限被拒绝</span>}
+          {midiPermissionState === 'error' && <span className="midi-input-state">MIDI初始化失败</span>}
+          {midiPermissionState === 'granted' && midiInputOptions.length === 0 && (
+            <span className="midi-input-state">未检测到MIDI输入设备</span>
+          )}
         </div>
 
         <input

@@ -1,7 +1,7 @@
 import { buildAccidentalStateBeforeNote, getEffectiveAlterFromContext, normalizeMeasurePairAt } from './accidentals'
 import { PIANO_MAX_MIDI, PIANO_MIN_MIDI, STEP_TO_SEMITONE } from './constants'
 import { getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './pitchMath'
-import type { ImportedNoteLocation, MeasurePair, ScoreNote, Selection, StaffKind } from './types'
+import type { ImportedNoteLocation, MeasurePair, Pitch, ScoreNote, Selection, StaffKind } from './types'
 
 const DIATONIC_STEPS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'] as const
 
@@ -278,6 +278,86 @@ export function appendIntervalKey(params: {
       noteId: selection.noteId,
       staff: selection.staff,
       keyIndex: appendedKeyIndex,
+    },
+    changedPairIndex: location.pairIndex,
+  }
+}
+
+export function replaceSelectedKeyPitch(params: {
+  pairs: MeasurePair[]
+  selection: Selection
+  targetPitch: Pitch
+  keyFifthsByMeasure?: number[] | null
+  importedNoteLookup?: Map<string, ImportedNoteLocation> | null
+}): KeyboardEditResult | null {
+  const {
+    pairs,
+    selection,
+    targetPitch,
+    keyFifthsByMeasure = null,
+    importedNoteLookup = null,
+  } = params
+  const location = findSelectionLocationInPairs({ pairs, selection, importedNoteLookup })
+  if (!location) return null
+  const pair = pairs[location.pairIndex]
+  if (!pair) return null
+  const notes = resolveStaffNotes(pair, location.staff)
+  const sourceNote = notes[location.noteIndex]
+  if (!sourceNote) return null
+
+  const selectedPitch = getSelectedPitch(sourceNote, selection.keyIndex)
+  if (!sourceNote.isRest && selectedPitch === targetPitch) return null
+
+  let nextKeyIndex = selection.keyIndex
+  const updatedPairs = updateNoteInPairs(pairs, location, (note) => {
+    if (note.isRest) {
+      nextKeyIndex = 0
+      return {
+        id: note.id,
+        pitch: targetPitch,
+        duration: note.duration,
+        isRest: false,
+      }
+    }
+
+    if (selection.keyIndex <= 0) {
+      nextKeyIndex = 0
+      return {
+        ...note,
+        pitch: targetPitch,
+      }
+    }
+
+    const chordIndex = selection.keyIndex - 1
+    const sourceChordPitches = note.chordPitches ?? []
+    if (chordIndex < 0 || chordIndex >= sourceChordPitches.length) {
+      nextKeyIndex = 0
+      return note
+    }
+    const nextChordPitches = sourceChordPitches.slice()
+    nextChordPitches[chordIndex] = targetPitch
+    const sourceChordAccidentals = note.chordAccidentals
+      ? note.chordAccidentals.slice()
+      : new Array(nextChordPitches.length).fill(null)
+    if (chordIndex < sourceChordAccidentals.length) {
+      sourceChordAccidentals[chordIndex] = null
+    }
+    nextKeyIndex = selection.keyIndex
+    return {
+      ...note,
+      chordPitches: nextChordPitches,
+      chordAccidentals: sourceChordAccidentals,
+    }
+  })
+  if (updatedPairs === pairs) return null
+
+  const normalizedPairs = normalizeMeasurePairAt(updatedPairs, location.pairIndex, keyFifthsByMeasure)
+  return {
+    nextPairs: normalizedPairs,
+    nextSelection: {
+      noteId: selection.noteId,
+      staff: selection.staff,
+      keyIndex: Math.max(0, nextKeyIndex),
     },
     changedPairIndex: location.pairIndex,
   }

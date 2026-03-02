@@ -265,6 +265,34 @@
   gap: 0.55rem;
 }
 
+.midi-input-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.midi-input-row label {
+  color: #20445a;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.midi-input-row select {
+  min-width: 220px;
+  border: 1px solid #c6d4dd;
+  border-radius: 10px;
+  padding: 0.4rem 0.55rem;
+  background: #ffffff;
+  color: #123246;
+  font-size: 0.84rem;
+}
+
+.midi-input-state {
+  color: #4a6271;
+  font-size: 0.8rem;
+}
+
 .import-actions button,
 .file-btn {
   border: 1px solid #c3d2db;

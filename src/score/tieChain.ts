@@ -460,3 +460,14 @@ export function resolveConnectedTieTargets(params: {
 
   return [...backwardTargets, toDragTieTarget(sourceNode), ...forwardTargets]
 }
+
+export function resolveFullTieTargets(params: {
+  measurePairs: MeasurePair[]
+  pairIndex: number
+  noteIndex: number
+  keyIndex: number
+  staff: StaffKind
+  pitchHint?: Pitch | null
+}): DragTieTarget[] {
+  return resolveConnectedTieTargets(params)
+}
