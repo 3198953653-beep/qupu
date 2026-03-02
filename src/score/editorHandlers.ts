@@ -26,7 +26,7 @@ import type {
 type StateSetter<T> = Dispatch<SetStateAction<T>>
 
 export function useEditorHandlers(params: {
-  synthRef: MutableRefObject<import('tone').PolySynth | null>
+  synthRef: MutableRefObject<import('tone').PolySynth | import('tone').Sampler | null>
   notes: ScoreNote[]
   bassNotes: ScoreNote[]
   stopPlayTimerRef: MutableRefObject<number | null>

@@ -1294,7 +1294,7 @@ function App() {
   const osmdPreviewMarginApplyTimerRef = useRef<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const osmdDirectFileInputRef = useRef<HTMLInputElement | null>(null)
-  const synthRef = useRef<Tone.PolySynth | null>(null)
+  const synthRef = useRef<Tone.PolySynth | Tone.Sampler | null>(null)
 
   const noteLayoutsRef = useRef<NoteLayout[]>([])
   const noteLayoutsByPairRef = useRef<Map<number, NoteLayout[]>>(new Map())

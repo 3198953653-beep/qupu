@@ -24,6 +24,42 @@ import type {
 } from '../types'
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>
+type PlaybackSynth = Tone.PolySynth | Tone.Sampler
+
+const PIANO_SAMPLE_URLS: Record<string, string> = {
+  A0: 'A0.mp3',
+  C1: 'C1.mp3',
+  'D#1': 'Ds1.mp3',
+  'F#1': 'Fs1.mp3',
+  A1: 'A1.mp3',
+  C2: 'C2.mp3',
+  'D#2': 'Ds2.mp3',
+  'F#2': 'Fs2.mp3',
+  A2: 'A2.mp3',
+  C3: 'C3.mp3',
+  'D#3': 'Ds3.mp3',
+  'F#3': 'Fs3.mp3',
+  A3: 'A3.mp3',
+  C4: 'C4.mp3',
+  'D#4': 'Ds4.mp3',
+  'F#4': 'Fs4.mp3',
+  A4: 'A4.mp3',
+  C5: 'C5.mp3',
+  'D#5': 'Ds5.mp3',
+  'F#5': 'Fs5.mp3',
+  A5: 'A5.mp3',
+  C6: 'C6.mp3',
+  'D#6': 'Ds6.mp3',
+  'F#6': 'Fs6.mp3',
+  A6: 'A6.mp3',
+  C7: 'C7.mp3',
+  'D#7': 'Ds7.mp3',
+  'F#7': 'Fs7.mp3',
+  A7: 'A7.mp3',
+  C8: 'C8.mp3',
+}
+
+const PIANO_SAMPLE_BASE_URL = 'https://tonejs.github.io/audio/salamander/'
 
 export function useImportedRefsSync(params: {
   measurePairsFromImport: MeasurePair[] | null
@@ -342,13 +378,41 @@ export function useScoreRenderEffect(params: {
 }
 
 export function useSynthLifecycle(params: {
-  synthRef: MutableRefObject<Tone.PolySynth | null>
+  synthRef: MutableRefObject<PlaybackSynth | null>
 }): void {
   const { synthRef } = params
   useEffect(() => {
-    synthRef.current = new Tone.PolySynth(Tone.Synth).toDestination()
+    const fallbackSynth = new Tone.PolySynth(Tone.Synth).toDestination()
+    const sampler = new Tone.Sampler({
+      urls: PIANO_SAMPLE_URLS,
+      baseUrl: PIANO_SAMPLE_BASE_URL,
+      release: 1.8,
+    }).toDestination()
+    synthRef.current = sampler
+    let isDisposed = false
+    let isFallbackDisposed = false
+    void Tone.loaded()
+      .then(() => {
+        if (isDisposed) return
+        if (synthRef.current !== sampler) return
+        console.info('[audio] 高质量钢琴音源已加载（Salamander Sampler）。')
+        fallbackSynth.dispose()
+        isFallbackDisposed = true
+      })
+      .catch((error: unknown) => {
+        if (isDisposed) return
+        sampler.dispose()
+        synthRef.current = fallbackSynth
+        const message = error instanceof Error ? error.message : String(error)
+        console.warn(`[audio] 钢琴采样加载失败，已回退到默认合成器：${message}`)
+      })
     return () => {
-      synthRef.current?.dispose()
+      isDisposed = true
+      const currentSynth = synthRef.current
+      currentSynth?.dispose()
+      if (!isFallbackDisposed && currentSynth !== fallbackSynth) {
+        fallbackSynth.dispose()
+      }
     }
   }, [synthRef])
 }

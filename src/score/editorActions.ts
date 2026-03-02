@@ -34,7 +34,7 @@ function formatMusicXmlTextareaPreview(xmlText: string): string {
 }
 
 export async function playScoreAction(params: {
-  synth: Tone.PolySynth | null
+  synth: Tone.PolySynth | Tone.Sampler | null
   notes: ScoreNote[]
   bassNotes: ScoreNote[]
   stopPlayTimerRef: MutableRefObject<number | null>
@@ -44,6 +44,9 @@ export async function playScoreAction(params: {
   if (!synth) return
 
   await Tone.start()
+  if (synth instanceof Tone.Sampler && !synth.loaded) {
+    await Tone.loaded()
+  }
   setIsPlaying(true)
 
   const start = Tone.now() + 0.05
