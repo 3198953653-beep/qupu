@@ -1,3 +1,5 @@
+import type { NoteDuration, ScoreNote, StaffKind } from './types'
+
 export type NotationPaletteDuration = '32' | '16' | '8' | 'q' | 'h' | 'w'
 export type NotationPaletteAccidental = 'bb' | 'b' | 'natural' | '#' | 'x' | null
 export type NotationPaletteMode = 'note' | 'rest'
@@ -72,6 +74,18 @@ export type NotationPaletteSelection = {
   arpeggio: boolean
   placeholders: Record<NotationPalettePlaceholderKey, boolean>
 }
+
+export type NotationPaletteResolvedSelection = {
+  noteId: string
+  staff: StaffKind
+  keyIndex: number
+  note: ScoreNote
+}
+
+export type NotationPaletteDerivedDisplay = {
+  activeItemIds: Set<string>
+  summary: string
+} | null
 
 export type NotationPaletteGroupId = 'mode' | 'duration' | 'accidental' | 'modifiers' | 'future'
 
@@ -398,4 +412,139 @@ export function formatNotationPaletteSelectionSummary(selection: NotationPalette
     summaryParts.push(`占位:${placeholderLabels.join('、')}`)
   }
   return `当前占位选择：${summaryParts.join(' / ')}`
+}
+
+export function getBaseDurationFromNoteDuration(duration: NoteDuration): NotationPaletteDuration {
+  switch (duration) {
+    case '32':
+    case '32d':
+      return '32'
+    case '16':
+    case '16d':
+      return '16'
+    case '8':
+    case '8d':
+      return '8'
+    case 'q':
+    case 'qd':
+      return 'q'
+    case 'h':
+      return 'h'
+    case 'w':
+    default:
+      return 'w'
+  }
+}
+
+export function isDottedDuration(duration: NoteDuration): boolean {
+  return duration === 'qd' || duration === '8d' || duration === '16d' || duration === '32d'
+}
+
+function getAccidentalIdFromRenderedAccidental(
+  accidental: string | null | undefined,
+): NotationPaletteAccidental {
+  if (accidental === 'bb') return 'bb'
+  if (accidental === 'b') return 'b'
+  if (accidental === 'n') return 'natural'
+  if (accidental === '#') return '#'
+  if (accidental === '##') return 'x'
+  return null
+}
+
+export function buildEmptyNotationPaletteDisplay(): NotationPaletteDerivedDisplay {
+  return {
+    activeItemIds: new Set<string>(),
+    summary: '当前选中：无',
+  }
+}
+
+function buildSummary(parts: string[]): string {
+  return `当前选中：${parts.join(' / ')}`
+}
+
+function getSelectionRenderedAccidental(note: ScoreNote, keyIndex: number): string | null | undefined {
+  if (note.isRest) return null
+  if (keyIndex <= 0) return note.accidental
+  return note.chordAccidentals?.[keyIndex - 1] ?? null
+}
+
+function hasSelectionTieStart(note: ScoreNote, keyIndex: number): boolean {
+  if (keyIndex <= 0) return Boolean(note.tieStart)
+  return Boolean(note.chordTieStarts?.[keyIndex - 1])
+}
+
+export function buildNotationPaletteDisplayFromSingleNote(
+  note: ScoreNote,
+  keyIndex: number,
+): NotationPaletteDerivedDisplay {
+  const activeItemIds = new Set<string>()
+  const summaryParts = [note.isRest ? '休止符' : '音符', DURATION_LABELS[getBaseDurationFromNoteDuration(note.duration)]]
+
+  activeItemIds.add(note.isRest ? 'rest' : 'note')
+  activeItemIds.add(getBaseDurationFromNoteDuration(note.duration))
+
+  if (isDottedDuration(note.duration)) {
+    activeItemIds.add('dotted')
+    summaryParts.push('附点')
+  }
+
+  if (hasSelectionTieStart(note, keyIndex)) {
+    activeItemIds.add('tie')
+    summaryParts.push('延音线')
+  }
+
+  if (!note.isRest) {
+    const accidentalId = getAccidentalIdFromRenderedAccidental(getSelectionRenderedAccidental(note, keyIndex))
+    if (accidentalId) {
+      activeItemIds.add(accidentalId)
+      summaryParts.splice(2, 0, ACCIDENTAL_LABELS[accidentalId])
+    }
+  }
+
+  return {
+    activeItemIds,
+    summary: buildSummary(summaryParts),
+  }
+}
+
+export function buildNotationPaletteDisplayForChordSelection(note: ScoreNote): NotationPaletteDerivedDisplay {
+  const activeItemIds = new Set<string>()
+  activeItemIds.add(getBaseDurationFromNoteDuration(note.duration))
+  const summaryParts = ['和弦多选', DURATION_LABELS[getBaseDurationFromNoteDuration(note.duration)]]
+  if (isDottedDuration(note.duration)) {
+    activeItemIds.add('dotted')
+    summaryParts.push('附点')
+  }
+  return {
+    activeItemIds,
+    summary: buildSummary(summaryParts),
+  }
+}
+
+export function buildNotationPaletteDerivedDisplay(params: {
+  isSelectionVisible: boolean
+  selections: NotationPaletteResolvedSelection[]
+}): NotationPaletteDerivedDisplay {
+  const { isSelectionVisible, selections } = params
+  if (!isSelectionVisible || selections.length === 0) {
+    return buildEmptyNotationPaletteDisplay()
+  }
+
+  if (selections.length === 1) {
+    const selection = selections[0]
+    return buildNotationPaletteDisplayFromSingleNote(selection.note, selection.keyIndex)
+  }
+
+  const firstSelection = selections[0]
+  const isSameChordSelection = selections.every(
+    (selection) => selection.noteId === firstSelection.noteId && selection.staff === firstSelection.staff,
+  )
+  if (isSameChordSelection) {
+    return buildNotationPaletteDisplayForChordSelection(firstSelection.note)
+  }
+
+  return {
+    activeItemIds: new Set<string>(),
+    summary: '当前选中：多选（无统一属性）',
+  }
 }

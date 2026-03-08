@@ -293,10 +293,8 @@
 }
 
 .notation-palette-popover {
-  position: absolute;
-  top: calc(100% + 0.45rem);
-  left: 0;
-  z-index: 12;
+  position: fixed;
+  z-index: 60;
   width: 282px;
   border: 1px solid #d4e1e8;
   border-radius: 14px;
@@ -305,6 +303,52 @@
   padding: 0.65rem;
   display: grid;
   gap: 0.55rem;
+}
+
+.notation-palette-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-bottom: 0.15rem;
+  border-bottom: 1px dashed #cfdae2;
+  cursor: grab;
+  touch-action: none;
+}
+
+.notation-palette-header.is-dragging {
+  cursor: grabbing;
+}
+
+.notation-palette-title {
+  color: #123246;
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  user-select: none;
+}
+
+.notation-palette-close {
+  width: 28px;
+  height: 28px;
+  border: 1px solid #cad9e2;
+  border-radius: 8px;
+  background: #fbfdff;
+  color: #355469;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, transform 120ms ease;
+}
+
+.notation-palette-close:hover {
+  background: #f4fbff;
+  border-color: #2f89ba;
+  color: #0f5f88;
+  transform: translateY(-1px);
 }
 
 .notation-palette-section {

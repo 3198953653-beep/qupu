@@ -18,6 +18,8 @@ export function ScoreControls(props: {
   onCloseNotationPalette: () => void
   notationPaletteSelection: NotationPaletteSelection
   notationPaletteLastAction: string
+  notationPaletteActiveItemIdsOverride?: ReadonlySet<string> | null
+  notationPaletteSummaryOverride?: string | null
   onNotationPaletteSelectionChange: (next: NotationPaletteSelection, actionLabel: string) => void
   onOpenDirectOsmdFilePicker: () => void
   onImportMusicXmlFromTextarea: () => void
@@ -74,6 +76,8 @@ export function ScoreControls(props: {
     onCloseNotationPalette,
     notationPaletteSelection,
     notationPaletteLastAction,
+    notationPaletteActiveItemIdsOverride = null,
+    notationPaletteSummaryOverride = null,
     onNotationPaletteSelectionChange,
     onOpenDirectOsmdFilePicker,
     onImportMusicXmlFromTextarea,
@@ -476,6 +480,8 @@ export function ScoreControls(props: {
               lastActionLabel={notationPaletteLastAction}
               anchorRef={notationPaletteAnchorRef}
               onClose={onCloseNotationPalette}
+              activeItemIdsOverride={notationPaletteActiveItemIdsOverride}
+              summaryOverride={notationPaletteSummaryOverride}
               onSelectionChange={onNotationPaletteSelectionChange}
             />
           </div>

@@ -56,7 +56,10 @@ import { compareTimelinePoint, resolveSelectionTimelinePoint } from './score/sel
 import { resolveForwardTieTargets, resolveFullTieTargets, resolvePreviousTieTarget } from './score/tieChain'
 import { buildSelectionGroupMoveTargets } from './score/selectionGroupTargets'
 import {
+  buildNotationPaletteDerivedDisplay,
   getDefaultNotationPaletteSelection,
+  type NotationPaletteDerivedDisplay,
+  type NotationPaletteResolvedSelection,
   type NotationPaletteSelection,
 } from './score/notationPaletteConfig'
 import type { HitGridIndex } from './score/layout/hitTest'
@@ -1928,6 +1931,45 @@ function App() {
       ? currentSelection.chordPitches?.[activeSelection.keyIndex - 1] ?? currentSelection.pitch
       : currentSelection.pitch
   const currentSelectionPitchLabel = currentSelection.isRest ? '休止符' : toDisplayPitch(currentSelectionPitch)
+  const derivedNotationPaletteDisplay = useMemo<NotationPaletteDerivedDisplay>(() => {
+    if (!isSelectionVisible) {
+      return buildNotationPaletteDerivedDisplay({ isSelectionVisible: false, selections: [] })
+    }
+
+    const selectionExists = (selection: Selection): boolean =>
+      selection.staff === 'treble' ? trebleNoteById.has(selection.noteId) : bassNoteById.has(selection.noteId)
+
+    const effectiveSelections = (() => {
+      const filteredSelections = selectedSelections.filter(selectionExists)
+      return selectionExists(activeSelection) ? appendUniqueSelection(filteredSelections, activeSelection) : filteredSelections
+    })()
+
+    const resolvedSelections: NotationPaletteResolvedSelection[] = effectiveSelections
+      .map((selection) => {
+        const location = findSelectionLocationInPairs({
+          pairs: measurePairs,
+          selection,
+          importedNoteLookup: importedNoteLookupRef.current,
+        })
+        if (!location) return null
+        const pair = measurePairs[location.pairIndex]
+        const note =
+          location.staff === 'treble' ? pair?.treble[location.noteIndex] ?? null : pair?.bass[location.noteIndex] ?? null
+        if (!note || note.id !== selection.noteId) return null
+        return {
+          noteId: selection.noteId,
+          staff: selection.staff,
+          keyIndex: selection.keyIndex,
+          note,
+        }
+      })
+      .filter((selection): selection is NotationPaletteResolvedSelection => selection !== null)
+
+    return buildNotationPaletteDerivedDisplay({
+      isSelectionVisible: true,
+      selections: resolvedSelections,
+    })
+  }, [activeSelection, bassNoteById, isSelectionVisible, measurePairs, selectedSelections, trebleNoteById])
   const trebleSequenceText = useMemo(() => toSequencePreview(notes), [notes])
   const bassSequenceText = useMemo(() => toSequencePreview(bassNotes), [bassNotes])
   const isImportLoading = importFeedback.kind === 'loading'
@@ -4154,6 +4196,8 @@ function App() {
         onCloseNotationPalette={closeNotationPalette}
         notationPaletteSelection={notationPaletteSelection}
         notationPaletteLastAction={notationPaletteLastAction}
+        notationPaletteActiveItemIdsOverride={derivedNotationPaletteDisplay?.activeItemIds ?? null}
+        notationPaletteSummaryOverride={derivedNotationPaletteDisplay?.summary ?? null}
         onNotationPaletteSelectionChange={onNotationPaletteSelectionChange}
         onOpenDirectOsmdFilePicker={openDirectOsmdFilePicker}
         onImportMusicXmlFromTextarea={importMusicXmlFromTextarea}
