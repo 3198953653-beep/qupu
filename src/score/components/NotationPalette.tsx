@@ -6,6 +6,7 @@ import {
   isNotationPaletteItemActive,
   type NotationPaletteSelection,
 } from '../notationPaletteConfig'
+import { NotationPaletteIcon } from './NotationPaletteIcon'
 
 export function NotationPalette(props: {
   open: boolean
@@ -33,13 +34,14 @@ export function NotationPalette(props: {
                     type="button"
                     className={`notation-palette-cell ${active ? 'is-active' : ''}`}
                     title={item.label}
+                    aria-label={item.label}
                     aria-pressed={active}
                     onClick={() => {
                       const result = applyNotationPaletteItemSelection(selection, item)
                       onSelectionChange(result.nextSelection, result.actionLabel)
                     }}
                   >
-                    <span className="notation-palette-cell-label">{item.cellLabel}</span>
+                    <NotationPaletteIcon iconId={item.iconId} />
                   </button>
                 )
               })}

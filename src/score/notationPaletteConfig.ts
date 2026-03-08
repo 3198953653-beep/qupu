@@ -15,6 +15,54 @@ export type NotationPalettePlaceholderKey =
   | 'repeat'
   | 'all'
 
+export type NotationPaletteIconId =
+  | 'note-solid'
+  | 'rest-mark'
+  | 'dur-32'
+  | 'dur-16'
+  | 'dur-8'
+  | 'dur-4'
+  | 'dur-2'
+  | 'dur-1'
+  | 'acc-bb'
+  | 'acc-b'
+  | 'acc-natural'
+  | 'acc-sharp'
+  | 'acc-double-sharp'
+  | 'dot'
+  | 'tie'
+  | 'arpeggio'
+  | 'reset'
+  | 'slur'
+  | 'staccato'
+  | 'accent'
+  | 'tenuto'
+  | 'turn'
+  | 'grace'
+  | 'triplet'
+  | 'mordent'
+  | 'trill'
+  | 'ornament'
+  | 'repeat'
+  | 'all'
+
+export type NotationPaletteIconRenderKind = 'glyph' | 'glyph-layered' | 'fallback-text'
+
+export type NotationPaletteGlyphLayer = {
+  glyph: string
+  fontSize: number
+  dx?: number
+  dy?: number
+  fontFamily?: string
+  fontWeight?: number | string
+}
+
+export type NotationPaletteIconSpec = {
+  kind: NotationPaletteIconRenderKind
+  layers: NotationPaletteGlyphLayer[]
+  boxSize?: number
+}
+
 export type NotationPaletteSelection = {
   mode: NotationPaletteMode
   duration: NotationPaletteDuration
@@ -30,7 +78,7 @@ export type NotationPaletteGroupId = 'mode' | 'duration' | 'accidental' | 'modif
 type NotationPaletteItemBase = {
   id: string
   label: string
-  cellLabel: string
+  iconId: NotationPaletteIconId
   group: NotationPaletteGroupId
 }
 
@@ -51,40 +99,162 @@ export const NOTATION_PALETTE_GROUPS: Array<{ id: NotationPaletteGroupId; label:
 ]
 
 export const NOTATION_PALETTE_ITEMS: NotationPaletteItem[] = [
-  { id: 'note', label: '音符', cellLabel: '音', group: 'mode', kind: 'mode' },
-  { id: 'rest', label: '休止符', cellLabel: '休', group: 'mode', kind: 'mode' },
+  { id: 'note', label: '音符', iconId: 'note-solid', group: 'mode', kind: 'mode' },
+  { id: 'rest', label: '休止符', iconId: 'rest-mark', group: 'mode', kind: 'mode' },
 
-  { id: '32', label: '32分音符', cellLabel: '32', group: 'duration', kind: 'duration' },
-  { id: '16', label: '16分音符', cellLabel: '16', group: 'duration', kind: 'duration' },
-  { id: '8', label: '8分音符', cellLabel: '8', group: 'duration', kind: 'duration' },
-  { id: 'q', label: '4分音符', cellLabel: '4', group: 'duration', kind: 'duration' },
-  { id: 'h', label: '2分音符', cellLabel: '2', group: 'duration', kind: 'duration' },
-  { id: 'w', label: '全音符', cellLabel: '1', group: 'duration', kind: 'duration' },
+  { id: '32', label: '32分音符', iconId: 'dur-32', group: 'duration', kind: 'duration' },
+  { id: '16', label: '16分音符', iconId: 'dur-16', group: 'duration', kind: 'duration' },
+  { id: '8', label: '8分音符', iconId: 'dur-8', group: 'duration', kind: 'duration' },
+  { id: 'q', label: '4分音符', iconId: 'dur-4', group: 'duration', kind: 'duration' },
+  { id: 'h', label: '2分音符', iconId: 'dur-2', group: 'duration', kind: 'duration' },
+  { id: 'w', label: '全音符', iconId: 'dur-1', group: 'duration', kind: 'duration' },
 
-  { id: 'bb', label: '重降记号', cellLabel: 'bb', group: 'accidental', kind: 'accidental' },
-  { id: 'b', label: '降记号', cellLabel: 'b', group: 'accidental', kind: 'accidental' },
-  { id: 'natural', label: '还原记号', cellLabel: '♮', group: 'accidental', kind: 'accidental' },
-  { id: '#', label: '升记号', cellLabel: '#', group: 'accidental', kind: 'accidental' },
-  { id: 'x', label: '重升记号', cellLabel: 'x', group: 'accidental', kind: 'accidental' },
+  { id: 'bb', label: '重降记号', iconId: 'acc-bb', group: 'accidental', kind: 'accidental' },
+  { id: 'b', label: '降记号', iconId: 'acc-b', group: 'accidental', kind: 'accidental' },
+  { id: 'natural', label: '还原记号', iconId: 'acc-natural', group: 'accidental', kind: 'accidental' },
+  { id: '#', label: '升记号', iconId: 'acc-sharp', group: 'accidental', kind: 'accidental' },
+  { id: 'x', label: '重升记号', iconId: 'acc-double-sharp', group: 'accidental', kind: 'accidental' },
 
-  { id: 'dotted', label: '附点', cellLabel: '·', group: 'modifiers', kind: 'modifier' },
-  { id: 'tie', label: '延音线', cellLabel: '⌒', group: 'modifiers', kind: 'modifier' },
-  { id: 'arpeggio', label: '琶音', cellLabel: '琶', group: 'modifiers', kind: 'modifier' },
-  { id: 'reset', label: '还原选择', cellLabel: '清', group: 'modifiers', kind: 'action' },
+  { id: 'dotted', label: '附点', iconId: 'dot', group: 'modifiers', kind: 'modifier' },
+  { id: 'tie', label: '延音线', iconId: 'tie', group: 'modifiers', kind: 'modifier' },
+  { id: 'arpeggio', label: '琶音', iconId: 'arpeggio', group: 'modifiers', kind: 'modifier' },
+  { id: 'reset', label: '还原选择', iconId: 'reset', group: 'modifiers', kind: 'action' },
 
-  { id: 'slur', label: '连线', cellLabel: '连', group: 'future', kind: 'placeholder' },
-  { id: 'staccato', label: '断音', cellLabel: '断', group: 'future', kind: 'placeholder' },
-  { id: 'accent', label: '重音', cellLabel: '重', group: 'future', kind: 'placeholder' },
-  { id: 'tenuto', label: '保持音', cellLabel: '保', group: 'future', kind: 'placeholder' },
-  { id: 'turn', label: '回音', cellLabel: '回', group: 'future', kind: 'placeholder' },
-  { id: 'grace', label: '倚音', cellLabel: '倚', group: 'future', kind: 'placeholder' },
-  { id: 'triplet', label: '三连音', cellLabel: '3连', group: 'future', kind: 'placeholder' },
-  { id: 'mordent', label: '波音', cellLabel: '波', group: 'future', kind: 'placeholder' },
-  { id: 'trill', label: '颤音', cellLabel: '颤', group: 'future', kind: 'placeholder' },
-  { id: 'ornament', label: '装饰音', cellLabel: '饰', group: 'future', kind: 'placeholder' },
-  { id: 'repeat', label: '反复记号', cellLabel: '反', group: 'future', kind: 'placeholder' },
-  { id: 'all', label: 'All', cellLabel: 'All', group: 'future', kind: 'placeholder' },
+  { id: 'slur', label: '连线', iconId: 'slur', group: 'future', kind: 'placeholder' },
+  { id: 'staccato', label: '断音', iconId: 'staccato', group: 'future', kind: 'placeholder' },
+  { id: 'accent', label: '重音', iconId: 'accent', group: 'future', kind: 'placeholder' },
+  { id: 'tenuto', label: '保持音', iconId: 'tenuto', group: 'future', kind: 'placeholder' },
+  { id: 'turn', label: '回音', iconId: 'turn', group: 'future', kind: 'placeholder' },
+  { id: 'grace', label: '倚音', iconId: 'grace', group: 'future', kind: 'placeholder' },
+  { id: 'triplet', label: '三连音', iconId: 'triplet', group: 'future', kind: 'placeholder' },
+  { id: 'mordent', label: '波音', iconId: 'mordent', group: 'future', kind: 'placeholder' },
+  { id: 'trill', label: '颤音', iconId: 'trill', group: 'future', kind: 'placeholder' },
+  { id: 'ornament', label: '装饰音', iconId: 'ornament', group: 'future', kind: 'placeholder' },
+  { id: 'repeat', label: '反复记号', iconId: 'repeat', group: 'future', kind: 'placeholder' },
+  { id: 'all', label: 'All', iconId: 'all', group: 'future', kind: 'placeholder' },
 ]
+
+export const NOTATION_PALETTE_ICON_SPECS: Record<NotationPaletteIconId, NotationPaletteIconSpec> = {
+  'note-solid': {
+    kind: 'glyph',
+    layers: [{ glyph: 'metNoteQuarterUp', fontSize: 18, dy: 0.9 }],
+  },
+  'rest-mark': {
+    kind: 'glyph',
+    layers: [{ glyph: 'restQuarter', fontSize: 18.5, dy: 0.6 }],
+  },
+  'dur-32': {
+    kind: 'glyph',
+    layers: [{ glyph: 'metNote32ndUp', fontSize: 17.2, dy: 1.1 }],
+  },
+  'dur-16': {
+    kind: 'glyph',
+    layers: [{ glyph: 'metNote16thUp', fontSize: 17.4, dy: 1.0 }],
+  },
+  'dur-8': {
+    kind: 'glyph',
+    layers: [{ glyph: 'metNote8thUp', fontSize: 17.6, dy: 0.95 }],
+  },
+  'dur-4': {
+    kind: 'glyph',
+    layers: [{ glyph: 'metNoteQuarterUp', fontSize: 18, dy: 0.85 }],
+  },
+  'dur-2': {
+    kind: 'glyph',
+    layers: [{ glyph: 'metNoteHalfUp', fontSize: 18, dy: 0.9 }],
+  },
+  'dur-1': {
+    kind: 'glyph',
+    layers: [{ glyph: 'metNoteWhole', fontSize: 18.2, dy: 0.9 }],
+  },
+  'acc-bb': {
+    kind: 'glyph',
+    layers: [{ glyph: 'accidentalDoubleFlat', fontSize: 18.3, dy: 0.85 }],
+  },
+  'acc-b': {
+    kind: 'glyph',
+    layers: [{ glyph: 'accidentalFlat', fontSize: 18.8, dy: 0.95 }],
+  },
+  'acc-natural': {
+    kind: 'glyph',
+    layers: [{ glyph: 'accidentalNatural', fontSize: 18, dy: 0.9 }],
+  },
+  'acc-sharp': {
+    kind: 'glyph',
+    layers: [{ glyph: 'accidentalSharp', fontSize: 18, dy: 0.9 }],
+  },
+  'acc-double-sharp': {
+    kind: 'glyph',
+    layers: [{ glyph: 'accidentalDoubleSharp', fontSize: 18, dy: 0.9 }],
+  },
+  dot: {
+    kind: 'glyph',
+    layers: [{ glyph: 'augmentationDot', fontSize: 17.5, dy: 0.7 }],
+  },
+  tie: {
+    kind: 'fallback-text',
+    layers: [{ glyph: '⌒', fontSize: 14.5, dy: 0.35, fontWeight: 600 }],
+  },
+  arpeggio: {
+    kind: 'glyph',
+    layers: [{ glyph: 'arpeggiatoUp', fontSize: 18, dy: 0.9 }],
+  },
+  reset: {
+    kind: 'fallback-text',
+    layers: [{ glyph: '↺', fontSize: 15, dy: 0.45, fontWeight: 700 }],
+  },
+  slur: {
+    kind: 'fallback-text',
+    layers: [{ glyph: '⌢', fontSize: 14.5, dy: 0.35, fontWeight: 600 }],
+  },
+  staccato: {
+    kind: 'glyph',
+    layers: [{ glyph: 'articStaccatoAbove', fontSize: 17.5, dy: 0.8 }],
+  },
+  accent: {
+    kind: 'glyph',
+    layers: [{ glyph: 'articAccentAbove', fontSize: 17.8, dy: 0.8 }],
+  },
+  tenuto: {
+    kind: 'glyph',
+    layers: [{ glyph: 'articTenutoAbove', fontSize: 17.5, dy: 0.8 }],
+  },
+  turn: {
+    kind: 'glyph',
+    layers: [{ glyph: 'ornamentTurn', fontSize: 16.8, dy: 0.8 }],
+  },
+  grace: {
+    kind: 'glyph',
+    layers: [{ glyph: 'graceNoteAppoggiaturaStemUp', fontSize: 17.1, dy: 0.95 }],
+  },
+  triplet: {
+    kind: 'glyph',
+    layers: [{ glyph: 'tuplet3', fontSize: 16.8, dy: 0.75 }],
+  },
+  mordent: {
+    kind: 'glyph',
+    layers: [{ glyph: 'ornamentMordent', fontSize: 16.8, dy: 0.8 }],
+  },
+  trill: {
+    kind: 'glyph',
+    layers: [{ glyph: 'ornamentTrill', fontSize: 16.8, dy: 0.8 }],
+  },
+  ornament: {
+    kind: 'glyph',
+    layers: [{ glyph: 'fermataAbove', fontSize: 17, dy: 0.8 }],
+  },
+  repeat: {
+    kind: 'glyph-layered',
+    layers: [
+      { glyph: 'repeatLeft', fontSize: 17.8, dx: -1.35, dy: 0.9 },
+      { glyph: 'repeatDots', fontSize: 16.2, dx: 2.4, dy: 0.9 },
+    ],
+  },
+  all: {
+    kind: 'fallback-text',
+    layers: [{ glyph: 'All', fontSize: 12.5, dy: 0.45, fontWeight: 700 }],
+  },
+}
 
 export const DEFAULT_NOTATION_PALETTE_SELECTION: NotationPaletteSelection = {
   mode: 'note',
