@@ -2797,7 +2797,7 @@ function App() {
   }, [])
 
   const toggleNotationPalette = useCallback(() => {
-    setIsNotationPaletteOpen((current) => !current)
+    setIsNotationPaletteOpen(true)
   }, [])
 
   const closeNotationPalette = useCallback(() => {

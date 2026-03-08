@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type RefObject } from 'react'
+import { useRef, useState, type ChangeEvent, type RefObject } from 'react'
 import { RHYTHM_PRESETS } from '../constants'
 import type { ImportFeedback, RhythmPresetId } from '../types'
 import type { NotationPaletteSelection } from '../notationPaletteConfig'
@@ -121,31 +121,6 @@ export function ScoreControls(props: {
   const [showDurationRatioPanel, setShowDurationRatioPanel] = useState(false)
   const [showPageMarginPanel, setShowPageMarginPanel] = useState(false)
   const notationPaletteAnchorRef = useRef<HTMLDivElement | null>(null)
-
-  useEffect(() => {
-    if (!isNotationPaletteOpen) return undefined
-
-    const handlePointerDown = (event: PointerEvent) => {
-      const anchor = notationPaletteAnchorRef.current
-      if (!anchor) return
-      const target = event.target
-      if (!(target instanceof Node)) return
-      if (anchor.contains(target)) return
-      onCloseNotationPalette()
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      onCloseNotationPalette()
-    }
-
-    window.addEventListener('pointerdown', handlePointerDown)
-    window.addEventListener('keydown', handleKeyDown)
-    return () => {
-      window.removeEventListener('pointerdown', handlePointerDown)
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [isNotationPaletteOpen, onCloseNotationPalette])
 
   const handleScaleValue = (rawValue: string) => {
     const next = Number(rawValue)
@@ -499,6 +474,8 @@ export function ScoreControls(props: {
               open={isNotationPaletteOpen}
               selection={notationPaletteSelection}
               lastActionLabel={notationPaletteLastAction}
+              anchorRef={notationPaletteAnchorRef}
+              onClose={onCloseNotationPalette}
               onSelectionChange={onNotationPaletteSelectionChange}
             />
           </div>
