@@ -1,6 +1,8 @@
-﻿import { useState, type ChangeEvent, type RefObject } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type RefObject } from 'react'
 import { RHYTHM_PRESETS } from '../constants'
 import type { ImportFeedback, RhythmPresetId } from '../types'
+import type { NotationPaletteSelection } from '../notationPaletteConfig'
+import { NotationPalette } from './NotationPalette'
 
 export function ScoreControls(props: {
   isPlaying: boolean
@@ -11,6 +13,12 @@ export function ScoreControls(props: {
   onExportMusicXmlFile: () => void
   onOpenOsmdPreview: () => void
   onOpenBeamGroupingTool: () => void
+  isNotationPaletteOpen: boolean
+  onToggleNotationPalette: () => void
+  onCloseNotationPalette: () => void
+  notationPaletteSelection: NotationPaletteSelection
+  notationPaletteLastAction: string
+  onNotationPaletteSelectionChange: (next: NotationPaletteSelection, actionLabel: string) => void
   onOpenDirectOsmdFilePicker: () => void
   onImportMusicXmlFromTextarea: () => void
   midiSupported: boolean
@@ -61,6 +69,12 @@ export function ScoreControls(props: {
     onExportMusicXmlFile,
     onOpenOsmdPreview,
     onOpenBeamGroupingTool,
+    isNotationPaletteOpen,
+    onToggleNotationPalette,
+    onCloseNotationPalette,
+    notationPaletteSelection,
+    notationPaletteLastAction,
+    onNotationPaletteSelectionChange,
     onOpenDirectOsmdFilePicker,
     onImportMusicXmlFromTextarea,
     midiSupported,
@@ -106,6 +120,32 @@ export function ScoreControls(props: {
   const [showGlobalGapPanel, setShowGlobalGapPanel] = useState(false)
   const [showDurationRatioPanel, setShowDurationRatioPanel] = useState(false)
   const [showPageMarginPanel, setShowPageMarginPanel] = useState(false)
+  const notationPaletteAnchorRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!isNotationPaletteOpen) return undefined
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const anchor = notationPaletteAnchorRef.current
+      if (!anchor) return
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (anchor.contains(target)) return
+      onCloseNotationPalette()
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      onCloseNotationPalette()
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isNotationPaletteOpen, onCloseNotationPalette])
 
   const handleScaleValue = (rawValue: string) => {
     const next = Number(rawValue)
@@ -447,6 +487,21 @@ export function ScoreControls(props: {
           <button type="button" onClick={onExportMusicXmlFile}>导出乐谱文件</button>
           <button type="button" onClick={onOpenOsmdPreview}>OSMD预览</button>
           <button type="button" onClick={onOpenBeamGroupingTool}>音值组合</button>
+          <div ref={notationPaletteAnchorRef} className="notation-palette-anchor">
+            <button
+              type="button"
+              className={isNotationPaletteOpen ? 'notation-palette-trigger is-active' : 'notation-palette-trigger'}
+              onClick={onToggleNotationPalette}
+            >
+              记谱工具
+            </button>
+            <NotationPalette
+              open={isNotationPaletteOpen}
+              selection={notationPaletteSelection}
+              lastActionLabel={notationPaletteLastAction}
+              onSelectionChange={onNotationPaletteSelectionChange}
+            />
+          </div>
           <button type="button" onClick={onImportMusicXmlFromTextarea}>导入文本</button>
         </div>
 
@@ -525,6 +580,7 @@ export function ScoreControls(props: {
     </>
   )
 }
+
 
 
 

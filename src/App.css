@@ -265,6 +265,110 @@
   gap: 0.55rem;
 }
 
+.notation-palette-anchor {
+  position: relative;
+}
+
+.notation-palette-trigger {
+  border: 1px solid #c3d2db;
+  background: #ffffff;
+  color: #123246;
+  border-radius: 10px;
+  font-weight: 600;
+  padding: 0.45rem 0.8rem;
+  font-size: 0.86rem;
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.notation-palette-trigger:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 16px -8px rgba(18, 50, 70, 0.45);
+  background: #f3faff;
+}
+
+.notation-palette-trigger.is-active {
+  border-color: #2f89ba;
+  background: #e8f5fc;
+  color: #0f5f88;
+}
+
+.notation-palette-popover {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  left: 0;
+  z-index: 12;
+  width: 282px;
+  border: 1px solid #d4e1e8;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 18px 42px -28px rgba(8, 30, 50, 0.88);
+  padding: 0.65rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.notation-palette-section {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.notation-palette-group-label {
+  color: #355469;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.notation-palette-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.notation-palette-cell {
+  min-height: 42px;
+  border: 1px solid #cad9e2;
+  background: #fbfdff;
+  color: #123246;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem;
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.notation-palette-cell:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px -10px rgba(18, 50, 70, 0.6);
+  background: #f4fbff;
+}
+
+.notation-palette-cell.is-active {
+  border-color: #2f89ba;
+  background: #e8f5fc;
+  color: #0f5f88;
+  box-shadow: inset 0 0 0 1px rgba(47, 137, 186, 0.2);
+}
+
+.notation-palette-cell-label {
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+}
+
+.notation-palette-footer {
+  border-top: 1px dashed #cfdae2;
+  padding-top: 0.5rem;
+  display: grid;
+  gap: 0.2rem;
+  color: #355469;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
 .midi-input-row {
   display: flex;
   flex-wrap: wrap;

@@ -55,6 +55,10 @@ import { getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './score/pitch
 import { compareTimelinePoint, resolveSelectionTimelinePoint } from './score/selectionTimelineRange'
 import { resolveForwardTieTargets, resolveFullTieTargets, resolvePreviousTieTarget } from './score/tieChain'
 import { buildSelectionGroupMoveTargets } from './score/selectionGroupTargets'
+import {
+  getDefaultNotationPaletteSelection,
+  type NotationPaletteSelection,
+} from './score/notationPaletteConfig'
 import type { HitGridIndex } from './score/layout/hitTest'
 import type {
   DragDebugSnapshot,
@@ -1281,6 +1285,11 @@ function App() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [musicXmlInput, setMusicXmlInput] = useState<string>('')
   const [importFeedback, setImportFeedback] = useState<ImportFeedback>({ kind: 'idle', message: '' })
+  const [isNotationPaletteOpen, setIsNotationPaletteOpen] = useState(false)
+  const [notationPaletteSelection, setNotationPaletteSelection] = useState<NotationPaletteSelection>(
+    () => getDefaultNotationPaletteSelection(),
+  )
+  const [notationPaletteLastAction, setNotationPaletteLastAction] = useState('未选择')
   const [isRhythmLinked, setIsRhythmLinked] = useState(true)
   const [measurePairsFromImport, setMeasurePairsFromImport] = useState<MeasurePair[] | null>(null)
   const [measureKeyFifthsFromImport, setMeasureKeyFifthsFromImport] = useState<number[] | null>(null)
@@ -2787,6 +2796,23 @@ function App() {
     console.info('[beam-grouping] 独立算法入口已就绪：src/score/beamGrouping.ts（当前仅占位提示，不改谱面）')
   }, [])
 
+  const toggleNotationPalette = useCallback(() => {
+    setIsNotationPaletteOpen((current) => !current)
+  }, [])
+
+  const closeNotationPalette = useCallback(() => {
+    setIsNotationPaletteOpen(false)
+  }, [])
+
+  const onNotationPaletteSelectionChange = useCallback(
+    (nextSelection: NotationPaletteSelection, actionLabel: string) => {
+      setNotationPaletteSelection(nextSelection)
+      setNotationPaletteLastAction(actionLabel)
+      console.info('[notation-palette]', actionLabel, nextSelection)
+    },
+    [],
+  )
+
   const openDirectOsmdFilePicker = useCallback(() => {
     const input = osmdDirectFileInputRef.current
     if (!input) return
@@ -4123,6 +4149,12 @@ function App() {
         onExportMusicXmlFile={exportMusicXmlFile}
         onOpenOsmdPreview={openOsmdPreview}
         onOpenBeamGroupingTool={openBeamGroupingTool}
+        isNotationPaletteOpen={isNotationPaletteOpen}
+        onToggleNotationPalette={toggleNotationPalette}
+        onCloseNotationPalette={closeNotationPalette}
+        notationPaletteSelection={notationPaletteSelection}
+        notationPaletteLastAction={notationPaletteLastAction}
+        onNotationPaletteSelectionChange={onNotationPaletteSelectionChange}
         onOpenDirectOsmdFilePicker={openDirectOsmdFilePicker}
         onImportMusicXmlFromTextarea={importMusicXmlFromTextarea}
         midiSupported={midiSupported}
