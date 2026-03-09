@@ -24,6 +24,7 @@ import { buildPitchLineMap, createPianoPitches, getPitchLine, getStrictStemDirec
 import { getTieFrozenIncoming } from '../tieFrozen'
 import { getDragPreviewTargetKey } from './dragPreviewOverrides'
 import type { RenderedNoteKey } from '../accidentals'
+import type { PublicAxisLayout } from '../timeline/types'
 import type {
   DragDebugRow,
   DragDebugSnapshot,
@@ -108,6 +109,7 @@ export type DrawMeasureParams = {
   skipPainting?: boolean
   staticNoteXById?: Map<string, number> | null
   staticAccidentalRightXById?: Map<string, Map<number, number>> | null
+  publicAxisLayout?: PublicAxisLayout | null
   preferMeasureBarlineAxis?: boolean
   preferMeasureEndBarlineAxis?: boolean
   enableEdgeGapCap?: boolean
@@ -160,6 +162,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     skipPainting = false,
     staticNoteXById = null,
     staticAccidentalRightXById = null,
+    publicAxisLayout = null,
     preferMeasureBarlineAxis = !isSystemStart && !showKeySignature && !showTimeSignature,
     preferMeasureEndBarlineAxis = !showEndTimeSignature,
     enableEdgeGapCap = true,
@@ -520,6 +523,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       uniformSpacingByTicks: true,
       measureStartBarX: measureX,
       measureEndBarX: measureX + measureWidth,
+      publicAxisLayout,
       preferMeasureBarlineAxis,
       preferMeasureEndBarlineAxis,
       enableEdgeGapCap,

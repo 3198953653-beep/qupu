@@ -4,7 +4,12 @@ import { SYSTEM_BASS_OFFSET_Y, SYSTEM_TREBLE_OFFSET_Y, TICKS_PER_BEAT } from '..
 import { drawMeasureToContext } from '../render/drawMeasure'
 import type { MeasurePair, ScoreNote, TimeSignature } from '../types'
 import type { TimeAxisSpacingConfig } from './timeAxisSpacing'
-import { getMeasureUniformTimelineWeightSpan, getUniformTickSpacingPadding } from './timeAxisSpacing'
+import {
+  attachMeasureTimelineAxisLayout,
+  buildMeasureTimelineBundle,
+  getMeasureUniformTimelineWeightSpan,
+  getUniformTickSpacingPadding,
+} from './timeAxisSpacing'
 import { resolveEffectiveBoundary } from './effectiveBoundary'
 
 type SolverMeasureMeta = {
@@ -205,6 +210,28 @@ function probeMeasureSpacing(
   spacingConfig: TimeAxisSpacingConfig,
 ): MeasureSpacingProbe | null {
   const geometry = buildMeasureProbeGeometry(meta, measureWidth)
+  const baseTimelineBundle = buildMeasureTimelineBundle({
+    measure: meta.measure,
+    measureIndex: meta.pairIndex,
+    timeSignature: meta.timeSignature,
+    spacingConfig,
+    timelineMode: 'merged',
+  })
+  const effectiveBoundary = resolveEffectiveBoundary({
+    measureX: 0,
+    measureWidth,
+    noteStartX: geometry.noteStartX,
+    noteEndX: geometry.noteEndX,
+    showStartDecorations: meta.showStartDecorations,
+    showEndDecorations: meta.showEndDecorations,
+  })
+  const timelineBundle = attachMeasureTimelineAxisLayout({
+    bundle: baseTimelineBundle,
+    effectiveBoundaryStartX: effectiveBoundary.effectiveStartX,
+    effectiveBoundaryEndX: effectiveBoundary.effectiveEndX,
+    widthPx: measureWidth,
+    spacingConfig,
+  })
   const spacingMetricsRef: {
     current:
       | {
@@ -236,6 +263,7 @@ function probeMeasureSpacing(
     formatWidthOverride: geometry.formatWidth,
     timeAxisSpacingConfig: spacingConfig,
     spacingLayoutMode: 'custom',
+    publicAxisLayout: timelineBundle.publicAxisLayout,
     preferMeasureBarlineAxis: meta.preferMeasureStartBarlineAxis,
     preferMeasureEndBarlineAxis: meta.preferMeasureEndBarlineAxis,
     enableEdgeGapCap: true,
@@ -359,7 +387,19 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
       1,
       Math.round(meta.timeSignature.beats * TICKS_PER_BEAT * (4 / meta.timeSignature.beatType)),
     )
-    const timelineSpan = getMeasureUniformTimelineWeightSpan(meta.measure, measureTicks, spacingConfig)
+    const timelineBundle = buildMeasureTimelineBundle({
+      measure: meta.measure,
+      measureIndex: meta.pairIndex,
+      timeSignature: meta.timeSignature,
+      spacingConfig,
+      timelineMode: 'merged',
+    })
+    const timelineSpan = getMeasureUniformTimelineWeightSpan(
+      meta.measure,
+      measureTicks,
+      spacingConfig,
+      timelineBundle,
+    )
     const estimatedDecorationWidth =
       meta.isSystemStart
         ? EST_SYSTEM_START_DECORATION_PX

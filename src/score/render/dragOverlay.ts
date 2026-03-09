@@ -4,6 +4,7 @@ import { drawMeasureToContext } from './drawMeasure'
 import { drawCrossMeasureTies } from './drawCrossMeasureTies'
 import { buildDragPreviewOverrides, type DragPreviewFrozenBoundaryCurve, type DragPreviewNoteOverride } from './dragPreviewOverrides'
 import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
+import type { MeasureTimelineBundle } from '../timeline/types'
 import type {
   DragDebugStaticRecord,
   DragDebugSnapshot,
@@ -185,6 +186,7 @@ function drawOverlayRange(params: {
   pairIndices: number[]
   measureLayouts: Map<number, MeasureLayout>
   measurePairs: MeasurePair[]
+  measureTimelineBundles?: Map<number, MeasureTimelineBundle> | null
   ensureOverlayCanvasForRect: (rect: MeasureLayout['overlayRect']) => OverlayFrame | null
   getOverlayContext: () => ReturnType<import('vexflow').Renderer['getContext']> | null
   clearDragOverlay: () => void
@@ -215,6 +217,7 @@ function drawOverlayRange(params: {
     pairIndices,
     measureLayouts,
     measurePairs,
+    measureTimelineBundles = null,
     ensureOverlayCanvasForRect,
     getOverlayContext,
     clearDragOverlay,
@@ -253,6 +256,7 @@ function drawOverlayRange(params: {
     const showKeySignature = !measureLayout.isSystemStart && measureLayout.showKeySignature
     const showTimeSignature = !measureLayout.isSystemStart && measureLayout.showTimeSignature
     const preview = getPreviewForPair?.(pairIndex)
+    const timelineBundle = measureTimelineBundles?.get(pairIndex) ?? null
 
     const measureNoteLayouts = drawMeasureToContext({
       context: overlayContext,
@@ -277,6 +281,7 @@ function drawOverlayRange(params: {
       formatWidthOverride: measureLayout.formatWidth,
       timeAxisSpacingConfig,
       spacingLayoutMode,
+      publicAxisLayout: timelineBundle?.publicAxisLayout ?? null,
       renderBoundaryPartialTies: false,
       forceLeadingConnector: pairOffset === 0,
       previewNotes: preview?.previewNotes ?? null,
@@ -322,6 +327,7 @@ export function drawSelectionMeasureOverlay(params: {
   noteLayoutByKey: Map<string, NoteLayout>
   measureLayouts: Map<number, MeasureLayout>
   measurePairs: MeasurePair[]
+  measureTimelineBundles?: Map<number, MeasureTimelineBundle> | null
   viewportXRange?: { startX: number; endX: number } | null
   renderOffsetX?: number
   ensureOverlayCanvasForRect: (rect: MeasureLayout['overlayRect']) => OverlayFrame | null
@@ -335,6 +341,7 @@ export function drawSelectionMeasureOverlay(params: {
     noteLayoutByKey,
     measureLayouts,
     measurePairs,
+    measureTimelineBundles = null,
     viewportXRange = null,
     renderOffsetX = 0,
     ensureOverlayCanvasForRect,
@@ -363,6 +370,7 @@ export function drawSelectionMeasureOverlay(params: {
     pairIndices: visibleRange.pairIndices,
     measureLayouts,
     measurePairs,
+    measureTimelineBundles,
     ensureOverlayCanvasForRect,
     getOverlayContext,
     clearDragOverlay,
@@ -378,6 +386,7 @@ export function drawDragMeasurePreview(params: {
   dragPreviewFrameRef: MutableRefObject<number>
   measureLayouts: Map<number, MeasureLayout>
   measurePairs: MeasurePair[]
+  measureTimelineBundles?: Map<number, MeasureTimelineBundle> | null
   viewportXRange?: { startX: number; endX: number } | null
   renderOffsetX?: number
   ensureOverlayCanvasForRect: (rect: MeasureLayout['overlayRect']) => OverlayFrame | null
@@ -393,6 +402,7 @@ export function drawDragMeasurePreview(params: {
     dragPreviewFrameRef,
     measureLayouts,
     measurePairs,
+    measureTimelineBundles = null,
     viewportXRange = null,
     renderOffsetX = 0,
     ensureOverlayCanvasForRect,
@@ -424,6 +434,7 @@ export function drawDragMeasurePreview(params: {
     pairIndices: visibleRange.pairIndices,
     measureLayouts,
     measurePairs,
+    measureTimelineBundles,
     ensureOverlayCanvasForRect,
     getOverlayContext,
     clearDragOverlay,

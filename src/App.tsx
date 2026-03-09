@@ -1808,6 +1808,7 @@ function App() {
     noteLayoutByKeyRef,
     hitGridRef,
     measureLayoutsRef,
+    measureTimelineBundlesRef,
     measurePairsRef,
     dragDebugFramesRef,
     dragRef,

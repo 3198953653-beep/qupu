@@ -16,6 +16,7 @@ import {
   drawSelectionMeasureOverlay as drawSelectionMeasureOverlayHelper,
 } from './render/dragOverlay'
 import type { TimeAxisSpacingConfig } from './layout/timeAxisSpacing'
+import type { MeasureTimelineBundle } from './timeline/types'
 import type {
   DragDebugSnapshot,
   DragState,
@@ -43,6 +44,7 @@ type OverlayRuntime = {
   renderOffsetX?: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
   spacingLayoutMode?: SpacingLayoutMode
+  measureTimelineBundles?: Map<number, MeasureTimelineBundle> | null
 }
 
 function buildOverlayAccessors(runtime: OverlayRuntime) {
@@ -130,6 +132,7 @@ export function drawSelectionOverlay(params: {
     ensureOverlayCanvasForRect: (rect) => overlay.ensureRect(rect, { lockToExistingFrame: false }),
     getOverlayContext: overlay.getContext,
     clearDragOverlay: overlay.clear,
+    measureTimelineBundles: overlayRuntime.measureTimelineBundles ?? null,
     viewportXRange: overlayRuntime.viewportXRange,
     renderOffsetX: overlayRuntime.renderOffsetX ?? 0,
     timeAxisSpacingConfig: overlayRuntime.timeAxisSpacingConfig,
@@ -176,6 +179,7 @@ export function drawDragPreviewOverlay(params: {
     ensureOverlayCanvasForRect: (rect) => overlay.ensureRect(rect, { lockToExistingFrame: true }),
     getOverlayContext: overlay.getContext,
     clearDragOverlay: overlay.clear,
+    measureTimelineBundles: overlayRuntime.measureTimelineBundles ?? null,
     viewportXRange: overlayRuntime.viewportXRange,
     renderOffsetX: overlayRuntime.renderOffsetX ?? 0,
     dragDebugFramesRef,

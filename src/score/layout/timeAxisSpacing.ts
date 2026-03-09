@@ -7,7 +7,7 @@ import { buildPublicAxisLayout } from '../timeline/axisLayout'
 import { compareLegacyAndMergedTimeline } from '../timeline/debug'
 import { mergeStaffTimelines } from '../timeline/mergedTimeline'
 import { buildStaffTimeline } from '../timeline/staffTimeline'
-import type { MeasureTimelineBundle } from '../timeline/types'
+import type { MeasureTimelineBundle, PublicAxisLayout } from '../timeline/types'
 
 type RenderedStaffNote = {
   vexNote: StaveNote
@@ -33,6 +33,7 @@ type ApplyUnifiedTimeAxisSpacingParams = {
   uniformSpacingByTicks?: boolean
   measureStartBarX?: number
   measureEndBarX?: number
+  publicAxisLayout?: PublicAxisLayout | null
   preferMeasureBarlineAxis?: boolean
   preferMeasureEndBarlineAxis?: boolean
   enableEdgeGapCap?: boolean
@@ -588,9 +589,12 @@ export function getMeasureUniformTimelineWeightSpan(
   measure: MeasurePair,
   measureTicks: number,
   spacingConfig: TimeAxisSpacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
+  timelineBundle: MeasureTimelineBundle | null = null,
 ): number {
   void measureTicks
-  const onsets = collectMeasureOnsetTicks(measure).sort((left, right) => left - right)
+  const onsets = timelineBundle
+    ? timelineBundle.publicTimeline.points.map((point) => point.tick).sort((left, right) => left - right)
+    : collectMeasureOnsetTicks(measure).sort((left, right) => left - right)
   if (onsets.length <= 1) return 0
   let totalGapPx = 0
   for (let i = 1; i < onsets.length; i += 1) {
@@ -614,6 +618,7 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     uniformSpacingByTicks = false,
     measureStartBarX,
     measureEndBarX,
+    publicAxisLayout = null,
     preferMeasureBarlineAxis = false,
     preferMeasureEndBarlineAxis = false,
     enableEdgeGapCap = true,
@@ -712,7 +717,16 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
 
   const targetXByOnset = new Map<number, number>()
 
-  if (uniformSpacingByTicks) {
+  if (publicAxisLayout?.tickToX && publicAxisLayout.tickToX.size > 0) {
+    noteOnsets.forEach((onset) => {
+      const axisX = publicAxisLayout.tickToX.get(onset)
+      if (Number.isFinite(axisX)) {
+        targetXByOnset.set(onset, axisX as number)
+      }
+    })
+  }
+
+  if (targetXByOnset.size === 0 && uniformSpacingByTicks) {
     const timelineWeightMap = buildUniformTimelineWeightMap(noteOnsets, measureTotalTicks, spacingConfig)
     const spanWidth = Math.max(1, axisEnd - axisStart)
     const intrinsicSpan = Math.max(0.0001, timelineWeightMap.totalWeight)
@@ -784,7 +798,7 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
         })
       }
     }
-  } else {
+  } else if (targetXByOnset.size === 0) {
 
     if (axisEnd <= axisStart) {
       const fallbackX = noteStartX + usableFormatWidth * 0.5

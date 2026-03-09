@@ -16,6 +16,7 @@ import {
 import { flushPendingDragFrame, scheduleDragCommitFrame } from './dragScheduler'
 import { flattenBassFromPairs, flattenTrebleFromPairs } from './scoreOps'
 import type { TimeAxisSpacingConfig } from './layout/timeAxisSpacing'
+import type { MeasureTimelineBundle } from './timeline/types'
 import type { Renderer } from 'vexflow'
 import type { HitGridIndex } from './layout/hitTest'
 import type {
@@ -42,6 +43,7 @@ export function useDragHandlers(params: {
   noteLayoutByKeyRef: MutableRefObject<Map<string, NoteLayout>>
   hitGridRef: MutableRefObject<HitGridIndex | null>
   measureLayoutsRef: MutableRefObject<Map<number, MeasureLayout>>
+  measureTimelineBundlesRef: MutableRefObject<Map<number, MeasureTimelineBundle>>
   measurePairsRef: MutableRefObject<MeasurePair[]>
   dragDebugFramesRef: MutableRefObject<DragDebugSnapshot[]>
   dragRef: MutableRefObject<DragState | null>
@@ -107,6 +109,7 @@ export function useDragHandlers(params: {
     noteLayoutByKeyRef,
     hitGridRef,
     measureLayoutsRef,
+    measureTimelineBundlesRef,
     measurePairsRef,
     dragDebugFramesRef,
     dragRef,
@@ -186,6 +189,7 @@ export function useDragHandlers(params: {
         renderOffsetX,
         timeAxisSpacingConfig,
         spacingLayoutMode,
+        measureTimelineBundles: measureTimelineBundlesRef.current,
       },
     })
   }

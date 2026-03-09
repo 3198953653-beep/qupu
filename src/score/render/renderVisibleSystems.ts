@@ -604,6 +604,34 @@ export function renderVisibleSystems(params: {
         }),
       )
     }
+    const buildTimelineBundleForRender = (params: {
+      entry: (typeof systemMeta)[number]
+      measureX: number
+      measureWidth: number
+      noteStartX: number
+      noteEndX: number
+    }): MeasureTimelineBundle | null => {
+      const { entry, measureX, measureWidth, noteStartX, noteEndX } = params
+      const baseBundle = systemTimelineBundles.get(entry.pairIndex)
+      if (!baseBundle) return null
+      const effectiveBoundary = resolveEffectiveBoundary({
+        measureX,
+        measureWidth,
+        noteStartX,
+        noteEndX,
+        showStartDecorations: !entry.preferMeasureStartBarlineAxis,
+        showEndDecorations: !entry.preferMeasureEndBarlineAxis,
+      })
+      const timelineBundle = attachMeasureTimelineAxisLayout({
+        bundle: baseBundle,
+        effectiveBoundaryStartX: effectiveBoundary.effectiveStartX,
+        effectiveBoundaryEndX: effectiveBoundary.effectiveEndX,
+        widthPx: measureWidth,
+        spacingConfig,
+      })
+      nextTimelineBundlesByPair.set(entry.pairIndex, timelineBundle)
+      return timelineBundle
+    }
     const resolveEffectiveLayoutMetrics = (params: {
       measureX: number
       measureWidth: number
@@ -704,6 +732,13 @@ export function renderVisibleSystems(params: {
         const measureX = frame.measureX - renderOffsetX
         const measureWidth = Math.max(1, frame.measureWidth)
         const { noteStartX, noteEndX, formatWidth } = buildMeasureProbe(entry, measureX, measureWidth)
+        const timelineBundle = buildTimelineBundleForRender({
+          entry,
+          measureX,
+          measureWidth,
+          noteStartX,
+          noteEndX,
+        })
         const frozenSpacing = frozenSpacingByPairIndex.get(entry.pairIndex) ?? null
         const translatedFrozenSpacing =
           frozenSpacing !== null ? translateFrozenSpacingToMeasureX(frozenSpacing, measureX) : null
@@ -749,6 +784,7 @@ export function renderVisibleSystems(params: {
           formatWidthOverride: formatWidth,
           timeAxisSpacingConfig: spacingConfig,
           spacingLayoutMode,
+          publicAxisLayout: timelineBundle?.publicAxisLayout ?? null,
           staticNoteXById: previewStaticNoteXById ?? translatedFrozenSpacing?.staticNoteXById ?? null,
           staticAccidentalRightXById:
             previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
@@ -887,6 +923,13 @@ export function renderVisibleSystems(params: {
         const noteStartX = stableFrame.noteStartX
         const noteEndX = stableFrame.noteEndX
         const formatWidth = stableFrame.formatWidth
+        const timelineBundle = buildTimelineBundleForRender({
+          entry,
+          measureX,
+          measureWidth,
+          noteStartX,
+          noteEndX,
+        })
         const frozenSpacing = tryBuildFrozenMeasureSpacing({
           pairIndex: entry.pairIndex,
           measure: entry.measure,
@@ -936,6 +979,7 @@ export function renderVisibleSystems(params: {
           formatWidthOverride: formatWidth,
           timeAxisSpacingConfig: spacingConfig,
           spacingLayoutMode,
+          publicAxisLayout: timelineBundle?.publicAxisLayout ?? null,
           staticNoteXById: previewStaticNoteXById ?? translatedFrozenSpacing?.staticNoteXById ?? null,
           staticAccidentalRightXById:
             previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
@@ -1032,6 +1076,7 @@ export function renderVisibleSystems(params: {
         entry.measure,
         measureTicksBySystem[indexInSystem] ?? 1,
         spacingConfig,
+        systemTimelineBundles.get(entry.pairIndex) ?? null,
       ),
     )
     const uniformTickPadding = getUniformTickSpacingPadding(spacingConfig)
@@ -1115,6 +1160,13 @@ export function renderVisibleSystems(params: {
         probeMeasureX,
         safeMeasureWidth,
       )
+      const timelineBundle = buildTimelineBundleForRender({
+        entry,
+        measureX: probeMeasureX,
+        measureWidth: safeMeasureWidth,
+        noteStartX: spacingLeftLimitX,
+        noteEndX: spacingRightLimitX,
+      })
       const measureNoteLayouts = drawMeasureToContext({
         context,
         measure: entry.measure,
@@ -1139,6 +1191,7 @@ export function renderVisibleSystems(params: {
         formatWidthOverride: formatWidth,
         timeAxisSpacingConfig: spacingConfig,
         spacingLayoutMode,
+        publicAxisLayout: timelineBundle?.publicAxisLayout ?? null,
         // Width probing must be fully deterministic by score content only.
         // Do not feed previous-frame frozen spacing into the probe solver.
         staticNoteXById: null,
@@ -1217,6 +1270,13 @@ export function renderVisibleSystems(params: {
       const measureX = measureCursorX
       measureCursorX += measureWidth
       const { noteStartX, noteEndX, formatWidth } = buildMeasureProbe(entry, measureX, measureWidth)
+      const timelineBundle = buildTimelineBundleForRender({
+        entry,
+        measureX,
+        measureWidth,
+        noteStartX,
+        noteEndX,
+      })
       const frozenSpacing = frozenSpacingByPairIndex.get(entry.pairIndex) ?? null
       const translatedFrozenSpacing =
         frozenSpacing !== null ? translateFrozenSpacingToMeasureX(frozenSpacing, measureX) : null
@@ -1250,6 +1310,7 @@ export function renderVisibleSystems(params: {
         formatWidthOverride: formatWidth,
         timeAxisSpacingConfig: spacingConfig,
         spacingLayoutMode,
+        publicAxisLayout: timelineBundle?.publicAxisLayout ?? null,
         staticNoteXById: previewStaticNoteXById ?? translatedFrozenSpacing?.staticNoteXById ?? null,
         staticAccidentalRightXById:
           previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
