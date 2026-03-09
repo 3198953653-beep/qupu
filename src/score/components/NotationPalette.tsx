@@ -14,6 +14,7 @@ import {
   applyNotationPaletteItemSelection,
   formatNotationPaletteSelectionSummary,
   isNotationPaletteItemActive,
+  type NotationPaletteItem,
   type NotationPaletteSelection,
 } from '../notationPaletteConfig'
 import { NotationPaletteIcon } from './NotationPaletteIcon'
@@ -34,7 +35,7 @@ export function NotationPalette(props: {
   onClose: () => void
   activeItemIdsOverride?: ReadonlySet<string> | null
   summaryOverride?: string | null
-  onSelectionChange: (next: NotationPaletteSelection, actionLabel: string) => void
+  onSelectionChange: (next: NotationPaletteSelection, actionLabel: string, item: NotationPaletteItem) => void
 }) {
   const {
     open,
@@ -173,7 +174,7 @@ export function NotationPalette(props: {
                     aria-pressed={active}
                     onClick={() => {
                       const result = applyNotationPaletteItemSelection(selection, item)
-                      onSelectionChange(result.nextSelection, result.actionLabel)
+                      onSelectionChange(result.nextSelection, result.actionLabel, item)
                     }}
                   >
                     <NotationPaletteIcon iconId={item.iconId} />

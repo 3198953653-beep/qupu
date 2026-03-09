@@ -88,12 +88,19 @@ export type NotationPaletteDerivedDisplay = {
 } | null
 
 export type NotationPaletteGroupId = 'mode' | 'duration' | 'accidental' | 'modifiers' | 'future'
+export type NotationPaletteBehavior =
+  | 'ui-only'
+  | 'duration-edit'
+  | 'dot-toggle'
+  | 'note-to-rest'
+  | 'rest-to-note-disabled'
 
 type NotationPaletteItemBase = {
   id: string
   label: string
   iconId: NotationPaletteIconId
   group: NotationPaletteGroupId
+  behavior: NotationPaletteBehavior
 }
 
 export type NotationPaletteItem =
@@ -113,39 +120,39 @@ export const NOTATION_PALETTE_GROUPS: Array<{ id: NotationPaletteGroupId; label:
 ]
 
 export const NOTATION_PALETTE_ITEMS: NotationPaletteItem[] = [
-  { id: 'note', label: '音符', iconId: 'note-solid', group: 'mode', kind: 'mode' },
-  { id: 'rest', label: '休止符', iconId: 'rest-mark', group: 'mode', kind: 'mode' },
+  { id: 'note', label: '音符', iconId: 'note-solid', group: 'mode', kind: 'mode', behavior: 'rest-to-note-disabled' },
+  { id: 'rest', label: '休止符', iconId: 'rest-mark', group: 'mode', kind: 'mode', behavior: 'note-to-rest' },
 
-  { id: '32', label: '32分音符', iconId: 'dur-32', group: 'duration', kind: 'duration' },
-  { id: '16', label: '16分音符', iconId: 'dur-16', group: 'duration', kind: 'duration' },
-  { id: '8', label: '8分音符', iconId: 'dur-8', group: 'duration', kind: 'duration' },
-  { id: 'q', label: '4分音符', iconId: 'dur-4', group: 'duration', kind: 'duration' },
-  { id: 'h', label: '2分音符', iconId: 'dur-2', group: 'duration', kind: 'duration' },
-  { id: 'w', label: '全音符', iconId: 'dur-1', group: 'duration', kind: 'duration' },
+  { id: '32', label: '32分音符', iconId: 'dur-32', group: 'duration', kind: 'duration', behavior: 'duration-edit' },
+  { id: '16', label: '16分音符', iconId: 'dur-16', group: 'duration', kind: 'duration', behavior: 'duration-edit' },
+  { id: '8', label: '8分音符', iconId: 'dur-8', group: 'duration', kind: 'duration', behavior: 'duration-edit' },
+  { id: 'q', label: '4分音符', iconId: 'dur-4', group: 'duration', kind: 'duration', behavior: 'duration-edit' },
+  { id: 'h', label: '2分音符', iconId: 'dur-2', group: 'duration', kind: 'duration', behavior: 'duration-edit' },
+  { id: 'w', label: '全音符', iconId: 'dur-1', group: 'duration', kind: 'duration', behavior: 'duration-edit' },
 
-  { id: 'bb', label: '重降记号', iconId: 'acc-bb', group: 'accidental', kind: 'accidental' },
-  { id: 'b', label: '降记号', iconId: 'acc-b', group: 'accidental', kind: 'accidental' },
-  { id: 'natural', label: '还原记号', iconId: 'acc-natural', group: 'accidental', kind: 'accidental' },
-  { id: '#', label: '升记号', iconId: 'acc-sharp', group: 'accidental', kind: 'accidental' },
-  { id: 'x', label: '重升记号', iconId: 'acc-double-sharp', group: 'accidental', kind: 'accidental' },
+  { id: 'bb', label: '重降记号', iconId: 'acc-bb', group: 'accidental', kind: 'accidental', behavior: 'ui-only' },
+  { id: 'b', label: '降记号', iconId: 'acc-b', group: 'accidental', kind: 'accidental', behavior: 'ui-only' },
+  { id: 'natural', label: '还原记号', iconId: 'acc-natural', group: 'accidental', kind: 'accidental', behavior: 'ui-only' },
+  { id: '#', label: '升记号', iconId: 'acc-sharp', group: 'accidental', kind: 'accidental', behavior: 'ui-only' },
+  { id: 'x', label: '重升记号', iconId: 'acc-double-sharp', group: 'accidental', kind: 'accidental', behavior: 'ui-only' },
 
-  { id: 'dotted', label: '附点', iconId: 'dot', group: 'modifiers', kind: 'modifier' },
-  { id: 'tie', label: '延音线', iconId: 'tie', group: 'modifiers', kind: 'modifier' },
-  { id: 'arpeggio', label: '琶音', iconId: 'arpeggio', group: 'modifiers', kind: 'modifier' },
-  { id: 'reset', label: '还原选择', iconId: 'reset', group: 'modifiers', kind: 'action' },
+  { id: 'dotted', label: '附点', iconId: 'dot', group: 'modifiers', kind: 'modifier', behavior: 'dot-toggle' },
+  { id: 'tie', label: '延音线', iconId: 'tie', group: 'modifiers', kind: 'modifier', behavior: 'ui-only' },
+  { id: 'arpeggio', label: '琶音', iconId: 'arpeggio', group: 'modifiers', kind: 'modifier', behavior: 'ui-only' },
+  { id: 'reset', label: '还原选择', iconId: 'reset', group: 'modifiers', kind: 'action', behavior: 'ui-only' },
 
-  { id: 'slur', label: '连线', iconId: 'slur', group: 'future', kind: 'placeholder' },
-  { id: 'staccato', label: '断音', iconId: 'staccato', group: 'future', kind: 'placeholder' },
-  { id: 'accent', label: '重音', iconId: 'accent', group: 'future', kind: 'placeholder' },
-  { id: 'tenuto', label: '保持音', iconId: 'tenuto', group: 'future', kind: 'placeholder' },
-  { id: 'turn', label: '回音', iconId: 'turn', group: 'future', kind: 'placeholder' },
-  { id: 'grace', label: '倚音', iconId: 'grace', group: 'future', kind: 'placeholder' },
-  { id: 'triplet', label: '三连音', iconId: 'triplet', group: 'future', kind: 'placeholder' },
-  { id: 'mordent', label: '波音', iconId: 'mordent', group: 'future', kind: 'placeholder' },
-  { id: 'trill', label: '颤音', iconId: 'trill', group: 'future', kind: 'placeholder' },
-  { id: 'ornament', label: '装饰音', iconId: 'ornament', group: 'future', kind: 'placeholder' },
-  { id: 'repeat', label: '反复记号', iconId: 'repeat', group: 'future', kind: 'placeholder' },
-  { id: 'all', label: 'All', iconId: 'all', group: 'future', kind: 'placeholder' },
+  { id: 'slur', label: '连线', iconId: 'slur', group: 'future', kind: 'placeholder', behavior: 'ui-only' },
+  { id: 'staccato', label: '断音', iconId: 'staccato', group: 'future', kind: 'placeholder', behavior: 'ui-only' },
+  { id: 'accent', label: '重音', iconId: 'accent', group: 'future', kind: 'placeholder', behavior: 'ui-only' },
+  { id: 'tenuto', label: '保持音', iconId: 'tenuto', group: 'future', kind: 'placeholder', behavior: 'ui-only' },
+  { id: 'turn', label: '回音', iconId: 'turn', group: 'future', kind: 'placeholder', behavior: 'ui-only' },
+  { id: 'grace', label: '倚音', iconId: 'grace', group: 'future', kind: 'placeholder', behavior: 'ui-only' },
+  { id: 'triplet', label: '三连音', iconId: 'triplet', group: 'future', kind: 'placeholder', behavior: 'ui-only' },
+  { id: 'mordent', label: '波音', iconId: 'mordent', group: 'future', kind: 'placeholder', behavior: 'ui-only' },
+  { id: 'trill', label: '颤音', iconId: 'trill', group: 'future', kind: 'placeholder', behavior: 'ui-only' },
+  { id: 'ornament', label: '装饰音', iconId: 'ornament', group: 'future', kind: 'placeholder', behavior: 'ui-only' },
+  { id: 'repeat', label: '反复记号', iconId: 'repeat', group: 'future', kind: 'placeholder', behavior: 'ui-only' },
+  { id: 'all', label: 'All', iconId: 'all', group: 'future', kind: 'placeholder', behavior: 'ui-only' },
 ]
 
 export const NOTATION_PALETTE_ICON_SPECS: Record<NotationPaletteIconId, NotationPaletteIconSpec> = {
@@ -433,6 +440,49 @@ export function getBaseDurationFromNoteDuration(duration: NoteDuration): Notatio
     case 'w':
     default:
       return 'w'
+  }
+}
+
+export function toTargetDurationFromPalette(durationId: NotationPaletteDuration): NoteDuration {
+  switch (durationId) {
+    case '32':
+      return '32'
+    case '16':
+      return '16'
+    case '8':
+      return '8'
+    case 'q':
+      return 'q'
+    case 'h':
+      return 'h'
+    case 'w':
+    default:
+      return 'w'
+  }
+}
+
+export function toggleDottedDuration(duration: NoteDuration): NoteDuration | null {
+  switch (duration) {
+    case 'q':
+      return 'qd'
+    case 'qd':
+      return 'q'
+    case '8':
+      return '8d'
+    case '8d':
+      return '8'
+    case '16':
+      return '16d'
+    case '16d':
+      return '16'
+    case '32':
+      return '32d'
+    case '32d':
+      return '32'
+    case 'h':
+    case 'w':
+    default:
+      return null
   }
 }
 

@@ -44,11 +44,13 @@ import {
 } from './score/pitchUtils'
 import {
   buildBassMockNotes,
+  buildImportedNoteLookup,
   buildMeasurePairs,
   flattenBassFromPairs,
   flattenTrebleFromPairs,
 } from './score/scoreOps'
 import { commitDragPitchToScoreData } from './score/dragInteractions'
+import { applyPaletteDurationEdit, type DurationEditFailureReason } from './score/durationEdits'
 import { appendIntervalKey, deleteSelectedKey, findSelectionLocationInPairs, replaceSelectedKeyPitch } from './score/keyboardEdits'
 import { getMidiNoteNumber, toPitchFromMidiWithKeyPreference } from './score/midiInput'
 import { getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './score/pitchMath'
@@ -58,6 +60,9 @@ import { buildSelectionGroupMoveTargets } from './score/selectionGroupTargets'
 import {
   buildNotationPaletteDerivedDisplay,
   getDefaultNotationPaletteSelection,
+  toggleDottedDuration,
+  toTargetDurationFromPalette,
+  type NotationPaletteItem,
   type NotationPaletteDerivedDisplay,
   type NotationPaletteResolvedSelection,
   type NotationPaletteSelection,
@@ -129,6 +134,23 @@ function toSequencePreview(notes: ScoreNote[]): string {
     .map((note) => (note.isRest ? `Rest(${toDisplayDuration(note.duration)})` : toDisplayPitch(note.pitch)))
     .join('  |  ')
   return `${preview}  |  ...（还剩 ${notes.length - INSPECTOR_SEQUENCE_PREVIEW_LIMIT} 个）`
+}
+
+function getDurationEditFailureMessage(reason: DurationEditFailureReason): string {
+  switch (reason) {
+    case 'no-selection':
+      return '未选中可编辑音符'
+    case 'multi-note-block':
+      return '当前多选范围不支持改时值'
+    case 'selection-not-found':
+      return '未选中可编辑音符'
+    case 'insufficient-ticks':
+      return '当前小节剩余时值不足，无法修改为该时值'
+    case 'unsupported-dot':
+      return '当前时值暂不支持附点修改'
+    default:
+      return '当前操作暂不支持'
+  }
 }
 
 function cloneScoreNote(note: ScoreNote): ScoreNote {
@@ -2048,6 +2070,7 @@ function App() {
       measurePairsFromImportRef.current = null
       setMeasurePairsFromImport(null)
     }
+    importedNoteLookupRef.current = buildImportedNoteLookup(restoredPairs)
     setNotes(flattenTrebleFromPairs(restoredPairs))
     setBassNotes(flattenBassFromPairs(restoredPairs))
     setIsSelectionVisible(snapshot.isSelectionVisible)
@@ -2057,7 +2080,7 @@ function App() {
   }, [clearDragOverlay, setBassNotes, setMeasurePairsFromImport, setNotes, setDraggingSelection])
 
   const applyKeyboardEditResult = useCallback(
-    (nextPairs: MeasurePair[], nextSelection: Selection) => {
+    (nextPairs: MeasurePair[], nextSelection: Selection, nextSelections: Selection[] = [nextSelection]) => {
       const sourcePairs = measurePairsRef.current
       if (nextPairs !== sourcePairs) {
         pushUndoSnapshot(sourcePairs)
@@ -2066,11 +2089,12 @@ function App() {
         measurePairsFromImportRef.current = nextPairs
         setMeasurePairsFromImport(nextPairs)
       }
+      importedNoteLookupRef.current = buildImportedNoteLookup(nextPairs)
       setNotes(flattenTrebleFromPairs(nextPairs))
       setBassNotes(flattenBassFromPairs(nextPairs))
       setIsSelectionVisible(true)
       setActiveSelection(nextSelection)
-      setSelectedSelections([nextSelection])
+      setSelectedSelections(nextSelections)
     },
     [pushUndoSnapshot, setBassNotes, setMeasurePairsFromImport, setNotes, setActiveSelection],
   )
@@ -2847,12 +2871,76 @@ function App() {
   }, [])
 
   const onNotationPaletteSelectionChange = useCallback(
-    (nextSelection: NotationPaletteSelection, actionLabel: string) => {
+    (nextSelection: NotationPaletteSelection, actionLabel: string, item: NotationPaletteItem) => {
       setNotationPaletteSelection(nextSelection)
+      const sourcePairs = measurePairsRef.current
+      const importedMode = measurePairsFromImportRef.current !== null
+
+      if (item.behavior === 'ui-only') {
+        setNotationPaletteLastAction(actionLabel)
+        console.info('[notation-palette]', actionLabel, nextSelection)
+        return
+      }
+
+      if (item.behavior === 'rest-to-note-disabled') {
+        if (isSelectionVisible && currentSelection?.isRest) {
+          const message = '首版暂不支持休止符转音符'
+          setNotationPaletteLastAction(message)
+          console.info('[notation-palette]', message, nextSelection)
+          return
+        }
+        setNotationPaletteLastAction(actionLabel)
+        console.info('[notation-palette]', actionLabel, nextSelection)
+        return
+      }
+
+      const action =
+        item.behavior === 'duration-edit' && item.kind === 'duration'
+          ? { type: 'duration' as const, targetDuration: toTargetDurationFromPalette(item.id) }
+          : item.behavior === 'dot-toggle'
+            ? { type: 'toggle-dot' as const, targetDuration: currentSelection ? toggleDottedDuration(currentSelection.duration) : null }
+            : item.behavior === 'note-to-rest'
+              ? { type: 'note-to-rest' as const }
+              : null
+
+      if (!action) {
+        setNotationPaletteLastAction(actionLabel)
+        console.info('[notation-palette]', actionLabel, nextSelection)
+        return
+      }
+
+      const attempt = applyPaletteDurationEdit({
+        pairs: sourcePairs,
+        activeSelection,
+        selectedSelections,
+        isSelectionVisible,
+        importedNoteLookup: importedNoteLookupRef.current,
+        keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
+        action,
+        importedMode,
+      })
+
+      if (attempt.error) {
+        const message = getDurationEditFailureMessage(attempt.error)
+        setNotationPaletteLastAction(message)
+        console.info('[notation-palette]', message, nextSelection)
+        return
+      }
+
+      if (attempt.result) {
+        applyKeyboardEditResult(attempt.result.nextPairs, attempt.result.nextSelection, attempt.result.nextSelections)
+      }
+
       setNotationPaletteLastAction(actionLabel)
       console.info('[notation-palette]', actionLabel, nextSelection)
     },
-    [],
+    [
+      activeSelection,
+      applyKeyboardEditResult,
+      currentSelection,
+      isSelectionVisible,
+      selectedSelections,
+    ],
   )
 
   const openDirectOsmdFilePicker = useCallback(() => {

@@ -1,7 +1,7 @@
 import { useRef, useState, type ChangeEvent, type RefObject } from 'react'
 import { RHYTHM_PRESETS } from '../constants'
 import type { ImportFeedback, RhythmPresetId } from '../types'
-import type { NotationPaletteSelection } from '../notationPaletteConfig'
+import type { NotationPaletteItem, NotationPaletteSelection } from '../notationPaletteConfig'
 import { NotationPalette } from './NotationPalette'
 
 export function ScoreControls(props: {
@@ -20,7 +20,11 @@ export function ScoreControls(props: {
   notationPaletteLastAction: string
   notationPaletteActiveItemIdsOverride?: ReadonlySet<string> | null
   notationPaletteSummaryOverride?: string | null
-  onNotationPaletteSelectionChange: (next: NotationPaletteSelection, actionLabel: string) => void
+  onNotationPaletteSelectionChange: (
+    next: NotationPaletteSelection,
+    actionLabel: string,
+    item: NotationPaletteItem,
+  ) => void
   onOpenDirectOsmdFilePicker: () => void
   onImportMusicXmlFromTextarea: () => void
   midiSupported: boolean
