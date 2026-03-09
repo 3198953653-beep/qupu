@@ -19,11 +19,14 @@ import { drawCrossMeasureTies } from './drawCrossMeasureTies'
 import { buildDragPreviewOverrides } from './dragPreviewOverrides'
 import {
   DEFAULT_TIME_AXIS_SPACING_CONFIG,
+  attachMeasureTimelineAxisLayout,
+  buildMeasureTimelineBundle,
   getMeasureUniformTimelineWeightSpan,
   getUniformTickSpacingPadding,
   type TimeAxisSpacingConfig,
 } from '../layout/timeAxisSpacing'
 import { resolveEffectiveBoundary } from '../layout/effectiveBoundary'
+import type { MeasureTimelineBundle } from '../timeline/types'
 import type {
   DragState,
   LayoutReflowHint,
@@ -281,6 +284,7 @@ export function renderVisibleSystems(params: {
   nextLayoutsByPair: Map<number, NoteLayout[]>
   nextLayoutsByKey: Map<string, NoteLayout>
   nextMeasureLayouts: Map<number, MeasureLayout>
+  nextTimelineBundlesByPair: Map<number, MeasureTimelineBundle>
 } {
   const {
     context,
@@ -323,6 +327,7 @@ export function renderVisibleSystems(params: {
   const nextLayoutsByPair = new Map<number, NoteLayout[]>()
   const nextLayoutsByKey = new Map<string, NoteLayout>()
   const nextMeasureLayouts = new Map<number, MeasureLayout>()
+  const nextTimelineBundlesByPair = new Map<number, MeasureTimelineBundle>()
   if (systemRanges.length === 0) {
     context.clearRect(0, 0, scoreWidth, scoreHeight)
     return {
@@ -330,6 +335,7 @@ export function renderVisibleSystems(params: {
       nextLayoutsByPair,
       nextLayoutsByKey,
       nextMeasureLayouts,
+      nextTimelineBundlesByPair,
     }
   }
   const maxSystemIndex = systemRanges.length - 1
@@ -480,6 +486,19 @@ export function renderVisibleSystems(params: {
       })
     }
     if (systemMeta.length === 0) continue
+    const systemTimelineBundles = new Map<number, MeasureTimelineBundle>()
+    systemMeta.forEach((entry) => {
+      systemTimelineBundles.set(
+        entry.pairIndex,
+        buildMeasureTimelineBundle({
+          measure: entry.measure,
+          measureIndex: entry.pairIndex,
+          timeSignature: entry.timeSignature,
+          spacingConfig,
+          timelineMode: 'dual',
+        }),
+      )
+    })
 
     const drawCrossMeasureTiesForSystem = () => {
       const startPairIndex = systemMeta[0]?.pairIndex ?? 0
@@ -566,6 +585,25 @@ export function renderVisibleSystems(params: {
         formatWidth: geometry.formatWidth,
       }
     }
+    const attachTimelineBundleForMeasure = (params: {
+      pairIndex: number
+      effectiveBoundaryStartX: number
+      effectiveBoundaryEndX: number
+      widthPx: number
+    }) => {
+      const baseBundle = systemTimelineBundles.get(params.pairIndex)
+      if (!baseBundle) return
+      nextTimelineBundlesByPair.set(
+        params.pairIndex,
+        attachMeasureTimelineAxisLayout({
+          bundle: baseBundle,
+          effectiveBoundaryStartX: params.effectiveBoundaryStartX,
+          effectiveBoundaryEndX: params.effectiveBoundaryEndX,
+          widthPx: params.widthPx,
+          spacingConfig,
+        }),
+      )
+    }
     const resolveEffectiveLayoutMetrics = (params: {
       measureX: number
       measureWidth: number
@@ -648,6 +686,15 @@ export function renderVisibleSystems(params: {
               nextLayoutsByKey.set(getLayoutNoteKey(layout.staff, layout.id), layout)
             })
             nextMeasureLayouts.set(entry.pairIndex, previousMeasureLayout)
+            attachTimelineBundleForMeasure({
+              pairIndex: entry.pairIndex,
+              effectiveBoundaryStartX:
+                previousMeasureLayout.effectiveBoundaryStartX ?? previousMeasureLayout.measureX,
+              effectiveBoundaryEndX:
+                previousMeasureLayout.effectiveBoundaryEndX ??
+                previousMeasureLayout.measureX + previousMeasureLayout.measureWidth,
+              widthPx: previousMeasureLayout.measureWidth,
+            })
             return
           }
         }
@@ -780,6 +827,12 @@ export function renderVisibleSystems(params: {
           effectiveRightGapPx: effectiveLayoutMetrics.effectiveRightGapPx,
           overlayRect,
         })
+        attachTimelineBundleForMeasure({
+          pairIndex: entry.pairIndex,
+          effectiveBoundaryStartX: effectiveLayoutMetrics.effectiveBoundaryStartX,
+          effectiveBoundaryEndX: effectiveLayoutMetrics.effectiveBoundaryEndX,
+          widthPx: measureWidth,
+        })
       })
       drawCrossMeasureTiesForSystem()
       continue
@@ -815,6 +868,15 @@ export function renderVisibleSystems(params: {
               nextLayoutsByKey.set(getLayoutNoteKey(layout.staff, layout.id), layout)
             })
             nextMeasureLayouts.set(entry.pairIndex, previousMeasureLayout)
+            attachTimelineBundleForMeasure({
+              pairIndex: entry.pairIndex,
+              effectiveBoundaryStartX:
+                previousMeasureLayout.effectiveBoundaryStartX ?? previousMeasureLayout.measureX,
+              effectiveBoundaryEndX:
+                previousMeasureLayout.effectiveBoundaryEndX ??
+                previousMeasureLayout.measureX + previousMeasureLayout.measureWidth,
+              widthPx: previousMeasureLayout.measureWidth,
+            })
             return
           }
         }
@@ -951,6 +1013,12 @@ export function renderVisibleSystems(params: {
           effectiveLeftGapPx: effectiveLayoutMetrics.effectiveLeftGapPx,
           effectiveRightGapPx: effectiveLayoutMetrics.effectiveRightGapPx,
           overlayRect,
+        })
+        attachTimelineBundleForMeasure({
+          pairIndex: entry.pairIndex,
+          effectiveBoundaryStartX: effectiveLayoutMetrics.effectiveBoundaryStartX,
+          effectiveBoundaryEndX: effectiveLayoutMetrics.effectiveBoundaryEndX,
+          widthPx: measureWidth,
         })
       })
       drawCrossMeasureTiesForSystem()
@@ -1260,6 +1328,12 @@ export function renderVisibleSystems(params: {
         effectiveRightGapPx: effectiveLayoutMetrics.effectiveRightGapPx,
         overlayRect,
       })
+      attachTimelineBundleForMeasure({
+        pairIndex: entry.pairIndex,
+        effectiveBoundaryStartX: effectiveLayoutMetrics.effectiveBoundaryStartX,
+        effectiveBoundaryEndX: effectiveLayoutMetrics.effectiveBoundaryEndX,
+        widthPx: measureWidth,
+      })
     })
     drawCrossMeasureTiesForSystem()
   }
@@ -1269,5 +1343,6 @@ export function renderVisibleSystems(params: {
     nextLayoutsByPair,
     nextLayoutsByKey,
     nextMeasureLayouts,
+    nextTimelineBundlesByPair,
   }
 }

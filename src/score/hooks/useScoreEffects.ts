@@ -6,6 +6,7 @@ import { buildHitGridIndex } from '../layout/hitTest'
 import { getVisibleSystemRange } from '../layout/viewport'
 import { renderVisibleSystems } from '../render/renderVisibleSystems'
 import { syncBassNotesToTreble } from '../scoreOps'
+import type { MeasureTimelineBundle } from '../timeline/types'
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
 import type { HitGridIndex } from '../layout/hitTest'
 import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
@@ -203,6 +204,7 @@ export function useScoreRenderEffect(params: {
   noteLayoutByKeyRef: MutableRefObject<Map<string, NoteLayout>>
   hitGridRef: MutableRefObject<HitGridIndex | null>
   measureLayoutsRef: MutableRefObject<Map<number, MeasureLayout>>
+  measureTimelineBundlesRef: MutableRefObject<Map<number, MeasureTimelineBundle>>
   backend: number
   pagePaddingX?: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
@@ -241,6 +243,7 @@ export function useScoreRenderEffect(params: {
     noteLayoutByKeyRef,
     hitGridRef,
     measureLayoutsRef,
+    measureTimelineBundlesRef,
     backend,
     pagePaddingX,
     timeAxisSpacingConfig,
@@ -303,7 +306,8 @@ export function useScoreRenderEffect(params: {
     const previousMeasureLayouts = measureLayoutsRef.current
     const layoutReflowHint = layoutReflowHintRef?.current ?? null
 
-    const { nextLayouts, nextLayoutsByPair, nextLayoutsByKey, nextMeasureLayouts } = renderVisibleSystems({
+    const { nextLayouts, nextLayoutsByPair, nextLayoutsByKey, nextMeasureLayouts, nextTimelineBundlesByPair } =
+      renderVisibleSystems({
       context,
       measurePairs,
       scoreWidth,
@@ -330,12 +334,13 @@ export function useScoreRenderEffect(params: {
       timeAxisSpacingConfig,
       spacingLayoutMode,
       dragPreview,
-    })
+      })
     noteLayoutsRef.current = nextLayouts
     noteLayoutsByPairRef.current = nextLayoutsByPair
     noteLayoutByKeyRef.current = nextLayoutsByKey
     hitGridRef.current = buildHitGridIndex(nextLayouts)
     measureLayoutsRef.current = nextMeasureLayouts
+    measureTimelineBundlesRef.current = nextTimelineBundlesByPair
     onAfterRender?.()
   }, [
     scoreRef,
@@ -364,6 +369,7 @@ export function useScoreRenderEffect(params: {
     noteLayoutByKeyRef,
     hitGridRef,
     measureLayoutsRef,
+    measureTimelineBundlesRef,
     backend,
     pagePaddingX,
     timeAxisSpacingConfig,

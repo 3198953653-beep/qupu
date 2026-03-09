@@ -3,6 +3,11 @@ import { DURATION_TICKS } from '../constants'
 import { getAccidentalVisualX, getRenderedNoteVisualX } from './renderPosition'
 import type { MeasurePair, ScoreNote } from '../types'
 import { resolveEffectiveBoundary } from './effectiveBoundary'
+import { buildPublicAxisLayout } from '../timeline/axisLayout'
+import { compareLegacyAndMergedTimeline } from '../timeline/debug'
+import { mergeStaffTimelines } from '../timeline/mergedTimeline'
+import { buildStaffTimeline } from '../timeline/staffTimeline'
+import type { MeasureTimelineBundle } from '../timeline/types'
 
 type RenderedStaffNote = {
   vexNote: StaveNote
@@ -224,6 +229,112 @@ export function collectMeasureOnsetTicks(measure: MeasurePair): number[] {
   buildStaffOnsetTicks(measure.treble).forEach((onset) => onsetTicksSet.add(onset))
   buildStaffOnsetTicks(measure.bass).forEach((onset) => onsetTicksSet.add(onset))
   return [...onsetTicksSet].sort((left, right) => left - right)
+}
+
+export function buildLegacyOnsetTicks(measure: MeasurePair): number[] {
+  return collectMeasureOnsetTicks(measure)
+}
+
+function resolveMeasureTicksFromTimeSignature(timeSignature: { beats: number; beatType: number }): number {
+  const beats = Number.isFinite(timeSignature.beats) ? Math.max(1, timeSignature.beats) : 4
+  const beatType = Number.isFinite(timeSignature.beatType) ? Math.max(1, timeSignature.beatType) : 4
+  const measureTicks = beats * TICKS_PER_QUARTER * (4 / beatType)
+  if (Number.isFinite(measureTicks) && measureTicks > 0) {
+    return Math.max(1, Math.round(measureTicks))
+  }
+  return TICKS_PER_QUARTER * 4
+}
+
+export function buildMeasureTimelineBundle(params: {
+  measure: MeasurePair
+  measureIndex: number
+  timeSignature: { beats: number; beatType: number }
+  spacingConfig?: TimeAxisSpacingConfig
+  timelineMode?: 'legacy' | 'dual' | 'merged'
+}): MeasureTimelineBundle {
+  const {
+    measure,
+    measureIndex,
+    timeSignature,
+    timelineMode = 'dual',
+    spacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
+  } = params
+  const legacyOnsets = buildLegacyOnsetTicks(measure)
+  const measureTicks = resolveMeasureTicksFromTimeSignature(timeSignature)
+  const trebleTimeline = buildStaffTimeline(measure.treble, 'treble', measureIndex, measureTicks)
+  const bassTimeline = buildStaffTimeline(measure.bass, 'bass', measureIndex, measureTicks)
+  const publicTimeline = mergeStaffTimelines({
+    measureIndex,
+    measureTicks,
+    timeSignature,
+    trebleTimeline,
+    bassTimeline,
+  })
+  const publicAxisLayout = buildPublicAxisLayout({
+    measureIndex,
+    measureTicks,
+    publicTimeline,
+    spacingConfig: {
+      baseMinGap32Px: spacingConfig.baseMinGap32Px,
+      durationGapRatios: spacingConfig.durationGapRatios,
+    },
+    effectiveBoundaryStartX: 0,
+    effectiveBoundaryEndX: 1,
+  })
+  return {
+    measureIndex,
+    measureTicks,
+    legacyOnsets,
+    trebleTimeline,
+    bassTimeline,
+    publicTimeline,
+    publicAxisLayout: publicAxisLayout.widthPx > 0 ? publicAxisLayout : null,
+    timelineDiffSummary: compareLegacyAndMergedTimeline({
+      legacyOnsets,
+      publicTimeline,
+      publicAxisLayout,
+    }),
+    timelineMode,
+  }
+}
+
+export function attachMeasureTimelineAxisLayout(params: {
+  bundle: MeasureTimelineBundle
+  effectiveBoundaryStartX: number
+  effectiveBoundaryEndX: number
+  widthPx: number
+  spacingConfig?: TimeAxisSpacingConfig
+}): MeasureTimelineBundle {
+  const {
+    bundle,
+    effectiveBoundaryStartX,
+    effectiveBoundaryEndX,
+    widthPx,
+    spacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
+  } = params
+  const publicAxisLayout = buildPublicAxisLayout({
+    measureIndex: bundle.measureIndex,
+    measureTicks: bundle.measureTicks,
+    publicTimeline: bundle.publicTimeline,
+    spacingConfig: {
+      baseMinGap32Px: spacingConfig.baseMinGap32Px,
+      durationGapRatios: spacingConfig.durationGapRatios,
+    },
+    effectiveBoundaryStartX,
+    effectiveBoundaryEndX,
+  })
+  return {
+    ...bundle,
+    publicAxisLayout: {
+      ...publicAxisLayout,
+      widthPx,
+    },
+    timelineDiffSummary: compareLegacyAndMergedTimeline({
+      legacyOnsets: bundle.legacyOnsets,
+      publicTimeline: bundle.publicTimeline,
+      publicAxisLayout,
+    }),
+  }
 }
 
 export type UniformTickTimeline = {

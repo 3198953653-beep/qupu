@@ -57,6 +57,7 @@ import { getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './score/pitch
 import { compareTimelinePoint, resolveSelectionTimelinePoint } from './score/selectionTimelineRange'
 import { resolveForwardTieTargets, resolveFullTieTargets, resolvePreviousTieTarget } from './score/tieChain'
 import { buildSelectionGroupMoveTargets } from './score/selectionGroupTargets'
+import type { MeasureTimelineBundle } from './score/timeline/types'
 import {
   buildNotationPaletteDerivedDisplay,
   getDefaultNotationPaletteSelection,
@@ -1387,6 +1388,7 @@ function App() {
   const noteLayoutByKeyRef = useRef<Map<string, NoteLayout>>(new Map())
   const hitGridRef = useRef<HitGridIndex | null>(null)
   const measureLayoutsRef = useRef<Map<number, MeasureLayout>>(new Map())
+  const measureTimelineBundlesRef = useRef<Map<number, MeasureTimelineBundle>>(new Map())
   const rulerLayoutSignatureRef = useRef('')
   const measurePairsRef = useRef<MeasurePair[]>([])
   const dragDebugFramesRef = useRef<DragDebugSnapshot[]>([])
@@ -1729,6 +1731,7 @@ function App() {
     noteLayoutByKeyRef,
     hitGridRef,
     measureLayoutsRef,
+    measureTimelineBundlesRef,
     backend: SCORE_RENDER_BACKEND,
     pagePaddingX: pageHorizontalPaddingPx,
     timeAxisSpacingConfig,
@@ -3665,6 +3668,7 @@ function App() {
   const dumpAllMeasureCoordinateReport = useCallback(() => {
     const measureLayouts = measureLayoutsRef.current
     const noteLayoutsByPair = noteLayoutsByPairRef.current
+    const measureTimelineBundles = measureTimelineBundlesRef.current
     const pairs = measurePairsRef.current
     const toRoundedNumber = (value: number | null | undefined, digits: number): number | null => {
       if (typeof value !== 'number' || !Number.isFinite(value)) return null
@@ -3684,6 +3688,7 @@ function App() {
     const rows = pairs.map((pair, pairIndex) => {
       const measureLayout = measureLayouts.get(pairIndex) ?? null
       const pairLayouts = noteLayoutsByPair.get(pairIndex) ?? []
+      const timelineBundle = measureTimelineBundles.get(pairIndex) ?? null
       const trebleOnsetTicksByIndex = buildOnsetTicksByNoteIndex(pair.treble)
       const bassOnsetTicksByIndex = buildOnsetTicksByNoteIndex(pair.bass)
       const axisPointBuckets = new Map<
@@ -3864,6 +3869,7 @@ function App() {
       return {
         pairIndex,
         rendered: measureLayout !== null,
+        timelineMode: timelineBundle?.timelineMode ?? 'legacy',
         measureX: measureLayout?.measureX ?? null,
         measureWidth: measureLayout?.measureWidth ?? null,
         systemTop: measureLayout?.systemTop ?? null,
@@ -3898,6 +3904,36 @@ function App() {
               ? Number((effectiveBoundary.effectiveEndX - lastVisualRightX).toFixed(3))
               : null,
         timeAxisTicksPerBeat: TICKS_PER_BEAT,
+        legacyOnsets: timelineBundle?.legacyOnsets ?? orderedOnsets,
+        trebleTimelineEvents:
+          timelineBundle?.trebleTimeline.events.map((event) => ({
+            noteId: event.noteId,
+            noteIndex: event.noteIndex,
+            startTick: event.startTick,
+            endTick: event.endTick,
+            durationTicks: event.durationTicks,
+            isRest: event.isRest,
+          })) ?? [],
+        bassTimelineEvents:
+          timelineBundle?.bassTimeline.events.map((event) => ({
+            noteId: event.noteId,
+            noteIndex: event.noteIndex,
+            startTick: event.startTick,
+            endTick: event.endTick,
+            durationTicks: event.durationTicks,
+            isRest: event.isRest,
+          })) ?? [],
+        publicTimelineTicks: timelineBundle?.publicTimeline.points.map((point) => point.tick) ?? [],
+        publicTickToX:
+          timelineBundle?.publicAxisLayout
+            ? Object.fromEntries(
+                [...timelineBundle.publicAxisLayout.tickToX.entries()].map(([tick, x]) => [
+                  String(tick),
+                  toRoundedNumber(x, 3),
+                ]),
+              )
+            : {},
+        timelineDiffSummary: timelineBundle?.timelineDiffSummary ?? null,
         timeAxisPoints,
         maxVisualRightX,
         maxSpacingRightX,
