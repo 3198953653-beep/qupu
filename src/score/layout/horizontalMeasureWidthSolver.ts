@@ -5,10 +5,12 @@ import { drawMeasureToContext } from '../render/drawMeasure'
 import type { MeasurePair, ScoreNote, TimeSignature } from '../types'
 import type { TimeAxisSpacingConfig } from './timeAxisSpacing'
 import {
+  PUBLIC_AXIS_CONSUMPTION_MODE,
   attachMeasureTimelineAxisLayout,
   buildMeasureTimelineBundle,
   getMeasureUniformTimelineWeightSpan,
   getUniformTickSpacingPadding,
+  resolvePublicAxisLayoutForConsumption,
 } from './timeAxisSpacing'
 import { resolveEffectiveBoundary } from './effectiveBoundary'
 
@@ -210,28 +212,31 @@ function probeMeasureSpacing(
   spacingConfig: TimeAxisSpacingConfig,
 ): MeasureSpacingProbe | null {
   const geometry = buildMeasureProbeGeometry(meta, measureWidth)
-  const baseTimelineBundle = buildMeasureTimelineBundle({
-    measure: meta.measure,
-    measureIndex: meta.pairIndex,
-    timeSignature: meta.timeSignature,
-    spacingConfig,
-    timelineMode: 'merged',
-  })
-  const effectiveBoundary = resolveEffectiveBoundary({
-    measureX: 0,
-    measureWidth,
-    noteStartX: geometry.noteStartX,
-    noteEndX: geometry.noteEndX,
-    showStartDecorations: meta.showStartDecorations,
-    showEndDecorations: meta.showEndDecorations,
-  })
-  const timelineBundle = attachMeasureTimelineAxisLayout({
-    bundle: baseTimelineBundle,
-    effectiveBoundaryStartX: effectiveBoundary.effectiveStartX,
-    effectiveBoundaryEndX: effectiveBoundary.effectiveEndX,
-    widthPx: measureWidth,
-    spacingConfig,
-  })
+  let probeTimelineBundle: ReturnType<typeof buildMeasureTimelineBundle> | null = null
+  if (PUBLIC_AXIS_CONSUMPTION_MODE === 'merged') {
+    const baseTimelineBundle = buildMeasureTimelineBundle({
+      measure: meta.measure,
+      measureIndex: meta.pairIndex,
+      timeSignature: meta.timeSignature,
+      spacingConfig,
+      timelineMode: 'dual',
+    })
+    const effectiveBoundary = resolveEffectiveBoundary({
+      measureX: 0,
+      measureWidth,
+      noteStartX: geometry.noteStartX,
+      noteEndX: geometry.noteEndX,
+      showStartDecorations: !meta.preferMeasureStartBarlineAxis,
+      showEndDecorations: !meta.preferMeasureEndBarlineAxis,
+    })
+    probeTimelineBundle = attachMeasureTimelineAxisLayout({
+      bundle: baseTimelineBundle,
+      effectiveBoundaryStartX: effectiveBoundary.effectiveStartX,
+      effectiveBoundaryEndX: effectiveBoundary.effectiveEndX,
+      widthPx: measureWidth,
+      spacingConfig,
+    })
+  }
   const spacingMetricsRef: {
     current:
       | {
@@ -263,7 +268,7 @@ function probeMeasureSpacing(
     formatWidthOverride: geometry.formatWidth,
     timeAxisSpacingConfig: spacingConfig,
     spacingLayoutMode: 'custom',
-    publicAxisLayout: timelineBundle.publicAxisLayout,
+    publicAxisLayout: resolvePublicAxisLayoutForConsumption(probeTimelineBundle),
     preferMeasureBarlineAxis: meta.preferMeasureStartBarlineAxis,
     preferMeasureEndBarlineAxis: meta.preferMeasureEndBarlineAxis,
     enableEdgeGapCap: true,
@@ -392,7 +397,7 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
       measureIndex: meta.pairIndex,
       timeSignature: meta.timeSignature,
       spacingConfig,
-      timelineMode: 'merged',
+      timelineMode: 'dual',
     })
     const timelineSpan = getMeasureUniformTimelineWeightSpan(
       meta.measure,

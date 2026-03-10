@@ -76,6 +76,12 @@ export type DurationGapRatioConfig = {
   half: number
 }
 
+export type PublicAxisConsumptionMode = 'legacy' | 'merged'
+
+// Stage switch for timeline refactor rollout.
+// Toggle back to 'legacy' for immediate rollback if needed.
+export const PUBLIC_AXIS_CONSUMPTION_MODE: PublicAxisConsumptionMode = 'legacy'
+
 export const DEFAULT_TIME_AXIS_SPACING_CONFIG: TimeAxisSpacingConfig = {
   minGapBeats: MIN_GAP_BEATS,
   gapGamma: GAP_GAMMA,
@@ -262,6 +268,7 @@ export function buildMeasureTimelineBundle(params: {
   } = params
   const legacyOnsets = buildLegacyOnsetTicks(measure)
   const measureTicks = resolveMeasureTicksFromTimeSignature(timeSignature)
+  const { startPadPx, endPadPx } = getUniformTickSpacingPadding(spacingConfig)
   const trebleTimeline = buildStaffTimeline(measure.treble, 'treble', measureIndex, measureTicks)
   const bassTimeline = buildStaffTimeline(measure.bass, 'bass', measureIndex, measureTicks)
   const publicTimeline = mergeStaffTimelines({
@@ -278,6 +285,8 @@ export function buildMeasureTimelineBundle(params: {
     spacingConfig: {
       baseMinGap32Px: spacingConfig.baseMinGap32Px,
       durationGapRatios: spacingConfig.durationGapRatios,
+      startPadPx,
+      endPadPx,
     },
     effectiveBoundaryStartX: 0,
     effectiveBoundaryEndX: 1,
@@ -305,6 +314,7 @@ export function attachMeasureTimelineAxisLayout(params: {
   effectiveBoundaryEndX: number
   widthPx: number
   spacingConfig?: TimeAxisSpacingConfig
+  timelineScaleOverride?: number | null
 }): MeasureTimelineBundle {
   const {
     bundle,
@@ -312,7 +322,9 @@ export function attachMeasureTimelineAxisLayout(params: {
     effectiveBoundaryEndX,
     widthPx,
     spacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
+    timelineScaleOverride = null,
   } = params
+  const { startPadPx, endPadPx } = getUniformTickSpacingPadding(spacingConfig)
   const publicAxisLayout = buildPublicAxisLayout({
     measureIndex: bundle.measureIndex,
     measureTicks: bundle.measureTicks,
@@ -320,9 +332,12 @@ export function attachMeasureTimelineAxisLayout(params: {
     spacingConfig: {
       baseMinGap32Px: spacingConfig.baseMinGap32Px,
       durationGapRatios: spacingConfig.durationGapRatios,
+      startPadPx,
+      endPadPx,
     },
     effectiveBoundaryStartX,
     effectiveBoundaryEndX,
+    timelineScaleOverride,
   })
   return {
     ...bundle,
@@ -442,6 +457,13 @@ function getDurationGapRatioByDeltaTicks(deltaTicks: number, ratios: DurationGap
   return anchors[anchors.length - 1].ratio
 }
 
+export function resolvePublicAxisLayoutForConsumption(
+  timelineBundle: MeasureTimelineBundle | null | undefined,
+): PublicAxisLayout | null {
+  if (PUBLIC_AXIS_CONSUMPTION_MODE !== 'merged') return null
+  return timelineBundle?.publicAxisLayout ?? null
+}
+
 function getDurationAddedMinGapPx(deltaTicks: number, spacingConfig: TimeAxisSpacingConfig): number {
   void deltaTicks
   void spacingConfig
@@ -490,6 +512,11 @@ function buildUniformTimelineWeightMap(
   }
 }
 
+type EdgeGapCapResult = {
+  appliedShift: number
+  infeasiblePlacement: boolean
+}
+
 function applyMeasureEdgeGapCap(params: {
   noteOnsets: number[]
   targetXByOnset: Map<number, number>
@@ -501,7 +528,11 @@ function applyMeasureEdgeGapCap(params: {
   lastRightExtent: number
   minBarlineEdgeGapPx: number
   maxBarlineEdgeGapPx: number
-}): void {
+}): EdgeGapCapResult {
+  const noShift: EdgeGapCapResult = {
+    appliedShift: 0,
+    infeasiblePlacement: false,
+  }
   const {
     noteOnsets,
     targetXByOnset,
@@ -515,38 +546,38 @@ function applyMeasureEdgeGapCap(params: {
     maxBarlineEdgeGapPx,
   } = params
 
-  if (!Number.isFinite(maxBarlineEdgeGapPx)) return
+  if (!Number.isFinite(maxBarlineEdgeGapPx)) return noShift
   const maxGap = Math.max(0, maxBarlineEdgeGapPx)
   const minGapCandidate = Number.isFinite(minBarlineEdgeGapPx) ? Math.max(0, minBarlineEdgeGapPx) : 0
   const minGap = minGapCandidate <= maxGap ? minGapCandidate : maxGap
   const hasEffectiveMinGap = minGap > 0
-  if (noteOnsets.length === 0) return
+  if (noteOnsets.length === 0) return noShift
 
   const positions = noteOnsets.map((onset) => targetXByOnset.get(onset))
-  if (positions.some((value) => value === undefined || !Number.isFinite(value))) return
+  if (positions.some((value) => value === undefined || !Number.isFinite(value))) return noShift
   const safePositions = positions as number[]
 
   const firstIndex = 0
   const lastIndex = safePositions.length - 1
   const currentFirstX = safePositions[firstIndex]
   const currentLastX = safePositions[lastIndex]
-  if (!Number.isFinite(currentFirstX) || !Number.isFinite(currentLastX)) return
+  if (!Number.isFinite(currentFirstX) || !Number.isFinite(currentLastX)) return noShift
 
   const minFirstX = legalBoundaryStart
   const maxLastX = legalBoundaryEnd
-  if (!Number.isFinite(minFirstX) || !Number.isFinite(maxLastX) || minFirstX > maxLastX) return
+  if (!Number.isFinite(minFirstX) || !Number.isFinite(maxLastX) || minFirstX > maxLastX) return noShift
 
-  // Preserve all inter-onset spacing and only resolve by translation.
+  // Preferred path keeps all inter-onset spacing (pure translation).
   const legalShiftMin = minFirstX - currentFirstX
   const legalShiftMax = maxLastX - currentLastX
-  if (!Number.isFinite(legalShiftMin) || !Number.isFinite(legalShiftMax) || legalShiftMin > legalShiftMax) return
+  if (!Number.isFinite(legalShiftMin) || !Number.isFinite(legalShiftMax) || legalShiftMin > legalShiftMax) return noShift
 
   // Cap is interpreted as visual edge distance: first/last note glyph edge to
   // measure boundary. This keeps "=0" behavior aligned with user expectation
   // (touching boundaries), instead of onset anchor distance.
   const currentLeftEdgeGap = currentFirstX - firstLeftExtent - edgeBoundaryStart
   const currentRightEdgeGap = edgeBoundaryEnd - (currentLastX + lastRightExtent)
-  if (!Number.isFinite(currentLeftEdgeGap) || !Number.isFinite(currentRightEdgeGap)) return
+  if (!Number.isFinite(currentLeftEdgeGap) || !Number.isFinite(currentRightEdgeGap)) return noShift
 
   // leftGap' = currentLeftEdgeGap + shift <= maxGap
   // rightGap' = currentRightEdgeGap - shift <= maxGap
@@ -559,8 +590,15 @@ function applyMeasureEdgeGapCap(params: {
   const feasibleShiftMax = Math.min(legalShiftMax, capShiftMax, hasEffectiveMinGap ? minShiftMax : Number.POSITIVE_INFINITY)
 
   const clampShift = (value: number): number => Math.max(legalShiftMin, Math.min(legalShiftMax, value))
-
+  const exceedsCapAt = (firstX: number, lastX: number): boolean => {
+    const leftEdgeGap = firstX - firstLeftExtent - edgeBoundaryStart
+    const rightEdgeGap = edgeBoundaryEnd - (lastX + lastRightExtent)
+    return leftEdgeGap > maxGap + 0.001 || rightEdgeGap > maxGap + 0.001
+  }
+  const exceedsCapAfterShift = (shift: number): boolean =>
+    exceedsCapAt(currentFirstX + shift, currentLastX + shift)
   let resolvedShift = 0
+  let infeasiblePlacement = false
   if (feasibleShiftMin <= feasibleShiftMax) {
     resolvedShift = Math.max(feasibleShiftMin, Math.min(0, feasibleShiftMax))
   } else {
@@ -570,18 +608,31 @@ function applyMeasureEdgeGapCap(params: {
     if (feasibleWithoutMinShiftMin <= feasibleWithoutMinShiftMax) {
       resolvedShift = Math.max(feasibleWithoutMinShiftMin, Math.min(0, feasibleWithoutMinShiftMax))
     } else {
-    // When cap constraints are infeasible under pure translation, prefer a
-    // balanced placement (left/right gaps as equal as possible) instead of
-    // forcing one side to the cap and exploding the opposite side.
+      // When cap constraints are infeasible under pure translation, prefer a
+      // balanced placement (left/right gaps as equal as possible) instead of
+      // forcing one side to the cap and exploding the opposite side.
       const balancedShift = (currentRightEdgeGap - currentLeftEdgeGap) * 0.5
       resolvedShift = clampShift(balancedShift)
+      infeasiblePlacement = true
     }
   }
 
-  if (!Number.isFinite(resolvedShift) || Math.abs(resolvedShift) < 0.001) return
+  if (!Number.isFinite(resolvedShift) || Math.abs(resolvedShift) < 0.001) {
+    const stillExceedsCap = Number.isFinite(resolvedShift) ? exceedsCapAfterShift(resolvedShift) : false
+    return {
+      appliedShift: 0,
+      infeasiblePlacement: infeasiblePlacement || stillExceedsCap,
+    }
+  }
 
   for (let i = 0; i < safePositions.length; i += 1) {
     targetXByOnset.set(noteOnsets[i], safePositions[i] + resolvedShift)
+  }
+
+  const stillExceedsCap = exceedsCapAfterShift(resolvedShift)
+  return {
+    appliedShift: resolvedShift,
+    infeasiblePlacement: infeasiblePlacement || stillExceedsCap,
   }
 }
 
@@ -592,9 +643,13 @@ export function getMeasureUniformTimelineWeightSpan(
   timelineBundle: MeasureTimelineBundle | null = null,
 ): number {
   void measureTicks
-  const onsets = timelineBundle
-    ? timelineBundle.publicTimeline.points.map((point) => point.tick).sort((left, right) => left - right)
-    : collectMeasureOnsetTicks(measure).sort((left, right) => left - right)
+  // Compatibility mode for layout stability:
+  // width solving keeps the legacy onset span while timeline refactor is
+  // validated in parallel. This preserves the previously tuned spacing rule.
+  const onsets =
+    timelineBundle?.legacyOnsets?.length
+      ? [...timelineBundle.legacyOnsets].sort((left, right) => left - right)
+      : collectMeasureOnsetTicks(measure).sort((left, right) => left - right)
   if (onsets.length <= 1) return 0
   let totalGapPx = 0
   for (let i = 1; i < onsets.length; i += 1) {
@@ -893,10 +948,11 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     }
   }
 
+  let edgeGapCapResult: EdgeGapCapResult | null = null
   if (enableEdgeGapCap) {
     const legalBoundaryStart = axisBoundaryStart + Math.max(0, edgeLegalStartInset)
     const legalBoundaryEnd = axisBoundaryEnd - Math.max(0, edgeLegalEndInset)
-    applyMeasureEdgeGapCap({
+    edgeGapCapResult = applyMeasureEdgeGapCap({
       noteOnsets,
       targetXByOnset,
       // Use effective spacing boundaries (noteStartX / noteEndX when
@@ -936,10 +992,14 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     return null
   }
 
+  const effectiveLeftGapPx = resolvedFirstX - firstLeftExtent - axisBoundaryStart
+  const effectiveRightGapPx = axisBoundaryEnd - (resolvedLastX + lastRightExtent)
+  const exposeEffectiveGaps = !(edgeGapCapResult?.infeasiblePlacement ?? false)
+
   return {
     effectiveBoundaryStartX: axisBoundaryStart,
     effectiveBoundaryEndX: axisBoundaryEnd,
-    effectiveLeftGapPx: resolvedFirstX - firstLeftExtent - axisBoundaryStart,
-    effectiveRightGapPx: axisBoundaryEnd - (resolvedLastX + lastRightExtent),
+    effectiveLeftGapPx: exposeEffectiveGaps ? effectiveLeftGapPx : Number.NaN,
+    effectiveRightGapPx: exposeEffectiveGaps ? effectiveRightGapPx : Number.NaN,
   }
 }
