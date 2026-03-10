@@ -89,7 +89,7 @@ import type {
 
 const SCORE_RENDER_BACKEND = Renderer.Backends.CANVAS
 const INSPECTOR_SEQUENCE_PREVIEW_LIMIT = 64
-const MANUAL_SCALE_BASELINE = 0.91
+const MANUAL_SCALE_BASELINE = 1
 const DEFAULT_PAGE_HORIZONTAL_PADDING_PX = 86
 const ENABLE_AUTO_FIRST_MEASURE_DRAG_DEBUG = false
 const HORIZONTAL_VIEW_MEASURE_WIDTH_PX = 220
@@ -1324,7 +1324,6 @@ function App() {
   const [musicXmlMetadataFromImport, setMusicXmlMetadataFromImport] = useState<MusicXmlMetadata | null>(null)
   const [, setDragDebugReport] = useState<string>('')
   const [, setMeasureEdgeDebugReport] = useState<string>('')
-  const [layoutRenderVersion, setLayoutRenderVersion] = useState(0)
   const [autoScaleEnabled, setAutoScaleEnabled] = useState(false)
   const [manualScalePercent, setManualScalePercent] = useState(100)
   const [canvasHeightPercent, setCanvasHeightPercent] = useState(100)
@@ -1389,7 +1388,6 @@ function App() {
   const hitGridRef = useRef<HitGridIndex | null>(null)
   const measureLayoutsRef = useRef<Map<number, MeasureLayout>>(new Map())
   const measureTimelineBundlesRef = useRef<Map<number, MeasureTimelineBundle>>(new Map())
-  const rulerLayoutSignatureRef = useRef('')
   const measurePairsRef = useRef<MeasurePair[]>([])
   const dragDebugFramesRef = useRef<DragDebugSnapshot[]>([])
   const dragRef = useRef<DragState | null>(null)
@@ -1640,18 +1638,6 @@ function App() {
     spacingLayoutMode,
   ])
 
-  const handleScoreRendered = useCallback(() => {
-    const layouts = measureLayoutsRef.current
-    if (!layouts || layouts.size === 0) return
-    const entries = [...layouts.entries()].sort((left, right) => left[0] - right[0])
-    const signature = entries
-      .map(([pairIndex, layout]) => `${pairIndex}:${layout.measureX.toFixed(3)}`)
-      .join('|')
-    if (signature === rulerLayoutSignatureRef.current) return
-    rulerLayoutSignatureRef.current = signature
-    setLayoutRenderVersion((current) => current + 1)
-  }, [])
-
   useEffect(() => {
     const scrollHost = scoreScrollRef.current
     if (!scrollHost) {
@@ -1741,7 +1727,6 @@ function App() {
     renderQualityScaleX: renderQualityScale.x,
     renderQualityScaleY: renderQualityScale.y,
     dragPreview: draggingSelection ? dragPreviewState : null,
-    onAfterRender: handleScoreRendered,
   })
 
   useSynthLifecycle({
@@ -3487,39 +3472,14 @@ function App() {
   const scoreSurfaceOffsetYPx = Math.max(0, (displayScoreHeight - scaledRenderedScoreHeight) / 2)
   const measureRulerTicks = useMemo(() => {
     if (horizontalMeasureFramesByPair.length === 0) return [] as Array<{ key: string; xPx: number; label: string }>
-    const renderedLayouts = measureLayoutsRef.current
-    let fallbackShift = 0
-    let hasFallbackShift = false
-    if (renderedLayouts.size > 0) {
-      for (const [pairIndex, layout] of renderedLayouts.entries()) {
-        const frame = horizontalMeasureFramesByPair[pairIndex]
-        if (!frame) continue
-        const renderedScoreX = layout.measureX + horizontalRenderOffsetX
-        fallbackShift = renderedScoreX - frame.measureX
-        hasFallbackShift = true
-        break
-      }
-    }
-
     return horizontalMeasureFramesByPair.map((frame, index) => {
-      const layout = renderedLayouts.get(index)
-      const scoreX = layout
-        ? layout.measureX + horizontalRenderOffsetX
-        : frame.measureX + (hasFallbackShift ? fallbackShift : 0)
       return {
         key: `measure-ruler-${index + 1}`,
-        xPx: scoreX * scoreScaleX,
+        xPx: frame.measureX * scoreScaleX,
         label: `${index + 1}`,
       }
     })
-  }, [
-    horizontalMeasureFramesByPair,
-    horizontalRenderOffsetX,
-    scoreScaleX,
-    layoutStabilityKey,
-    visibleSystemRange,
-    layoutRenderVersion,
-  ])
+  }, [horizontalMeasureFramesByPair, scoreScaleX])
   const formatDebugCoord = (value: number | null | undefined): string => {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 'null'
     return value.toFixed(3)
@@ -3760,6 +3720,7 @@ function App() {
             noteId: layout.id,
             noteIndex: layout.noteIndex,
             pitch: sourceNote?.pitch ?? null,
+            isRest: sourceNote?.isRest === true,
             duration: sourceNote?.duration ?? null,
             durationTicksInMeasure:
               sourceNote && Number.isFinite(DURATION_TICKS[sourceNote.duration])
@@ -3934,6 +3895,14 @@ function App() {
                 ]),
               )
             : {},
+        publicTimelineScale:
+          timelineBundle?.publicAxisLayout && Number.isFinite(timelineBundle.publicAxisLayout.timelineScale)
+            ? Number(timelineBundle.publicAxisLayout.timelineScale.toFixed(6))
+            : null,
+        publicTimelineTotalAnchorWeight:
+          timelineBundle?.publicAxisLayout && Number.isFinite(timelineBundle.publicAxisLayout.totalAnchorWeight)
+            ? Number(timelineBundle.publicAxisLayout.totalAnchorWeight.toFixed(6))
+            : null,
         timelineDiffSummary: timelineBundle?.timelineDiffSummary ?? null,
         timeAxisPoints,
         maxVisualRightX,

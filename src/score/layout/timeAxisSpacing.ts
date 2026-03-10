@@ -948,11 +948,10 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     }
   }
 
-  let edgeGapCapResult: EdgeGapCapResult | null = null
   if (enableEdgeGapCap) {
     const legalBoundaryStart = axisBoundaryStart + Math.max(0, edgeLegalStartInset)
     const legalBoundaryEnd = axisBoundaryEnd - Math.max(0, edgeLegalEndInset)
-    edgeGapCapResult = applyMeasureEdgeGapCap({
+    applyMeasureEdgeGapCap({
       noteOnsets,
       targetXByOnset,
       // Use effective spacing boundaries (noteStartX / noteEndX when
@@ -994,12 +993,14 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
 
   const effectiveLeftGapPx = resolvedFirstX - firstLeftExtent - axisBoundaryStart
   const effectiveRightGapPx = axisBoundaryEnd - (resolvedLastX + lastRightExtent)
-  const exposeEffectiveGaps = !(edgeGapCapResult?.infeasiblePlacement ?? false)
 
   return {
     effectiveBoundaryStartX: axisBoundaryStart,
     effectiveBoundaryEndX: axisBoundaryEnd,
-    effectiveLeftGapPx: exposeEffectiveGaps ? effectiveLeftGapPx : Number.NaN,
-    effectiveRightGapPx: exposeEffectiveGaps ? effectiveRightGapPx : Number.NaN,
+    // Always expose actual gap metrics, even when edge-cap translation is
+    // infeasible for the current width. Width solver needs real numbers to
+    // continue shrinking and converge to configured edge bounds.
+    effectiveLeftGapPx,
+    effectiveRightGapPx,
   }
 }
