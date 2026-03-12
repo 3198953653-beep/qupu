@@ -22,6 +22,7 @@ import {
   attachMeasureTimelineAxisLayout,
   buildMeasureTimelineBundle,
   getMeasureUniformTimelineWeightSpan,
+  resolvePublicAxisLayoutForConsumption,
   getUniformTickSpacingPadding,
   type TimeAxisSpacingConfig,
 } from '../layout/timeAxisSpacing'
@@ -157,6 +158,20 @@ type StableMeasureFrame = {
   noteStartX: number
   noteEndX: number
   formatWidth: number
+}
+
+function isFrameAlignedWithPreviousLayout(params: {
+  frame: { measureX: number; measureWidth: number }
+  previousLayout: MeasureLayout | null | undefined
+  renderOffsetX: number
+}): boolean {
+  const { frame, previousLayout, renderOffsetX } = params
+  if (!previousLayout) return false
+  const expectedMeasureX = frame.measureX - renderOffsetX
+  return (
+    Math.abs(previousLayout.measureX - expectedMeasureX) <= 0.5 &&
+    Math.abs(previousLayout.measureWidth - frame.measureWidth) <= 0.5
+  )
 }
 
 function collectStableSystemMeasureFrames(
@@ -683,11 +698,23 @@ export function renderVisibleSystems(params: {
       }
     }
 
+    const canReusePreviousGeometryWithCurrentOffset =
+      measureFramesByPair !== null &&
+      systemMeta.every((entry) => {
+        const frame = measureFramesByPair[entry.pairIndex]
+        if (!frame) return false
+        return isFrameAlignedWithPreviousLayout({
+          frame,
+          previousLayout: previousMeasureLayouts?.get(entry.pairIndex),
+          renderOffsetX,
+        })
+      })
     const shouldSkipSystemReflow =
       layoutReflowHint !== null &&
       layoutReflowHint.layoutStabilityKey === layoutStabilityKey &&
       !layoutReflowHint.shouldReflow &&
-      systemMeta.some((entry) => entry.pairIndex === layoutReflowHint.pairIndex)
+      systemMeta.some((entry) => entry.pairIndex === layoutReflowHint.pairIndex) &&
+      (measureFramesByPair === null || canReusePreviousGeometryWithCurrentOffset)
     const incrementalPairIndex = shouldUseIncrementalPaint ? hintPairIndex : null
     if (measureFramesByPair !== null) {
       systemMeta.forEach((entry) => {
@@ -784,7 +811,7 @@ export function renderVisibleSystems(params: {
           formatWidthOverride: formatWidth,
           timeAxisSpacingConfig: spacingConfig,
           spacingLayoutMode,
-          publicAxisLayout: timelineBundle?.publicAxisLayout ?? null,
+          publicAxisLayout: resolvePublicAxisLayoutForConsumption(timelineBundle),
           staticNoteXById: previewStaticNoteXById ?? translatedFrozenSpacing?.staticNoteXById ?? null,
           staticAccidentalRightXById:
             previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
@@ -979,7 +1006,7 @@ export function renderVisibleSystems(params: {
           formatWidthOverride: formatWidth,
           timeAxisSpacingConfig: spacingConfig,
           spacingLayoutMode,
-          publicAxisLayout: timelineBundle?.publicAxisLayout ?? null,
+          publicAxisLayout: resolvePublicAxisLayoutForConsumption(timelineBundle),
           staticNoteXById: previewStaticNoteXById ?? translatedFrozenSpacing?.staticNoteXById ?? null,
           staticAccidentalRightXById:
             previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
@@ -1191,7 +1218,7 @@ export function renderVisibleSystems(params: {
         formatWidthOverride: formatWidth,
         timeAxisSpacingConfig: spacingConfig,
         spacingLayoutMode,
-        publicAxisLayout: timelineBundle?.publicAxisLayout ?? null,
+        publicAxisLayout: resolvePublicAxisLayoutForConsumption(timelineBundle),
         // Width probing must be fully deterministic by score content only.
         // Do not feed previous-frame frozen spacing into the probe solver.
         staticNoteXById: null,
@@ -1310,7 +1337,7 @@ export function renderVisibleSystems(params: {
         formatWidthOverride: formatWidth,
         timeAxisSpacingConfig: spacingConfig,
         spacingLayoutMode,
-        publicAxisLayout: timelineBundle?.publicAxisLayout ?? null,
+        publicAxisLayout: resolvePublicAxisLayoutForConsumption(timelineBundle),
         staticNoteXById: previewStaticNoteXById ?? translatedFrozenSpacing?.staticNoteXById ?? null,
         staticAccidentalRightXById:
           previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,

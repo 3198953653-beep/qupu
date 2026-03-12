@@ -1,5 +1,6 @@
 import type { MutableRefObject } from 'react'
 import { getLayoutNoteKey } from '../layout/renderPosition'
+import { resolvePublicAxisLayoutForConsumption } from '../layout/timeAxisSpacing'
 import { drawMeasureToContext } from './drawMeasure'
 import { drawCrossMeasureTies } from './drawCrossMeasureTies'
 import { buildDragPreviewOverrides, type DragPreviewFrozenBoundaryCurve, type DragPreviewNoteOverride } from './dragPreviewOverrides'
@@ -281,7 +282,7 @@ function drawOverlayRange(params: {
       formatWidthOverride: measureLayout.formatWidth,
       timeAxisSpacingConfig,
       spacingLayoutMode,
-      publicAxisLayout: timelineBundle?.publicAxisLayout ?? null,
+      publicAxisLayout: resolvePublicAxisLayoutForConsumption(timelineBundle),
       renderBoundaryPartialTies: false,
       forceLeadingConnector: pairOffset === 0,
       previewNotes: preview?.previewNotes ?? null,

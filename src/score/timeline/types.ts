@@ -42,6 +42,9 @@ export type PublicAxisLayout = {
   measureTicks: number
   tickToX: Map<number, number>
   orderedTicks: number[]
+  anchorTicks: number[]
+  totalAnchorWeight: number
+  timelineScale: number
   effectiveBoundaryStartX: number
   effectiveBoundaryEndX: number
   effectiveLeftGapPx: number

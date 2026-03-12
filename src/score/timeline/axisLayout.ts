@@ -11,40 +11,40 @@ export type PublicAxisDurationGapRatioConfig = {
 export type PublicAxisSpacingConfig = {
   baseMinGap32Px: number
   durationGapRatios: PublicAxisDurationGapRatioConfig
+  startPadPx: number
+  endPadPx: number
 }
 
 const BASE_GAP_UNIT_PX = 3.5
 
-function getDurationGapRatioByDeltaTicks(deltaTicks: number, ratios: PublicAxisDurationGapRatioConfig): number {
-  const anchors: Array<{ ticks: number; ratio: number }> = [
-    { ticks: 2, ratio: ratios.thirtySecond },
-    { ticks: 4, ratio: ratios.sixteenth },
-    { ticks: 8, ratio: ratios.eighth },
-    { ticks: 16, ratio: ratios.quarter },
-    { ticks: 32, ratio: ratios.half },
-  ]
+function mapTickGapToWeight(deltaTicks: number, config: PublicAxisSpacingConfig): number {
+  const base32GapPx = Math.max(0, config.baseMinGap32Px)
+  const base32Ratio = Math.max(0.0001, config.durationGapRatios.thirtySecond)
   const safeTicks = Math.max(1, deltaTicks)
-  if (safeTicks <= anchors[0].ticks) return anchors[0].ratio
-  if (safeTicks >= anchors[anchors.length - 1].ticks) return anchors[anchors.length - 1].ratio
-  for (let index = 1; index < anchors.length; index += 1) {
-    const left = anchors[index - 1]
-    const right = anchors[index]
-    if (safeTicks === right.ticks) return right.ratio
-    if (safeTicks < right.ticks) {
-      const leftLog = Math.log2(left.ticks)
-      const rightLog = Math.log2(right.ticks)
-      const tickLog = Math.log2(safeTicks)
-      const blend = (tickLog - leftLog) / Math.max(0.0001, rightLog - leftLog)
-      return left.ratio + (right.ratio - left.ratio) * blend
-    }
-  }
-  return anchors[anchors.length - 1].ratio
+  const weightPerTick = (base32GapPx * base32Ratio * BASE_GAP_UNIT_PX) / 2
+  return safeTicks * weightPerTick
 }
 
-function mapTickGapToWeight(deltaTicks: number, config: PublicAxisSpacingConfig): number {
-  const ratio = Math.max(0.0001, getDurationGapRatioByDeltaTicks(deltaTicks, config.durationGapRatios))
-  const base32GapPx = Math.max(0, config.baseMinGap32Px)
-  return base32GapPx * ratio * BASE_GAP_UNIT_PX
+export function getPublicTimelineAnchorTicks(
+  publicTimeline: PublicMergedTimeline,
+  domainStartTick?: number | null,
+  domainEndTick?: number | null,
+): number[] {
+  const hasDomainStart = typeof domainStartTick === 'number' && Number.isFinite(domainStartTick)
+  const hasDomainEnd = typeof domainEndTick === 'number' && Number.isFinite(domainEndTick)
+  const anchorSet = new Set<number>()
+  publicTimeline.points.forEach((point) => {
+    if (hasDomainStart && point.tick < (domainStartTick as number)) return
+    if (hasDomainEnd && point.tick > (domainEndTick as number)) return
+    if (
+      point.isBeatBoundary ||
+      point.trebleStartsHere ||
+      point.bassStartsHere
+    ) {
+      anchorSet.add(point.tick)
+    }
+  })
+  return [...anchorSet].filter((tick) => Number.isFinite(tick)).sort((left, right) => left - right)
 }
 
 export function buildPublicAxisLayout(params: {
@@ -54,19 +54,48 @@ export function buildPublicAxisLayout(params: {
   spacingConfig: PublicAxisSpacingConfig
   effectiveBoundaryStartX: number
   effectiveBoundaryEndX: number
+  timelineScaleOverride?: number | null
 }): PublicAxisLayout {
-  const { measureIndex, measureTicks, publicTimeline, spacingConfig, effectiveBoundaryStartX, effectiveBoundaryEndX } = params
+  const {
+    measureIndex,
+    measureTicks,
+    publicTimeline,
+    spacingConfig,
+    effectiveBoundaryStartX,
+    effectiveBoundaryEndX,
+    timelineScaleOverride = null,
+  } = params
   const orderedTicks = [...new Set(publicTimeline.points.map((point) => point.tick))]
     .filter((tick) => Number.isFinite(tick))
     .sort((left, right) => left - right)
+  const noteStartTicks = publicTimeline.points
+    .filter((point) => point.trebleStartsHere || point.bassStartsHere)
+    .map((point) => point.tick)
+    .filter((tick) => Number.isFinite(tick))
+    .sort((left, right) => left - right)
+  const firstContentTick = noteStartTicks[0] ?? orderedTicks[0]
+  const lastContentTick = noteStartTicks[noteStartTicks.length - 1] ?? orderedTicks[orderedTicks.length - 1]
+  const anchorTicks = getPublicTimelineAnchorTicks(publicTimeline, firstContentTick, lastContentTick)
   const tickToX = new Map<number, number>()
   const widthPx = Math.max(0, effectiveBoundaryEndX - effectiveBoundaryStartX)
+  const contentStartX = Math.min(
+    effectiveBoundaryEndX,
+    effectiveBoundaryStartX + Math.max(0, spacingConfig.startPadPx),
+  )
+  const contentEndX = Math.max(
+    contentStartX,
+    effectiveBoundaryEndX - Math.max(0, spacingConfig.endPadPx),
+  )
+  const contentWidthPx = Math.max(0, contentEndX - contentStartX)
   if (orderedTicks.length === 0) {
     return {
       measureIndex,
       measureTicks,
       tickToX,
       orderedTicks,
+      anchorTicks,
+      totalAnchorWeight: 0,
+      timelineScale: 0,
       effectiveBoundaryStartX,
       effectiveBoundaryEndX,
       effectiveLeftGapPx: 0,
@@ -75,32 +104,62 @@ export function buildPublicAxisLayout(params: {
     }
   }
 
-  const cumulativeWeightByTick = new Map<number, number>()
-  cumulativeWeightByTick.set(orderedTicks[0], 0)
+  const safeAnchorTicks = anchorTicks.length > 0 ? anchorTicks : [firstContentTick, lastContentTick]
+  const cumulativeWeightByAnchorTick = new Map<number, number>()
+  cumulativeWeightByAnchorTick.set(safeAnchorTicks[0], 0)
   let totalWeight = 0
-  for (let index = 1; index < orderedTicks.length; index += 1) {
-    const deltaTicks = Math.max(1, orderedTicks[index] - orderedTicks[index - 1])
+  for (let index = 1; index < safeAnchorTicks.length; index += 1) {
+    const deltaTicks = Math.max(1, safeAnchorTicks[index] - safeAnchorTicks[index - 1])
     totalWeight += mapTickGapToWeight(deltaTicks, spacingConfig)
-    cumulativeWeightByTick.set(orderedTicks[index], totalWeight)
+    cumulativeWeightByAnchorTick.set(safeAnchorTicks[index], totalWeight)
   }
 
-  if (totalWeight <= 0.0001) {
-    orderedTicks.forEach((tick) => tickToX.set(tick, effectiveBoundaryStartX))
+  const anchorXByTick = new Map<number, number>()
+  const resolvedTimelineScale =
+    totalWeight <= 0.0001 || safeAnchorTicks.length <= 1
+      ? 0
+      : typeof timelineScaleOverride === 'number' && Number.isFinite(timelineScaleOverride)
+        ? Math.max(0, timelineScaleOverride)
+        : Math.min(1, contentWidthPx / Math.max(0.0001, totalWeight))
+  if (resolvedTimelineScale <= 0 || totalWeight <= 0.0001 || safeAnchorTicks.length <= 1) {
+    safeAnchorTicks.forEach((tick) => anchorXByTick.set(tick, contentStartX))
+    orderedTicks.forEach((tick) => tickToX.set(tick, contentStartX))
   } else {
+    safeAnchorTicks.forEach((tick) => {
+      const weight = cumulativeWeightByAnchorTick.get(tick) ?? 0
+      const x = contentStartX + weight * resolvedTimelineScale
+      anchorXByTick.set(tick, x)
+    })
+    let anchorIndex = 0
     orderedTicks.forEach((tick) => {
-      const weight = cumulativeWeightByTick.get(tick) ?? 0
-      const x = effectiveBoundaryStartX + (weight / totalWeight) * widthPx
-      tickToX.set(tick, x)
+      const directAnchorX = anchorXByTick.get(tick)
+      if (typeof directAnchorX === 'number' && Number.isFinite(directAnchorX)) {
+        tickToX.set(tick, directAnchorX)
+        return
+      }
+      if (tick <= safeAnchorTicks[0]) {
+        tickToX.set(tick, anchorXByTick.get(safeAnchorTicks[0]) ?? contentStartX)
+        return
+      }
+      if (tick >= safeAnchorTicks[safeAnchorTicks.length - 1]) {
+        tickToX.set(tick, anchorXByTick.get(safeAnchorTicks[safeAnchorTicks.length - 1]) ?? contentEndX)
+        return
+      }
+      while (anchorIndex + 1 < safeAnchorTicks.length && safeAnchorTicks[anchorIndex + 1] < tick) {
+        anchorIndex += 1
+      }
+      const leftAnchorTick = safeAnchorTicks[Math.max(0, anchorIndex)]
+      const rightAnchorTick = safeAnchorTicks[Math.min(safeAnchorTicks.length - 1, anchorIndex + 1)]
+      const leftAnchorX = anchorXByTick.get(leftAnchorTick) ?? effectiveBoundaryStartX
+      const rightAnchorX = anchorXByTick.get(rightAnchorTick) ?? effectiveBoundaryEndX
+      if (rightAnchorTick <= leftAnchorTick) {
+        tickToX.set(tick, leftAnchorX)
+        return
+      }
+      const blend = (tick - leftAnchorTick) / Math.max(0.0001, rightAnchorTick - leftAnchorTick)
+      tickToX.set(tick, leftAnchorX + (rightAnchorX - leftAnchorX) * blend)
     })
   }
-
-  const firstContentTick =
-    publicTimeline.points.find((point) => point.trebleStartsHere || point.bassStartsHere)?.tick ?? orderedTicks[0]
-  const lastContentTick =
-    [...publicTimeline.points]
-      .reverse()
-      .find((point) => point.trebleStartsHere || point.bassStartsHere || point.trebleEndsHere || point.bassEndsHere)?.tick ??
-    orderedTicks[orderedTicks.length - 1]
 
   const firstX = tickToX.get(firstContentTick) ?? effectiveBoundaryStartX
   const lastX = tickToX.get(lastContentTick) ?? effectiveBoundaryEndX
@@ -110,6 +169,9 @@ export function buildPublicAxisLayout(params: {
     measureTicks,
     tickToX,
     orderedTicks,
+    anchorTicks: safeAnchorTicks,
+    totalAnchorWeight: totalWeight,
+    timelineScale: resolvedTimelineScale,
     effectiveBoundaryStartX,
     effectiveBoundaryEndX,
     effectiveLeftGapPx: firstX - effectiveBoundaryStartX,
