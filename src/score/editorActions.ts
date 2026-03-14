@@ -167,7 +167,7 @@ export function resetScoreAction(params: {
   }
   setRhythmPreset('quarter')
   setImportFeedback({ kind: 'idle', message: '' })
-  setIsRhythmLinked(true)
+  setIsRhythmLinked(false)
 }
 
 export function runAiDraftAction(params: {
@@ -194,7 +194,7 @@ export function applyRhythmPresetAction(params: {
   const preset = RHYTHM_PRESETS.find((item) => item.id === presetId)
   if (!preset) return
 
-  setIsRhythmLinked(true)
+  setIsRhythmLinked(false)
   clearImportedSourceState(clearImportedSourceParams)
 
   let nextActive = ''

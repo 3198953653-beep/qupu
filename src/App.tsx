@@ -149,6 +149,8 @@ function getDurationEditFailureMessage(reason: DurationEditFailureReason): strin
       return '当前小节剩余时值不足，无法修改为该时值'
     case 'unsupported-dot':
       return '当前时值暂不支持附点修改'
+    case 'unsupported-grouping':
+      return '当前节奏无法在不跨拍规则下重组'
     default:
       return '当前操作暂不支持'
   }
@@ -1316,7 +1318,7 @@ function App() {
     () => getDefaultNotationPaletteSelection(),
   )
   const [notationPaletteLastAction, setNotationPaletteLastAction] = useState('未选择')
-  const [isRhythmLinked, setIsRhythmLinked] = useState(true)
+  const [isRhythmLinked, setIsRhythmLinked] = useState(false)
   const [measurePairsFromImport, setMeasurePairsFromImport] = useState<MeasurePair[] | null>(null)
   const [measureKeyFifthsFromImport, setMeasureKeyFifthsFromImport] = useState<number[] | null>(null)
   const [measureDivisionsFromImport, setMeasureDivisionsFromImport] = useState<number[] | null>(null)
@@ -2074,6 +2076,7 @@ function App() {
       if (nextPairs !== sourcePairs) {
         pushUndoSnapshot(sourcePairs)
       }
+      setIsRhythmLinked(false)
       if (measurePairsFromImportRef.current) {
         measurePairsFromImportRef.current = nextPairs
         setMeasurePairsFromImport(nextPairs)
@@ -2085,7 +2088,7 @@ function App() {
       setActiveSelection(nextSelection)
       setSelectedSelections(nextSelections)
     },
-    [pushUndoSnapshot, setBassNotes, setMeasurePairsFromImport, setNotes, setActiveSelection],
+    [pushUndoSnapshot, setBassNotes, setMeasurePairsFromImport, setNotes, setActiveSelection, setIsRhythmLinked],
   )
 
   const refreshMidiInputs = useCallback((access: WebMidiAccessLike | null) => {
@@ -2905,6 +2908,7 @@ function App() {
         isSelectionVisible,
         importedNoteLookup: importedNoteLookupRef.current,
         keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
+        timeSignaturesByMeasure: measureTimeSignaturesFromImportRef.current,
         action,
         importedMode,
       })

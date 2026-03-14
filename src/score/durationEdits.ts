@@ -2,6 +2,12 @@ import { normalizeMeasurePairAt } from './accidentals'
 import { DURATION_TICKS } from './constants'
 import { findSelectionLocationInPairs } from './keyboardEdits'
 import {
+  decomposeNoteSpanAllowDot,
+  decomposeRestSpanNoDot,
+  getMeasureTicksByTimeSignature,
+  isXOver4TimeSignature,
+} from './rhythmRegroup'
+import {
   createImportedNoteId,
   createNoteId,
   splitTicksToDurations,
@@ -13,6 +19,7 @@ import type {
   ScoreNote,
   Selection,
   StaffKind,
+  TimeSignature,
 } from './types'
 
 export type PaletteDurationEditAction =
@@ -26,6 +33,7 @@ export type DurationEditFailureReason =
   | 'selection-not-found'
   | 'insufficient-ticks'
   | 'unsupported-dot'
+  | 'unsupported-grouping'
 
 export type DurationEditResult = {
   nextPairs: MeasurePair[]
@@ -83,8 +91,44 @@ function getNoteTicks(note: ScoreNote): number {
   return DURATION_TICKS[note.duration]
 }
 
+function getTotalTicksForDurations(durations: NoteDuration[]): number {
+  return durations.reduce((sum, duration) => sum + (DURATION_TICKS[duration] ?? 0), 0)
+}
+
+function isValidDurationDecomposition(durations: NoteDuration[] | null, expectedTicks: number): durations is NoteDuration[] {
+  if (!durations) return false
+  return getTotalTicksForDurations(durations) === expectedTicks
+}
+
 function buildGeneratedNoteId(staff: StaffKind, importedMode: boolean): string {
   return importedMode ? createImportedNoteId(staff) : createNoteId()
+}
+
+function resolvePairTimeSignature(pairIndex: number, timeSignaturesByMeasure?: TimeSignature[] | null): TimeSignature {
+  if (!timeSignaturesByMeasure || timeSignaturesByMeasure.length === 0) {
+    return { beats: 4, beatType: 4 }
+  }
+  for (let index = pairIndex; index >= 0; index -= 1) {
+    const value = timeSignaturesByMeasure[index]
+    if (
+      value &&
+      Number.isFinite(value.beats) &&
+      value.beats > 0 &&
+      Number.isFinite(value.beatType) &&
+      value.beatType > 0
+    ) {
+      return { beats: Math.round(value.beats), beatType: Math.round(value.beatType) }
+    }
+  }
+  return { beats: 4, beatType: 4 }
+}
+
+function getNoteStartTickAtIndex(notes: ScoreNote[], noteIndex: number): number {
+  let cursor = 0
+  for (let index = 0; index < noteIndex; index += 1) {
+    cursor += getNoteTicks(notes[index])
+  }
+  return cursor
 }
 
 function clearIncomingTieFields(note: ScoreNote): ScoreNote {
@@ -145,9 +189,9 @@ function cloneNoteForDurationFragment(params: {
   )
 }
 
-function buildRestNotesForTicks(ticks: number, staff: StaffKind, importedMode: boolean): ScoreNote[] {
-  if (ticks <= 0) return []
-  return splitTicksToDurations(ticks).map((duration) =>
+function buildRestNotesFromDurations(durations: NoteDuration[], staff: StaffKind, importedMode: boolean): ScoreNote[] {
+  if (durations.length === 0) return []
+  return durations.map((duration) =>
     clearAllTieFields({
       id: buildGeneratedNoteId(staff, importedMode),
       pitch: REST_ANCHOR_PITCH[staff],
@@ -157,16 +201,36 @@ function buildRestNotesForTicks(ticks: number, staff: StaffKind, importedMode: b
   )
 }
 
+function applyInternalFragmentTies(fragments: ScoreNote[], sourceNote: ScoreNote): ScoreNote[] {
+  if (fragments.length <= 1 || sourceNote.isRest) return fragments
+  const chordCount = sourceNote.chordPitches?.length ?? 0
+  return fragments.map((note, index) => {
+    const next = { ...note }
+    if (index > 0) {
+      next.tieStop = true
+      if (chordCount > 0) {
+        next.chordTieStops = new Array(chordCount).fill(true)
+      }
+    }
+    if (index < fragments.length - 1) {
+      next.tieStart = true
+      if (chordCount > 0) {
+        next.chordTieStarts = new Array(chordCount).fill(true)
+      }
+    }
+    return next
+  })
+}
+
 function splitRemainingNoteIntoFragments(params: {
   note: ScoreNote
-  remainingTicks: number
+  durations: NoteDuration[]
   staff: StaffKind
   importedMode: boolean
 }): ScoreNote[] {
-  const { note, remainingTicks, staff, importedMode } = params
-  if (remainingTicks <= 0) return []
-  const durations = splitTicksToDurations(remainingTicks)
-  return durations.map((duration, index) =>
+  const { note, durations, staff, importedMode } = params
+  if (durations.length === 0) return []
+  const fragments = durations.map((duration, index) =>
     cloneNoteForDurationFragment({
       note,
       duration,
@@ -174,6 +238,51 @@ function splitRemainingNoteIntoFragments(params: {
       id: index === 0 ? note.id : buildGeneratedNoteId(staff, importedMode),
     }),
   )
+  return applyInternalFragmentTies(fragments, note)
+}
+
+function resolveRegroupedRestDurations(params: {
+  startTick: number
+  endTick: number
+  measureTicks: number
+  timeSignature: TimeSignature
+}): NoteDuration[] | null {
+  const { startTick, endTick, measureTicks, timeSignature } = params
+  const restTicks = Math.max(0, Math.round(endTick - startTick))
+  if (restTicks === 0) return []
+  if (!isXOver4TimeSignature(timeSignature)) {
+    const fallback = splitTicksToDurations(restTicks)
+    return isValidDurationDecomposition(fallback, restTicks) ? fallback : null
+  }
+  const regrouped = decomposeRestSpanNoDot({
+    startTick,
+    endTick,
+    measureTicks,
+    timeSignature,
+  })
+  return isValidDurationDecomposition(regrouped, restTicks) ? regrouped : null
+}
+
+function resolveRegroupedBoundaryNoteDurations(params: {
+  startTick: number
+  endTick: number
+  measureTicks: number
+  timeSignature: TimeSignature
+}): NoteDuration[] | null {
+  const { startTick, endTick, measureTicks, timeSignature } = params
+  const ticks = Math.max(0, Math.round(endTick - startTick))
+  if (ticks === 0) return []
+  if (!isXOver4TimeSignature(timeSignature)) {
+    const fallback = splitTicksToDurations(ticks)
+    return isValidDurationDecomposition(fallback, ticks) ? fallback : null
+  }
+  const regrouped = decomposeNoteSpanAllowDot({
+    startTick,
+    endTick,
+    measureTicks,
+    timeSignature,
+  })
+  return isValidDurationDecomposition(regrouped, ticks) ? regrouped : null
 }
 
 function withClearedIncomingTieOnFirst(notes: ScoreNote[]): ScoreNote[] {
@@ -258,13 +367,17 @@ function rewriteMeasureStaffNotesWithDurationChange(params: {
   targetDuration: NoteDuration
   staff: StaffKind
   importedMode: boolean
+  timeSignature: TimeSignature
 }): { notes: ScoreNote[] | null; error: DurationEditFailureReason | null } {
-  const { notes, noteIndex, targetDuration, staff, importedMode } = params
+  const { notes, noteIndex, targetDuration, staff, importedMode, timeSignature } = params
   const sourceNote = notes[noteIndex]
   if (!sourceNote) return { notes: null, error: 'selection-not-found' }
 
   const currentTicks = getNoteTicks(sourceNote)
   const targetTicks = DURATION_TICKS[targetDuration]
+  const measureTicks = getMeasureTicksByTimeSignature(timeSignature)
+  const sourceStartTick = getNoteStartTickAtIndex(notes, noteIndex)
+  const sourceEndTick = sourceStartTick + currentTicks
   if (currentTicks === targetTicks && sourceNote.duration === targetDuration) {
     return { notes, error: null }
   }
@@ -278,7 +391,18 @@ function rewriteMeasureStaffNotesWithDurationChange(params: {
       : clearOutgoingTieFields({ ...sourceNote, duration: targetDuration })
 
   if (targetTicks < currentTicks) {
-    const restNotes = buildRestNotesForTicks(currentTicks - targetTicks, staff, importedMode)
+    const restStartTick = sourceStartTick + targetTicks
+    const restEndTick = sourceEndTick
+    const restDurations = resolveRegroupedRestDurations({
+      startTick: restStartTick,
+      endTick: restEndTick,
+      measureTicks,
+      timeSignature,
+    })
+    if (!restDurations) {
+      return { notes: null, error: 'unsupported-grouping' }
+    }
+    const restNotes = buildRestNotesFromDurations(restDurations, staff, importedMode)
     return {
       notes: [...beforeNotes, nextTarget, ...restNotes, ...withClearedIncomingTieOnFirst(afterNotes)],
       error: null,
@@ -288,19 +412,41 @@ function rewriteMeasureStaffNotesWithDurationChange(params: {
   let needTicks = targetTicks - currentTicks
   let scanIndex = noteIndex + 1
   let boundaryFragments: ScoreNote[] = []
+  let cursorTick = sourceEndTick
 
   while (scanIndex < notes.length && needTicks > 0) {
     const currentNote = notes[scanIndex]
     const noteTicks = getNoteTicks(currentNote)
     if (noteTicks <= needTicks) {
       needTicks -= noteTicks
+      cursorTick += noteTicks
       scanIndex += 1
       continue
     }
 
+    const boundaryStartTick = cursorTick
+    const boundaryEndTick = boundaryStartTick + noteTicks
+    const remainingStartTick = boundaryStartTick + needTicks
+    const regroupedDurations = currentNote.isRest
+      ? resolveRegroupedRestDurations({
+          startTick: remainingStartTick,
+          endTick: boundaryEndTick,
+          measureTicks,
+          timeSignature,
+        })
+      : resolveRegroupedBoundaryNoteDurations({
+          startTick: remainingStartTick,
+          endTick: boundaryEndTick,
+          measureTicks,
+          timeSignature,
+        })
+    if (!regroupedDurations) {
+      return { notes: null, error: 'unsupported-grouping' }
+    }
+
     boundaryFragments = splitRemainingNoteIntoFragments({
       note: currentNote,
-      remainingTicks: noteTicks - needTicks,
+      durations: regroupedDurations,
       staff,
       importedMode,
     })
@@ -341,19 +487,30 @@ function changeNoteBlockDurationWithinMeasure(params: {
   target: EditableSelectionTarget
   targetDuration: NoteDuration
   keyFifthsByMeasure?: number[] | null
+  timeSignaturesByMeasure?: TimeSignature[] | null
   importedMode: boolean
   changeKind: 'duration' | 'dot'
 }): DurationEditAttempt {
-  const { pairs, target, targetDuration, keyFifthsByMeasure = null, importedMode, changeKind } = params
+  const {
+    pairs,
+    target,
+    targetDuration,
+    keyFifthsByMeasure = null,
+    timeSignaturesByMeasure = null,
+    importedMode,
+    changeKind,
+  } = params
   const pair = pairs[target.pairIndex]
   if (!pair) return { result: null, error: 'selection-not-found' }
   const sourceStaffNotes = resolveStaffNotes(pair, target.staff)
+  const timeSignature = resolvePairTimeSignature(target.pairIndex, timeSignaturesByMeasure)
   const rewriteResult = rewriteMeasureStaffNotesWithDurationChange({
     notes: sourceStaffNotes,
     noteIndex: target.noteIndex,
     targetDuration,
     staff: target.staff,
     importedMode,
+    timeSignature,
   })
   if (!rewriteResult.notes || rewriteResult.error) {
     return { result: null, error: rewriteResult.error }
@@ -394,6 +551,7 @@ function toggleSelectedNoteBlockDot(params: {
   target: EditableSelectionTarget
   targetDuration: NoteDuration | null
   keyFifthsByMeasure?: number[] | null
+  timeSignaturesByMeasure?: TimeSignature[] | null
   importedMode: boolean
 }): DurationEditAttempt {
   const { targetDuration } = params
@@ -467,6 +625,7 @@ export function applyPaletteDurationEdit(params: {
   isSelectionVisible: boolean
   importedNoteLookup?: Map<string, ImportedNoteLocation> | null
   keyFifthsByMeasure?: number[] | null
+  timeSignaturesByMeasure?: TimeSignature[] | null
   action: PaletteDurationEditAction
   importedMode: boolean
 }): DurationEditAttempt {
@@ -477,6 +636,7 @@ export function applyPaletteDurationEdit(params: {
     isSelectionVisible,
     importedNoteLookup = null,
     keyFifthsByMeasure = null,
+    timeSignaturesByMeasure = null,
     action,
     importedMode,
   } = params
@@ -499,6 +659,7 @@ export function applyPaletteDurationEdit(params: {
         target,
         targetDuration: action.targetDuration,
         keyFifthsByMeasure,
+        timeSignaturesByMeasure,
         importedMode,
         changeKind: 'duration',
       })
@@ -508,6 +669,7 @@ export function applyPaletteDurationEdit(params: {
         target,
         targetDuration: action.targetDuration,
         keyFifthsByMeasure,
+        timeSignaturesByMeasure,
         importedMode,
       })
     case 'note-to-rest':
