@@ -337,6 +337,7 @@ function computeMeasureBeamTags(notes: ScoreNote[], time: TimeSignature): Array<
   for (let level = 1; level <= 3; level += 1) {
     const groupMap = new Map<number, number[]>()
     notes.forEach((note, noteIndex) => {
+      if (note.isRest) return
       if (getBeamCountFromDuration(note.duration) < level) return
       const group = Math.floor((starts[noteIndex] + epsilon) / beatSpan)
       const existing = groupMap.get(group)
@@ -485,15 +486,17 @@ export function buildMusicXmlFromMeasurePairs(params: {
     }
     if (accidentalXml) destination.push(`    <accidental>${accidentalXml}</accidental>`)
     destination.push(`    <staff>${staff}</staff>`)
-    const beamNumbers = Object.keys(beamTags)
-      .map((value) => Number(value))
-      .filter((value) => Number.isFinite(value))
-      .sort((left, right) => left - right)
-    beamNumbers.forEach((beamNumber) => {
-      const beamValue = beamTags[beamNumber]
-      if (!beamValue) return
-      destination.push(`    <beam number="${beamNumber}">${beamValue}</beam>`)
-    })
+    if (!isRest) {
+      const beamNumbers = Object.keys(beamTags)
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value))
+        .sort((left, right) => left - right)
+      beamNumbers.forEach((beamNumber) => {
+        const beamValue = beamTags[beamNumber]
+        if (!beamValue) return
+        destination.push(`    <beam number="${beamNumber}">${beamValue}</beam>`)
+      })
+    }
     if (!isRest && (tieStart || tieStop || tieFrozenIncomingPitch)) {
       destination.push('    <notations>')
       if (tieStart) destination.push('     <tied type="start"/>')
