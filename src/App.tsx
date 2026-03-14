@@ -52,12 +52,14 @@ import {
 import { commitDragPitchToScoreData } from './score/dragInteractions'
 import { applyPaletteDurationEdit, type DurationEditFailureReason } from './score/durationEdits'
 import { appendIntervalKey, deleteSelectedKey, findSelectionLocationInPairs, replaceSelectedKeyPitch } from './score/keyboardEdits'
+import { applyClipboardPaste, buildClipboardFromSelections, type CopyPasteFailureReason } from './score/copyPasteEdits'
 import { getMidiNoteNumber, toPitchFromMidiWithKeyPreference } from './score/midiInput'
 import { getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './score/pitchMath'
 import { compareTimelinePoint, resolveSelectionTimelinePoint } from './score/selectionTimelineRange'
 import { resolveForwardTieTargets, resolveFullTieTargets, resolvePreviousTieTarget } from './score/tieChain'
 import { buildSelectionGroupMoveTargets } from './score/selectionGroupTargets'
 import type { MeasureTimelineBundle } from './score/timeline/types'
+import type { NoteClipboardPayload } from './score/copyPasteTypes'
 import {
   buildNotationPaletteDerivedDisplay,
   getDefaultNotationPaletteSelection,
@@ -153,6 +155,30 @@ function getDurationEditFailureMessage(reason: DurationEditFailureReason): strin
       return '当前节奏无法在不跨拍规则下重组'
     default:
       return '当前操作暂不支持'
+  }
+}
+
+function getCopyPasteFailureMessage(reason: CopyPasteFailureReason): string {
+  switch (reason) {
+    case 'no-selection':
+      return '未选中可复制/粘贴的音符'
+    case 'multi-timepoint':
+    case 'multi-note-block':
+      return '当前仅支持同一时间点复制'
+    case 'selection-not-found':
+      return '未选中可复制/粘贴的音符'
+    case 'rest-source':
+      return '暂不支持复制休止符'
+    case 'clipboard-empty':
+      return '剪贴板为空'
+    case 'insufficient-ticks':
+      return '后续时值不足，无法粘贴该时值'
+    case 'unsupported-dot':
+      return '当前时值暂不支持附点修改'
+    case 'unsupported-grouping':
+      return '当前节奏无法在不跨拍规则下重组'
+    default:
+      return '复制粘贴暂不支持当前操作'
   }
 }
 
@@ -1429,6 +1455,7 @@ function App() {
   const midiAccessRef = useRef<WebMidiAccessLike | null>(null)
   const midiInputsByIdRef = useRef<Map<string, WebMidiInputLike>>(new Map())
   const boundMidiInputIdRef = useRef<string>('')
+  const noteClipboardRef = useRef<NoteClipboardPayload | null>(null)
   const measurePairs = useMemo(
     () => measurePairsFromImport ?? buildMeasurePairs(notes, bassNotes),
     [measurePairsFromImport, notes, bassNotes],
@@ -3173,6 +3200,68 @@ function App() {
         return
       }
 
+      const isCopyShortcut =
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === 'c'
+      if (isCopyShortcut) {
+        event.preventDefault()
+        const copyAttempt = buildClipboardFromSelections({
+          pairs: measurePairs,
+          activeSelection,
+          selectedSelections,
+          isSelectionVisible,
+          importedNoteLookup: importedNoteLookupRef.current,
+        })
+        if (!copyAttempt.payload || copyAttempt.error) {
+          const message = getCopyPasteFailureMessage(copyAttempt.error ?? 'selection-not-found')
+          setNotationPaletteLastAction(message)
+          console.info('[copy-paste]', message)
+          return
+        }
+        noteClipboardRef.current = copyAttempt.payload
+        const message = `已复制 ${copyAttempt.payload.pitches.length} 个音（${toDisplayDuration(copyAttempt.payload.duration)}）`
+        setNotationPaletteLastAction(message)
+        console.info('[copy-paste]', message, copyAttempt.payload)
+        return
+      }
+
+      const isPasteShortcut =
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === 'v'
+      if (isPasteShortcut) {
+        event.preventDefault()
+        const pasteAttempt = applyClipboardPaste({
+          pairs: measurePairs,
+          clipboard: noteClipboardRef.current,
+          activeSelection,
+          isSelectionVisible,
+          importedNoteLookup: importedNoteLookupRef.current,
+          keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
+          timeSignaturesByMeasure: measureTimeSignaturesFromImportRef.current,
+          importedMode: measurePairsFromImportRef.current !== null,
+        })
+        if (!pasteAttempt.result || pasteAttempt.error) {
+          const message = getCopyPasteFailureMessage(pasteAttempt.error ?? 'selection-not-found')
+          setNotationPaletteLastAction(message)
+          console.info('[copy-paste]', message)
+          return
+        }
+        applyKeyboardEditResult(
+          pasteAttempt.result.nextPairs,
+          pasteAttempt.result.nextSelection,
+          pasteAttempt.result.nextSelections,
+        )
+        const copiedCount = noteClipboardRef.current?.pitches.length ?? 0
+        const message = `已粘贴 ${copiedCount} 个音`
+        setNotationPaletteLastAction(message)
+        console.info('[copy-paste]', message)
+        return
+      }
+
       if (!isSelectionVisible) return
 
       if (
@@ -3238,6 +3327,7 @@ function App() {
     isSelectionVisible,
     measurePairs,
     activeSelection,
+    selectedSelections,
     measureKeyFifthsFromImport,
     applyKeyboardEditResult,
     moveSelectionsByKeyboardSteps,

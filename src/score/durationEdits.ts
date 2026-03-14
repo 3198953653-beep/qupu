@@ -43,6 +43,14 @@ export type DurationEditResult = {
   changeKind: 'duration' | 'dot' | 'rest'
 }
 
+export type DurationTargetLocation = {
+  pairIndex: number
+  noteIndex: number
+  staff: StaffKind
+  noteId: string
+  keyIndex: number
+}
+
 type DurationEditAttempt = {
   result: DurationEditResult | null
   error: DurationEditFailureReason | null
@@ -482,6 +490,144 @@ function replacePairStaffNotes(
   return nextPairs
 }
 
+function rewriteDurationAcrossMeasures(params: {
+  pairs: MeasurePair[]
+  target: DurationTargetLocation
+  targetDuration: NoteDuration
+  keyFifthsByMeasure?: number[] | null
+  timeSignaturesByMeasure?: TimeSignature[] | null
+  importedMode: boolean
+}): { nextPairs: MeasurePair[] | null; changedPairIndices: number[]; error: DurationEditFailureReason | null } {
+  const {
+    pairs,
+    target,
+    targetDuration,
+    keyFifthsByMeasure = null,
+    timeSignaturesByMeasure = null,
+    importedMode,
+  } = params
+  const pair = pairs[target.pairIndex]
+  if (!pair) return { nextPairs: null, changedPairIndices: [], error: 'selection-not-found' }
+  const sourceNotes = resolveStaffNotes(pair, target.staff)
+  const sourceNote = sourceNotes[target.noteIndex]
+  if (!sourceNote || sourceNote.id !== target.noteId) {
+    return { nextPairs: null, changedPairIndices: [], error: 'selection-not-found' }
+  }
+
+  const currentTicks = getNoteTicks(sourceNote)
+  const targetTicks = DURATION_TICKS[targetDuration]
+  if (!Number.isFinite(targetTicks) || targetTicks <= currentTicks) {
+    return { nextPairs: null, changedPairIndices: [], error: 'insufficient-ticks' }
+  }
+
+  const nextPairs = pairs.slice()
+  const changedPairIndices = new Set<number>()
+  const setStaffNotesAt = (pairIndex: number, nextStaffNotes: ScoreNote[]) => {
+    const sourcePair = nextPairs[pairIndex]
+    if (!sourcePair) return
+    nextPairs[pairIndex] =
+      target.staff === 'treble'
+        ? { treble: nextStaffNotes, bass: sourcePair.bass }
+        : { treble: sourcePair.treble, bass: nextStaffNotes }
+    changedPairIndices.add(pairIndex)
+  }
+
+  let targetPairNotes = sourceNotes.slice()
+  targetPairNotes[target.noteIndex] =
+    sourceNote.isRest
+      ? clearAllTieFields({ ...sourceNote, duration: targetDuration })
+      : clearOutgoingTieFields({ ...sourceNote, duration: targetDuration })
+  setStaffNotesAt(target.pairIndex, targetPairNotes)
+
+  let needTicks = targetTicks - currentTicks
+  let pairIndex = target.pairIndex
+  let scanStartIndex = target.noteIndex + 1
+  let cursorTick = getNoteStartTickAtIndex(sourceNotes, target.noteIndex) + currentTicks
+
+  while (pairIndex < nextPairs.length && needTicks > 0) {
+    const sourcePairNotes = resolveStaffNotes(nextPairs[pairIndex], target.staff)
+    const notes = sourcePairNotes.slice()
+    const timeSignature = resolvePairTimeSignature(pairIndex, timeSignaturesByMeasure)
+    const measureTicks = getMeasureTicksByTimeSignature(timeSignature)
+    let changedThisPair = false
+    let noteIndex = scanStartIndex
+
+    while (noteIndex < notes.length && needTicks > 0) {
+      const note = notes[noteIndex]
+      const noteTicks = getNoteTicks(note)
+      if (noteTicks <= needTicks) {
+        needTicks -= noteTicks
+        cursorTick += noteTicks
+        notes.splice(noteIndex, 1)
+        changedThisPair = true
+        continue
+      }
+
+      const boundaryStartTick = cursorTick
+      const boundaryEndTick = boundaryStartTick + noteTicks
+      const remainingStartTick = boundaryStartTick + needTicks
+      const regroupedDurations = note.isRest
+        ? resolveRegroupedRestDurations({
+            startTick: remainingStartTick,
+            endTick: boundaryEndTick,
+            measureTicks,
+            timeSignature,
+          })
+        : resolveRegroupedBoundaryNoteDurations({
+            startTick: remainingStartTick,
+            endTick: boundaryEndTick,
+            measureTicks,
+            timeSignature,
+          })
+      if (!regroupedDurations) {
+        return { nextPairs: null, changedPairIndices: [], error: 'unsupported-grouping' }
+      }
+      const fragments = splitRemainingNoteIntoFragments({
+        note,
+        durations: regroupedDurations,
+        staff: target.staff,
+        importedMode,
+      })
+      notes.splice(noteIndex, 1, ...fragments)
+      changedThisPair = true
+      needTicks = 0
+      break
+    }
+
+    if (changedThisPair) {
+      if (pairIndex === target.pairIndex) {
+        const afterTargetIndex = target.noteIndex + 1
+        if (notes[afterTargetIndex]) {
+          notes[afterTargetIndex] = clearIncomingTieFields(notes[afterTargetIndex])
+        }
+      } else if (notes[0]) {
+        notes[0] = clearIncomingTieFields(notes[0])
+      }
+      setStaffNotesAt(pairIndex, notes)
+    }
+
+    pairIndex += 1
+    scanStartIndex = 0
+    cursorTick = 0
+  }
+
+  if (needTicks > 0) {
+    return { nextPairs: null, changedPairIndices: [], error: 'insufficient-ticks' }
+  }
+
+  const keyFifthsList = keyFifthsByMeasure
+    ? keyFifthsByMeasure.map((_, index) => resolvePairKeyFifths(index, keyFifthsByMeasure))
+    : null
+
+  let normalizedPairs = nextPairs
+  const normalizedIndices = [...changedPairIndices].sort((left, right) => left - right)
+  normalizedIndices.forEach((changedPairIndex) => {
+    normalizedPairs = normalizeMeasurePairAt(normalizedPairs, changedPairIndex, keyFifthsList)
+  })
+
+  return { nextPairs: normalizedPairs, changedPairIndices: normalizedIndices, error: null }
+}
+
 function changeNoteBlockDurationWithinMeasure(params: {
   pairs: MeasurePair[]
   target: EditableSelectionTarget
@@ -680,5 +826,82 @@ export function applyPaletteDurationEdit(params: {
       })
     default:
       return { result: null, error: null }
+  }
+}
+
+export function applyDurationChangeAtTargetLocation(params: {
+  pairs: MeasurePair[]
+  target: DurationTargetLocation
+  targetDuration: NoteDuration
+  keyFifthsByMeasure?: number[] | null
+  timeSignaturesByMeasure?: TimeSignature[] | null
+  importedMode: boolean
+  allowCrossMeasureExtend?: boolean
+  changeKind?: 'duration' | 'dot'
+}): DurationEditAttempt {
+  const {
+    pairs,
+    target,
+    targetDuration,
+    keyFifthsByMeasure = null,
+    timeSignaturesByMeasure = null,
+    importedMode,
+    allowCrossMeasureExtend = false,
+    changeKind = 'duration',
+  } = params
+
+  const activeSelection: Selection = {
+    noteId: target.noteId,
+    staff: target.staff,
+    keyIndex: target.keyIndex,
+  }
+
+  const baseAttempt = applyPaletteDurationEdit({
+    pairs,
+    activeSelection,
+    selectedSelections: [activeSelection],
+    isSelectionVisible: true,
+    importedNoteLookup: null,
+    keyFifthsByMeasure,
+    timeSignaturesByMeasure,
+    action: { type: 'duration', targetDuration },
+    importedMode,
+  })
+
+  if (baseAttempt.result || !allowCrossMeasureExtend || baseAttempt.error !== 'insufficient-ticks') {
+    return baseAttempt
+  }
+
+  const pair = pairs[target.pairIndex]
+  if (!pair) return { result: null, error: 'selection-not-found' }
+  const sourceNote = resolveStaffNotes(pair, target.staff)[target.noteIndex]
+  if (!sourceNote || sourceNote.id !== target.noteId) {
+    return { result: null, error: 'selection-not-found' }
+  }
+  if (DURATION_TICKS[targetDuration] <= getNoteTicks(sourceNote)) {
+    return baseAttempt
+  }
+
+  const crossMeasureRewrite = rewriteDurationAcrossMeasures({
+    pairs,
+    target,
+    targetDuration,
+    keyFifthsByMeasure,
+    timeSignaturesByMeasure,
+    importedMode,
+  })
+  if (!crossMeasureRewrite.nextPairs || crossMeasureRewrite.error) {
+    return { result: null, error: crossMeasureRewrite.error }
+  }
+
+  return {
+    result: {
+      nextPairs: crossMeasureRewrite.nextPairs,
+      nextSelection: activeSelection,
+      nextSelections: [activeSelection],
+      changedPairIndex: target.pairIndex,
+      changeKind,
+    },
+    error: null,
   }
 }
