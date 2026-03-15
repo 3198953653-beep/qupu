@@ -303,6 +303,8 @@ export function useDragHandlers(params: {
     handleBeginDragPointer({
       event,
       surface: scoreRef.current,
+      scoreScaleX,
+      scoreScaleY,
       noteLayouts: noteLayoutsRef.current,
       hitGrid: hitGridRef.current,
       dragPreviewFrameRef,

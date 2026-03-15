@@ -293,13 +293,21 @@ export function useScoreRenderEffect(params: {
     root.style.width = `${scoreWidth}px`
     root.style.height = `${scoreHeight}px`
     const context = renderer.getContext()
+    // Keep logical score-space to CSS pixels strictly 1:1 after browser scaling.
+    // IMPORTANT: use actual canvas backing size after renderer.resize(), because
+    // some VexFlow paths apply additional DPR scaling internally.
+    const actualBackingWidth = root.width > 0 ? root.width : backingWidth
+    const actualBackingHeight = root.height > 0 ? root.height : backingHeight
+    const scaleX = scoreWidth > 0 ? actualBackingWidth / scoreWidth : 1
+    const scaleY = scoreHeight > 0 ? actualBackingHeight / scoreHeight : 1
+    // Prefer raw canvas context for deterministic mapping even if VexFlow's
+    // wrapped context shape differs across versions/environments.
+    const rawContext2D = root.getContext('2d')
+    if (rawContext2D) {
+      rawContext2D.setTransform(scaleX, 0, 0, scaleY, 0, 0)
+    }
     const context2D = (context as unknown as { context2D?: CanvasRenderingContext2D }).context2D
-    if (context2D) {
-      // Keep logical score-space to CSS pixels strictly 1:1 after browser scaling.
-      // Use actual backing/store ratio instead of nominal quality factor to avoid
-      // sub-pixel drift between main canvas and overlay canvas.
-      const scaleX = scoreWidth > 0 ? backingWidth / scoreWidth : 1
-      const scaleY = scoreHeight > 0 ? backingHeight / scoreHeight : 1
+    if (context2D && context2D !== rawContext2D) {
       context2D.setTransform(scaleX, 0, 0, scaleY, 0, 0)
     }
     const previousNoteLayoutsByPair = noteLayoutsByPairRef.current

@@ -100,6 +100,8 @@ function resolveHeadAnchor(params: {
 export function handleBeginDragPointer(params: {
   event: PointerEvent<HTMLCanvasElement>
   surface: HTMLCanvasElement | null
+  scoreScaleX: number
+  scoreScaleY: number
   noteLayouts: NoteLayout[]
   hitGrid: HitGridIndex | null
   dragPreviewFrameRef: MutableRefObject<number>
@@ -129,6 +131,8 @@ export function handleBeginDragPointer(params: {
   const {
     event,
     surface,
+    scoreScaleX,
+    scoreScaleY,
     noteLayouts,
     hitGrid,
     dragPreviewFrameRef,
@@ -155,11 +159,62 @@ export function handleBeginDragPointer(params: {
   if (!surface) return
 
   const rect = surface.getBoundingClientRect()
-  // Use CSS layout size instead of backing-store size to avoid DPR-induced hit-test drift.
-  const logicalWidth = surface.clientWidth || surface.width
-  const logicalHeight = surface.clientHeight || surface.height
-  const clientToScoreScaleX = rect.width > 0 ? logicalWidth / rect.width : 1
-  const clientToScoreScaleY = rect.height > 0 ? logicalHeight / rect.height : 1
+  const fallbackScaleX = Number.isFinite(scoreScaleX) && scoreScaleX > 0 ? scoreScaleX : 1
+  const fallbackScaleY = Number.isFinite(scoreScaleY) && scoreScaleY > 0 ? scoreScaleY : 1
+  const styleWidth = Number.parseFloat(surface.style.width)
+  const styleHeight = Number.parseFloat(surface.style.height)
+  const inferredLogicalWidthFromRect = rect.width > 0 ? rect.width / fallbackScaleX : NaN
+  const inferredLogicalHeightFromRect = rect.height > 0 ? rect.height / fallbackScaleY : NaN
+  // Prefer declared CSS logical size and stable scale-state mapping.
+  // Avoid clientWidth/backing-store coupling, which can drift under fractional DPI/zoom.
+  const logicalWidth =
+    (Number.isFinite(styleWidth) && styleWidth > 0 ? styleWidth : NaN) ||
+    (Number.isFinite(inferredLogicalWidthFromRect) && inferredLogicalWidthFromRect > 0
+      ? inferredLogicalWidthFromRect
+      : NaN) ||
+    (surface.clientWidth > 0 ? surface.clientWidth : 1)
+  const logicalHeight =
+    (Number.isFinite(styleHeight) && styleHeight > 0 ? styleHeight : NaN) ||
+    (Number.isFinite(inferredLogicalHeightFromRect) && inferredLogicalHeightFromRect > 0
+      ? inferredLogicalHeightFromRect
+      : NaN) ||
+    (surface.clientHeight > 0 ? surface.clientHeight : 1)
+  const rawContext2D = surface.getContext('2d')
+  const transform = rawContext2D?.getTransform()
+  const transformScaleX = transform?.a
+  const transformScaleY = transform?.d
+  const backingWidth = surface.width
+  const backingHeight = surface.height
+  // Self-calibrated mapping:
+  // logical-per-client = backing / (ctxTransform * clientRect)
+  // This keeps hit-test stable even if a browser/GPU path temporarily renders
+  // with an unexpected backing-to-CSS ratio.
+  const calibratedClientToScoreScaleX =
+    Number.isFinite(backingWidth) &&
+    backingWidth > 0 &&
+    Number.isFinite(transformScaleX) &&
+    (transformScaleX as number) > 0 &&
+    rect.width > 0
+      ? backingWidth / ((transformScaleX as number) * rect.width)
+      : NaN
+  const calibratedClientToScoreScaleY =
+    Number.isFinite(backingHeight) &&
+    backingHeight > 0 &&
+    Number.isFinite(transformScaleY) &&
+    (transformScaleY as number) > 0 &&
+    rect.height > 0
+      ? backingHeight / ((transformScaleY as number) * rect.height)
+      : NaN
+  const clientToScoreScaleX = Number.isFinite(calibratedClientToScoreScaleX) && calibratedClientToScoreScaleX > 0
+    ? calibratedClientToScoreScaleX
+    : rect.width > 0
+      ? logicalWidth / rect.width
+      : 1 / fallbackScaleX
+  const clientToScoreScaleY = Number.isFinite(calibratedClientToScoreScaleY) && calibratedClientToScoreScaleY > 0
+    ? calibratedClientToScoreScaleY
+    : rect.height > 0
+      ? logicalHeight / rect.height
+      : 1 / fallbackScaleY
   const x = (event.clientX - rect.left) * clientToScoreScaleX
   const y = (event.clientY - rect.top) * clientToScoreScaleY
   const logicalHitRadius = hitRadius * clientToScoreScaleX

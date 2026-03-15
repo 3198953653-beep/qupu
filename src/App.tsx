@@ -93,6 +93,7 @@ const SCORE_RENDER_BACKEND = Renderer.Backends.CANVAS
 const INSPECTOR_SEQUENCE_PREVIEW_LIMIT = 64
 const MANUAL_SCALE_BASELINE = 1
 const DEFAULT_PAGE_HORIZONTAL_PADDING_PX = 86
+const SCORE_STAGE_BORDER_PX = 1
 const ENABLE_AUTO_FIRST_MEASURE_DRAG_DEBUG = false
 const HORIZONTAL_VIEW_MEASURE_WIDTH_PX = 220
 const HORIZONTAL_VIEW_MIN_MEASURE_WIDTH_PX = 1
@@ -3569,7 +3570,8 @@ function App() {
     return horizontalMeasureFramesByPair.map((frame, index) => {
       return {
         key: `measure-ruler-${index + 1}`,
-        xPx: frame.measureX * scoreScaleX,
+        // Keep ruler ticks in the same visual coordinate space as barlines in the bordered stage.
+        xPx: frame.measureX * scoreScaleX + SCORE_STAGE_BORDER_PX,
         label: `${index + 1}`,
       }
     })

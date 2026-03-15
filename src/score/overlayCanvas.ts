@@ -143,23 +143,29 @@ export function getOverlayRendererContext(params: {
     overlayRendererRef.current = renderer
   }
   const currentSize = overlayRendererSizeRef.current
-  const overlayWidth = overlay.width || 1
-  const overlayHeight = overlay.height || 1
-  if (currentSize.width !== overlayWidth || currentSize.height !== overlayHeight) {
-    renderer.resize(overlayWidth, overlayHeight)
-    overlayRendererSizeRef.current = { width: overlayWidth, height: overlayHeight }
+  const requestedOverlayWidth = overlay.width || 1
+  const requestedOverlayHeight = overlay.height || 1
+  if (currentSize.width !== requestedOverlayWidth || currentSize.height !== requestedOverlayHeight) {
+    renderer.resize(requestedOverlayWidth, requestedOverlayHeight)
+    overlayRendererSizeRef.current = { width: requestedOverlayWidth, height: requestedOverlayHeight }
   }
+  const overlayWidth = overlay.width || requestedOverlayWidth || 1
+  const overlayHeight = overlay.height || requestedOverlayHeight || 1
   // Keep overlay element sized in logical score units; backing store may be supersampled.
   overlay.style.width = `${logicalWidth}px`
   overlay.style.height = `${logicalHeight}px`
 
   const context = renderer.getContext()
+  // Same mapping rule as main canvas: real backing/store ratio.
+  // This avoids subtle drift from nominal quality factor rounding.
+  const scaleX = logicalWidth > 0 ? overlayWidth / logicalWidth : 1
+  const scaleY = logicalHeight > 0 ? overlayHeight / logicalHeight : 1
+  const rawContext2D = overlay.getContext('2d')
+  if (rawContext2D) {
+    rawContext2D.setTransform(scaleX, 0, 0, scaleY, 0, 0)
+  }
   const context2D = (context as unknown as { context2D?: CanvasRenderingContext2D }).context2D
-  if (context2D) {
-    // Same mapping rule as main canvas: real backing/store ratio.
-    // This avoids subtle drift from nominal quality factor rounding.
-    const scaleX = logicalWidth > 0 ? overlayWidth / logicalWidth : 1
-    const scaleY = logicalHeight > 0 ? overlayHeight / logicalHeight : 1
+  if (context2D && context2D !== rawContext2D) {
     context2D.setTransform(scaleX, 0, 0, scaleY, 0, 0)
   }
   return context
