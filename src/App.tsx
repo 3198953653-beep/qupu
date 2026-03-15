@@ -51,6 +51,7 @@ import {
 } from './score/scoreOps'
 import { commitDragPitchToScoreData } from './score/dragInteractions'
 import { applyPaletteDurationEdit, type DurationEditFailureReason } from './score/durationEdits'
+import { applyPaletteAccidentalEdit, type AccidentalEditFailureReason } from './score/accidentalEdits'
 import { appendIntervalKey, deleteSelectedKey, findSelectionLocationInPairs, replaceSelectedKeyPitch } from './score/keyboardEdits'
 import { applyClipboardPaste, buildClipboardFromSelections, type CopyPasteFailureReason } from './score/copyPasteEdits'
 import { getMidiNoteNumber, toPitchFromMidiWithKeyPreference } from './score/midiInput'
@@ -180,6 +181,23 @@ function getCopyPasteFailureMessage(reason: CopyPasteFailureReason): string {
       return '当前节奏无法在不跨拍规则下重组'
     default:
       return '复制粘贴暂不支持当前操作'
+  }
+}
+
+function getAccidentalEditFailureMessage(reason: AccidentalEditFailureReason): string {
+  switch (reason) {
+    case 'no-selection':
+      return '未选中可编辑音符'
+    case 'selection-not-found':
+      return '未找到可编辑目标'
+    case 'no-editable-note':
+      return '当前目标是休止符，无法添加变音记号'
+    case 'no-op':
+      return '当前音符已是该变音'
+    case 'conflict':
+      return '多选目标冲突，未执行修改'
+    default:
+      return '当前操作暂不支持'
   }
 }
 
@@ -2908,6 +2926,30 @@ function App() {
           setNotationPaletteLastAction(message)
           console.info('[notation-palette]', message, nextSelection)
           return
+        }
+        setNotationPaletteLastAction(actionLabel)
+        console.info('[notation-palette]', actionLabel, nextSelection)
+        return
+      }
+
+      if (item.behavior === 'accidental-edit' && item.kind === 'accidental') {
+        const attempt = applyPaletteAccidentalEdit({
+          pairs: sourcePairs,
+          activeSelection,
+          selectedSelections,
+          isSelectionVisible,
+          importedNoteLookup: importedNoteLookupRef.current,
+          keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
+          accidentalId: item.id,
+        })
+        if (attempt.error) {
+          const message = getAccidentalEditFailureMessage(attempt.error)
+          setNotationPaletteLastAction(message)
+          console.info('[notation-palette]', message, nextSelection)
+          return
+        }
+        if (attempt.result) {
+          applyKeyboardEditResult(attempt.result.nextPairs, attempt.result.nextSelection, attempt.result.nextSelections)
         }
         setNotationPaletteLastAction(actionLabel)
         console.info('[notation-palette]', actionLabel, nextSelection)

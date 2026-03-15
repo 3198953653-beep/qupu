@@ -91,6 +91,7 @@ export type NotationPaletteGroupId = 'mode' | 'duration' | 'accidental' | 'modif
 export type NotationPaletteBehavior =
   | 'ui-only'
   | 'duration-edit'
+  | 'accidental-edit'
   | 'dot-toggle'
   | 'note-to-rest'
   | 'rest-to-note-disabled'
@@ -130,11 +131,11 @@ export const NOTATION_PALETTE_ITEMS: NotationPaletteItem[] = [
   { id: 'h', label: '2分音符', iconId: 'dur-2', group: 'duration', kind: 'duration', behavior: 'duration-edit' },
   { id: 'w', label: '全音符', iconId: 'dur-1', group: 'duration', kind: 'duration', behavior: 'duration-edit' },
 
-  { id: 'bb', label: '重降记号', iconId: 'acc-bb', group: 'accidental', kind: 'accidental', behavior: 'ui-only' },
-  { id: 'b', label: '降记号', iconId: 'acc-b', group: 'accidental', kind: 'accidental', behavior: 'ui-only' },
-  { id: 'natural', label: '还原记号', iconId: 'acc-natural', group: 'accidental', kind: 'accidental', behavior: 'ui-only' },
-  { id: '#', label: '升记号', iconId: 'acc-sharp', group: 'accidental', kind: 'accidental', behavior: 'ui-only' },
-  { id: 'x', label: '重升记号', iconId: 'acc-double-sharp', group: 'accidental', kind: 'accidental', behavior: 'ui-only' },
+  { id: 'bb', label: '重降记号', iconId: 'acc-bb', group: 'accidental', kind: 'accidental', behavior: 'accidental-edit' },
+  { id: 'b', label: '降记号', iconId: 'acc-b', group: 'accidental', kind: 'accidental', behavior: 'accidental-edit' },
+  { id: 'natural', label: '还原记号', iconId: 'acc-natural', group: 'accidental', kind: 'accidental', behavior: 'accidental-edit' },
+  { id: '#', label: '升记号', iconId: 'acc-sharp', group: 'accidental', kind: 'accidental', behavior: 'accidental-edit' },
+  { id: 'x', label: '重升记号', iconId: 'acc-double-sharp', group: 'accidental', kind: 'accidental', behavior: 'accidental-edit' },
 
   { id: 'dotted', label: '附点', iconId: 'dot', group: 'modifiers', kind: 'modifier', behavior: 'dot-toggle' },
   { id: 'tie', label: '延音线', iconId: 'tie', group: 'modifiers', kind: 'modifier', behavior: 'ui-only' },
@@ -458,6 +459,24 @@ export function toTargetDurationFromPalette(durationId: NotationPaletteDuration)
     case 'w':
     default:
       return 'w'
+  }
+}
+
+export function toTargetAlterFromPaletteAccidental(
+  accidentalId: Exclude<NotationPaletteAccidental, null>,
+): -2 | -1 | 0 | 1 | 2 {
+  switch (accidentalId) {
+    case 'bb':
+      return -2
+    case 'b':
+      return -1
+    case 'natural':
+      return 0
+    case '#':
+      return 1
+    case 'x':
+    default:
+      return 2
   }
 }
 
