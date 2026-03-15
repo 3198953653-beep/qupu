@@ -917,6 +917,18 @@ function appendUniqueSelection(current: Selection[], next: Selection): Selection
   return [...current, next]
 }
 
+function buildSelectionsForMeasureStaff(pair: MeasurePair, staff: Selection['staff']): Selection[] {
+  const selections: Selection[] = []
+  const notes = staff === 'treble' ? pair.treble : pair.bass
+  notes.forEach((note) => {
+    const keyCount = 1 + (note.chordPitches?.length ?? 0)
+    for (let keyIndex = 0; keyIndex < keyCount; keyIndex += 1) {
+      selections.push({ noteId: note.id, staff, keyIndex })
+    }
+  })
+  return selections
+}
+
 function buildMeasureStaffOnsetEntries(notes: ScoreNote[]): MeasureStaffOnsetEntry[] {
   const entries: MeasureStaffOnsetEntry[] = []
   let cursorTicks = 0
@@ -1352,6 +1364,7 @@ function App() {
   const [selectedSelections, setSelectedSelections] = useState<Selection[]>([
     { noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 },
   ])
+  const [selectedMeasureScope, setSelectedMeasureScope] = useState<{ pairIndex: number; staff: Selection['staff'] } | null>(null)
   const [isSelectionVisible, setIsSelectionVisible] = useState(true)
   const [draggingSelection, setDraggingSelection] = useState<Selection | null>(null)
   const [dragPreviewState, setDragPreviewState] = useState<DragState | null>(null)
@@ -1758,6 +1771,7 @@ function App() {
     draggingSelection,
     activeSelections: isSelectionVisible ? selectedSelections : [],
     draggingSelections: draggingSelection ? [draggingSelection] : [],
+    selectedMeasureScope,
     layoutReflowHintRef,
     layoutStabilityKey,
     noteLayoutsRef,
@@ -1863,25 +1877,55 @@ function App() {
     setActiveSelection,
     setDraggingSelection,
     currentSelections: selectedSelections,
-    onSelectionPointerDown: (selection, nextSelections, mode) => {
-      void selection
-      void mode
+    onSelectionPointerDown: (_selection, nextSelections, _mode) => {
+      void _selection
+      void _mode
+      setSelectedMeasureScope(null)
+      const nextTargetSelections = nextSelections
       setSelectedSelections((current) => {
         if (
-          current.length === nextSelections.length &&
-          current.every((entry, index) => isSameSelection(entry, nextSelections[index]))
+          current.length === nextTargetSelections.length &&
+          current.every((entry, index) => isSameSelection(entry, nextTargetSelections[index]))
         ) {
           return current
         }
-        return nextSelections
+        return nextTargetSelections
       })
+    },
+    onSelectionTapRelease: (selection) => {
+      setSelectedMeasureScope(null)
+      setSelectedSelections([selection])
+      setActiveSelection(selection)
+      setIsSelectionVisible(true)
     },
     onBeforeApplyScoreChange: (sourcePairs) => {
       pushUndoSnapshot(sourcePairs)
     },
-    onBlankPointerDown: () => {
-      setIsSelectionVisible(false)
-      setSelectedSelections([])
+    onBlankPointerDown: ({ pairIndex, staff }) => {
+      if (pairIndex === null || staff === null) {
+        setIsSelectionVisible(false)
+        setSelectedSelections([])
+        setSelectedMeasureScope(null)
+        return
+      }
+      const targetPair = measurePairsRef.current[pairIndex]
+      if (!targetPair) {
+        setIsSelectionVisible(false)
+        setSelectedSelections([])
+        setSelectedMeasureScope(null)
+        return
+      }
+      const nextSelections = buildSelectionsForMeasureStaff(targetPair, staff)
+      if (nextSelections.length === 0) {
+        setIsSelectionVisible(false)
+        setSelectedSelections([])
+        setSelectedMeasureScope(null)
+        return
+      }
+      setIsSelectionVisible(true)
+      setSelectedSelections(nextSelections)
+      setActiveSelection(nextSelections[0])
+      setSelectedMeasureScope({ pairIndex, staff })
     },
     onSelectionActivated: () => {
       setIsSelectionVisible(true)
@@ -2041,6 +2085,19 @@ function App() {
   useEffect(() => {
     selectedSelectionsRef.current = selectedSelections
   }, [selectedSelections])
+
+  useEffect(() => {
+    if (isSelectionVisible) return
+    if (selectedMeasureScope === null) return
+    setSelectedMeasureScope(null)
+  }, [isSelectionVisible, selectedMeasureScope])
+
+  useEffect(() => {
+    if (selectedMeasureScope === null) return
+    if (selectedMeasureScope.pairIndex >= measurePairs.length) {
+      setSelectedMeasureScope(null)
+    }
+  }, [selectedMeasureScope, measurePairs.length])
   useEffect(() => {
     isSelectionVisibleRef.current = isSelectionVisible
   }, [isSelectionVisible])
@@ -3618,6 +3675,44 @@ function App() {
       }
     })
   }, [horizontalMeasureFramesByPair, scoreScaleX])
+  const selectedMeasureHighlightRectPx = useMemo(() => {
+    if (selectedMeasureScope === null) return null
+    const measureLayout = measureLayoutsRef.current.get(selectedMeasureScope.pairIndex) ?? null
+    if (!measureLayout) return null
+    const padX = 6
+    const padY = 4
+    const x = scoreSurfaceOffsetXPx + measureLayout.measureX * scoreScaleX + SCORE_STAGE_BORDER_PX
+    const lineTopRaw =
+      selectedMeasureScope.staff === 'treble'
+        ? (Number.isFinite(measureLayout.trebleLineTopY) ? measureLayout.trebleLineTopY : measureLayout.trebleY)
+        : (Number.isFinite(measureLayout.bassLineTopY) ? measureLayout.bassLineTopY : measureLayout.bassY)
+    const lineBottomRaw =
+      selectedMeasureScope.staff === 'treble'
+        ? (Number.isFinite(measureLayout.trebleLineBottomY) ? measureLayout.trebleLineBottomY : measureLayout.trebleY + 40)
+        : (Number.isFinite(measureLayout.bassLineBottomY) ? measureLayout.bassLineBottomY : measureLayout.bassY + 40)
+    const lineTop = Math.min(lineTopRaw, lineBottomRaw)
+    const lineBottom = Math.max(lineTopRaw, lineBottomRaw)
+    const y = scoreSurfaceOffsetYPx + lineTop * scoreScaleY + SCORE_STAGE_BORDER_PX
+    const width = measureLayout.measureWidth * scoreScaleX
+    const height = (lineBottom - lineTop) * scoreScaleY
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height)) {
+      return null
+    }
+    if (width <= 0 || height <= 0) return null
+    return {
+      x: x - padX,
+      y: y - padY,
+      width: width + padX * 2,
+      height: height + padY * 2,
+    }
+  }, [
+    selectedMeasureScope,
+    scoreSurfaceOffsetXPx,
+    scoreSurfaceOffsetYPx,
+    scoreScaleX,
+    scoreScaleY,
+    layoutStabilityKey,
+  ])
   const formatDebugCoord = (value: number | null | undefined): string => {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 'null'
     return value.toFixed(3)
@@ -4458,6 +4553,7 @@ function App() {
         scoreSurfaceOffsetXPx={scoreSurfaceOffsetXPx}
         scoreSurfaceOffsetYPx={scoreSurfaceOffsetYPx}
         measureRulerTicks={measureRulerTicks}
+        selectedMeasureHighlightRectPx={selectedMeasureHighlightRectPx}
         draggingSelection={draggingSelection}
         scoreRef={scoreRef}
         scoreOverlayRef={scoreOverlayRef}

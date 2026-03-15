@@ -285,6 +285,7 @@ export function renderVisibleSystems(params: {
   draggingSelection: Selection | null
   activeSelections?: Selection[] | null
   draggingSelections?: Selection[] | null
+  selectedMeasureScope?: { pairIndex: number; staff: 'treble' | 'bass' } | null
   previousNoteLayoutsByPair?: Map<number, NoteLayout[]> | null
   previousMeasureLayouts?: Map<number, MeasureLayout> | null
   allowSelectionFreezeWhenNotDragging?: boolean
@@ -319,6 +320,7 @@ export function renderVisibleSystems(params: {
     draggingSelection,
     activeSelections = null,
     draggingSelections = null,
+    selectedMeasureScope = null,
     previousNoteLayoutsByPair = null,
     previousMeasureLayouts = null,
     allowSelectionFreezeWhenNotDragging = true,
@@ -789,6 +791,12 @@ export function renderVisibleSystems(params: {
               effectiveRightGapPx: number
             }
           | null = null
+        let staffLineBounds = {
+          trebleLineTopY: trebleY,
+          trebleLineBottomY: trebleY + 40,
+          bassLineTopY: bassY,
+          bassLineBottomY: bassY + 40,
+        }
         const measureNoteLayouts = drawMeasureToContext({
           context,
           measure: entry.measure,
@@ -808,6 +816,10 @@ export function renderVisibleSystems(params: {
           draggingSelection,
           activeSelections,
           draggingSelections,
+          highlightStaff:
+            selectedMeasureScope && selectedMeasureScope.pairIndex === entry.pairIndex
+              ? selectedMeasureScope.staff
+              : null,
           formatWidthOverride: formatWidth,
           timeAxisSpacingConfig: spacingConfig,
           spacingLayoutMode,
@@ -824,6 +836,9 @@ export function renderVisibleSystems(params: {
           preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
           onSpacingMetrics: (metrics) => {
             spacingMetrics = metrics
+          },
+          onStaffLineBounds: (bounds) => {
+            staffLineBounds = bounds
           },
           renderBoundaryPartialTies: false,
         })
@@ -872,6 +887,10 @@ export function renderVisibleSystems(params: {
           measureWidth,
           trebleY,
           bassY,
+          trebleLineTopY: staffLineBounds.trebleLineTopY,
+          trebleLineBottomY: staffLineBounds.trebleLineBottomY,
+          bassLineTopY: staffLineBounds.bassLineTopY,
+          bassLineBottomY: staffLineBounds.bassLineBottomY,
           systemTop,
           isSystemStart: entry.isSystemStart,
           keyFifths: entry.keyFifths,
@@ -984,6 +1003,12 @@ export function renderVisibleSystems(params: {
               effectiveRightGapPx: number
             }
           | null = null
+        let staffLineBounds = {
+          trebleLineTopY: trebleY,
+          trebleLineBottomY: trebleY + 40,
+          bassLineTopY: bassY,
+          bassLineBottomY: bassY + 40,
+        }
         const measureNoteLayouts = drawMeasureToContext({
           context,
           measure: entry.measure,
@@ -1003,6 +1028,10 @@ export function renderVisibleSystems(params: {
           draggingSelection,
           activeSelections,
           draggingSelections,
+          highlightStaff:
+            selectedMeasureScope && selectedMeasureScope.pairIndex === entry.pairIndex
+              ? selectedMeasureScope.staff
+              : null,
           formatWidthOverride: formatWidth,
           timeAxisSpacingConfig: spacingConfig,
           spacingLayoutMode,
@@ -1019,6 +1048,9 @@ export function renderVisibleSystems(params: {
           preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
           onSpacingMetrics: (metrics) => {
             spacingMetrics = metrics
+          },
+          onStaffLineBounds: (bounds) => {
+            staffLineBounds = bounds
           },
           renderBoundaryPartialTies: false,
         })
@@ -1067,6 +1099,10 @@ export function renderVisibleSystems(params: {
           measureWidth,
           trebleY,
           bassY,
+          trebleLineTopY: staffLineBounds.trebleLineTopY,
+          trebleLineBottomY: staffLineBounds.trebleLineBottomY,
+          bassLineTopY: staffLineBounds.bassLineTopY,
+          bassLineBottomY: staffLineBounds.bassLineBottomY,
           systemTop,
           isSystemStart: entry.isSystemStart,
           keyFifths: entry.keyFifths,
@@ -1213,6 +1249,10 @@ export function renderVisibleSystems(params: {
         draggingSelection: null,
         activeSelections: null,
         draggingSelections: null,
+        highlightStaff:
+          selectedMeasureScope && selectedMeasureScope.pairIndex === entry.pairIndex
+            ? selectedMeasureScope.staff
+            : null,
         collectLayouts: true,
         skipPainting: true,
         formatWidthOverride: formatWidth,
@@ -1315,6 +1355,12 @@ export function renderVisibleSystems(params: {
             effectiveRightGapPx: number
           }
         | null = null
+      let staffLineBounds = {
+        trebleLineTopY: trebleY,
+        trebleLineBottomY: trebleY + 40,
+        bassLineTopY: bassY,
+        bassLineBottomY: bassY + 40,
+      }
       const measureNoteLayouts = drawMeasureToContext({
         context,
         measure: entry.measure,
@@ -1334,6 +1380,10 @@ export function renderVisibleSystems(params: {
         draggingSelection,
         activeSelections,
         draggingSelections,
+        highlightStaff:
+          selectedMeasureScope && selectedMeasureScope.pairIndex === entry.pairIndex
+            ? selectedMeasureScope.staff
+            : null,
         formatWidthOverride: formatWidth,
         timeAxisSpacingConfig: spacingConfig,
         spacingLayoutMode,
@@ -1350,6 +1400,9 @@ export function renderVisibleSystems(params: {
         preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
         onSpacingMetrics: (metrics) => {
           spacingMetrics = metrics
+        },
+        onStaffLineBounds: (bounds) => {
+          staffLineBounds = bounds
         },
         renderBoundaryPartialTies: false,
       })
@@ -1398,6 +1451,10 @@ export function renderVisibleSystems(params: {
         measureWidth,
         trebleY,
         bassY,
+        trebleLineTopY: staffLineBounds.trebleLineTopY,
+        trebleLineBottomY: staffLineBounds.trebleLineBottomY,
+        bassLineTopY: staffLineBounds.bassLineTopY,
+        bassLineBottomY: staffLineBounds.bassLineBottomY,
         systemTop,
         isSystemStart: entry.isSystemStart,
         keyFifths: entry.keyFifths,

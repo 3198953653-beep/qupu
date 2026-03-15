@@ -16,6 +16,7 @@ export function ScoreBoard(props: {
     xPx: number
     label: string
   }>
+  selectedMeasureHighlightRectPx?: { x: number; y: number; width: number; height: number } | null
   draggingSelection: { noteId: string; staff: 'treble' | 'bass'; keyIndex: number } | null
   scoreRef: RefObject<HTMLCanvasElement | null>
   scoreOverlayRef: RefObject<HTMLCanvasElement | null>
@@ -41,6 +42,7 @@ export function ScoreBoard(props: {
     scoreSurfaceOffsetXPx,
     scoreSurfaceOffsetYPx,
     measureRulerTicks,
+    selectedMeasureHighlightRectPx = null,
     draggingSelection,
     scoreRef,
     scoreOverlayRef,
@@ -100,6 +102,18 @@ export function ScoreBoard(props: {
               transformOrigin: 'left top',
             }}
           />
+          {selectedMeasureHighlightRectPx && (
+            <div
+              className="score-measure-highlight"
+              style={{
+                left: `${selectedMeasureHighlightRectPx.x}px`,
+                top: `${selectedMeasureHighlightRectPx.y}px`,
+                width: `${selectedMeasureHighlightRectPx.width}px`,
+                height: `${selectedMeasureHighlightRectPx.height}px`,
+              }}
+              aria-hidden="true"
+            />
+          )}
         </div>
       </div>
 

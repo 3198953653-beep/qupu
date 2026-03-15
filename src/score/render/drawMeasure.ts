@@ -144,6 +144,7 @@ export type DrawMeasureParams = {
   draggingSelection: Selection | null
   activeSelections?: Selection[] | null
   draggingSelections?: Selection[] | null
+  highlightStaff?: StaffKind | null
   previewNotes?: PreviewNoteOverride[] | null
   previewNote?: { noteId: string; staff: StaffKind; pitch: Pitch; keyIndex: number } | null
   previewAccidentalStateBeforeNote?: Map<string, number> | null
@@ -188,6 +189,12 @@ export type DrawMeasureParams = {
   } | null
   renderBoundaryPartialTies?: boolean
   forceLeadingConnector?: boolean
+  onStaffLineBounds?: (bounds: {
+    trebleLineTopY: number
+    trebleLineBottomY: number
+    bassLineTopY: number
+    bassLineBottomY: number
+  }) => void
 }
 
 export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] => {
@@ -210,6 +217,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     draggingSelection: dragging,
     activeSelections = null,
     draggingSelections = null,
+    highlightStaff = null,
     previewNotes = null,
     previewNote = null,
     previewAccidentalStateBeforeNote = null,
@@ -235,6 +243,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     debugCapture = null,
     renderBoundaryPartialTies = true,
     forceLeadingConnector = false,
+    onStaffLineBounds,
   } = params
   const isSpacingOnlyLayout = layoutDetail === 'spacing-only'
   const noteLayouts: NoteLayout[] = []
@@ -344,6 +353,23 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
 
   const trebleStave = new Stave(measureX, trebleY, measureWidth)
   const bassStave = new Stave(measureX, bassY, measureWidth)
+  const resolveStaffLineBounds = () => {
+    const rawTrebleTop = trebleStave.getYForLine(0)
+    const rawTrebleBottom = trebleStave.getYForLine(4)
+    const rawBassTop = bassStave.getYForLine(0)
+    const rawBassBottom = bassStave.getYForLine(4)
+    const trebleLineTopY = Number.isFinite(rawTrebleTop) ? rawTrebleTop : trebleY
+    const trebleLineBottomY = Number.isFinite(rawTrebleBottom) ? rawTrebleBottom : trebleY + 40
+    const bassLineTopY = Number.isFinite(rawBassTop) ? rawBassTop : bassY
+    const bassLineBottomY = Number.isFinite(rawBassBottom) ? rawBassBottom : bassY + 40
+    return {
+      trebleLineTopY: Math.min(trebleLineTopY, trebleLineBottomY),
+      trebleLineBottomY: Math.max(trebleLineTopY, trebleLineBottomY),
+      bassLineTopY: Math.min(bassLineTopY, bassLineBottomY),
+      bassLineBottomY: Math.max(bassLineTopY, bassLineBottomY),
+    }
+  }
+  onStaffLineBounds?.(resolveStaffLineBounds())
   const setImplicitClefContext = (stave: Stave, clefSpec: 'treble' | 'bass') => {
     // Keep correct clef-dependent modifier placement on mid-system measures
     // without drawing an extra clef glyph.
@@ -535,6 +561,15 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   const bassVexNotes = bassRendered.map((entry) => entry.vexNote)
   trebleVexNotes.forEach((vexNote) => vexNote.setStave(trebleStave))
   bassVexNotes.forEach((vexNote) => vexNote.setStave(bassStave))
+
+  if (highlightStaff === 'treble' || highlightStaff === 'bass') {
+    const measureHighlightStyle = { fillStyle: '#5f9fc6', strokeStyle: '#5f9fc6' }
+    if (highlightStaff === 'treble') {
+      trebleVexNotes.forEach((vexNote) => vexNote.setStyle(measureHighlightStyle))
+    } else {
+      bassVexNotes.forEach((vexNote) => vexNote.setStyle(measureHighlightStyle))
+    }
+  }
 
   trebleRendered.forEach(({ vexNote, renderedKeys }, noteIndex) => {
     const noteId = measure.treble[noteIndex].id

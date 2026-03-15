@@ -7,6 +7,7 @@ import {
   handleSurfacePointerMove,
 } from './dragPointerHandlers'
 import type { SelectionPointerMode } from './dragPointerHandlers'
+import type { BlankPointerPayload } from './dragPointerHandlers'
 import {
   clearDragOverlayCanvas,
   drawSelectionOverlay,
@@ -68,8 +69,9 @@ export function useDragHandlers(params: {
     mode: SelectionPointerMode,
   ) => void
   onBeforeApplyScoreChange?: (sourcePairs: MeasurePair[]) => void
-  onBlankPointerDown?: () => void
+  onBlankPointerDown?: (payload: BlankPointerPayload) => void
   onSelectionActivated?: () => void
+  onSelectionTapRelease?: (selection: Selection) => void
   measurePairsFromImportRef: MutableRefObject<MeasurePair[] | null>
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
   measureKeyFifthsFromImportRef: MutableRefObject<number[] | null>
@@ -132,6 +134,7 @@ export function useDragHandlers(params: {
     onBeforeApplyScoreChange,
     onBlankPointerDown,
     onSelectionActivated,
+    onSelectionTapRelease,
     measurePairsFromImportRef,
     importedNoteLookupRef,
     measureKeyFifthsFromImportRef,
@@ -296,6 +299,7 @@ export function useDragHandlers(params: {
       setActiveSelection,
       setDraggingSelection,
       onSelectionActivated,
+      onSelectionTapRelease,
     })
   }
 

@@ -175,6 +175,9 @@ export type DragState = {
   originPitch: Pitch
   pitch: Pitch
   previewStarted: boolean
+  startedWithReplaceDeferred?: boolean
+  startTimestampMs?: number
+  startSelection?: Selection
   grabOffsetY: number
   pitchYMap: Record<Pitch, number>
   keyFifths: number
@@ -202,6 +205,10 @@ export type MeasureLayout = {
   measureWidth: number
   trebleY: number
   bassY: number
+  trebleLineTopY: number
+  trebleLineBottomY: number
+  bassLineTopY: number
+  bassLineBottomY: number
   systemTop: number
   isSystemStart: boolean
   keyFifths: number

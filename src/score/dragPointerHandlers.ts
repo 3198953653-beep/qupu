@@ -19,6 +19,8 @@ import type {
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>
 export type SelectionPointerMode = 'replace' | 'append' | 'range'
+export type BlankPointerPayload = { pairIndex: number | null; staff: Selection['staff'] | null }
+const REPLACE_TAP_SELECTION_THRESHOLD_MS = 180
 
 function upsertSelection(
   selection: Selection,
@@ -97,6 +99,61 @@ function resolveHeadAnchor(params: {
   }
 }
 
+function resolveBlankMeasureHit(params: {
+  x: number
+  y: number
+  measureLayouts: Map<number, MeasureLayout>
+}): BlankPointerPayload {
+  const { x, y, measureLayouts } = params
+  if (measureLayouts.size === 0) return { pairIndex: null, staff: null }
+  let winnerPairIndex: number | null = null
+  let winnerStaff: Selection['staff'] | null = null
+  let winnerDistance = Number.POSITIVE_INFINITY
+  for (const [pairIndex, layout] of measureLayouts.entries()) {
+    if (!Number.isFinite(layout.measureX) || !Number.isFinite(layout.measureWidth)) continue
+    const measureLeft = layout.measureX
+    const measureRight = layout.measureX + layout.measureWidth
+    if (x < measureLeft || x > measureRight) continue
+    const trebleTopRaw = Number.isFinite(layout.trebleLineTopY) ? layout.trebleLineTopY : layout.trebleY
+    const trebleBottomRaw = Number.isFinite(layout.trebleLineBottomY) ? layout.trebleLineBottomY : layout.trebleY + 40
+    const bassTopRaw = Number.isFinite(layout.bassLineTopY) ? layout.bassLineTopY : layout.bassY
+    const bassBottomRaw = Number.isFinite(layout.bassLineBottomY) ? layout.bassLineBottomY : layout.bassY + 40
+    if (
+      !Number.isFinite(trebleTopRaw) ||
+      !Number.isFinite(trebleBottomRaw) ||
+      !Number.isFinite(bassTopRaw) ||
+      !Number.isFinite(bassBottomRaw)
+    ) {
+      continue
+    }
+    const trebleTop = Math.min(trebleTopRaw, trebleBottomRaw)
+    const trebleBottom = Math.max(trebleTopRaw, trebleBottomRaw)
+    const bassTop = Math.min(bassTopRaw, bassBottomRaw)
+    const bassBottom = Math.max(bassTopRaw, bassBottomRaw)
+    // Strict 0px tolerance: only inside the five staff lines area.
+    const staff: Selection['staff'] | null =
+      y >= trebleTop && y <= trebleBottom
+        ? 'treble'
+        : y >= bassTop && y <= bassBottom
+          ? 'bass'
+          : null
+    if (!staff) continue
+    const distanceToCenter = Math.abs(x - (measureLeft + layout.measureWidth / 2))
+    if (
+      distanceToCenter < winnerDistance ||
+      (distanceToCenter === winnerDistance && (winnerPairIndex === null || pairIndex < winnerPairIndex))
+    ) {
+      winnerDistance = distanceToCenter
+      winnerPairIndex = pairIndex
+      winnerStaff = staff
+    }
+  }
+  if (winnerPairIndex === null || winnerStaff === null) {
+    return { pairIndex: null, staff: null }
+  }
+  return { pairIndex: winnerPairIndex, staff: winnerStaff }
+}
+
 export function handleBeginDragPointer(params: {
   event: PointerEvent<HTMLCanvasElement>
   surface: HTMLCanvasElement | null
@@ -124,7 +181,7 @@ export function handleBeginDragPointer(params: {
     nextSelections: Selection[],
     mode: SelectionPointerMode,
   ) => void
-  onBlankPointerDown?: () => void
+  onBlankPointerDown?: (payload: BlankPointerPayload) => void
   onSelectionActivated?: () => void
 }): void {
   const {
@@ -217,7 +274,8 @@ export function handleBeginDragPointer(params: {
   const y = (event.clientY - rect.top) * clientToScoreScaleY
   const hit = getHitNote(x, y, noteLayouts, 0, hitGrid)
   if (!hit) {
-    onBlankPointerDown?.()
+    const blankHit = resolveBlankMeasureHit({ x, y, measureLayouts })
+    onBlankPointerDown?.(blankHit)
     return
   }
   const hitHead = hit.head
@@ -246,7 +304,10 @@ export function handleBeginDragPointer(params: {
 
   dragRef.current = dragState
   const selectionMode: SelectionPointerMode = event.shiftKey ? 'range' : event.ctrlKey ? 'append' : 'replace'
-  const alreadySelected = currentSelections.some((entry) => isSameSelection(entry, selection))
+  const shouldDeferReplaceSelection =
+    selectionMode === 'replace' &&
+    currentSelections.length > 1 &&
+    currentSelections.some((entry) => isSameSelection(entry, selection))
   const effectiveSelections =
     selectionMode === 'range'
       ? (() => {
@@ -260,7 +321,18 @@ export function handleBeginDragPointer(params: {
         })()
       : selectionMode === 'append'
         ? appendUniqueSelection(currentSelections, selection)
-        : (alreadySelected && currentSelections.length > 0 ? currentSelections : [selection])
+        : shouldDeferReplaceSelection
+          ? currentSelections
+          : [selection]
+  if (shouldDeferReplaceSelection) {
+    dragState.startedWithReplaceDeferred = true
+    dragState.startTimestampMs = event.timeStamp
+    dragState.startSelection = selection
+  } else {
+    dragState.startedWithReplaceDeferred = false
+    dragState.startTimestampMs = event.timeStamp
+    dragState.startSelection = selection
+  }
   dragState.groupMoveTargets = buildSelectionGroupMoveTargets({
     effectiveSelections,
     primarySelection: selection,
@@ -396,6 +468,7 @@ export function handleEndDragPointer(params: {
   setActiveSelection: StateSetter<Selection>
   setDraggingSelection: StateSetter<Selection | null>
   onSelectionActivated?: () => void
+  onSelectionTapRelease?: (selection: Selection) => void
 }): void {
   const {
     event,
@@ -408,6 +481,7 @@ export function handleEndDragPointer(params: {
     setActiveSelection,
     setDraggingSelection,
     onSelectionActivated,
+    onSelectionTapRelease,
   } = params
 
   const drag = dragRef.current
@@ -429,6 +503,19 @@ export function handleEndDragPointer(params: {
     staff: drag.staff,
     keyIndex: drag.keyIndex,
   }))
+  const dragSelection: Selection = drag.startSelection ?? {
+    noteId: drag.noteId,
+    staff: drag.staff,
+    keyIndex: drag.keyIndex,
+  }
+  const pressDurationMs = event.timeStamp - (drag.startTimestampMs ?? event.timeStamp)
+  const shouldCollapseToSingleSelection =
+    drag.startedWithReplaceDeferred === true &&
+    drag.previewStarted !== true &&
+    pressDurationMs <= REPLACE_TAP_SELECTION_THRESHOLD_MS
+  if (shouldCollapseToSingleSelection) {
+    onSelectionTapRelease?.(dragSelection)
+  }
   onSelectionActivated?.()
   setDraggingSelection(null)
   clearDragOverlay()

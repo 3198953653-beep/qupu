@@ -197,6 +197,7 @@ export function useScoreRenderEffect(params: {
   draggingSelection?: Selection | null
   activeSelections?: Selection[] | null
   draggingSelections?: Selection[] | null
+  selectedMeasureScope?: { pairIndex: number; staff: 'treble' | 'bass' } | null
   layoutReflowHintRef?: MutableRefObject<LayoutReflowHint | null>
   layoutStabilityKey?: string
   noteLayoutsRef: MutableRefObject<NoteLayout[]>
@@ -236,6 +237,7 @@ export function useScoreRenderEffect(params: {
     draggingSelection = null,
     activeSelections = null,
     draggingSelections = null,
+    selectedMeasureScope = null,
     layoutReflowHintRef,
     layoutStabilityKey,
     noteLayoutsRef,
@@ -333,6 +335,7 @@ export function useScoreRenderEffect(params: {
       draggingSelection,
       activeSelections,
       draggingSelections,
+      selectedMeasureScope,
       layoutReflowHint,
       layoutStabilityKey,
       previousNoteLayoutsByPair,
@@ -370,6 +373,7 @@ export function useScoreRenderEffect(params: {
     draggingSelection,
     activeSelections,
     draggingSelections,
+    selectedMeasureScope,
     layoutReflowHintRef,
     layoutStabilityKey,
     noteLayoutsRef,
