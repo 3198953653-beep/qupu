@@ -48,9 +48,74 @@ const VALID_BEAM_DURATIONS = ['4', '8', '16', '32', '64'] as const
 const ACCIDENTAL_HEAD_CLEARANCE_PX = 2
 const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
 const MIN_FORMAT_WIDTH_PX = 8
+const DEFAULT_NOTE_HEAD_HIT_RADIUS_X = 5.5
+const DEFAULT_NOTE_HEAD_HIT_RADIUS_Y = 4.2
 
 function getRestAnchorPitch(staff: StaffKind): Pitch {
   return staff === 'treble' ? 'b/4' : 'd/3'
+}
+
+type NoteHeadHitGeometry = {
+  hitCenterX: number
+  hitCenterY: number
+  hitRadiusX: number
+  hitRadiusY: number
+  hitMinX: number
+  hitMaxX: number
+  hitMinY: number
+  hitMaxY: number
+}
+
+function buildNoteHeadHitGeometry(params: {
+  vexNote: StaveNote
+  renderedIndex: number
+  headX: number
+  headY: number
+}): NoteHeadHitGeometry {
+  const { vexNote, renderedIndex, headX, headY } = params
+  const fallbackCenterX = headX + 6
+  const fallbackCenterY = headY
+  let centerX = fallbackCenterX
+  let centerY = fallbackCenterY
+  let radiusX = DEFAULT_NOTE_HEAD_HIT_RADIUS_X
+  let radiusY = DEFAULT_NOTE_HEAD_HIT_RADIUS_Y
+
+  const noteHead = (vexNote.noteHeads?.[renderedIndex] ?? null) as
+    | {
+        getBoundingBox?: () =>
+          | {
+              getX: () => number
+              getY: () => number
+              getW: () => number
+              getH: () => number
+            }
+          | null
+      }
+    | null
+  const bbox = noteHead?.getBoundingBox?.() ?? null
+  if (bbox) {
+    const x = bbox.getX()
+    const y = bbox.getY()
+    const w = bbox.getW()
+    const h = bbox.getH()
+    if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+      centerX = x + w / 2
+      centerY = y + h / 2
+      radiusX = Math.max(2, w / 2)
+      radiusY = Math.max(2, h / 2)
+    }
+  }
+
+  return {
+    hitCenterX: centerX,
+    hitCenterY: centerY,
+    hitRadiusX: radiusX,
+    hitRadiusY: radiusY,
+    hitMinX: centerX - radiusX,
+    hitMaxX: centerX + radiusX,
+    hitMinY: centerY - radiusY,
+    hitMaxY: centerY + radiusY,
+  }
 }
 
 type PreviewNoteOverride = {
@@ -1211,12 +1276,23 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         if (offset === undefined) return
         accidentalRightXByKeyIndex[entry.keyIndex] = offset
       })
-      const noteHeads = renderedKeys.map((entry, renderedIndex) => ({
-        x: renderedHeadXByIndex.get(renderedIndex) ?? getRenderedNoteVisualX(vexNote),
-        y: ys[renderedIndex] ?? ys[0],
-        pitch: entry.pitch,
-        keyIndex: entry.keyIndex,
-      }))
+      const noteHeads = renderedKeys.map((entry, renderedIndex) => {
+        const headX = renderedHeadXByIndex.get(renderedIndex) ?? getRenderedNoteVisualX(vexNote)
+        const headY = ys[renderedIndex] ?? ys[0]
+        const hitGeometry = buildNoteHeadHitGeometry({
+          vexNote,
+          renderedIndex,
+          headX,
+          headY,
+        })
+        return {
+          x: headX,
+          y: headY,
+          pitch: entry.pitch,
+          keyIndex: entry.keyIndex,
+          ...hitGeometry,
+        }
+      })
       const rootHead = noteHeads.find((head) => head.keyIndex === 0) ?? noteHeads[0]
       const noteSpacingRightX = getRenderedNoteSpacingRightX(vexNote, noteHeads)
       const noteRightX = isSpacingOnlyLayout ? noteSpacingRightX : getRenderedNoteRightX(vexNote, noteHeads)
@@ -1251,12 +1327,23 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         if (offset === undefined) return
         accidentalRightXByKeyIndex[entry.keyIndex] = offset
       })
-      const noteHeads = renderedKeys.map((entry, renderedIndex) => ({
-        x: renderedHeadXByIndex.get(renderedIndex) ?? getRenderedNoteVisualX(vexNote),
-        y: ys[renderedIndex] ?? ys[0],
-        pitch: entry.pitch,
-        keyIndex: entry.keyIndex,
-      }))
+      const noteHeads = renderedKeys.map((entry, renderedIndex) => {
+        const headX = renderedHeadXByIndex.get(renderedIndex) ?? getRenderedNoteVisualX(vexNote)
+        const headY = ys[renderedIndex] ?? ys[0]
+        const hitGeometry = buildNoteHeadHitGeometry({
+          vexNote,
+          renderedIndex,
+          headX,
+          headY,
+        })
+        return {
+          x: headX,
+          y: headY,
+          pitch: entry.pitch,
+          keyIndex: entry.keyIndex,
+          ...hitGeometry,
+        }
+      })
       const rootHead = noteHeads.find((head) => head.keyIndex === 0) ?? noteHeads[0]
       const noteSpacingRightX = getRenderedNoteSpacingRightX(vexNote, noteHeads)
       const noteRightX = isSpacingOnlyLayout ? noteSpacingRightX : getRenderedNoteRightX(vexNote, noteHeads)

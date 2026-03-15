@@ -76,6 +76,14 @@ export type NoteHeadLayout = {
   y: number
   pitch: Pitch
   keyIndex: number
+  hitCenterX?: number
+  hitCenterY?: number
+  hitRadiusX?: number
+  hitRadiusY?: number
+  hitMinX?: number
+  hitMaxX?: number
+  hitMinY?: number
+  hitMaxY?: number
 }
 
 export type NoteLayout = {

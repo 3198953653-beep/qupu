@@ -126,7 +126,6 @@ export function handleBeginDragPointer(params: {
   ) => void
   onBlankPointerDown?: () => void
   onSelectionActivated?: () => void
-  hitRadius?: number
 }): void {
   const {
     event,
@@ -153,7 +152,6 @@ export function handleBeginDragPointer(params: {
     onSelectionPointerDown,
     onBlankPointerDown,
     onSelectionActivated,
-    hitRadius = 30,
   } = params
 
   if (!surface) return
@@ -217,8 +215,7 @@ export function handleBeginDragPointer(params: {
       : 1 / fallbackScaleY
   const x = (event.clientX - rect.left) * clientToScoreScaleX
   const y = (event.clientY - rect.top) * clientToScoreScaleY
-  const logicalHitRadius = hitRadius * clientToScoreScaleX
-  const hit = getHitNote(x, y, noteLayouts, logicalHitRadius, hitGrid)
+  const hit = getHitNote(x, y, noteLayouts, 0, hitGrid)
   if (!hit) {
     onBlankPointerDown?.()
     return
