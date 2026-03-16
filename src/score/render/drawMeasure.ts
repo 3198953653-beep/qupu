@@ -563,7 +563,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   bassVexNotes.forEach((vexNote) => vexNote.setStave(bassStave))
 
   if (highlightStaff === 'treble' || highlightStaff === 'bass') {
-    const measureHighlightStyle = { fillStyle: '#5f9fc6', strokeStyle: '#5f9fc6' }
+    const measureHighlightStyle = { fillStyle: '#2437E8', strokeStyle: '#2437E8' }
     if (highlightStaff === 'treble') {
       trebleVexNotes.forEach((vexNote) => vexNote.setStyle(measureHighlightStyle))
     } else {
@@ -580,7 +580,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       if (draggingKeySet?.has(entry.keyIndex)) {
         vexNote.setKeyStyle(Math.max(0, renderedIndex), { fillStyle: '#0e9ac7', strokeStyle: '#0e9ac7' })
       } else if (selectedKeySet?.has(entry.keyIndex)) {
-        vexNote.setKeyStyle(Math.max(0, renderedIndex), { fillStyle: '#1f7aa8', strokeStyle: '#1f7aa8' })
+        vexNote.setKeyStyle(Math.max(0, renderedIndex), { fillStyle: '#2437E8', strokeStyle: '#2437E8' })
       }
     })
   })
@@ -594,7 +594,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       if (draggingKeySet?.has(entry.keyIndex)) {
         vexNote.setKeyStyle(Math.max(0, renderedIndex), { fillStyle: '#0e9ac7', strokeStyle: '#0e9ac7' })
       } else if (selectedKeySet?.has(entry.keyIndex)) {
-        vexNote.setKeyStyle(Math.max(0, renderedIndex), { fillStyle: '#1f7aa8', strokeStyle: '#1f7aa8' })
+        vexNote.setKeyStyle(Math.max(0, renderedIndex), { fillStyle: '#2437E8', strokeStyle: '#2437E8' })
       }
     })
   })
