@@ -1445,6 +1445,7 @@ function App() {
   const noteLayoutsRef = useRef<NoteLayout[]>([])
   const noteLayoutsByPairRef = useRef<Map<number, NoteLayout[]>>(new Map())
   const noteLayoutByKeyRef = useRef<Map<string, NoteLayout>>(new Map())
+  const horizontalRenderOffsetXRef = useRef(0)
   const hitGridRef = useRef<HitGridIndex | null>(null)
   const measureLayoutsRef = useRef<Map<number, MeasureLayout>>(new Map())
   const measureTimelineBundlesRef = useRef<Map<number, MeasureTimelineBundle>>(new Map())
@@ -1597,6 +1598,7 @@ function App() {
     const maxOffset = Math.max(0, totalScoreWidth - horizontalRenderSurfaceWidth)
     return Math.max(0, Math.min(maxOffset, desiredOffset))
   }, [horizontalViewportXRange.startX, totalScoreWidth, horizontalRenderSurfaceWidth])
+  horizontalRenderOffsetXRef.current = horizontalRenderOffsetX
   const scoreWidth = horizontalRenderSurfaceWidth
   const systemRanges = useMemo(() => [{ startPairIndex: 0, endPairIndexExclusive: measurePairs.length }], [measurePairs.length])
   const scaledScoreContentHeight = Math.max(1, HORIZONTAL_VIEW_HEIGHT_PX * viewportHeightScaleByZoom)
@@ -2761,14 +2763,54 @@ function App() {
                   const isRest = sourceNote.isRestFlag === true || (typeof sourceNote.isRest === 'function' && sourceNote.isRest())
                   if (isRest) continue
 
-                  const sourceMeasure = sourceNote.sourceMeasure
+                  const sourceMeasure = sourceNote.sourceMeasure as
+                    | {
+                        measureListIndex?: number
+                        MeasureListIndex?: number
+                        measureNumber?: number
+                        MeasureNumber?: number
+                      }
+                    | undefined
+                  const graphicalMeasureAny = graphicalMeasure as
+                    | {
+                        parentSourceMeasure?: {
+                          measureListIndex?: number
+                          MeasureListIndex?: number
+                          measureNumber?: number
+                          MeasureNumber?: number
+                        }
+                        ParentSourceMeasure?: {
+                          measureListIndex?: number
+                          MeasureListIndex?: number
+                          measureNumber?: number
+                          MeasureNumber?: number
+                        }
+                        measureNumber?: number
+                        MeasureNumber?: number
+                      }
+                    | undefined
+                  const parentSourceMeasure =
+                    graphicalMeasureAny?.parentSourceMeasure ??
+                    graphicalMeasureAny?.ParentSourceMeasure
+                  const measureListIndexRaw =
+                    sourceMeasure?.measureListIndex ??
+                    sourceMeasure?.MeasureListIndex ??
+                    parentSourceMeasure?.measureListIndex ??
+                    parentSourceMeasure?.MeasureListIndex
                   const measureNumberRaw =
                     sourceMeasure?.measureNumber ??
                     sourceMeasure?.MeasureNumber ??
-                    graphicalMeasure?.measureNumber ??
-                    graphicalMeasure?.MeasureNumber
-                  if (typeof measureNumberRaw !== 'number' || !Number.isFinite(measureNumberRaw)) continue
-                  const pairIndex = Math.max(0, Math.round(measureNumberRaw) - 1)
+                    parentSourceMeasure?.measureNumber ??
+                    parentSourceMeasure?.MeasureNumber ??
+                    graphicalMeasureAny?.measureNumber ??
+                    graphicalMeasureAny?.MeasureNumber
+                  const pairIndex =
+                    typeof measureListIndexRaw === 'number' && Number.isFinite(measureListIndexRaw)
+                      ? Math.max(0, Math.round(measureListIndexRaw))
+                      : typeof measureNumberRaw === 'number' && Number.isFinite(measureNumberRaw)
+                        ? Math.max(0, Math.round(measureNumberRaw) - 1)
+                        : -1
+                  if (pairIndex < 0) continue
                   const pair = measurePairs[pairIndex]
                   if (!pair) continue
 
@@ -2871,35 +2913,58 @@ function App() {
     setActiveSelection(selection)
     setSelectedSelections([selection])
     setDraggingSelection(null)
+    setSelectedMeasureScope(null)
     closeOsmdPreview()
 
     const scrollHost = scoreScrollRef.current
     if (!scrollHost) return
-    const frame = horizontalMeasureFramesByPair[pairIndex]
-    if (frame) {
+    const resolvedLocation = findSelectionLocationInPairs({
+      pairs: measurePairsRef.current,
+      selection,
+      importedNoteLookup: importedNoteLookupRef.current,
+    })
+    const resolvedPairIndex = resolvedLocation?.pairIndex ?? pairIndex
+    const getCoarseScrollLeft = (): number | null => {
+      const frame = horizontalMeasureFramesByPair[resolvedPairIndex]
+      if (!frame) return null
       const frameCenterX = frame.measureX + frame.measureWidth * 0.5
-      const coarseScrollLeft = Math.max(0, frameCenterX * scoreScaleX - scrollHost.clientWidth * 0.5)
-      scrollHost.scrollLeft = coarseScrollLeft
+      return Math.max(0, frameCenterX * scoreScaleX - scrollHost.clientWidth * 0.5)
+    }
+    const getPreciseScrollLeft = (): number | null => {
+      const pairLayouts = noteLayoutsByPairRef.current.get(resolvedPairIndex) ?? []
+      const noteLayout =
+        pairLayouts.find((layout) => layout.id === selection.noteId && layout.staff === selection.staff) ??
+        noteLayoutByKeyRef.current.get(getLayoutNoteKey(selection.staff, selection.noteId))
+      if (!noteLayout) return null
+      const targetHeadX = noteLayout.noteHeads.find((head) => head.keyIndex === selection.keyIndex)?.x ?? noteLayout.x
+      const targetHeadGlobalX = horizontalRenderOffsetXRef.current + targetHeadX
+      return Math.max(0, targetHeadGlobalX * scoreScaleX - scrollHost.clientWidth * 0.5)
     }
 
+    const MAX_ATTEMPTS = 48
     let attempts = 0
-    const maxAttempts = 20
-    const alignSelection = () => {
+    const runJumpLoop = () => {
       attempts += 1
-      const noteLayout = noteLayoutByKeyRef.current.get(getLayoutNoteKey(selection.staff, selection.noteId))
-      if (noteLayout) {
-        const targetHeadX = noteLayout.noteHeads.find((head) => head.keyIndex === selection.keyIndex)?.x ?? noteLayout.x
-        const targetScrollLeft = Math.max(0, targetHeadX * scoreScaleX - scrollHost.clientWidth * 0.45)
-        scrollHost.scrollLeft = targetScrollLeft
+      const coarseScrollLeft = getCoarseScrollLeft()
+      if (coarseScrollLeft !== null) {
+        scrollHost.scrollLeft = coarseScrollLeft
+      }
+      const preciseScrollLeft = getPreciseScrollLeft()
+      if (preciseScrollLeft !== null) {
+        scrollHost.scrollLeft = preciseScrollLeft
         return
       }
-      if (attempts < maxAttempts) {
-        window.requestAnimationFrame(alignSelection)
+      if (attempts < MAX_ATTEMPTS) {
+        window.requestAnimationFrame(runJumpLoop)
+      } else {
+        console.warn(
+          `[osmd-jump] 无法精确定位目标音符，已停在目标小节附近。selection=${selection.staff}:${selection.noteId}[${selection.keyIndex}] pair=${resolvedPairIndex}`,
+        )
       }
     }
 
     window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(alignSelection)
+      window.requestAnimationFrame(runJumpLoop)
     })
   }, [closeOsmdPreview, horizontalMeasureFramesByPair, scoreScaleX])
 
