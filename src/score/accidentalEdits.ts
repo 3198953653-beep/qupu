@@ -1,4 +1,4 @@
-import { normalizeMeasurePairAt } from './accidentals'
+import { buildAccidentalStateBeforeNote, getEffectivePitchForStaffPosition, normalizeMeasurePairAt } from './accidentals'
 import { findSelectionLocationInPairs } from './keyboardEdits'
 import { toTargetAlterFromPaletteAccidental, type NotationPaletteAccidental } from './notationPaletteConfig'
 import { getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './pitchMath'
@@ -327,6 +327,105 @@ export function applyPaletteAccidentalEdit(params: {
       nextPairs: applied.nextPairs,
       nextSelection: { ...activeSelection },
       nextSelections: dedupeSelections([...selectedSelections, activeSelection]),
+      changedPairIndices: applied.changedPairIndices,
+    },
+    error: null,
+  }
+}
+
+export function applyDeleteAccidentalSelection(params: {
+  pairs: MeasurePair[]
+  selection: Selection
+  importedNoteLookup?: Map<string, ImportedNoteLocation> | null
+  keyFifthsByMeasure?: number[] | null
+}): AccidentalEditAttempt {
+  const {
+    pairs,
+    selection,
+    importedNoteLookup = null,
+    keyFifthsByMeasure = null,
+  } = params
+
+  const location = findSelectionLocationInPairs({
+    pairs,
+    selection,
+    importedNoteLookup,
+  })
+  if (!location) {
+    return { result: null, error: 'selection-not-found' }
+  }
+
+  const pair = pairs[location.pairIndex]
+  if (!pair) {
+    return { result: null, error: 'selection-not-found' }
+  }
+
+  const staffNotes = resolveStaffNotes(pair, location.staff)
+  const note = staffNotes[location.noteIndex]
+  if (!note || note.id !== selection.noteId) {
+    return { result: null, error: 'selection-not-found' }
+  }
+  if (note.isRest) {
+    return { result: null, error: 'no-editable-note' }
+  }
+
+  const sourcePitch = getPitchAtKeyIndex(note, selection.keyIndex)
+  if (!sourcePitch) {
+    return { result: null, error: 'selection-not-found' }
+  }
+
+  const renderedAccidental =
+    selection.keyIndex <= 0
+      ? note.accidental ?? null
+      : note.chordAccidentals?.[selection.keyIndex - 1] ?? null
+  if (renderedAccidental === null) {
+    return { result: null, error: 'no-op' }
+  }
+
+  const keyFifths = resolvePairKeyFifths(location.pairIndex, keyFifthsByMeasure)
+  const accidentalStateBeforeNote = buildAccidentalStateBeforeNote(staffNotes, location.noteIndex, keyFifths)
+  const pitchParts = getStepOctaveAlterFromPitch(sourcePitch)
+  const naturalStaffPositionPitch = toPitchFromStepAlter(pitchParts.step, 0, pitchParts.octave)
+  const targetPitch = getEffectivePitchForStaffPosition(
+    naturalStaffPositionPitch,
+    keyFifths,
+    accidentalStateBeforeNote,
+  )
+
+  const expandedTargets = expandTargetsWithFullTieChain({
+    pairs,
+    sources: [
+      {
+        pairIndex: location.pairIndex,
+        noteIndex: location.noteIndex,
+        staff: location.staff,
+        noteId: selection.noteId,
+        keyIndex: selection.keyIndex,
+        note,
+        selection,
+        sourcePitch,
+        targetPitch,
+      },
+    ],
+  })
+  if (expandedTargets.length === 0) {
+    return { result: null, error: 'no-op' }
+  }
+
+  const applied = applyPitchTargetsAndNormalize({
+    pairs,
+    expandedTargets,
+    keyFifthsByMeasure,
+  })
+  if (applied.changedPairIndices.length === 0) {
+    return { result: null, error: 'no-op' }
+  }
+
+  return {
+    result: {
+      nextPairs: applied.nextPairs,
+      nextSelection: { ...selection },
+      nextSelections: [{ ...selection }],
       changedPairIndices: applied.changedPairIndices,
     },
     error: null,

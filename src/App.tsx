@@ -51,7 +51,11 @@ import {
 } from './score/scoreOps'
 import { commitDragPitchToScoreData } from './score/dragInteractions'
 import { applyPaletteDurationEdit, type DurationEditFailureReason } from './score/durationEdits'
-import { applyPaletteAccidentalEdit, type AccidentalEditFailureReason } from './score/accidentalEdits'
+import {
+  applyDeleteAccidentalSelection,
+  applyPaletteAccidentalEdit,
+  type AccidentalEditFailureReason,
+} from './score/accidentalEdits'
 import { appendIntervalKey, deleteSelectedKey, findSelectionLocationInPairs, replaceSelectedKeyPitch } from './score/keyboardEdits'
 import { applyClipboardPaste, buildClipboardFromSelections, type CopyPasteFailureReason } from './score/copyPasteEdits'
 import { getMidiNoteNumber, toPitchFromMidiWithKeyPreference } from './score/midiInput'
@@ -196,6 +200,23 @@ function getAccidentalEditFailureMessage(reason: AccidentalEditFailureReason): s
       return '当前音符已是该变音'
     case 'conflict':
       return '多选目标冲突，未执行修改'
+    default:
+      return '当前操作暂不支持'
+  }
+}
+
+function getDeleteAccidentalFailureMessage(reason: AccidentalEditFailureReason): string {
+  switch (reason) {
+    case 'no-selection':
+      return '未选中可删除的变音记号'
+    case 'selection-not-found':
+      return '未找到目标变音记号'
+    case 'no-editable-note':
+      return '当前目标不可编辑'
+    case 'no-op':
+      return '当前变音记号已不存在'
+    case 'conflict':
+      return '目标冲突，未执行删除'
     default:
       return '当前操作暂不支持'
   }
@@ -1361,6 +1382,7 @@ function App() {
   const [bassNotes, setBassNotes] = useState<ScoreNote[]>(INITIAL_BASS_NOTES)
   const [rhythmPreset, setRhythmPreset] = useState<RhythmPresetId>('quarter')
   const [activeSelection, setActiveSelection] = useState<Selection>({ noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 })
+  const [activeAccidentalSelection, setActiveAccidentalSelection] = useState<Selection | null>(null)
   const [selectedSelections, setSelectedSelections] = useState<Selection[]>([
     { noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 },
   ])
@@ -1770,6 +1792,7 @@ function App() {
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
     activeSelection: isSelectionVisible ? activeSelection : null,
+    activeAccidentalSelection,
     draggingSelection,
     activeSelections: isSelectionVisible ? selectedSelections : [],
     draggingSelections: draggingSelection ? [draggingSelection] : [],
@@ -1882,6 +1905,7 @@ function App() {
     onSelectionPointerDown: (_selection, nextSelections, _mode) => {
       void _selection
       void _mode
+      setActiveAccidentalSelection(null)
       setSelectedMeasureScope(null)
       const nextTargetSelections = nextSelections
       setSelectedSelections((current) => {
@@ -1895,15 +1919,24 @@ function App() {
       })
     },
     onSelectionTapRelease: (selection) => {
+      setActiveAccidentalSelection(null)
       setSelectedMeasureScope(null)
       setSelectedSelections([selection])
       setActiveSelection(selection)
       setIsSelectionVisible(true)
     },
+    onAccidentalPointerDown: (selection) => {
+      setActiveAccidentalSelection(selection)
+      setSelectedMeasureScope(null)
+      setDraggingSelection(null)
+      setSelectedSelections([])
+      setIsSelectionVisible(false)
+    },
     onBeforeApplyScoreChange: (sourcePairs) => {
       pushUndoSnapshot(sourcePairs)
     },
     onBlankPointerDown: ({ pairIndex, staff }) => {
+      setActiveAccidentalSelection(null)
       if (pairIndex === null || staff === null) {
         setIsSelectionVisible(false)
         setSelectedSelections([])
@@ -1930,6 +1963,7 @@ function App() {
       setSelectedMeasureScope({ pairIndex, staff })
     },
     onSelectionActivated: () => {
+      setActiveAccidentalSelection(null)
       setIsSelectionVisible(true)
     },
     measurePairsFromImportRef,
@@ -2170,10 +2204,20 @@ function App() {
     setNotes(flattenTrebleFromPairs(restoredPairs))
     setBassNotes(flattenBassFromPairs(restoredPairs))
     setIsSelectionVisible(snapshot.isSelectionVisible)
+    setActiveAccidentalSelection(null)
+    setSelectedMeasureScope(null)
     setActiveSelection(snapshot.selection)
     setSelectedSelections(snapshot.isSelectionVisible ? [snapshot.selection] : [])
     return true
-  }, [clearDragOverlay, setBassNotes, setMeasurePairsFromImport, setNotes, setDraggingSelection])
+  }, [
+    clearDragOverlay,
+    setActiveAccidentalSelection,
+    setBassNotes,
+    setMeasurePairsFromImport,
+    setNotes,
+    setDraggingSelection,
+    setSelectedMeasureScope,
+  ])
 
   const applyKeyboardEditResult = useCallback(
     (nextPairs: MeasurePair[], nextSelection: Selection, nextSelections: Selection[] = [nextSelection]) => {
@@ -2190,10 +2234,21 @@ function App() {
       setNotes(flattenTrebleFromPairs(nextPairs))
       setBassNotes(flattenBassFromPairs(nextPairs))
       setIsSelectionVisible(true)
+      setActiveAccidentalSelection(null)
+      setSelectedMeasureScope(null)
       setActiveSelection(nextSelection)
       setSelectedSelections(nextSelections)
     },
-    [pushUndoSnapshot, setBassNotes, setMeasurePairsFromImport, setNotes, setActiveSelection, setIsRhythmLinked],
+    [
+      pushUndoSnapshot,
+      setActiveAccidentalSelection,
+      setBassNotes,
+      setMeasurePairsFromImport,
+      setNotes,
+      setActiveSelection,
+      setIsRhythmLinked,
+      setSelectedMeasureScope,
+    ],
   )
 
   const refreshMidiInputs = useCallback((access: WebMidiAccessLike | null) => {
@@ -3365,6 +3420,12 @@ function App() {
         return
       }
 
+      if (event.key === 'Escape' && activeAccidentalSelection) {
+        event.preventDefault()
+        setActiveAccidentalSelection(null)
+        return
+      }
+
       const isCopyShortcut =
         (event.ctrlKey || event.metaKey) &&
         !event.altKey &&
@@ -3424,6 +3485,34 @@ function App() {
         const message = `已粘贴 ${copiedCount} 个音`
         setNotationPaletteLastAction(message)
         console.info('[copy-paste]', message)
+        return
+      }
+
+      if (event.key === 'Delete' && activeAccidentalSelection) {
+        const deleteAttempt = applyDeleteAccidentalSelection({
+          pairs: measurePairs,
+          selection: activeAccidentalSelection,
+          importedNoteLookup: importedNoteLookupRef.current,
+          keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
+        })
+        if (deleteAttempt.error || !deleteAttempt.result) {
+          const message = getDeleteAccidentalFailureMessage(deleteAttempt.error ?? 'selection-not-found')
+          setNotationPaletteLastAction(message)
+          console.info('[accidental-delete]', message)
+          return
+        }
+        event.preventDefault()
+        applyKeyboardEditResult(
+          deleteAttempt.result.nextPairs,
+          deleteAttempt.result.nextSelection,
+          deleteAttempt.result.nextSelections,
+        )
+        setActiveAccidentalSelection(null)
+        setIsSelectionVisible(false)
+        setSelectedSelections([])
+        setSelectedMeasureScope(null)
+        setNotationPaletteLastAction('已删除变音记号（按上下文回落并重算）')
+        console.info('[accidental-delete] 已删除变音记号（按上下文回落并重算）')
         return
       }
 
@@ -3487,6 +3576,7 @@ function App() {
       window.removeEventListener('keydown', onKeyDown)
     }
   }, [
+    activeAccidentalSelection,
     isOsmdPreviewOpen,
     draggingSelection,
     isSelectionVisible,

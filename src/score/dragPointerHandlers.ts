@@ -1,5 +1,5 @@
 import type { Dispatch, MutableRefObject, PointerEvent, SetStateAction } from 'react'
-import { getHitNote } from './layout/hitTest'
+import { getHitTarget } from './layout/hitTest'
 import type { HitGridIndex } from './layout/hitTest'
 import { buildDragStateForHit, getDragMovePitch } from './dragInteractions'
 import { buildSelectionGroupMoveTargets } from './selectionGroupTargets'
@@ -181,6 +181,7 @@ export function handleBeginDragPointer(params: {
     nextSelections: Selection[],
     mode: SelectionPointerMode,
   ) => void
+  onAccidentalPointerDown?: (selection: Selection) => void
   onBlankPointerDown?: (payload: BlankPointerPayload) => void
   onSelectionActivated?: () => void
 }): void {
@@ -207,6 +208,7 @@ export function handleBeginDragPointer(params: {
     setActiveSelection,
     setDraggingSelection,
     onSelectionPointerDown,
+    onAccidentalPointerDown,
     onBlankPointerDown,
     onSelectionActivated,
   } = params
@@ -272,13 +274,27 @@ export function handleBeginDragPointer(params: {
       : 1 / fallbackScaleY
   const x = (event.clientX - rect.left) * clientToScoreScaleX
   const y = (event.clientY - rect.top) * clientToScoreScaleY
-  const hit = getHitNote(x, y, noteLayouts, 0, hitGrid)
-  if (!hit) {
+  const hitTarget = getHitTarget(x, y, noteLayouts, 0, hitGrid)
+  if (!hitTarget) {
     const blankHit = resolveBlankMeasureHit({ x, y, measureLayouts })
     onBlankPointerDown?.(blankHit)
     return
   }
-  const hitHead = hit.head
+
+  if (hitTarget.kind === 'accidental') {
+    event.preventDefault()
+    const selection: Selection = {
+      noteId: hitTarget.layout.id,
+      staff: hitTarget.layout.staff,
+      keyIndex: hitTarget.accidental.keyIndex,
+    }
+    setDraggingSelection(null)
+    onAccidentalPointerDown?.(selection)
+    return
+  }
+
+  const hit = { layout: hitTarget.layout, head: hitTarget.head }
+  const hitHead = hitTarget.head
 
   event.preventDefault()
   dragPreviewFrameRef.current = 0

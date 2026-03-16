@@ -68,6 +68,7 @@ export function useDragHandlers(params: {
     nextSelections: Selection[],
     mode: SelectionPointerMode,
   ) => void
+  onAccidentalPointerDown?: (selection: Selection) => void
   onBeforeApplyScoreChange?: (sourcePairs: MeasurePair[]) => void
   onBlankPointerDown?: (payload: BlankPointerPayload) => void
   onSelectionActivated?: () => void
@@ -131,6 +132,7 @@ export function useDragHandlers(params: {
     setDraggingSelection,
     currentSelections,
     onSelectionPointerDown,
+    onAccidentalPointerDown,
     onBeforeApplyScoreChange,
     onBlankPointerDown,
     onSelectionActivated,
@@ -327,6 +329,7 @@ export function useDragHandlers(params: {
       setActiveSelection,
       setDraggingSelection,
       onSelectionPointerDown,
+      onAccidentalPointerDown,
       onBlankPointerDown,
       onSelectionActivated,
     })

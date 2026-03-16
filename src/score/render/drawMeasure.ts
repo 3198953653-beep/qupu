@@ -50,12 +50,24 @@ const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
 const MIN_FORMAT_WIDTH_PX = 8
 const DEFAULT_NOTE_HEAD_HIT_RADIUS_X = 5.5
 const DEFAULT_NOTE_HEAD_HIT_RADIUS_Y = 4.2
+const DEFAULT_ACCIDENTAL_HIT_RADIUS_Y = 7
 
 function getRestAnchorPitch(staff: StaffKind): Pitch {
   return staff === 'treble' ? 'b/4' : 'd/3'
 }
 
 type NoteHeadHitGeometry = {
+  hitCenterX: number
+  hitCenterY: number
+  hitRadiusX: number
+  hitRadiusY: number
+  hitMinX: number
+  hitMaxX: number
+  hitMinY: number
+  hitMaxY: number
+}
+
+type AccidentalHitGeometry = {
   hitCenterX: number
   hitCenterY: number
   hitRadiusX: number
@@ -118,6 +130,26 @@ function buildNoteHeadHitGeometry(params: {
   }
 }
 
+function buildAccidentalHitGeometry(params: {
+  centerX: number
+  centerY: number
+  width: number
+}): AccidentalHitGeometry {
+  const { centerX, centerY, width } = params
+  const radiusX = Math.max(2, width / 2)
+  const radiusY = Math.max(DEFAULT_ACCIDENTAL_HIT_RADIUS_Y, radiusX + 1)
+  return {
+    hitCenterX: centerX,
+    hitCenterY: centerY,
+    hitRadiusX: radiusX,
+    hitRadiusY: radiusY,
+    hitMinX: centerX - radiusX,
+    hitMaxX: centerX + radiusX,
+    hitMinY: centerY - radiusY,
+    hitMaxY: centerY + radiusY,
+  }
+}
+
 type PreviewNoteOverride = {
   noteId: string
   staff: StaffKind
@@ -141,6 +173,7 @@ export type DrawMeasureParams = {
   endTimeSignature?: TimeSignature | null
   showEndTimeSignature?: boolean
   activeSelection: Selection | null
+  activeAccidentalSelection?: Selection | null
   draggingSelection: Selection | null
   activeSelections?: Selection[] | null
   draggingSelections?: Selection[] | null
@@ -214,6 +247,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     endTimeSignature = null,
     showEndTimeSignature = false,
     activeSelection: selection,
+    activeAccidentalSelection = null,
     draggingSelection: dragging,
     activeSelections = null,
     draggingSelections = null,
@@ -598,6 +632,31 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       }
     })
   })
+
+  if (activeAccidentalSelection) {
+    const applyAccidentalHighlight = (
+      staff: StaffKind,
+      sourceNotes: ScoreNote[],
+      rendered: Array<{ vexNote: StaveNote; renderedKeys: RenderedNoteKey[] }>,
+    ) => {
+      if (activeAccidentalSelection.staff !== staff) return
+      sourceNotes.forEach((sourceNote, noteIndex) => {
+        if (sourceNote.id !== activeAccidentalSelection.noteId) return
+        const renderedEntry = rendered[noteIndex]
+        if (!renderedEntry) return
+        const renderedIndex = renderedEntry.renderedKeys.findIndex(
+          (entry) => entry.keyIndex === activeAccidentalSelection.keyIndex,
+        )
+        if (renderedIndex < 0) return
+        const accidentalModifier = renderedEntry.vexNote
+          .getModifiersByType(Accidental.CATEGORY)
+          .find((modifier) => modifier.getIndex() === renderedIndex) as Accidental | undefined
+        accidentalModifier?.setStyle({ fillStyle: '#2437E8', strokeStyle: '#2437E8' })
+      })
+    }
+    applyAccidentalHighlight('treble', measure.treble, trebleRendered)
+    applyAccidentalHighlight('bass', measure.bass, bassRendered)
+  }
 
   const trebleVoice = new Voice({ numBeats: timeSignature.beats, beatValue: timeSignature.beatType }).addTickables(trebleVexNotes)
   const bassVoice = new Voice({ numBeats: timeSignature.beats, beatValue: timeSignature.beatType }).addTickables(bassVexNotes)
@@ -1194,6 +1253,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           y: 0,
           pitchYMap: {},
           noteHeads: [],
+          accidentalLayouts: [],
           accidentalRightXByKeyIndex: {},
         }
       })
@@ -1306,6 +1366,29 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       })
       const accidentalByRenderedIndex = getAccidentalRightXByRenderedIndex(vexNote)
       const accidentalRightXByKeyIndex: Record<number, number> = {}
+      const accidentalLayouts = renderedKeys.flatMap((entry, renderedIndex) => {
+        const accidentalX = accidentalByRenderedIndex.get(renderedIndex)
+        if (accidentalX === undefined || !entry.accidental) return []
+        const modifier = vexNote
+          .getModifiersByType(Accidental.CATEGORY)
+          .find((candidate) => candidate.getIndex() === renderedIndex) as Accidental | undefined
+        const width = Number.isFinite(modifier?.getWidth()) ? (modifier?.getWidth() as number) : 8
+        const centerX = accidentalX + width / 2
+        const centerY = ys[renderedIndex] ?? ys[0] ?? 0
+        return [
+          {
+            keyIndex: entry.keyIndex,
+            x: centerX,
+            y: centerY,
+            renderedAccidental: entry.accidental,
+            ...buildAccidentalHitGeometry({
+              centerX,
+              centerY,
+              width,
+            }),
+          },
+        ]
+      })
       renderedKeys.forEach((entry, renderedIndex) => {
         const offset = accidentalByRenderedIndex.get(renderedIndex)
         if (offset === undefined) return
@@ -1342,6 +1425,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         y: rootHead?.y ?? ys[0] ?? 0,
         pitchYMap: treblePitchYMap,
         noteHeads,
+        accidentalLayouts,
         accidentalRightXByKeyIndex,
       }
     }),
@@ -1357,6 +1441,29 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       })
       const accidentalByRenderedIndex = getAccidentalRightXByRenderedIndex(vexNote)
       const accidentalRightXByKeyIndex: Record<number, number> = {}
+      const accidentalLayouts = renderedKeys.flatMap((entry, renderedIndex) => {
+        const accidentalX = accidentalByRenderedIndex.get(renderedIndex)
+        if (accidentalX === undefined || !entry.accidental) return []
+        const modifier = vexNote
+          .getModifiersByType(Accidental.CATEGORY)
+          .find((candidate) => candidate.getIndex() === renderedIndex) as Accidental | undefined
+        const width = Number.isFinite(modifier?.getWidth()) ? (modifier?.getWidth() as number) : 8
+        const centerX = accidentalX + width / 2
+        const centerY = ys[renderedIndex] ?? ys[0] ?? 0
+        return [
+          {
+            keyIndex: entry.keyIndex,
+            x: centerX,
+            y: centerY,
+            renderedAccidental: entry.accidental,
+            ...buildAccidentalHitGeometry({
+              centerX,
+              centerY,
+              width,
+            }),
+          },
+        ]
+      })
       renderedKeys.forEach((entry, renderedIndex) => {
         const offset = accidentalByRenderedIndex.get(renderedIndex)
         if (offset === undefined) return
@@ -1393,6 +1500,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         y: rootHead?.y ?? ys[0] ?? 0,
         pitchYMap: bassPitchYMap,
         noteHeads,
+        accidentalLayouts,
         accidentalRightXByKeyIndex,
       }
     }),

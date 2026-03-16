@@ -282,6 +282,7 @@ export function renderVisibleSystems(params: {
   measureKeyFifthsFromImport: number[] | null
   measureTimeSignaturesFromImport: TimeSignature[] | null
   activeSelection: Selection | null
+  activeAccidentalSelection?: Selection | null
   draggingSelection: Selection | null
   activeSelections?: Selection[] | null
   draggingSelections?: Selection[] | null
@@ -317,6 +318,7 @@ export function renderVisibleSystems(params: {
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
     activeSelection,
+    activeAccidentalSelection = null,
     draggingSelection,
     activeSelections = null,
     draggingSelections = null,
@@ -813,6 +815,7 @@ export function renderVisibleSystems(params: {
           endTimeSignature: entry.nextTimeSignature,
           showEndTimeSignature: entry.showEndTimeSignature,
           activeSelection,
+          activeAccidentalSelection,
           draggingSelection,
           activeSelections,
           draggingSelections,
@@ -1025,6 +1028,7 @@ export function renderVisibleSystems(params: {
           endTimeSignature: entry.nextTimeSignature,
           showEndTimeSignature: entry.showEndTimeSignature,
           activeSelection,
+          activeAccidentalSelection,
           draggingSelection,
           activeSelections,
           draggingSelections,
@@ -1377,6 +1381,7 @@ export function renderVisibleSystems(params: {
         endTimeSignature: entry.nextTimeSignature,
         showEndTimeSignature: entry.showEndTimeSignature,
         activeSelection,
+        activeAccidentalSelection,
         draggingSelection,
         activeSelections,
         draggingSelections,

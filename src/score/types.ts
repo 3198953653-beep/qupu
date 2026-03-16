@@ -86,6 +86,21 @@ export type NoteHeadLayout = {
   hitMaxY?: number
 }
 
+export type AccidentalLayout = {
+  keyIndex: number
+  x: number
+  y: number
+  renderedAccidental: string
+  hitCenterX?: number
+  hitCenterY?: number
+  hitRadiusX?: number
+  hitRadiusY?: number
+  hitMinX?: number
+  hitMaxX?: number
+  hitMinY?: number
+  hitMaxY?: number
+}
+
 export type NoteLayout = {
   id: string
   staff: StaffKind
@@ -97,6 +112,7 @@ export type NoteLayout = {
   y: number
   pitchYMap: Record<Pitch, number>
   noteHeads: NoteHeadLayout[]
+  accidentalLayouts: AccidentalLayout[]
   accidentalRightXByKeyIndex: Record<number, number>
 }
 

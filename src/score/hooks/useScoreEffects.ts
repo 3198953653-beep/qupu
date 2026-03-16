@@ -194,6 +194,7 @@ export function useScoreRenderEffect(params: {
   measureKeyFifthsFromImport: number[] | null
   measureTimeSignaturesFromImport: TimeSignature[] | null
   activeSelection?: Selection | null
+  activeAccidentalSelection?: Selection | null
   draggingSelection?: Selection | null
   activeSelections?: Selection[] | null
   draggingSelections?: Selection[] | null
@@ -234,6 +235,7 @@ export function useScoreRenderEffect(params: {
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
     activeSelection = null,
+    activeAccidentalSelection = null,
     draggingSelection = null,
     activeSelections = null,
     draggingSelections = null,
@@ -332,6 +334,7 @@ export function useScoreRenderEffect(params: {
       measureKeyFifthsFromImport,
       measureTimeSignaturesFromImport,
       activeSelection,
+      activeAccidentalSelection,
       draggingSelection,
       activeSelections,
       draggingSelections,
@@ -370,6 +373,7 @@ export function useScoreRenderEffect(params: {
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
     activeSelection,
+    activeAccidentalSelection,
     draggingSelection,
     activeSelections,
     draggingSelections,
