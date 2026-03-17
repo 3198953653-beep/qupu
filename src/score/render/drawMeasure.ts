@@ -23,6 +23,7 @@ import { getStepOctaveAlterFromPitch } from '../pitchMath'
 import { buildPitchLineMap, createPianoPitches, getPitchLine, getStrictStemDirection } from '../pitchUtils'
 import { getTieFrozenIncoming } from '../tieFrozen'
 import { getDragPreviewTargetKey } from './dragPreviewOverrides'
+import { buildTieLayout } from './tieLayoutGeometry'
 import type { RenderedNoteKey } from '../accidentals'
 import type { PublicAxisLayout } from '../timeline/types'
 import type {
@@ -36,6 +37,8 @@ import type {
   Selection,
   SpacingLayoutMode,
   StaffKind,
+  TieEndpoint,
+  TieLayout,
   TimeSignature,
 } from '../types'
 
@@ -174,6 +177,7 @@ export type DrawMeasureParams = {
   showEndTimeSignature?: boolean
   activeSelection: Selection | null
   activeAccidentalSelection?: Selection | null
+  activeTieSegmentKey?: string | null
   draggingSelection: Selection | null
   activeSelections?: Selection[] | null
   draggingSelections?: Selection[] | null
@@ -248,6 +252,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     showEndTimeSignature = false,
     activeSelection: selection,
     activeAccidentalSelection = null,
+    activeTieSegmentKey = null,
     draggingSelection: dragging,
     activeSelections = null,
     draggingSelections = null,
@@ -309,6 +314,17 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   }
   selectionEntries.forEach((entry) => appendSelectionKey(selectionKeySetByLayout, entry))
   draggingEntries.forEach((entry) => appendSelectionKey(draggingKeySetByLayout, entry))
+  const inMeasureTieLayoutsByLayoutKey = new Map<string, TieLayout[]>()
+  const appendInMeasureTieLayout = (layoutKey: string, tieLayout: TieLayout) => {
+    const existing = inMeasureTieLayoutsByLayoutKey.get(layoutKey)
+    if (existing) {
+      if (!existing.some((entry) => entry.key === tieLayout.key)) {
+        existing.push(tieLayout)
+      }
+      return
+    }
+    inMeasureTieLayoutsByLayoutKey.set(layoutKey, [tieLayout])
+  }
   const lockPreviewAccidentalLayout = freezePreviewAccidentalLayout && normalizedPreviewNotes.length > 0
   const previewAccidentalByRowKey = new Map<string, number>()
   const accidentalLockByRowKey = new Map<string, { targetRightX: number | null; applied: boolean; reason: string }>()
@@ -954,12 +970,15 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     return rendered.renderedKeys.findIndex((entry) => entry.pitch === pitch)
   }
 
+  const tieHighlightFill = '#2437E8'
+
   const drawTieCurveByAnchors = (
     startX: number,
     startY: number,
     endX: number,
     endY: number,
     direction: number,
+    highlighted: boolean,
   ) => {
     const safeStartX = Math.min(startX, endX - 0.5)
     const safeEndX = Math.max(endX, startX + 0.5)
@@ -969,6 +988,11 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       firstIndexes: [0],
       lastIndexes: [0],
     })
+    if (highlighted) {
+      context.save()
+      context.setFillStyle(tieHighlightFill)
+      context.setStrokeStyle(tieHighlightFill)
+    }
     tie.setContext(context)
     tie.renderTie({
       firstX: safeStartX,
@@ -977,6 +1001,9 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       lastYs: [endY],
       direction,
     })
+    if (highlighted) {
+      context.restore()
+    }
   }
 
   const getTieAnchorX = (
@@ -1045,12 +1072,38 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     return null
   }
 
+  const resolveStopEndpointInMeasure = (params: {
+    sourceNotes: ScoreNote[]
+    rendered: Array<{ vexNote: StaveNote; renderedKeys: RenderedNoteKey[] }>
+    staff: StaffKind
+    targetNoteIndex: number
+    targetPitch: Pitch
+  }): TieEndpoint | null => {
+    const { sourceNotes, rendered, staff, targetNoteIndex, targetPitch } = params
+    const note = sourceNotes[targetNoteIndex]
+    if (!note || note.isRest) return null
+    const specs = getTieKeySpecs(note, rendered[targetNoteIndex])
+    const resolvedSpec =
+      specs.find((spec) => spec.tieStop && spec.pitch === targetPitch) ??
+      specs.find((spec) => spec.pitch === targetPitch) ??
+      null
+    if (!resolvedSpec) return null
+    return {
+      pairIndex,
+      noteIndex: targetNoteIndex,
+      staff,
+      noteId: note.id,
+      keyIndex: resolvedSpec.keyIndex,
+      tieType: 'stop',
+    }
+  }
+
   const drawTiesForStaff = (
     sourceNotes: ScoreNote[],
     rendered: Array<{ vexNote: StaveNote; renderedKeys: RenderedNoteKey[] }>,
     staff: StaffKind,
   ) => {
-    if (isSpacingOnlyLayout || skipPainting) return
+    if (isSpacingOnlyLayout) return
 
     for (let noteIndex = 0; noteIndex < sourceNotes.length; noteIndex += 1) {
       const sourceNote = sourceNotes[noteIndex]
@@ -1070,6 +1123,51 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           noteId: sourceNote.id,
           keyIndex: spec.keyIndex,
         })
+        const tieDirection = getPitchLine(staff, spec.pitch) < 3 ? 1 : -1
+        const sourceLayoutKey = getLayoutNoteKey(staff, sourceNote.id)
+        const sourceStartEndpoint: TieEndpoint = {
+          pairIndex,
+          noteIndex,
+          staff,
+          noteId: sourceNote.id,
+          keyIndex: spec.keyIndex,
+          tieType: 'start',
+        }
+        const sourceStopEndpoint: TieEndpoint = {
+          pairIndex,
+          noteIndex,
+          staff,
+          noteId: sourceNote.id,
+          keyIndex: spec.keyIndex,
+          tieType: 'stop',
+        }
+        const drawInMeasureTieSegment = (params: {
+          startX: number
+          endX: number
+          y: number
+          endpoints: TieEndpoint[]
+        }) => {
+          const { startX, endX, y, endpoints } = params
+          if (!Number.isFinite(startX) || !Number.isFinite(endX) || !Number.isFinite(y)) return
+          const tieLayout = buildTieLayout({
+            startX,
+            startY: y,
+            endX,
+            endY: y,
+            direction: tieDirection,
+            endpoints,
+          })
+          appendInMeasureTieLayout(sourceLayoutKey, tieLayout)
+          if (skipPainting) return
+          drawTieCurveByAnchors(
+            startX,
+            y,
+            endX,
+            y,
+            tieDirection,
+            activeTieSegmentKey === tieLayout.key,
+          )
+        }
 
         if (spec.tieStart) {
           if (suppressedTieStartKeys?.has(tieTargetKey)) return
@@ -1080,13 +1178,16 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
             previewFrozenBoundaryCurve.fromNoteId === sourceNote.id &&
             previewFrozenBoundaryCurve.fromKeyIndex === spec.keyIndex
           ) {
-            drawTieCurveByAnchors(
-              previewFrozenBoundaryCurve.startX,
-              previewFrozenBoundaryCurve.startY,
-              previewFrozenBoundaryCurve.endX,
-              previewFrozenBoundaryCurve.endY,
-              getPitchLine(staff, spec.pitch) < 3 ? 1 : -1,
-            )
+            if (!skipPainting) {
+              drawTieCurveByAnchors(
+                previewFrozenBoundaryCurve.startX,
+                previewFrozenBoundaryCurve.startY,
+                previewFrozenBoundaryCurve.endX,
+                previewFrozenBoundaryCurve.endY,
+                tieDirection,
+                false,
+              )
+            }
             return
           }
 
@@ -1112,16 +1213,25 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
                   typeof endX === 'number' &&
                   Number.isFinite(endX)
                 ) {
-                drawTieCurveByAnchors(
-                  startX,
-                  translatedY,
-                  endX,
-                  translatedY,
-                  getPitchLine(staff, spec.pitch) < 3 ? 1 : -1,
-                )
-                return
+                  const targetNote = sourceNotes[frozenTarget.noteIndex]
+                  if (!targetNote) return
+                  const targetEndpoint: TieEndpoint = {
+                    pairIndex,
+                    noteIndex: frozenTarget.noteIndex,
+                    staff,
+                    noteId: targetNote.id,
+                    keyIndex: frozenTarget.keyIndex,
+                    tieType: 'stop',
+                  }
+                  drawInMeasureTieSegment({
+                    startX,
+                    endX,
+                    y: translatedY,
+                    endpoints: [sourceStartEndpoint, targetEndpoint],
+                  })
+                  return
+                }
               }
-            }
           }
 
           const renderedNext = rendered[noteIndex + 1]
@@ -1138,13 +1248,19 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
               typeof endX === 'number' &&
               Number.isFinite(endX)
             ) {
-              drawTieCurveByAnchors(
+              const targetEndpoint = resolveStopEndpointInMeasure({
+                sourceNotes,
+                rendered,
+                staff,
+                targetNoteIndex: noteIndex + 1,
+                targetPitch: spec.pitch,
+              })
+              drawInMeasureTieSegment({
                 startX,
-                translatedY,
                 endX,
-                translatedY,
-                getPitchLine(staff, spec.pitch) < 3 ? 1 : -1,
-              )
+                y: translatedY,
+                endpoints: targetEndpoint ? [sourceStartEndpoint, targetEndpoint] : [sourceStartEndpoint],
+              })
               return
             }
           }
@@ -1169,25 +1285,34 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
                 typeof endX === 'number' &&
                 Number.isFinite(endX)
               ) {
-                drawTieCurveByAnchors(
+                drawInMeasureTieSegment({
                   startX,
-                  translatedY,
                   endX,
-                  translatedY,
-                  getPitchLine(staff, spec.pitch) < 3 ? 1 : -1,
-                )
+                  y: translatedY,
+                  endpoints: [sourceStartEndpoint],
+                })
                 return
               }
             }
           } else if (renderBoundaryPartialTies) {
-            new StaveTie({
-              firstNote: renderedCurrent.vexNote,
-              lastNote: null,
-              firstIndexes: [currentRenderedIndex],
-              lastIndexes: [currentRenderedIndex],
-            })
-              .setContext(context)
-              .draw()
+            const translatedY =
+              renderedCurrent.vexNote.getYs()[currentRenderedIndex] ?? renderedCurrent.vexNote.getYs()[0]
+            const startX = getTieAnchorX(renderedCurrent, currentRenderedIndex)
+            const rightBoundaryX = measureX + measureWidth - 1
+            if (
+              Number.isFinite(translatedY) &&
+              typeof startX === 'number' &&
+              Number.isFinite(startX) &&
+              Number.isFinite(rightBoundaryX) &&
+              rightBoundaryX > startX + 0.5
+            ) {
+              drawInMeasureTieSegment({
+                startX,
+                endX: rightBoundaryX,
+                y: translatedY,
+                endpoints: [sourceStartEndpoint],
+              })
+            }
           }
         }
 
@@ -1205,14 +1330,24 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           if (hasIncomingTieInCurrentMeasure) return
 
           if (renderBoundaryPartialTies) {
-            new StaveTie({
-              firstNote: null,
-              lastNote: renderedCurrent.vexNote,
-              firstIndexes: [currentRenderedIndex],
-              lastIndexes: [currentRenderedIndex],
-            })
-              .setContext(context)
-              .draw()
+            const translatedY =
+              renderedCurrent.vexNote.getYs()[currentRenderedIndex] ?? renderedCurrent.vexNote.getYs()[0]
+            const endX = getTieAnchorX(renderedCurrent, currentRenderedIndex)
+            const leftBoundaryX = measureX + 1
+            if (
+              Number.isFinite(translatedY) &&
+              typeof endX === 'number' &&
+              Number.isFinite(endX) &&
+              Number.isFinite(leftBoundaryX) &&
+              endX > leftBoundaryX + 0.5
+            ) {
+              drawInMeasureTieSegment({
+                startX: leftBoundaryX,
+                endX,
+                y: translatedY,
+                endpoints: [sourceStopEndpoint],
+              })
+            }
           }
         }
       })
@@ -1254,6 +1389,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           pitchYMap: {},
           noteHeads: [],
           accidentalLayouts: [],
+          inMeasureTieLayouts: [],
+          crossMeasureTieLayouts: [],
           accidentalRightXByKeyIndex: {},
         }
       })
@@ -1414,6 +1551,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       const rootHead = noteHeads.find((head) => head.keyIndex === 0) ?? noteHeads[0]
       const noteSpacingRightX = getRenderedNoteSpacingRightX(vexNote, noteHeads)
       const noteRightX = isSpacingOnlyLayout ? noteSpacingRightX : getRenderedNoteRightX(vexNote, noteHeads)
+      const layoutKey = getLayoutNoteKey('treble', measure.treble[noteIndex].id)
       return {
         id: measure.treble[noteIndex].id,
         staff: 'treble' as const,
@@ -1426,6 +1564,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         pitchYMap: treblePitchYMap,
         noteHeads,
         accidentalLayouts,
+        inMeasureTieLayouts: inMeasureTieLayoutsByLayoutKey.get(layoutKey) ?? [],
+        crossMeasureTieLayouts: [],
         accidentalRightXByKeyIndex,
       }
     }),
@@ -1489,6 +1629,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       const rootHead = noteHeads.find((head) => head.keyIndex === 0) ?? noteHeads[0]
       const noteSpacingRightX = getRenderedNoteSpacingRightX(vexNote, noteHeads)
       const noteRightX = isSpacingOnlyLayout ? noteSpacingRightX : getRenderedNoteRightX(vexNote, noteHeads)
+      const layoutKey = getLayoutNoteKey('bass', measure.bass[noteIndex].id)
       return {
         id: measure.bass[noteIndex].id,
         staff: 'bass' as const,
@@ -1501,6 +1642,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         pitchYMap: bassPitchYMap,
         noteHeads,
         accidentalLayouts,
+        inMeasureTieLayouts: inMeasureTieLayoutsByLayoutKey.get(layoutKey) ?? [],
+        crossMeasureTieLayouts: [],
         accidentalRightXByKeyIndex,
       }
     }),

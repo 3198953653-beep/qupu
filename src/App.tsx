@@ -56,6 +56,7 @@ import {
   applyPaletteAccidentalEdit,
   type AccidentalEditFailureReason,
 } from './score/accidentalEdits'
+import { applyDeleteTieSelection, type TieDeleteFailureReason } from './score/tieEdits'
 import { appendIntervalKey, deleteSelectedKey, findSelectionLocationInPairs, replaceSelectedKeyPitch } from './score/keyboardEdits'
 import { applyClipboardPaste, buildClipboardFromSelections, type CopyPasteFailureReason } from './score/copyPasteEdits'
 import { getMidiNoteNumber, toPitchFromMidiWithKeyPreference } from './score/midiInput'
@@ -91,6 +92,7 @@ import type {
   ScoreNote,
   Selection,
   SpacingLayoutMode,
+  TieSelection,
   TimeSignature,
 } from './score/types'
 
@@ -217,6 +219,17 @@ function getDeleteAccidentalFailureMessage(reason: AccidentalEditFailureReason):
       return '当前变音记号已不存在'
     case 'conflict':
       return '目标冲突，未执行删除'
+    default:
+      return '当前操作暂不支持'
+  }
+}
+
+function getDeleteTieFailureMessage(reason: TieDeleteFailureReason): string {
+  switch (reason) {
+    case 'selection-not-found':
+      return '未找到目标延音线'
+    case 'no-op':
+      return '当前延音线已不存在'
     default:
       return '当前操作暂不支持'
   }
@@ -1383,6 +1396,7 @@ function App() {
   const [rhythmPreset, setRhythmPreset] = useState<RhythmPresetId>('quarter')
   const [activeSelection, setActiveSelection] = useState<Selection>({ noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 })
   const [activeAccidentalSelection, setActiveAccidentalSelection] = useState<Selection | null>(null)
+  const [activeTieSelection, setActiveTieSelection] = useState<TieSelection | null>(null)
   const [selectedSelections, setSelectedSelections] = useState<Selection[]>([
     { noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 },
   ])
@@ -1793,6 +1807,7 @@ function App() {
     measureTimeSignaturesFromImport,
     activeSelection: isSelectionVisible ? activeSelection : null,
     activeAccidentalSelection,
+    activeTieSegmentKey: activeTieSelection?.key ?? null,
     draggingSelection,
     activeSelections: isSelectionVisible ? selectedSelections : [],
     draggingSelections: draggingSelection ? [draggingSelection] : [],
@@ -1906,6 +1921,7 @@ function App() {
       void _selection
       void _mode
       setActiveAccidentalSelection(null)
+      setActiveTieSelection(null)
       setSelectedMeasureScope(null)
       const nextTargetSelections = nextSelections
       setSelectedSelections((current) => {
@@ -1920,6 +1936,7 @@ function App() {
     },
     onSelectionTapRelease: (selection) => {
       setActiveAccidentalSelection(null)
+      setActiveTieSelection(null)
       setSelectedMeasureScope(null)
       setSelectedSelections([selection])
       setActiveSelection(selection)
@@ -1927,6 +1944,15 @@ function App() {
     },
     onAccidentalPointerDown: (selection) => {
       setActiveAccidentalSelection(selection)
+      setActiveTieSelection(null)
+      setSelectedMeasureScope(null)
+      setDraggingSelection(null)
+      setSelectedSelections([])
+      setIsSelectionVisible(false)
+    },
+    onTiePointerDown: (selection) => {
+      setActiveTieSelection(selection)
+      setActiveAccidentalSelection(null)
       setSelectedMeasureScope(null)
       setDraggingSelection(null)
       setSelectedSelections([])
@@ -1937,6 +1963,7 @@ function App() {
     },
     onBlankPointerDown: ({ pairIndex, staff }) => {
       setActiveAccidentalSelection(null)
+      setActiveTieSelection(null)
       if (pairIndex === null || staff === null) {
         setIsSelectionVisible(false)
         setSelectedSelections([])
@@ -1964,6 +1991,7 @@ function App() {
     },
     onSelectionActivated: () => {
       setActiveAccidentalSelection(null)
+      setActiveTieSelection(null)
       setIsSelectionVisible(true)
     },
     measurePairsFromImportRef,
@@ -2135,6 +2163,26 @@ function App() {
     }
   }, [selectedMeasureScope, measurePairs.length])
   useEffect(() => {
+    if (!activeTieSelection) return
+    const stillExists = activeTieSelection.endpoints.some((endpoint) => {
+      const pair = measurePairs[endpoint.pairIndex]
+      if (!pair) return false
+      const staffNotes = endpoint.staff === 'treble' ? pair.treble : pair.bass
+      const note = staffNotes[endpoint.noteIndex] ?? staffNotes.find((entry) => entry.id === endpoint.noteId)
+      if (!note || note.id !== endpoint.noteId) return false
+      if (endpoint.tieType === 'start') {
+        return endpoint.keyIndex <= 0
+          ? Boolean(note.tieStart)
+          : Boolean(note.chordTieStarts?.[endpoint.keyIndex - 1])
+      }
+      return endpoint.keyIndex <= 0
+        ? Boolean(note.tieStop)
+        : Boolean(note.chordTieStops?.[endpoint.keyIndex - 1])
+    })
+    if (stillExists) return
+    setActiveTieSelection(null)
+  }, [activeTieSelection, measurePairs])
+  useEffect(() => {
     isSelectionVisibleRef.current = isSelectionVisible
   }, [isSelectionVisible])
   useEffect(() => {
@@ -2205,6 +2253,7 @@ function App() {
     setBassNotes(flattenBassFromPairs(restoredPairs))
     setIsSelectionVisible(snapshot.isSelectionVisible)
     setActiveAccidentalSelection(null)
+    setActiveTieSelection(null)
     setSelectedMeasureScope(null)
     setActiveSelection(snapshot.selection)
     setSelectedSelections(snapshot.isSelectionVisible ? [snapshot.selection] : [])
@@ -2212,6 +2261,7 @@ function App() {
   }, [
     clearDragOverlay,
     setActiveAccidentalSelection,
+    setActiveTieSelection,
     setBassNotes,
     setMeasurePairsFromImport,
     setNotes,
@@ -2235,6 +2285,7 @@ function App() {
       setBassNotes(flattenBassFromPairs(nextPairs))
       setIsSelectionVisible(true)
       setActiveAccidentalSelection(null)
+      setActiveTieSelection(null)
       setSelectedMeasureScope(null)
       setActiveSelection(nextSelection)
       setSelectedSelections(nextSelections)
@@ -2242,6 +2293,7 @@ function App() {
     [
       pushUndoSnapshot,
       setActiveAccidentalSelection,
+      setActiveTieSelection,
       setBassNotes,
       setMeasurePairsFromImport,
       setNotes,
@@ -3420,6 +3472,12 @@ function App() {
         return
       }
 
+      if (event.key === 'Escape' && activeTieSelection) {
+        event.preventDefault()
+        setActiveTieSelection(null)
+        return
+      }
+
       if (event.key === 'Escape' && activeAccidentalSelection) {
         event.preventDefault()
         setActiveAccidentalSelection(null)
@@ -3485,6 +3543,33 @@ function App() {
         const message = `已粘贴 ${copiedCount} 个音`
         setNotationPaletteLastAction(message)
         console.info('[copy-paste]', message)
+        return
+      }
+
+      if (event.key === 'Delete' && activeTieSelection) {
+        const deleteAttempt = applyDeleteTieSelection({
+          pairs: measurePairs,
+          selection: activeTieSelection,
+          fallbackSelection: activeSelection,
+        })
+        if (deleteAttempt.error || !deleteAttempt.result) {
+          const message = getDeleteTieFailureMessage(deleteAttempt.error ?? 'selection-not-found')
+          setNotationPaletteLastAction(message)
+          console.info('[tie-delete]', message)
+          return
+        }
+        event.preventDefault()
+        applyKeyboardEditResult(
+          deleteAttempt.result.nextPairs,
+          deleteAttempt.result.nextSelection,
+          deleteAttempt.result.nextSelections,
+        )
+        setActiveTieSelection(null)
+        setIsSelectionVisible(false)
+        setSelectedSelections([])
+        setSelectedMeasureScope(null)
+        setNotationPaletteLastAction('已删除延音线')
+        console.info('[tie-delete] 已删除延音线')
         return
       }
 
@@ -3577,6 +3662,7 @@ function App() {
     }
   }, [
     activeAccidentalSelection,
+    activeTieSelection,
     isOsmdPreviewOpen,
     draggingSelection,
     isSelectionVisible,

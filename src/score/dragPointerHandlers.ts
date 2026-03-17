@@ -5,6 +5,7 @@ import { buildDragStateForHit, getDragMovePitch } from './dragInteractions'
 import { buildSelectionGroupMoveTargets } from './selectionGroupTargets'
 import { buildSelectionsInTimelineRange } from './selectionTimelineRange'
 import { getTieFrozenIncoming } from './tieFrozen'
+import { cloneTieSelection } from './tieSelection'
 import type {
   DragDebugSnapshot,
   DragState,
@@ -15,6 +16,7 @@ import type {
   Pitch,
   ScoreNote,
   Selection,
+  TieSelection,
 } from './types'
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>
@@ -182,6 +184,7 @@ export function handleBeginDragPointer(params: {
     mode: SelectionPointerMode,
   ) => void
   onAccidentalPointerDown?: (selection: Selection) => void
+  onTiePointerDown?: (selection: TieSelection) => void
   onBlankPointerDown?: (payload: BlankPointerPayload) => void
   onSelectionActivated?: () => void
 }): void {
@@ -209,6 +212,7 @@ export function handleBeginDragPointer(params: {
     setDraggingSelection,
     onSelectionPointerDown,
     onAccidentalPointerDown,
+    onTiePointerDown,
     onBlankPointerDown,
     onSelectionActivated,
   } = params
@@ -290,6 +294,13 @@ export function handleBeginDragPointer(params: {
     }
     setDraggingSelection(null)
     onAccidentalPointerDown?.(selection)
+    return
+  }
+
+  if (hitTarget.kind === 'tie') {
+    event.preventDefault()
+    setDraggingSelection(null)
+    onTiePointerDown?.(cloneTieSelection(hitTarget.tie))
     return
   }
 

@@ -32,6 +32,7 @@ import type {
   ScoreNote,
   Selection,
   SpacingLayoutMode,
+  TieSelection,
 } from './types'
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>
@@ -69,6 +70,7 @@ export function useDragHandlers(params: {
     mode: SelectionPointerMode,
   ) => void
   onAccidentalPointerDown?: (selection: Selection) => void
+  onTiePointerDown?: (selection: TieSelection) => void
   onBeforeApplyScoreChange?: (sourcePairs: MeasurePair[]) => void
   onBlankPointerDown?: (payload: BlankPointerPayload) => void
   onSelectionActivated?: () => void
@@ -133,6 +135,7 @@ export function useDragHandlers(params: {
     currentSelections,
     onSelectionPointerDown,
     onAccidentalPointerDown,
+    onTiePointerDown,
     onBeforeApplyScoreChange,
     onBlankPointerDown,
     onSelectionActivated,
@@ -330,6 +333,7 @@ export function useDragHandlers(params: {
       setDraggingSelection,
       onSelectionPointerDown,
       onAccidentalPointerDown,
+      onTiePointerDown,
       onBlankPointerDown,
       onSelectionActivated,
     })

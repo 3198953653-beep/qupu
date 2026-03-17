@@ -195,6 +195,7 @@ export function useScoreRenderEffect(params: {
   measureTimeSignaturesFromImport: TimeSignature[] | null
   activeSelection?: Selection | null
   activeAccidentalSelection?: Selection | null
+  activeTieSegmentKey?: string | null
   draggingSelection?: Selection | null
   activeSelections?: Selection[] | null
   draggingSelections?: Selection[] | null
@@ -236,6 +237,7 @@ export function useScoreRenderEffect(params: {
     measureTimeSignaturesFromImport,
     activeSelection = null,
     activeAccidentalSelection = null,
+    activeTieSegmentKey = null,
     draggingSelection = null,
     activeSelections = null,
     draggingSelections = null,
@@ -335,6 +337,7 @@ export function useScoreRenderEffect(params: {
       measureTimeSignaturesFromImport,
       activeSelection,
       activeAccidentalSelection,
+      activeTieSegmentKey,
       draggingSelection,
       activeSelections,
       draggingSelections,
@@ -374,6 +377,7 @@ export function useScoreRenderEffect(params: {
     measureTimeSignaturesFromImport,
     activeSelection,
     activeAccidentalSelection,
+    activeTieSegmentKey,
     draggingSelection,
     activeSelections,
     draggingSelections,

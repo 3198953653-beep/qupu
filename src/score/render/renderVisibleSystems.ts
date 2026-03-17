@@ -283,6 +283,7 @@ export function renderVisibleSystems(params: {
   measureTimeSignaturesFromImport: TimeSignature[] | null
   activeSelection: Selection | null
   activeAccidentalSelection?: Selection | null
+  activeTieSegmentKey?: string | null
   draggingSelection: Selection | null
   activeSelections?: Selection[] | null
   draggingSelections?: Selection[] | null
@@ -319,6 +320,7 @@ export function renderVisibleSystems(params: {
     measureTimeSignaturesFromImport,
     activeSelection,
     activeAccidentalSelection = null,
+    activeTieSegmentKey = null,
     draggingSelection,
     activeSelections = null,
     draggingSelections = null,
@@ -534,6 +536,7 @@ export function renderVisibleSystems(params: {
         suppressedTieStartKeys: dragPreviewSuppressedTieStartKeys,
         suppressedTieStopKeys: dragPreviewSuppressedTieStopKeys,
         allowBoundaryPartialTies: !(dragPreview && dragPreview.previewStarted),
+        activeTieSegmentKey,
       })
     }
     // Apply spacing freeze while dragging; optionally allow post-release freeze
@@ -816,6 +819,7 @@ export function renderVisibleSystems(params: {
           showEndTimeSignature: entry.showEndTimeSignature,
           activeSelection,
           activeAccidentalSelection,
+          activeTieSegmentKey,
           draggingSelection,
           activeSelections,
           draggingSelections,
@@ -1029,6 +1033,7 @@ export function renderVisibleSystems(params: {
           showEndTimeSignature: entry.showEndTimeSignature,
           activeSelection,
           activeAccidentalSelection,
+          activeTieSegmentKey,
           draggingSelection,
           activeSelections,
           draggingSelections,
@@ -1382,6 +1387,7 @@ export function renderVisibleSystems(params: {
         showEndTimeSignature: entry.showEndTimeSignature,
         activeSelection,
         activeAccidentalSelection,
+        activeTieSegmentKey,
         draggingSelection,
         activeSelections,
         draggingSelections,

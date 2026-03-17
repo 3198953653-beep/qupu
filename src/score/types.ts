@@ -101,6 +101,38 @@ export type AccidentalLayout = {
   hitMaxY?: number
 }
 
+export type TieEndpointType = 'start' | 'stop'
+
+export type TieEndpoint = {
+  pairIndex: number
+  noteIndex: number
+  staff: StaffKind
+  noteId: string
+  keyIndex: number
+  tieType: TieEndpointType
+}
+
+export type TieSelection = {
+  key: string
+  endpoints: TieEndpoint[]
+}
+
+export type TieLayout = TieSelection & {
+  startX: number
+  startY: number
+  endX: number
+  endY: number
+  direction: number
+  hitCenterX?: number
+  hitCenterY?: number
+  hitRadiusX?: number
+  hitRadiusY?: number
+  hitMinX?: number
+  hitMaxX?: number
+  hitMinY?: number
+  hitMaxY?: number
+}
+
 export type NoteLayout = {
   id: string
   staff: StaffKind
@@ -113,6 +145,8 @@ export type NoteLayout = {
   pitchYMap: Record<Pitch, number>
   noteHeads: NoteHeadLayout[]
   accidentalLayouts: AccidentalLayout[]
+  inMeasureTieLayouts: TieLayout[]
+  crossMeasureTieLayouts: TieLayout[]
   accidentalRightXByKeyIndex: Record<number, number>
 }
 

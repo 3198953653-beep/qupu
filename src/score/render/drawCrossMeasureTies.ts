@@ -1,8 +1,18 @@
 import { StaveTie, type Renderer } from 'vexflow'
-import type { MeasureLayout, MeasurePair, NoteLayout, Pitch, ScoreNote, StaffKind } from '../types'
+import type {
+  MeasureLayout,
+  MeasurePair,
+  NoteLayout,
+  Pitch,
+  ScoreNote,
+  StaffKind,
+  TieEndpoint,
+  TieLayout,
+} from '../types'
 import { getPitchLine } from '../pitchUtils'
 import { getTieFrozenIncoming } from '../tieFrozen'
 import { getDragPreviewTargetKey, type DragPreviewFrozenBoundaryCurve } from './dragPreviewOverrides'
+import { buildTieLayout } from './tieLayoutGeometry'
 
 type TieKeySpec = {
   keyIndex: number
@@ -65,6 +75,7 @@ function drawTieCurve(
   endX: number,
   endY: number,
   direction: number,
+  highlighted: boolean,
 ): void {
   const safeStartX = Math.min(startX, endX - 0.5)
   const safeEndX = Math.max(endX, startX + 0.5)
@@ -74,6 +85,11 @@ function drawTieCurve(
     firstIndexes: [0],
     lastIndexes: [0],
   })
+  if (highlighted) {
+    context.save()
+    context.setFillStyle('#2437E8')
+    context.setStrokeStyle('#2437E8')
+  }
   tie.setContext(context)
   tie.renderTie({
     firstX: safeStartX,
@@ -82,6 +98,9 @@ function drawTieCurve(
     lastYs: [endY],
     direction,
   })
+  if (highlighted) {
+    context.restore()
+  }
 }
 
 function resolveTieDirection(staff: StaffKind, pitch: Pitch): number {
@@ -106,6 +125,15 @@ function getNoteLayout(
     if (layout.staff === staff && layout.noteIndex === noteIndex) return layout
   }
   return null
+}
+
+function appendCrossMeasureTieLayout(
+  sourceLayout: NoteLayout | null,
+  tieLayout: TieLayout,
+): void {
+  if (!sourceLayout) return
+  if (sourceLayout.crossMeasureTieLayouts.some((entry) => entry.key === tieLayout.key)) return
+  sourceLayout.crossMeasureTieLayouts.push(tieLayout)
 }
 
 function getHeadAnchor(layout: NoteLayout | null, keyIndex: number, pitch: string): { x: number; y: number } | null {
@@ -316,6 +344,7 @@ export function drawCrossMeasureTies(params: {
   suppressedTieStartKeys?: Set<string> | null
   suppressedTieStopKeys?: Set<string> | null
   allowBoundaryPartialTies?: boolean
+  activeTieSegmentKey?: string | null
 }): void {
   const {
     context,
@@ -329,6 +358,7 @@ export function drawCrossMeasureTies(params: {
     suppressedTieStartKeys = null,
     suppressedTieStopKeys = null,
     allowBoundaryPartialTies = true,
+    activeTieSegmentKey = null,
   } = params
   const safeStartPairIndex = Math.max(0, startPairIndex)
   const safeEndPairIndexExclusive = Math.min(
@@ -336,6 +366,14 @@ export function drawCrossMeasureTies(params: {
     Math.max(safeStartPairIndex, endPairIndexExclusive),
   )
   if (safeEndPairIndexExclusive <= safeStartPairIndex) return
+
+  for (let pairIndex = safeStartPairIndex; pairIndex < safeEndPairIndexExclusive; pairIndex += 1) {
+    const layouts = noteLayoutsByPair.get(pairIndex)
+    if (!layouts) continue
+    layouts.forEach((layout) => {
+      layout.crossMeasureTieLayouts = []
+    })
+  }
 
   for (let pairIndex = safeStartPairIndex; pairIndex < safeEndPairIndexExclusive; pairIndex += 1) {
     const currentPair = measurePairs[pairIndex]
@@ -364,6 +402,50 @@ export function drawCrossMeasureTies(params: {
             noteId: note.id,
             keyIndex: spec.keyIndex,
           })
+          const tieDirection = resolveTieDirection(staff, spec.pitch)
+          const sourceStartEndpoint: TieEndpoint = {
+            pairIndex,
+            noteIndex,
+            staff,
+            noteId: note.id,
+            keyIndex: spec.keyIndex,
+            tieType: 'start',
+          }
+          const sourceStopEndpoint: TieEndpoint = {
+            pairIndex,
+            noteIndex,
+            staff,
+            noteId: note.id,
+            keyIndex: spec.keyIndex,
+            tieType: 'stop',
+          }
+          const drawCrossMeasureTieSegment = (params: {
+            startX: number
+            endX: number
+            y: number
+            endpoints: TieEndpoint[]
+          }) => {
+            const { startX, endX, y, endpoints } = params
+            if (!Number.isFinite(startX) || !Number.isFinite(endX) || !Number.isFinite(y)) return
+            const tieLayout = buildTieLayout({
+              startX,
+              startY: y,
+              endX,
+              endY: y,
+              direction: tieDirection,
+              endpoints,
+            })
+            appendCrossMeasureTieLayout(currentNoteLayout, tieLayout)
+            drawTieCurve(
+              context,
+              startX,
+              y,
+              endX,
+              y,
+              tieDirection,
+              activeTieSegmentKey === tieLayout.key,
+            )
+          }
 
           if (spec.tieStart) {
             if (suppressedTieStartKeys?.has(tieTargetKey)) return
@@ -426,14 +508,22 @@ export function drawCrossMeasureTies(params: {
                 const toAnchor = getHeadAnchor(nextLayout, frozenTarget.keyIndex, frozenTarget.frozenPitch)
                 if (toAnchor) {
                   const translatedY = fromAnchor.y
-                  drawTieCurve(
-                    context,
-                    fromAnchor.x,
-                    translatedY,
-                    toAnchor.x,
-                    translatedY,
-                    resolveTieDirection(staff, spec.pitch),
-                  )
+                  const frozenTargetNote = nextStaffNotes[frozenTarget.noteIndex]
+                  if (!frozenTargetNote) return
+                  const targetEndpoint: TieEndpoint = {
+                    pairIndex: nextPairIndex,
+                    noteIndex: frozenTarget.noteIndex,
+                    staff,
+                    noteId: frozenTargetNote.id,
+                    keyIndex: frozenTarget.keyIndex,
+                    tieType: 'stop',
+                  }
+                  drawCrossMeasureTieSegment({
+                    startX: fromAnchor.x,
+                    endX: toAnchor.x,
+                    y: translatedY,
+                    endpoints: [sourceStartEndpoint, targetEndpoint],
+                  })
                   return
                 }
               }
@@ -454,14 +544,22 @@ export function drawCrossMeasureTies(params: {
                 const toAnchor = getHeadAnchor(nextLayout, nextTarget.keyIndex, spec.pitch)
                 if (toAnchor) {
                   const translatedY = fromAnchor.y
-                  drawTieCurve(
-                    context,
-                    fromAnchor.x,
-                    translatedY,
-                    toAnchor.x,
-                    translatedY,
-                    resolveTieDirection(staff, spec.pitch),
-                  )
+                  const targetNote = nextStaffNotes[nextTarget.noteIndex]
+                  if (!targetNote) return
+                  const targetEndpoint: TieEndpoint = {
+                    pairIndex: nextPairIndex,
+                    noteIndex: nextTarget.noteIndex,
+                    staff,
+                    noteId: targetNote.id,
+                    keyIndex: nextTarget.keyIndex,
+                    tieType: 'stop',
+                  }
+                  drawCrossMeasureTieSegment({
+                    startX: fromAnchor.x,
+                    endX: toAnchor.x,
+                    y: translatedY,
+                    endpoints: [sourceStartEndpoint, targetEndpoint],
+                  })
                   return
                 }
               }
@@ -482,14 +580,12 @@ export function drawCrossMeasureTies(params: {
                 const toAnchor = getHeadAnchor(nextLayout, ghostTarget.keyIndex, spec.pitch)
                 if (toAnchor) {
                   const translatedY = fromAnchor.y
-                  drawTieCurve(
-                    context,
-                    fromAnchor.x,
-                    translatedY,
-                    toAnchor.x,
-                    translatedY,
-                    resolveTieDirection(staff, spec.pitch),
-                  )
+                  drawCrossMeasureTieSegment({
+                    startX: fromAnchor.x,
+                    endX: toAnchor.x,
+                    y: translatedY,
+                    endpoints: [sourceStartEndpoint],
+                  })
                   return
                 }
               }
@@ -498,14 +594,12 @@ export function drawCrossMeasureTies(params: {
             if (allowBoundaryPartialTies) {
               const rightBoundaryX = currentLayout.measureX + currentLayout.measureWidth - 1
               if (rightBoundaryX > fromAnchor.x + 0.5) {
-                drawTieCurve(
-                  context,
-                  fromAnchor.x,
-                  fromAnchor.y,
-                  rightBoundaryX,
-                  fromAnchor.y,
-                  resolveTieDirection(staff, spec.pitch),
-                )
+                drawCrossMeasureTieSegment({
+                  startX: fromAnchor.x,
+                  endX: rightBoundaryX,
+                  y: fromAnchor.y,
+                  endpoints: [sourceStartEndpoint],
+                })
               }
             }
           }
@@ -547,14 +641,12 @@ export function drawCrossMeasureTies(params: {
             if (allowBoundaryPartialTies) {
               const leftBoundaryX = currentLayout.measureX + 1
               if (fromAnchor.x > leftBoundaryX + 0.5) {
-                drawTieCurve(
-                  context,
-                  leftBoundaryX,
-                  fromAnchor.y,
-                  fromAnchor.x,
-                  fromAnchor.y,
-                  resolveTieDirection(staff, spec.pitch),
-                )
+                drawCrossMeasureTieSegment({
+                  startX: leftBoundaryX,
+                  endX: fromAnchor.x,
+                  y: fromAnchor.y,
+                  endpoints: [sourceStopEndpoint],
+                })
               }
             }
           }
