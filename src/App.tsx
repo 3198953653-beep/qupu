@@ -57,12 +57,13 @@ import {
   type AccidentalEditFailureReason,
 } from './score/accidentalEdits'
 import { applyDeleteTieSelection, type TieDeleteFailureReason } from './score/tieEdits'
-import { appendIntervalKey, deleteSelectedKey, findSelectionLocationInPairs, replaceSelectedKeyPitch } from './score/keyboardEdits'
+import { applyMidiStepInput, type MidiStepInputMode } from './score/midiStepEdits'
+import { appendIntervalKey, deleteSelectedKey, findSelectionLocationInPairs } from './score/keyboardEdits'
 import { applyClipboardPaste, buildClipboardFromSelections, type CopyPasteFailureReason } from './score/copyPasteEdits'
 import { getMidiNoteNumber, toPitchFromMidiWithKeyPreference } from './score/midiInput'
 import { getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './score/pitchMath'
 import { compareTimelinePoint, resolveSelectionTimelinePoint } from './score/selectionTimelineRange'
-import { resolveForwardTieTargets, resolveFullTieTargets, resolvePreviousTieTarget } from './score/tieChain'
+import { resolveForwardTieTargets, resolvePreviousTieTarget } from './score/tieChain'
 import { buildSelectionGroupMoveTargets } from './score/selectionGroupTargets'
 import type { MeasureTimelineBundle } from './score/timeline/types'
 import type { NoteClipboardPayload } from './score/copyPasteTypes'
@@ -1528,6 +1529,8 @@ function App() {
   const midiAccessRef = useRef<WebMidiAccessLike | null>(null)
   const midiInputsByIdRef = useRef<Map<string, WebMidiInputLike>>(new Map())
   const boundMidiInputIdRef = useRef<string>('')
+  const midiStepChainRef = useRef(false)
+  const midiStepLastSelectionRef = useRef<Selection | null>(null)
   const noteClipboardRef = useRef<NoteClipboardPayload | null>(null)
   const measurePairs = useMemo(
     () => measurePairsFromImport ?? buildMeasurePairs(notes, bassNotes),
@@ -1887,6 +1890,18 @@ function App() {
     }
   }, [])
 
+  const resetMidiStepChain = useCallback(() => {
+    midiStepChainRef.current = false
+    midiStepLastSelectionRef.current = null
+  }, [])
+
+  const canContinueMidiStep = useCallback((targetSelection: Selection): boolean => {
+    if (!midiStepChainRef.current) return false
+    const lastSelection = midiStepLastSelectionRef.current
+    if (!lastSelection) return false
+    return isSameSelection(lastSelection, targetSelection)
+  }, [])
+
   const {
     clearDragOverlay,
     onSurfacePointerMove,
@@ -1925,6 +1940,7 @@ function App() {
     onSelectionPointerDown: (_selection, nextSelections, _mode) => {
       void _selection
       void _mode
+      resetMidiStepChain()
       setActiveAccidentalSelection(null)
       setActiveTieSelection(null)
       setSelectedMeasureScope(null)
@@ -1940,6 +1956,7 @@ function App() {
       })
     },
     onSelectionTapRelease: (selection) => {
+      resetMidiStepChain()
       setActiveAccidentalSelection(null)
       setActiveTieSelection(null)
       setSelectedMeasureScope(null)
@@ -1948,6 +1965,7 @@ function App() {
       setIsSelectionVisible(true)
     },
     onAccidentalPointerDown: (selection) => {
+      resetMidiStepChain()
       setActiveAccidentalSelection(selection)
       setActiveTieSelection(null)
       setSelectedMeasureScope(null)
@@ -1956,6 +1974,7 @@ function App() {
       setIsSelectionVisible(false)
     },
     onTiePointerDown: (selection) => {
+      resetMidiStepChain()
       setActiveTieSelection(selection)
       setActiveAccidentalSelection(null)
       setSelectedMeasureScope(null)
@@ -1967,6 +1986,7 @@ function App() {
       pushUndoSnapshot(sourcePairs)
     },
     onBlankPointerDown: ({ pairIndex, staff }) => {
+      resetMidiStepChain()
       setActiveAccidentalSelection(null)
       setActiveTieSelection(null)
       if (pairIndex === null || staff === null) {
@@ -1995,6 +2015,7 @@ function App() {
       setSelectedMeasureScope({ pairIndex, staff })
     },
     onSelectionActivated: () => {
+      resetMidiStepChain()
       setActiveAccidentalSelection(null)
       setActiveTieSelection(null)
       setIsSelectionVisible(true)
@@ -2245,6 +2266,7 @@ function App() {
     dragRef.current = null
     clearDragOverlay()
     setDraggingSelection(null)
+    resetMidiStepChain()
 
     if (snapshot.imported) {
       measurePairsFromImportRef.current = restoredPairs
@@ -2265,6 +2287,7 @@ function App() {
     return true
   }, [
     clearDragOverlay,
+    resetMidiStepChain,
     setActiveAccidentalSelection,
     setActiveTieSelection,
     setBassNotes,
@@ -2275,10 +2298,18 @@ function App() {
   ])
 
   const applyKeyboardEditResult = useCallback(
-    (nextPairs: MeasurePair[], nextSelection: Selection, nextSelections: Selection[] = [nextSelection]) => {
+    (
+      nextPairs: MeasurePair[],
+      nextSelection: Selection,
+      nextSelections: Selection[] = [nextSelection],
+      source: 'default' | 'midi-step' = 'default',
+    ) => {
       const sourcePairs = measurePairsRef.current
       if (nextPairs !== sourcePairs) {
         pushUndoSnapshot(sourcePairs)
+      }
+      if (source !== 'midi-step') {
+        resetMidiStepChain()
       }
       setIsRhythmLinked(false)
       if (measurePairsFromImportRef.current) {
@@ -2297,6 +2328,7 @@ function App() {
     },
     [
       pushUndoSnapshot,
+      resetMidiStepChain,
       setActiveAccidentalSelection,
       setActiveTieSelection,
       setBassNotes,
@@ -2374,123 +2406,99 @@ function App() {
     })
     if (!selectionLocation) return
 
-    const sourcePair = sourcePairs[selectionLocation.pairIndex]
-    if (!sourcePair) return
-    const staffNotes = selectionLocation.staff === 'treble' ? sourcePair.treble : sourcePair.bass
-    const sourceNote = staffNotes[selectionLocation.noteIndex]
-    if (!sourceNote) return
-
     const keyFifths = resolvePairKeyFifthsForKeyboard(selectionLocation.pairIndex, measureKeyFifthsFromImportRef.current)
     const targetPitch = toPitchFromMidiWithKeyPreference(midiNoteNumber, keyFifths)
+    const mode: MidiStepInputMode = canContinueMidiStep(targetSelection)
+      ? 'insert-after-anchor'
+      : 'replace-anchor'
 
-    if (sourceNote.isRest) {
-      const replaceResult = replaceSelectedKeyPitch({
-        pairs: sourcePairs,
-        selection: targetSelection,
-        targetPitch,
-        keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
-        importedNoteLookup: importedNoteLookupRef.current,
-      })
-      if (!replaceResult) return
-      applyKeyboardEditResult(replaceResult.nextPairs, replaceResult.nextSelection)
-      return
-    }
-
-    const selectedPitch =
-      targetSelection.keyIndex > 0
-        ? sourceNote.chordPitches?.[targetSelection.keyIndex - 1] ?? null
-        : sourceNote.pitch
-    if (!selectedPitch || selectedPitch === targetPitch) return
-
-    const accidentalStateBeforeNote = buildAccidentalStateBeforeNote(staffNotes, selectionLocation.noteIndex, keyFifths)
-    const importedPairs = measurePairsFromImportRef.current
-    const activePairs = importedPairs ?? sourcePairs
-    const linkedTieTargets = resolveFullTieTargets({
-      measurePairs: activePairs,
-      pairIndex: selectionLocation.pairIndex,
-      noteIndex: selectionLocation.noteIndex,
-      keyIndex: targetSelection.keyIndex,
-      staff: targetSelection.staff,
-      pitchHint: selectedPitch,
-    })
-    const previousTieTarget = resolvePreviousTieTarget({
-      measurePairs: activePairs,
-      pairIndex: selectionLocation.pairIndex,
-      noteIndex: selectionLocation.noteIndex,
-      keyIndex: targetSelection.keyIndex,
-      staff: targetSelection.staff,
-      pitchHint: selectedPitch,
-    })
-    const dragState: DragState = {
-      noteId: targetSelection.noteId,
-      staff: targetSelection.staff,
-      keyIndex: targetSelection.keyIndex,
-      pairIndex: selectionLocation.pairIndex,
-      noteIndex: selectionLocation.noteIndex,
-      linkedTieTargets:
-        linkedTieTargets.length > 0
-          ? linkedTieTargets
-          : [
-              {
-                pairIndex: selectionLocation.pairIndex,
-                noteIndex: selectionLocation.noteIndex,
-                staff: targetSelection.staff,
-                noteId: targetSelection.noteId,
-                keyIndex: targetSelection.keyIndex,
-                pitch: selectedPitch,
-              },
-            ],
-      previousTieTarget,
-      groupMoveTargets: [],
-      pointerId: -1,
-      surfaceTop: 0,
-      surfaceClientToScoreScaleY: 1,
-      startClientY: 0,
-      originPitch: selectedPitch,
-      pitch: selectedPitch,
-      previewStarted: false,
-      grabOffsetY: 0,
-      pitchYMap: {} as Record<Pitch, number>,
-      keyFifths,
-      accidentalStateBeforeNote,
-      layoutCacheReady: false,
-      staticNoteXById: new Map(),
-      previewAccidentalRightXById: new Map(),
-      debugStaticByNoteKey: new Map(),
-    }
-    const commitResult = commitDragPitchToScoreData({
-      drag: dragState,
-      pitch: targetPitch,
-      importedPairs,
+    const stepAttempt = applyMidiStepInput({
+      pairs: sourcePairs,
+      anchorSelection: targetSelection,
+      mode,
+      targetPitch,
+      importedMode: measurePairsFromImportRef.current !== null,
       importedNoteLookup: importedNoteLookupRef.current,
-      currentPairs: sourcePairs,
-      importedKeyFifths: measureKeyFifthsFromImportRef.current,
+      keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
+      timeSignaturesByMeasure: measureTimeSignaturesFromImportRef.current,
+      allowAutoAppendMeasure: true,
     })
+    if (!stepAttempt.result || stepAttempt.error) return
 
-    const sourceSnapshotPairs = commitResult.fromImported ? (importedPairs ?? sourcePairs) : sourcePairs
-    if (commitResult.normalizedPairs !== sourceSnapshotPairs) {
-      pushUndoSnapshot(sourceSnapshotPairs)
-    }
-    const decoratedLayoutHint = commitResult.layoutReflowHint.scoreContentChanged
-      ? { ...commitResult.layoutReflowHint, layoutStabilityKey }
-      : null
-    layoutReflowHintRef.current = decoratedLayoutHint
+    const { result } = stepAttempt
+    if (result.appendedMeasureCount > 0 && measurePairsFromImportRef.current) {
+      const targetLength = result.nextPairs.length
+      const extendNumberSeries = (
+        source: number[] | null,
+        fallback: number,
+        normalize: (value: number) => number,
+      ): number[] => {
+        const next: number[] = []
+        let carry = normalize(fallback)
+        for (let index = 0; index < targetLength; index += 1) {
+          const raw = source?.[index]
+          if (Number.isFinite(raw)) {
+            carry = normalize(raw as number)
+          }
+          next.push(carry)
+        }
+        return next
+      }
+      const extendTimeSignatureSeries = (source: TimeSignature[] | null): TimeSignature[] => {
+        const next: TimeSignature[] = []
+        let carry: TimeSignature = { beats: 4, beatType: 4 }
+        for (let index = 0; index < targetLength; index += 1) {
+          const candidate = source?.[index]
+          if (
+            candidate &&
+            Number.isFinite(candidate.beats) &&
+            candidate.beats > 0 &&
+            Number.isFinite(candidate.beatType) &&
+            candidate.beatType > 0
+          ) {
+            carry = {
+              beats: Math.max(1, Math.round(candidate.beats)),
+              beatType: Math.max(1, Math.round(candidate.beatType)),
+            }
+          }
+          next.push({
+            beats: carry.beats,
+            beatType: carry.beatType,
+          })
+        }
+        return next
+      }
 
-    if (commitResult.fromImported) {
-      measurePairsFromImportRef.current = commitResult.normalizedPairs
-      setMeasurePairsFromImport(commitResult.normalizedPairs)
-      setNotes(flattenTrebleFromPairs(commitResult.normalizedPairs))
-      setBassNotes(flattenBassFromPairs(commitResult.normalizedPairs))
-    } else {
-      setNotes(commitResult.trebleNotes)
-      setBassNotes(commitResult.bassNotes)
+      const nextKeyFifths = extendNumberSeries(
+        measureKeyFifthsFromImportRef.current,
+        0,
+        (value) => Math.trunc(value),
+      )
+      const nextDivisions = extendNumberSeries(
+        measureDivisionsFromImportRef.current,
+        16,
+        (value) => Math.max(1, Math.round(value)),
+      )
+      const nextTimeSignatures = extendTimeSignatureSeries(measureTimeSignaturesFromImportRef.current)
+      measureKeyFifthsFromImportRef.current = nextKeyFifths
+      setMeasureKeyFifthsFromImport(nextKeyFifths)
+      measureDivisionsFromImportRef.current = nextDivisions
+      setMeasureDivisionsFromImport(nextDivisions)
+      measureTimeSignaturesFromImportRef.current = nextTimeSignatures
+      setMeasureTimeSignaturesFromImport(nextTimeSignatures)
     }
-    setIsSelectionVisible(true)
-    setActiveSelection(targetSelection)
-    setSelectedSelections((current) =>
-      current.length === 0 ? [targetSelection] : appendUniqueSelection(current, targetSelection),
-    )
-  }, [applyKeyboardEditResult, layoutStabilityKey, pushUndoSnapshot, resolveMidiTargetSelection, setActiveSelection, setBassNotes, setMeasurePairsFromImport, setNotes])
+
+    applyKeyboardEditResult(result.nextPairs, result.nextSelection, [result.nextSelection], 'midi-step')
+    midiStepChainRef.current = true
+    midiStepLastSelectionRef.current = result.nextSelection
+  }, [
+    applyKeyboardEditResult,
+    canContinueMidiStep,
+    resolveMidiTargetSelection,
+    setMeasureDivisionsFromImport,
+    setMeasureKeyFifthsFromImport,
+    setMeasureTimeSignaturesFromImport,
+  ])
 
   const handleMidiMessage = useCallback((event: WebMidiMessageEventLike) => {
     const rawData = event?.data
@@ -2746,10 +2754,12 @@ function App() {
     if (scope === 'selected') {
       setSelectedSelections((current) => appendUniqueSelection(current, currentSelection))
     }
+    resetMidiStepChain()
     return true
   }, [
     layoutStabilityKey,
     pushUndoSnapshot,
+    resetMidiStepChain,
     selectedSelections,
     setBassNotes,
     setMeasurePairsFromImport,
@@ -3044,6 +3054,7 @@ function App() {
 
   const jumpFromOsmdPreviewToEditor = useCallback((target: OsmdPreviewSelectionTarget) => {
     const { selection, pairIndex } = target
+    resetMidiStepChain()
     setIsSelectionVisible(true)
     setActiveSelection(selection)
     setSelectedSelections([selection])
@@ -3101,7 +3112,7 @@ function App() {
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(runJumpLoop)
     })
-  }, [closeOsmdPreview, horizontalMeasureFramesByPair, scoreScaleX])
+  }, [closeOsmdPreview, horizontalMeasureFramesByPair, resetMidiStepChain, scoreScaleX])
 
   const onOsmdPreviewSurfaceClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     if (osmdPreviewSourceMode !== 'editor') return
