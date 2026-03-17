@@ -8,6 +8,8 @@ export function ScoreControls(props: {
   isPlaying: boolean
   onPlayScore: () => void
   onReset: () => void
+  showInScoreMeasureNumbers: boolean
+  onToggleInScoreMeasureNumbers: () => void
   onOpenMusicXmlFilePicker: () => void
   onLoadSampleMusicXml: () => void
   onExportMusicXmlFile: () => void
@@ -70,6 +72,8 @@ export function ScoreControls(props: {
     isPlaying,
     onPlayScore,
     onReset,
+    showInScoreMeasureNumbers,
+    onToggleInScoreMeasureNumbers,
     onOpenMusicXmlFilePicker,
     onLoadSampleMusicXml,
     onExportMusicXmlFile,
@@ -147,6 +151,9 @@ export function ScoreControls(props: {
           {isPlaying ? '播放中...' : '播放小节'}
         </button>
         <button type="button" onClick={onReset}>重置</button>
+        <button type="button" onClick={onToggleInScoreMeasureNumbers}>
+          {showInScoreMeasureNumbers ? '谱面序号：开' : '谱面序号：关'}
+        </button>
         <button type="button" onClick={onToggleAutoScale}>
           {autoScaleEnabled ? `自动缩放：开（${autoScalePercent}%）` : '自动缩放：关'}
         </button>

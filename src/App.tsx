@@ -128,6 +128,7 @@ const PDF_CJK_FONT_FILE_NAME = 'NotoSansSC-Regular.ttf'
 const PDF_CJK_FONT_URL = new URL('./assets/fonts/NotoSansSC-Regular.ttf', import.meta.url).href
 const UNDO_HISTORY_LIMIT = 120
 const LOCAL_STORAGE_MIDI_INPUT_KEY = 'score.midi.selectedInputId'
+const LOCAL_STORAGE_EDITOR_MEASURE_NUMBER_KEY = 'score.editor.showInScoreMeasureNumbers'
 
 const PITCHES: Pitch[] = createPianoPitches()
 const INITIAL_BASS_NOTES: ScoreNote[] = buildBassMockNotes(INITIAL_NOTES)
@@ -1423,6 +1424,7 @@ function App() {
   const [autoScaleEnabled, setAutoScaleEnabled] = useState(false)
   const [manualScalePercent, setManualScalePercent] = useState(100)
   const [canvasHeightPercent, setCanvasHeightPercent] = useState(100)
+  const [showInScoreMeasureNumbers, setShowInScoreMeasureNumbers] = useState(false)
   const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
   const [timeAxisSpacingConfig, setTimeAxisSpacingConfig] = useState(DEFAULT_TIME_AXIS_SPACING_CONFIG)
   const [isOsmdPreviewOpen, setIsOsmdPreviewOpen] = useState(false)
@@ -1472,6 +1474,7 @@ function App() {
   const osmdPreviewBottomMarginPxRef = useRef<number>(DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX)
   const osmdPreviewShowPageNumbersRef = useRef<boolean>(true)
   const osmdPreviewLastRebalanceStatsRef = useRef<OsmdPreviewRebalanceStats | null>(null)
+  const showInScoreMeasureNumbersHydratedRef = useRef(false)
   const osmdPreviewZoomCommitTimerRef = useRef<number | null>(null)
   const osmdPreviewMarginApplyTimerRef = useRef<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -1824,6 +1827,7 @@ function App() {
     pagePaddingX: pageHorizontalPaddingPx,
     timeAxisSpacingConfig,
     spacingLayoutMode,
+    showInScoreMeasureNumbers,
     renderScaleX: scoreScaleX,
     renderScaleY: scoreScaleY,
     renderQualityScaleX: renderQualityScale.x,
@@ -2496,6 +2500,29 @@ function App() {
     if (midiNoteNumber === null) return
     applyMidiReplacementByNoteNumber(midiNoteNumber)
   }, [applyMidiReplacementByNoteNumber])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      showInScoreMeasureNumbersHydratedRef.current = true
+      return
+    }
+    const storedValue = window.localStorage.getItem(LOCAL_STORAGE_EDITOR_MEASURE_NUMBER_KEY)
+    if (storedValue === '1' || storedValue === 'true') {
+      setShowInScoreMeasureNumbers(true)
+    } else if (storedValue === '0' || storedValue === 'false') {
+      setShowInScoreMeasureNumbers(false)
+    }
+    showInScoreMeasureNumbersHydratedRef.current = true
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!showInScoreMeasureNumbersHydratedRef.current) return
+    window.localStorage.setItem(
+      LOCAL_STORAGE_EDITOR_MEASURE_NUMBER_KEY,
+      showInScoreMeasureNumbers ? '1' : '0',
+    )
+  }, [showInScoreMeasureNumbers])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -4665,6 +4692,8 @@ function App() {
         isPlaying={isPlaying}
         onPlayScore={playScore}
         onReset={resetScore}
+        showInScoreMeasureNumbers={showInScoreMeasureNumbers}
+        onToggleInScoreMeasureNumbers={() => setShowInScoreMeasureNumbers((current) => !current)}
         autoScaleEnabled={autoScaleEnabled}
         autoScalePercent={autoScalePercent}
         onToggleAutoScale={() => setAutoScaleEnabled((enabled) => !enabled)}

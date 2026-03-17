@@ -210,6 +210,7 @@ export type DrawMeasureParams = {
   spacingLayoutMode?: SpacingLayoutMode
   layoutDetail?: 'full' | 'spacing-only'
   skipPainting?: boolean
+  showMeasureNumberLabel?: boolean
   staticNoteXById?: Map<string, number> | null
   staticAccidentalRightXById?: Map<string, Map<number, number>> | null
   publicAxisLayout?: PublicAxisLayout | null
@@ -272,6 +273,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     spacingLayoutMode = 'custom',
     layoutDetail = 'full',
     skipPainting = false,
+    showMeasureNumberLabel = true,
     staticNoteXById = null,
     staticAccidentalRightXById = null,
     publicAxisLayout = null,
@@ -496,7 +498,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     bassStave.setContext(context).draw()
   }
 
-  if (!skipPainting) {
+  if (!skipPainting && showMeasureNumberLabel) {
     const context2D = (context as unknown as { context2D?: CanvasRenderingContext2D }).context2D
     if (context2D) {
       context2D.save()

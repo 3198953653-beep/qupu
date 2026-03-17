@@ -212,6 +212,7 @@ export function useScoreRenderEffect(params: {
   pagePaddingX?: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
   spacingLayoutMode?: SpacingLayoutMode
+  showInScoreMeasureNumbers?: boolean
   renderScaleX?: number
   renderScaleY?: number
   renderQualityScaleX?: number
@@ -254,6 +255,7 @@ export function useScoreRenderEffect(params: {
     pagePaddingX,
     timeAxisSpacingConfig,
     spacingLayoutMode = 'custom',
+    showInScoreMeasureNumbers = false,
     renderScaleX = 1,
     renderScaleY = 1,
     renderQualityScaleX: forcedRenderQualityScaleX,
@@ -350,6 +352,7 @@ export function useScoreRenderEffect(params: {
       pagePaddingX,
       timeAxisSpacingConfig,
       spacingLayoutMode,
+      showInScoreMeasureNumbers,
       dragPreview,
       })
     noteLayoutsRef.current = nextLayouts
@@ -394,6 +397,7 @@ export function useScoreRenderEffect(params: {
     pagePaddingX,
     timeAxisSpacingConfig,
     spacingLayoutMode,
+    showInScoreMeasureNumbers,
     renderScaleX,
     renderScaleY,
     forcedRenderQualityScaleX,

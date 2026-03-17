@@ -296,6 +296,7 @@ export function renderVisibleSystems(params: {
   pagePaddingX?: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
   spacingLayoutMode?: SpacingLayoutMode
+  showInScoreMeasureNumbers?: boolean
   dragPreview?: DragState | null
 }): {
   nextLayouts: NoteLayout[]
@@ -333,6 +334,7 @@ export function renderVisibleSystems(params: {
     pagePaddingX = SCORE_PAGE_PADDING_X,
     timeAxisSpacingConfig,
     spacingLayoutMode = 'custom',
+    showInScoreMeasureNumbers = false,
     dragPreview = null,
   } = params
   const spacingConfig = timeAxisSpacingConfig ?? DEFAULT_TIME_AXIS_SPACING_CONFIG
@@ -839,6 +841,7 @@ export function renderVisibleSystems(params: {
           previewFrozenBoundaryCurve: dragPreviewFrozenBoundaryCurve,
           suppressedTieStartKeys: dragPreviewSuppressedTieStartKeys,
           suppressedTieStopKeys: dragPreviewSuppressedTieStopKeys,
+          showMeasureNumberLabel: showInScoreMeasureNumbers,
           preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
           preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
           onSpacingMetrics: (metrics) => {
@@ -1053,6 +1056,7 @@ export function renderVisibleSystems(params: {
           previewFrozenBoundaryCurve: dragPreviewFrozenBoundaryCurve,
           suppressedTieStartKeys: dragPreviewSuppressedTieStartKeys,
           suppressedTieStopKeys: dragPreviewSuppressedTieStopKeys,
+          showMeasureNumberLabel: showInScoreMeasureNumbers,
           preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
           preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
           onSpacingMetrics: (metrics) => {
@@ -1275,6 +1279,7 @@ export function renderVisibleSystems(params: {
         // Probe with the same layout path used by final render so spacingRightX
         // and barline fit are computed from identical geometry.
         layoutDetail: 'full',
+        showMeasureNumberLabel: showInScoreMeasureNumbers,
         preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
         preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
         // Probe with the same edge-cap path as final render so residual edge
@@ -1407,6 +1412,7 @@ export function renderVisibleSystems(params: {
         previewFrozenBoundaryCurve: dragPreviewFrozenBoundaryCurve,
         suppressedTieStartKeys: dragPreviewSuppressedTieStartKeys,
         suppressedTieStopKeys: dragPreviewSuppressedTieStopKeys,
+        showMeasureNumberLabel: showInScoreMeasureNumbers,
         preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
         preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
         onSpacingMetrics: (metrics) => {
