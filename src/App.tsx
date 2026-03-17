@@ -1473,6 +1473,7 @@ function App() {
   const osmdPreviewTopMarginPxRef = useRef<number>(DEFAULT_OSMD_PREVIEW_FOLLOWING_PAGE_TOP_MARGIN_PX)
   const osmdPreviewBottomMarginPxRef = useRef<number>(DEFAULT_OSMD_PREVIEW_BOTTOM_MARGIN_PX)
   const osmdPreviewShowPageNumbersRef = useRef<boolean>(true)
+  const osmdPreviewPageIndexRef = useRef<number>(0)
   const osmdPreviewLastRebalanceStatsRef = useRef<OsmdPreviewRebalanceStats | null>(null)
   const showInScoreMeasureNumbersHydratedRef = useRef(false)
   const osmdPreviewZoomCommitTimerRef = useRef<number | null>(null)
@@ -3462,6 +3463,10 @@ function App() {
   }, [osmdPreviewShowPageNumbers])
 
   useEffect(() => {
+    osmdPreviewPageIndexRef.current = osmdPreviewPageIndex
+  }, [osmdPreviewPageIndex])
+
+  useEffect(() => {
     return () => {
       if (osmdPreviewZoomCommitTimerRef.current !== null) {
         window.clearTimeout(osmdPreviewZoomCommitTimerRef.current)
@@ -3864,9 +3869,9 @@ function App() {
     const graphicPageCount = osmd.GraphicSheet?.MusicPages?.length ?? 0
     const nextPageCount = Math.max(1, renderedPages.length, graphicPageCount)
     setOsmdPreviewPageCount(nextPageCount)
-    applyOsmdPreviewPageVisibility(renderedPages, osmdPreviewPageIndex)
+    applyOsmdPreviewPageVisibility(renderedPages, osmdPreviewPageIndexRef.current)
     rebuildOsmdPreviewNoteLookup()
-  }, [isOsmdPreviewOpen, osmdPreviewPageIndex, osmdPreviewZoomPercent, rebuildOsmdPreviewNoteLookup])
+  }, [isOsmdPreviewOpen, osmdPreviewZoomPercent, rebuildOsmdPreviewNoteLookup])
 
   useEffect(() => {
     if (!isOsmdPreviewOpen) return
@@ -3893,7 +3898,7 @@ function App() {
       const graphicPageCount = osmd.GraphicSheet?.MusicPages?.length ?? 0
       const nextPageCount = Math.max(1, renderedPages.length, graphicPageCount)
       setOsmdPreviewPageCount(nextPageCount)
-      applyOsmdPreviewPageVisibility(renderedPages, osmdPreviewPageIndex)
+      applyOsmdPreviewPageVisibility(renderedPages, osmdPreviewPageIndexRef.current)
       rebuildOsmdPreviewNoteLookup()
     }, OSMD_PREVIEW_MARGIN_APPLY_DEBOUNCE_MS)
     return () => {
@@ -3908,7 +3913,6 @@ function App() {
     osmdPreviewFirstPageTopMarginPx,
     osmdPreviewTopMarginPx,
     osmdPreviewBottomMarginPx,
-    osmdPreviewPageIndex,
     rebuildOsmdPreviewNoteLookup,
   ])
 
