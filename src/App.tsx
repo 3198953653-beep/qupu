@@ -968,6 +968,106 @@ function appendUniqueSelection(current: Selection[], next: Selection): Selection
   return [...current, next]
 }
 
+type MeasureStaffScope = {
+  pairIndex: number
+  staff: Selection['staff']
+}
+
+function toMeasureStaffScopeKey(scope: MeasureStaffScope): string {
+  return `${Math.trunc(scope.pairIndex)}:${scope.staff}`
+}
+
+function parseMeasureStaffScopeKey(key: string): MeasureStaffScope | null {
+  if (!key) return null
+  const [rawPairIndex, rawStaff] = key.split(':')
+  if (rawStaff !== 'treble' && rawStaff !== 'bass') return null
+  const pairIndex = Number(rawPairIndex)
+  if (!Number.isFinite(pairIndex)) return null
+  return {
+    pairIndex: Math.trunc(pairIndex),
+    staff: rawStaff,
+  }
+}
+
+function sortMeasureStaffScopeKeys(keys: Iterable<string>): string[] {
+  const scopes: MeasureStaffScope[] = []
+  const deduped = new Set<string>()
+  for (const key of keys) {
+    const parsed = parseMeasureStaffScopeKey(key)
+    if (!parsed || parsed.pairIndex < 0) continue
+    const normalized = toMeasureStaffScopeKey(parsed)
+    if (deduped.has(normalized)) continue
+    deduped.add(normalized)
+    scopes.push(parsed)
+  }
+  scopes.sort((left, right) => {
+    if (left.pairIndex !== right.pairIndex) return left.pairIndex - right.pairIndex
+    if (left.staff === right.staff) return 0
+    return left.staff === 'treble' ? -1 : 1
+  })
+  return scopes.map((scope) => toMeasureStaffScopeKey(scope))
+}
+
+function collectChangedMeasureStaffScopeKeys(sourcePairs: MeasurePair[], nextPairs: MeasurePair[]): Set<string> {
+  const changed = new Set<string>()
+  const pairCount = Math.max(sourcePairs.length, nextPairs.length)
+  for (let pairIndex = 0; pairIndex < pairCount; pairIndex += 1) {
+    const sourcePair = sourcePairs[pairIndex]
+    const nextPair = nextPairs[pairIndex]
+    if (!sourcePair || !nextPair) {
+      changed.add(toMeasureStaffScopeKey({ pairIndex, staff: 'treble' }))
+      changed.add(toMeasureStaffScopeKey({ pairIndex, staff: 'bass' }))
+      continue
+    }
+    if (sourcePair.treble !== nextPair.treble) {
+      changed.add(toMeasureStaffScopeKey({ pairIndex, staff: 'treble' }))
+    }
+    if (sourcePair.bass !== nextPair.bass) {
+      changed.add(toMeasureStaffScopeKey({ pairIndex, staff: 'bass' }))
+    }
+  }
+  return changed
+}
+
+function mergeFullMeasureRestCollapseScopeKeys(params: {
+  currentScopeKeys: string[]
+  sourcePairs: MeasurePair[]
+  nextPairs: MeasurePair[]
+  collapseScopesToAdd?: MeasureStaffScope[]
+}): string[] {
+  const {
+    currentScopeKeys,
+    sourcePairs,
+    nextPairs,
+    collapseScopesToAdd = [],
+  } = params
+  const nextScopeKeys = new Set<string>()
+  const changedScopeKeys = collectChangedMeasureStaffScopeKeys(sourcePairs, nextPairs)
+  const maxPairIndex = nextPairs.length - 1
+
+  currentScopeKeys.forEach((scopeKey) => {
+    const parsed = parseMeasureStaffScopeKey(scopeKey)
+    if (!parsed) return
+    if (parsed.pairIndex < 0 || parsed.pairIndex > maxPairIndex) return
+    const normalized = toMeasureStaffScopeKey(parsed)
+    if (changedScopeKeys.has(normalized)) return
+    nextScopeKeys.add(normalized)
+  })
+
+  collapseScopesToAdd.forEach((scope) => {
+    const normalized: MeasureStaffScope = {
+      pairIndex: Math.trunc(scope.pairIndex),
+      staff: scope.staff,
+    }
+    if (!Number.isFinite(normalized.pairIndex)) return
+    if (normalized.pairIndex < 0 || normalized.pairIndex > maxPairIndex) return
+    if (normalized.staff !== 'treble' && normalized.staff !== 'bass') return
+    nextScopeKeys.add(toMeasureStaffScopeKey(normalized))
+  })
+
+  return sortMeasureStaffScopeKeys(nextScopeKeys)
+}
+
 function buildSelectionsForMeasureStaff(
   pair: MeasurePair,
   staff: Selection['staff'],
@@ -1374,6 +1474,7 @@ type UndoSnapshot = {
   imported: boolean
   selection: Selection
   isSelectionVisible: boolean
+  fullMeasureRestCollapseScopeKeys: string[]
 }
 
 type MidiPermissionState = 'idle' | 'granted' | 'denied' | 'unsupported' | 'error'
@@ -1433,6 +1534,7 @@ function App() {
     { noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 },
   ])
   const [selectedMeasureScope, setSelectedMeasureScope] = useState<{ pairIndex: number; staff: Selection['staff'] } | null>(null)
+  const [fullMeasureRestCollapseScopeKeys, setFullMeasureRestCollapseScopeKeys] = useState<string[]>([])
   const [isSelectionVisible, setIsSelectionVisible] = useState(true)
   const [draggingSelection, setDraggingSelection] = useState<Selection | null>(null)
   const [dragPreviewState, setDragPreviewState] = useState<DragState | null>(null)
@@ -1551,6 +1653,7 @@ function App() {
   const importFeedbackRef = useRef<ImportFeedback>(importFeedback)
   const activeSelectionRef = useRef<Selection>(activeSelection)
   const selectedSelectionsRef = useRef<Selection[]>(selectedSelections)
+  const fullMeasureRestCollapseScopeKeysRef = useRef<string[]>(fullMeasureRestCollapseScopeKeys)
   const isSelectionVisibleRef = useRef<boolean>(isSelectionVisible)
   const draggingSelectionRef = useRef<Selection | null>(draggingSelection)
   const isOsmdPreviewOpenRef = useRef<boolean>(isOsmdPreviewOpen)
@@ -1849,6 +1952,7 @@ function App() {
     activeSelections: isSelectionVisible ? selectedSelections : [],
     draggingSelections: draggingSelection ? [draggingSelection] : [],
     selectedMeasureScope,
+    fullMeasureRestCollapseScopeKeys,
     layoutReflowHintRef,
     layoutStabilityKey,
     noteLayoutsRef,
@@ -1914,6 +2018,7 @@ function App() {
       imported: measurePairsFromImportRef.current !== null,
       selection: { ...activeSelectionRef.current },
       isSelectionVisible: isSelectionVisibleRef.current,
+      fullMeasureRestCollapseScopeKeys: [...fullMeasureRestCollapseScopeKeysRef.current],
     })
     if (stack.length > UNDO_HISTORY_LIMIT) {
       stack.splice(0, stack.length - UNDO_HISTORY_LIMIT)
@@ -2015,6 +2120,15 @@ function App() {
     onBeforeApplyScoreChange: (sourcePairs) => {
       pushUndoSnapshot(sourcePairs)
     },
+    onAfterApplyScoreChange: ({ sourcePairs, nextPairs }) => {
+      setFullMeasureRestCollapseScopeKeys((current) =>
+        mergeFullMeasureRestCollapseScopeKeys({
+          currentScopeKeys: current,
+          sourcePairs,
+          nextPairs,
+        }),
+      )
+    },
     onBlankPointerDown: ({ pairIndex, staff }) => {
       resetMidiStepChain()
       setActiveAccidentalSelection(null)
@@ -2033,8 +2147,11 @@ function App() {
         return
       }
       const timeSignature = resolvePairTimeSignature(pairIndex, measureTimeSignaturesFromImportRef.current)
+      const canCollapseFullMeasureRest = fullMeasureRestCollapseScopeKeys.includes(
+        toMeasureStaffScopeKey({ pairIndex, staff }),
+      )
       const nextSelections = buildSelectionsForMeasureStaff(targetPair, staff, {
-        collapseFullMeasureRest: true,
+        collapseFullMeasureRest: canCollapseFullMeasureRest,
         timeSignature,
       })
       if (nextSelections.length === 0) {
@@ -2117,6 +2234,40 @@ function App() {
     initialTrebleNotes: INITIAL_NOTES,
     initialBassNotes: INITIAL_BASS_NOTES,
   })
+
+  const clearFullMeasureRestCollapseScopes = useCallback(() => {
+    setFullMeasureRestCollapseScopeKeys([])
+  }, [])
+
+  const importMusicXmlTextWithCollapseReset = useCallback((xmlText: string) => {
+    clearFullMeasureRestCollapseScopes()
+    importMusicXmlText(xmlText)
+  }, [clearFullMeasureRestCollapseScopes, importMusicXmlText])
+
+  const importMusicXmlFromTextareaWithCollapseReset = useCallback(() => {
+    clearFullMeasureRestCollapseScopes()
+    importMusicXmlFromTextarea()
+  }, [clearFullMeasureRestCollapseScopes, importMusicXmlFromTextarea])
+
+  const onMusicXmlFileChangeWithCollapseReset = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    clearFullMeasureRestCollapseScopes()
+    await onMusicXmlFileChange(event)
+  }, [clearFullMeasureRestCollapseScopes, onMusicXmlFileChange])
+
+  const loadSampleMusicXmlWithCollapseReset = useCallback(() => {
+    clearFullMeasureRestCollapseScopes()
+    loadSampleMusicXml()
+  }, [clearFullMeasureRestCollapseScopes, loadSampleMusicXml])
+
+  const resetScoreWithCollapseReset = useCallback(() => {
+    clearFullMeasureRestCollapseScopes()
+    resetScore()
+  }, [clearFullMeasureRestCollapseScopes, resetScore])
+
+  const applyRhythmPresetWithCollapseReset = useCallback((presetId: RhythmPresetId) => {
+    clearFullMeasureRestCollapseScopes()
+    applyRhythmPreset(presetId)
+  }, [applyRhythmPreset, clearFullMeasureRestCollapseScopes])
 
   useEffect(() => {
     const hasActiveTreble = notes.some((note) => note.id === activeSelection.noteId)
@@ -2209,6 +2360,9 @@ function App() {
   useEffect(() => {
     selectedSelectionsRef.current = selectedSelections
   }, [selectedSelections])
+  useEffect(() => {
+    fullMeasureRestCollapseScopeKeysRef.current = fullMeasureRestCollapseScopeKeys
+  }, [fullMeasureRestCollapseScopeKeys])
 
   useEffect(() => {
     if (isSelectionVisible) return
@@ -2316,6 +2470,7 @@ function App() {
     setActiveAccidentalSelection(null)
     setActiveTieSelection(null)
     setSelectedMeasureScope(null)
+    setFullMeasureRestCollapseScopeKeys(snapshot.fullMeasureRestCollapseScopeKeys)
     setActiveSelection(snapshot.selection)
     setSelectedSelections(snapshot.isSelectionVisible ? [snapshot.selection] : [])
     return true
@@ -2325,6 +2480,7 @@ function App() {
     setActiveAccidentalSelection,
     setActiveTieSelection,
     setBassNotes,
+    setFullMeasureRestCollapseScopeKeys,
     setMeasurePairsFromImport,
     setNotes,
     setDraggingSelection,
@@ -2337,10 +2493,24 @@ function App() {
       nextSelection: Selection,
       nextSelections: Selection[] = [nextSelection],
       source: 'default' | 'midi-step' = 'default',
+      options?: {
+        collapseScopesToAdd?: MeasureStaffScope[]
+      },
     ) => {
       const sourcePairs = measurePairsRef.current
+      const collapseScopesToAdd = options?.collapseScopesToAdd ?? []
       if (nextPairs !== sourcePairs) {
         pushUndoSnapshot(sourcePairs)
+      }
+      if (nextPairs !== sourcePairs || collapseScopesToAdd.length > 0) {
+        setFullMeasureRestCollapseScopeKeys((current) =>
+          mergeFullMeasureRestCollapseScopeKeys({
+            currentScopeKeys: current,
+            sourcePairs,
+            nextPairs,
+            collapseScopesToAdd,
+          }),
+        )
       }
       if (source !== 'midi-step') {
         resetMidiStepChain()
@@ -2363,6 +2533,7 @@ function App() {
     [
       pushUndoSnapshot,
       resetMidiStepChain,
+      setFullMeasureRestCollapseScopeKeys,
       setActiveAccidentalSelection,
       setActiveTieSelection,
       setBassNotes,
@@ -2522,7 +2693,22 @@ function App() {
       setMeasureTimeSignaturesFromImport(nextTimeSignatures)
     }
 
-    applyKeyboardEditResult(result.nextPairs, result.nextSelection, [result.nextSelection], 'midi-step')
+    const collapseScopesToAdd: MeasureStaffScope[] = []
+    if (result.appendedMeasureCount > 0) {
+      const appendStartPairIndex = Math.max(0, result.nextPairs.length - result.appendedMeasureCount)
+      for (let pairIndex = appendStartPairIndex; pairIndex < result.nextPairs.length; pairIndex += 1) {
+        collapseScopesToAdd.push({ pairIndex, staff: 'treble' })
+        collapseScopesToAdd.push({ pairIndex, staff: 'bass' })
+      }
+    }
+
+    applyKeyboardEditResult(
+      result.nextPairs,
+      result.nextSelection,
+      [result.nextSelection],
+      'midi-step',
+      { collapseScopesToAdd },
+    )
     midiStepChainRef.current = true
     midiStepLastSelectionRef.current = result.nextSelection
   }, [
@@ -3697,6 +3883,13 @@ function App() {
           deleteAttempt.result.nextPairs,
           deleteAttempt.result.nextSelection,
           deleteAttempt.result.nextSelections,
+          'default',
+          {
+            collapseScopesToAdd: [{
+              pairIndex: selectedMeasureScope.pairIndex,
+              staff: selectedMeasureScope.staff,
+            }],
+          },
         )
         setSelectedMeasureScope({
           pairIndex: selectedMeasureScope.pairIndex,
@@ -4600,7 +4793,7 @@ function App() {
     if (!import.meta.env.DEV) return
     const debugApi = {
       importMusicXmlText: (xmlText: string) => {
-        importMusicXmlText(xmlText)
+        importMusicXmlTextWithCollapseReset(xmlText)
       },
       getImportFeedback: () => importFeedbackRef.current,
       getScaleConfig: () => ({
@@ -4735,7 +4928,7 @@ function App() {
       delete (window as unknown as { __scoreDebug?: typeof debugApi }).__scoreDebug
     }
   }, [
-    importMusicXmlText,
+    importMusicXmlTextWithCollapseReset,
     dumpAllMeasureCoordinateReport,
     dumpOsmdPreviewSystemMetrics,
     pageCount,
@@ -4771,7 +4964,7 @@ function App() {
       <ScoreControls
         isPlaying={isPlaying}
         onPlayScore={playScore}
-        onReset={resetScore}
+        onReset={resetScoreWithCollapseReset}
         showInScoreMeasureNumbers={showInScoreMeasureNumbers}
         onToggleInScoreMeasureNumbers={() => setShowInScoreMeasureNumbers((current) => !current)}
         autoScaleEnabled={autoScaleEnabled}
@@ -4864,7 +5057,7 @@ function App() {
           setPageHorizontalPaddingPx(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
         }}
         onOpenMusicXmlFilePicker={openMusicXmlFilePicker}
-        onLoadSampleMusicXml={loadSampleMusicXml}
+        onLoadSampleMusicXml={loadSampleMusicXmlWithCollapseReset}
         onExportMusicXmlFile={exportMusicXmlFile}
         onOpenOsmdPreview={openOsmdPreview}
         onOpenBeamGroupingTool={openBeamGroupingTool}
@@ -4877,7 +5070,7 @@ function App() {
         notationPaletteSummaryOverride={derivedNotationPaletteDisplay?.summary ?? null}
         onNotationPaletteSelectionChange={onNotationPaletteSelectionChange}
         onOpenDirectOsmdFilePicker={openDirectOsmdFilePicker}
-        onImportMusicXmlFromTextarea={importMusicXmlFromTextarea}
+        onImportMusicXmlFromTextarea={importMusicXmlFromTextareaWithCollapseReset}
         midiSupported={midiSupported}
         midiPermissionState={midiPermissionState}
         midiInputOptions={midiInputOptions}
@@ -4885,11 +5078,11 @@ function App() {
         onSelectedMidiInputIdChange={setSelectedMidiInputId}
         fileInputRef={fileInputRef}
         osmdDirectFileInputRef={osmdDirectFileInputRef}
-        onMusicXmlFileChange={onMusicXmlFileChange}
+        onMusicXmlFileChange={onMusicXmlFileChangeWithCollapseReset}
         onOsmdDirectFileChange={onOsmdDirectFileChange}
         importFeedback={importFeedback}
         rhythmPreset={rhythmPreset}
-        onApplyRhythmPreset={applyRhythmPreset}
+        onApplyRhythmPreset={applyRhythmPresetWithCollapseReset}
       />
 
       <ScoreBoard

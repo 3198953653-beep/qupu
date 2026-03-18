@@ -218,6 +218,8 @@ export type DrawMeasureParams = {
   layoutDetail?: 'full' | 'spacing-only'
   skipPainting?: boolean
   showMeasureNumberLabel?: boolean
+  allowTrebleFullMeasureRestCollapse?: boolean
+  allowBassFullMeasureRestCollapse?: boolean
   staticNoteXById?: Map<string, number> | null
   staticAccidentalRightXById?: Map<string, Map<number, number>> | null
   publicAxisLayout?: PublicAxisLayout | null
@@ -281,6 +283,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     layoutDetail = 'full',
     skipPainting = false,
     showMeasureNumberLabel = true,
+    allowTrebleFullMeasureRestCollapse = false,
+    allowBassFullMeasureRestCollapse = false,
     staticNoteXById = null,
     staticAccidentalRightXById = null,
     publicAxisLayout = null,
@@ -532,8 +536,12 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     }
   }
 
-  const trebleIsFullMeasureRest = isStaffFullMeasureRest(measure.treble, timeSignature)
-  const bassIsFullMeasureRest = isStaffFullMeasureRest(measure.bass, timeSignature)
+  const trebleIsFullMeasureRest =
+    allowTrebleFullMeasureRestCollapse &&
+    isStaffFullMeasureRest(measure.treble, timeSignature)
+  const bassIsFullMeasureRest =
+    allowBassFullMeasureRestCollapse &&
+    isStaffFullMeasureRest(measure.bass, timeSignature)
 
   const buildRenderedStaffNote = (params: {
     note: ScoreNote

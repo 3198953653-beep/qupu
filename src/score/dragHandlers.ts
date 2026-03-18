@@ -72,6 +72,7 @@ export function useDragHandlers(params: {
   onAccidentalPointerDown?: (selection: Selection) => void
   onTiePointerDown?: (selection: TieSelection) => void
   onBeforeApplyScoreChange?: (sourcePairs: MeasurePair[]) => void
+  onAfterApplyScoreChange?: (params: { sourcePairs: MeasurePair[]; nextPairs: MeasurePair[] }) => void
   onBlankPointerDown?: (payload: BlankPointerPayload) => void
   onSelectionActivated?: () => void
   onSelectionTapRelease?: (selection: Selection) => void
@@ -137,6 +138,7 @@ export function useDragHandlers(params: {
     onAccidentalPointerDown,
     onTiePointerDown,
     onBeforeApplyScoreChange,
+    onAfterApplyScoreChange,
     onBlankPointerDown,
     onSelectionActivated,
     onSelectionTapRelease,
@@ -245,6 +247,10 @@ export function useDragHandlers(params: {
     if (result.fromImported) {
       if (result.normalizedPairs !== sourceImportedPairs) {
         onBeforeApplyScoreChange?.(sourceImportedPairs ?? [])
+        onAfterApplyScoreChange?.({
+          sourcePairs: sourceImportedPairs ?? [],
+          nextPairs: result.normalizedPairs,
+        })
       }
       measurePairsFromImportRef.current = result.normalizedPairs
       setMeasurePairsFromImport(result.normalizedPairs)
@@ -257,6 +263,10 @@ export function useDragHandlers(params: {
     }
     if (result.normalizedPairs !== sourceCurrentPairs) {
       onBeforeApplyScoreChange?.(sourceCurrentPairs)
+      onAfterApplyScoreChange?.({
+        sourcePairs: sourceCurrentPairs,
+        nextPairs: result.normalizedPairs,
+      })
     }
     setNotes(result.trebleNotes)
     setBassNotes(result.bassNotes)

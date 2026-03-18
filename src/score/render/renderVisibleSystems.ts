@@ -288,6 +288,7 @@ export function renderVisibleSystems(params: {
   activeSelections?: Selection[] | null
   draggingSelections?: Selection[] | null
   selectedMeasureScope?: { pairIndex: number; staff: 'treble' | 'bass' } | null
+  fullMeasureRestCollapseScopeKeys?: string[]
   previousNoteLayoutsByPair?: Map<number, NoteLayout[]> | null
   previousMeasureLayouts?: Map<number, MeasureLayout> | null
   allowSelectionFreezeWhenNotDragging?: boolean
@@ -326,6 +327,7 @@ export function renderVisibleSystems(params: {
     activeSelections = null,
     draggingSelections = null,
     selectedMeasureScope = null,
+    fullMeasureRestCollapseScopeKeys = [],
     previousNoteLayoutsByPair = null,
     previousMeasureLayouts = null,
     allowSelectionFreezeWhenNotDragging = true,
@@ -337,6 +339,9 @@ export function renderVisibleSystems(params: {
     showInScoreMeasureNumbers = false,
     dragPreview = null,
   } = params
+  const collapseScopeKeySet = new Set(fullMeasureRestCollapseScopeKeys)
+  const canCollapseFullMeasureRest = (pairIndex: number, staff: StaffKind): boolean =>
+    collapseScopeKeySet.has(`${pairIndex}:${staff}`)
   const spacingConfig = timeAxisSpacingConfig ?? DEFAULT_TIME_AXIS_SPACING_CONFIG
   const {
     previewNotesByPair: dragPreviewOverridesByPair,
@@ -842,6 +847,8 @@ export function renderVisibleSystems(params: {
           suppressedTieStartKeys: dragPreviewSuppressedTieStartKeys,
           suppressedTieStopKeys: dragPreviewSuppressedTieStopKeys,
           showMeasureNumberLabel: showInScoreMeasureNumbers,
+          allowTrebleFullMeasureRestCollapse: canCollapseFullMeasureRest(entry.pairIndex, 'treble'),
+          allowBassFullMeasureRestCollapse: canCollapseFullMeasureRest(entry.pairIndex, 'bass'),
           preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
           preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
           onSpacingMetrics: (metrics) => {
@@ -1057,6 +1064,8 @@ export function renderVisibleSystems(params: {
           suppressedTieStartKeys: dragPreviewSuppressedTieStartKeys,
           suppressedTieStopKeys: dragPreviewSuppressedTieStopKeys,
           showMeasureNumberLabel: showInScoreMeasureNumbers,
+          allowTrebleFullMeasureRestCollapse: canCollapseFullMeasureRest(entry.pairIndex, 'treble'),
+          allowBassFullMeasureRestCollapse: canCollapseFullMeasureRest(entry.pairIndex, 'bass'),
           preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
           preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
           onSpacingMetrics: (metrics) => {
@@ -1280,6 +1289,8 @@ export function renderVisibleSystems(params: {
         // and barline fit are computed from identical geometry.
         layoutDetail: 'full',
         showMeasureNumberLabel: showInScoreMeasureNumbers,
+        allowTrebleFullMeasureRestCollapse: canCollapseFullMeasureRest(entry.pairIndex, 'treble'),
+        allowBassFullMeasureRestCollapse: canCollapseFullMeasureRest(entry.pairIndex, 'bass'),
         preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
         preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
         // Probe with the same edge-cap path as final render so residual edge
@@ -1413,6 +1424,8 @@ export function renderVisibleSystems(params: {
         suppressedTieStartKeys: dragPreviewSuppressedTieStartKeys,
         suppressedTieStopKeys: dragPreviewSuppressedTieStopKeys,
         showMeasureNumberLabel: showInScoreMeasureNumbers,
+        allowTrebleFullMeasureRestCollapse: canCollapseFullMeasureRest(entry.pairIndex, 'treble'),
+        allowBassFullMeasureRestCollapse: canCollapseFullMeasureRest(entry.pairIndex, 'bass'),
         preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
         preferMeasureBarlineAxis: entry.preferMeasureStartBarlineAxis,
         onSpacingMetrics: (metrics) => {
