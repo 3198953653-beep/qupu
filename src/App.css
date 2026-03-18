@@ -663,12 +663,14 @@
 
 .score-ruler-strip {
   position: relative;
-  margin: 0 0 0.2rem;
-  height: 22px;
+  margin: 0;
+  height: 46px;
 }
 
 .measure-ruler-inline {
-  position: relative;
+  position: absolute;
+  left: 0;
+  top: 0;
   width: 100%;
   height: 100%;
   pointer-events: none;
@@ -698,8 +700,62 @@
   left: 0;
   top: 14px;
   width: 1px;
-  height: 7px;
+  height: calc(100% - 14px);
   background: rgba(23, 58, 80, 0.65);
+}
+
+.chord-ruler-inline {
+  position: absolute;
+  left: 0;
+  top: 22px;
+  width: 100%;
+  height: 24px;
+  pointer-events: none;
+}
+
+.chord-ruler-marker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  border: none;
+  padding: 0;
+  padding-inline: 8px;
+  margin: 0;
+  box-sizing: border-box;
+  border-radius: 7px;
+  background: #d9eaff;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.chord-ruler-label {
+  display: block;
+  position: static;
+  transform: none;
+  white-space: nowrap;
+  margin: 0;
+  padding: 0;
+  color: #1f4e74;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.chord-ruler-marker:hover {
+  background: #c7e0ff;
+}
+
+.chord-ruler-marker.is-active .chord-ruler-label {
+  color: #123f66;
+}
+
+.chord-ruler-marker.is-active {
+  background: #afcfff;
 }
 
 .score-surface {
@@ -1125,4 +1181,3 @@
     font-size: 0.88rem;
   }
 }
-

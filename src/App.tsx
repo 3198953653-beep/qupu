@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import * as Tone from 'tone'
 import { Renderer } from 'vexflow'
 import './App.css'
@@ -64,7 +64,7 @@ import { appendIntervalKey, deleteSelectedKey, findSelectionLocationInPairs } fr
 import { applyClipboardPaste, buildClipboardFromSelections, type CopyPasteFailureReason } from './score/copyPasteEdits'
 import { getMidiNoteNumber, toPitchFromMidiWithKeyPreference } from './score/midiInput'
 import { getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './score/pitchMath'
-import { compareTimelinePoint, resolveSelectionTimelinePoint } from './score/selectionTimelineRange'
+import { buildStaffOnsetTicks, compareTimelinePoint, resolveSelectionTimelinePoint } from './score/selectionTimelineRange'
 import { resolveForwardTieTargets, resolvePreviousTieTarget } from './score/tieChain'
 import { buildSelectionGroupMoveTargets } from './score/selectionGroupTargets'
 import type { MeasureTimelineBundle } from './score/timeline/types'
@@ -132,6 +132,9 @@ const PDF_CJK_FONT_URL = new URL('./assets/fonts/NotoSansSC-Regular.ttf', import
 const UNDO_HISTORY_LIMIT = 120
 const LOCAL_STORAGE_MIDI_INPUT_KEY = 'score.midi.selectedInputId'
 const LOCAL_STORAGE_EDITOR_MEASURE_NUMBER_KEY = 'score.editor.showInScoreMeasureNumbers'
+const CHORD_LABEL_LEFT_INSET_PX = 8
+const CHORD_HIGHLIGHT_PAD_X_PX = 4
+const CHORD_HIGHLIGHT_PAD_Y_PX = 4
 
 const PITCHES: Pitch[] = createPianoPitches()
 const INITIAL_BASS_NOTES: ScoreNote[] = buildBassMockNotes(INITIAL_NOTES)
@@ -284,6 +287,13 @@ function getAutoScoreScale(measureCount: number): number {
   if (measureCount >= 56) return 0.86
   if (measureCount >= 36) return 0.92
   return 1
+}
+
+function getBeatTicksByTimeSignature(timeSignature: TimeSignature): number {
+  const beatType = Math.max(1, Number.isFinite(timeSignature.beatType) ? Math.round(timeSignature.beatType) : 4)
+  const rawBeatTicks = TICKS_PER_BEAT * (4 / beatType)
+  if (!Number.isFinite(rawBeatTicks) || rawBeatTicks <= 0) return TICKS_PER_BEAT
+  return Math.max(1, Math.round(rawBeatTicks))
 }
 
 function clampScalePercent(value: number): number {
@@ -948,6 +958,32 @@ type MeasureStaffOnsetEntry = {
   maxKeyIndex: number
 }
 
+type ChordRulerMarker = {
+  key: string
+  xPx: number
+  label: string
+  isActive: boolean
+  pairIndex: number
+  beatIndex: 1 | 3
+}
+
+type ChordRulerMarkerMeta = {
+  key: string
+  pairIndex: number
+  beatIndex: 1 | 3
+  label: string
+  startTick: number
+  endTick: number
+  xPx: number
+}
+
+type ActiveChordSelection = {
+  markerKey: string
+  pairIndex: number
+  startTick: number
+  endTick: number
+}
+
 function escapeCssId(id: string): string {
   if (typeof (window as unknown as { CSS?: { escape?: (value: string) => string } }).CSS?.escape === 'function') {
     return (window as unknown as { CSS: { escape: (value: string) => string } }).CSS.escape(id)
@@ -1091,6 +1127,36 @@ function buildSelectionsForMeasureStaff(
     for (let keyIndex = 0; keyIndex < keyCount; keyIndex += 1) {
       selections.push({ noteId: note.id, staff, keyIndex })
     }
+  })
+  return selections
+}
+
+function buildSelectionsForMeasureTickRange(
+  pair: MeasurePair,
+  startTickInclusive: number,
+  endTickExclusive: number,
+): Selection[] {
+  const safeStartTick = Math.max(0, Math.round(startTickInclusive))
+  const safeEndTick = Math.max(safeStartTick, Math.round(endTickExclusive))
+  if (safeEndTick <= safeStartTick) return []
+  const selections: Selection[] = []
+  ;(['treble', 'bass'] as const).forEach((staff) => {
+    const notes = staff === 'treble' ? pair.treble : pair.bass
+    const onsetTicksByNoteIndex = buildStaffOnsetTicks(notes)
+    notes.forEach((note, noteIndex) => {
+      if (note.isRest) return
+      const onsetTick = onsetTicksByNoteIndex[noteIndex]
+      if (!Number.isFinite(onsetTick)) return
+      if (onsetTick < safeStartTick || onsetTick >= safeEndTick) return
+      const maxKeyIndex = note.chordPitches?.length ?? 0
+      for (let keyIndex = 0; keyIndex <= maxKeyIndex; keyIndex += 1) {
+        selections.push({
+          noteId: note.id,
+          staff,
+          keyIndex,
+        })
+      }
+    })
   })
   return selections
 }
@@ -1534,6 +1600,7 @@ function App() {
     { noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 },
   ])
   const [selectedMeasureScope, setSelectedMeasureScope] = useState<{ pairIndex: number; staff: Selection['staff'] } | null>(null)
+  const [activeChordSelection, setActiveChordSelection] = useState<ActiveChordSelection | null>(null)
   const [fullMeasureRestCollapseScopeKeys, setFullMeasureRestCollapseScopeKeys] = useState<string[]>([])
   const [isSelectionVisible, setIsSelectionVisible] = useState(true)
   const [draggingSelection, setDraggingSelection] = useState<Selection | null>(null)
@@ -1665,6 +1732,8 @@ function App() {
   const midiStepChainRef = useRef(false)
   const midiStepLastSelectionRef = useRef<Selection | null>(null)
   const noteClipboardRef = useRef<NoteClipboardPayload | null>(null)
+  const chordMarkerLayoutRequestRef = useRef(0)
+  const chordMarkerLayoutAppliedRef = useRef(0)
   const measurePairs = useMemo(
     () => measurePairsFromImport ?? buildMeasurePairs(notes, bassNotes),
     [measurePairsFromImport, notes, bassNotes],
@@ -1876,6 +1945,24 @@ function App() {
     timeAxisSpacingConfig.durationGapRatios.half,
     spacingLayoutMode,
   ])
+  const [chordMarkerLayoutRevision, setChordMarkerLayoutRevision] = useState(0)
+  useLayoutEffect(() => {
+    chordMarkerLayoutRequestRef.current += 1
+  }, [
+    measurePairs,
+    measurePairsFromImport,
+    measureTimeSignaturesFromImport,
+    horizontalMeasureFramesByPair,
+    horizontalRenderOffsetX,
+    scoreScaleX,
+    layoutStabilityKey,
+  ])
+  const onAfterScoreRender = useCallback(() => {
+    const request = chordMarkerLayoutRequestRef.current
+    if (request <= chordMarkerLayoutAppliedRef.current) return
+    chordMarkerLayoutAppliedRef.current = request
+    setChordMarkerLayoutRevision((current) => (current === request ? current : request))
+  }, [])
 
   useEffect(() => {
     const scrollHost = scoreScrollRef.current
@@ -1971,6 +2058,7 @@ function App() {
     renderQualityScaleX: renderQualityScale.x,
     renderQualityScaleY: renderQualityScale.y,
     dragPreview: draggingSelection ? dragPreviewState : null,
+    onAfterRender: onAfterScoreRender,
   })
 
   useSynthLifecycle({
@@ -2037,6 +2125,10 @@ function App() {
     return isSameSelection(lastSelection, targetSelection)
   }, [])
 
+  const clearActiveChordSelection = useCallback(() => {
+    setActiveChordSelection(null)
+  }, [])
+
   const {
     clearDragOverlay,
     onSurfacePointerMove,
@@ -2079,6 +2171,7 @@ function App() {
       setActiveAccidentalSelection(null)
       setActiveTieSelection(null)
       setSelectedMeasureScope(null)
+      clearActiveChordSelection()
       const nextTargetSelections = nextSelections
       setSelectedSelections((current) => {
         if (
@@ -2095,6 +2188,7 @@ function App() {
       setActiveAccidentalSelection(null)
       setActiveTieSelection(null)
       setSelectedMeasureScope(null)
+      clearActiveChordSelection()
       setSelectedSelections([selection])
       setActiveSelection(selection)
       setIsSelectionVisible(true)
@@ -2104,6 +2198,7 @@ function App() {
       setActiveAccidentalSelection(selection)
       setActiveTieSelection(null)
       setSelectedMeasureScope(null)
+      clearActiveChordSelection()
       setDraggingSelection(null)
       setSelectedSelections([])
       setIsSelectionVisible(false)
@@ -2113,6 +2208,7 @@ function App() {
       setActiveTieSelection(selection)
       setActiveAccidentalSelection(null)
       setSelectedMeasureScope(null)
+      clearActiveChordSelection()
       setDraggingSelection(null)
       setSelectedSelections([])
       setIsSelectionVisible(false)
@@ -2133,6 +2229,7 @@ function App() {
       resetMidiStepChain()
       setActiveAccidentalSelection(null)
       setActiveTieSelection(null)
+      clearActiveChordSelection()
       if (pairIndex === null || staff === null) {
         setIsSelectionVisible(false)
         setSelectedSelections([])
@@ -2169,6 +2266,7 @@ function App() {
       resetMidiStepChain()
       setActiveAccidentalSelection(null)
       setActiveTieSelection(null)
+      clearActiveChordSelection()
       setIsSelectionVisible(true)
     },
     measurePairsFromImportRef,
@@ -2241,33 +2339,39 @@ function App() {
 
   const importMusicXmlTextWithCollapseReset = useCallback((xmlText: string) => {
     clearFullMeasureRestCollapseScopes()
+    clearActiveChordSelection()
     importMusicXmlText(xmlText)
-  }, [clearFullMeasureRestCollapseScopes, importMusicXmlText])
+  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, importMusicXmlText])
 
   const importMusicXmlFromTextareaWithCollapseReset = useCallback(() => {
     clearFullMeasureRestCollapseScopes()
+    clearActiveChordSelection()
     importMusicXmlFromTextarea()
-  }, [clearFullMeasureRestCollapseScopes, importMusicXmlFromTextarea])
+  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, importMusicXmlFromTextarea])
 
   const onMusicXmlFileChangeWithCollapseReset = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
     clearFullMeasureRestCollapseScopes()
+    clearActiveChordSelection()
     await onMusicXmlFileChange(event)
-  }, [clearFullMeasureRestCollapseScopes, onMusicXmlFileChange])
+  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, onMusicXmlFileChange])
 
   const loadSampleMusicXmlWithCollapseReset = useCallback(() => {
     clearFullMeasureRestCollapseScopes()
+    clearActiveChordSelection()
     loadSampleMusicXml()
-  }, [clearFullMeasureRestCollapseScopes, loadSampleMusicXml])
+  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, loadSampleMusicXml])
 
   const resetScoreWithCollapseReset = useCallback(() => {
     clearFullMeasureRestCollapseScopes()
+    clearActiveChordSelection()
     resetScore()
-  }, [clearFullMeasureRestCollapseScopes, resetScore])
+  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, resetScore])
 
   const applyRhythmPresetWithCollapseReset = useCallback((presetId: RhythmPresetId) => {
     clearFullMeasureRestCollapseScopes()
+    clearActiveChordSelection()
     applyRhythmPreset(presetId)
-  }, [applyRhythmPreset, clearFullMeasureRestCollapseScopes])
+  }, [applyRhythmPreset, clearActiveChordSelection, clearFullMeasureRestCollapseScopes])
 
   useEffect(() => {
     const hasActiveTreble = notes.some((note) => note.id === activeSelection.noteId)
@@ -2470,11 +2574,13 @@ function App() {
     setActiveAccidentalSelection(null)
     setActiveTieSelection(null)
     setSelectedMeasureScope(null)
+    clearActiveChordSelection()
     setFullMeasureRestCollapseScopeKeys(snapshot.fullMeasureRestCollapseScopeKeys)
     setActiveSelection(snapshot.selection)
     setSelectedSelections(snapshot.isSelectionVisible ? [snapshot.selection] : [])
     return true
   }, [
+    clearActiveChordSelection,
     clearDragOverlay,
     resetMidiStepChain,
     setActiveAccidentalSelection,
@@ -2527,10 +2633,12 @@ function App() {
       setActiveAccidentalSelection(null)
       setActiveTieSelection(null)
       setSelectedMeasureScope(null)
+      clearActiveChordSelection()
       setActiveSelection(nextSelection)
       setSelectedSelections(nextSelections)
     },
     [
+      clearActiveChordSelection,
       pushUndoSnapshot,
       resetMidiStepChain,
       setFullMeasureRestCollapseScopeKeys,
@@ -3280,6 +3388,7 @@ function App() {
     setSelectedSelections([selection])
     setDraggingSelection(null)
     setSelectedMeasureScope(null)
+    clearActiveChordSelection()
     closeOsmdPreview()
 
     const scrollHost = scoreScrollRef.current
@@ -3332,7 +3441,7 @@ function App() {
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(runJumpLoop)
     })
-  }, [closeOsmdPreview, horizontalMeasureFramesByPair, resetMidiStepChain, scoreScaleX])
+  }, [clearActiveChordSelection, closeOsmdPreview, horizontalMeasureFramesByPair, resetMidiStepChain, scoreScaleX])
 
   const onOsmdPreviewSurfaceClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     if (osmdPreviewSourceMode !== 'editor') return
@@ -4216,12 +4325,285 @@ function App() {
       }
     })
   }, [horizontalMeasureFramesByPair, scoreScaleX])
+  const chordRulerMarkerMetaByKey = useMemo(() => {
+    void layoutStabilityKey
+    void chordMarkerLayoutRevision
+    const markers = new Map<string, ChordRulerMarkerMeta>()
+    if (measurePairsFromImport !== null) return markers
+    const resolveStaffHeadLeftX = (params: {
+      pairIndex: number
+      staff: 'treble' | 'bass'
+      startTick: number
+    }): number | null => {
+      const { pairIndex, staff, startTick } = params
+      const pair = measurePairs[pairIndex]
+      if (!pair) return null
+      const staffNotes = staff === 'treble' ? pair.treble : pair.bass
+      const onsetTicksByNoteIndex = buildStaffOnsetTicks(staffNotes)
+      const targetNoteIndex = onsetTicksByNoteIndex.findIndex((tick) => tick === startTick)
+      if (targetNoteIndex < 0) return null
+      const targetNote = staffNotes[targetNoteIndex]
+      if (!targetNote || targetNote.isRest) return null
+      const pairLayouts = noteLayoutsByPairRef.current.get(pairIndex) ?? []
+      const targetLayout =
+        pairLayouts.find((layout) => layout.staff === staff && layout.noteIndex === targetNoteIndex) ?? null
+      if (!targetLayout) return null
+      const rootHead = targetLayout.noteHeads.find((head) => head.keyIndex === 0) ?? targetLayout.noteHeads[0] ?? null
+      if (!rootHead) return null
+      const headLeftX = Number.isFinite(rootHead.hitMinX) ? (rootHead.hitMinX as number) : rootHead.x
+      if (!Number.isFinite(headLeftX)) return null
+      return headLeftX
+    }
+    horizontalMeasureFramesByPair.forEach((frame, pairIndex) => {
+      const timelineBundle = measureTimelineBundlesRef.current.get(pairIndex) ?? null
+      const timeSignature = resolvePairTimeSignature(pairIndex, measureTimeSignaturesFromImport)
+      const beatTicks = getBeatTicksByTimeSignature(timeSignature)
+      const measureTicks = Math.max(1, timelineBundle?.measureTicks ?? Math.round(timeSignature.beats * beatTicks))
+      const isOddMeasure = (pairIndex + 1) % 2 === 1
+      const chordEntries: Array<{ beatIndex: 1 | 3; label: string; startTick: number }> = [
+        {
+          beatIndex: 1,
+          label: isOddMeasure ? 'C' : 'F',
+          startTick: 0,
+        },
+        {
+          beatIndex: 3,
+          label: isOddMeasure ? 'Am' : 'G',
+          startTick: Math.max(0, Math.round(beatTicks * 2)),
+        },
+      ]
+      chordEntries.forEach((entry) => {
+        const safeStartTick = Math.max(0, Math.min(measureTicks, Math.round(entry.startTick)))
+        const safeEndTick = Math.max(safeStartTick, Math.min(measureTicks, safeStartTick + beatTicks * 2))
+        if (safeEndTick <= safeStartTick) return
+        const trebleHeadLeftX = resolveStaffHeadLeftX({
+          pairIndex,
+          staff: 'treble',
+          startTick: safeStartTick,
+        })
+        const preferredHeadLeftX =
+          trebleHeadLeftX ??
+          resolveStaffHeadLeftX({
+            pairIndex,
+            staff: 'bass',
+            startTick: safeStartTick,
+          })
+        const textAnchorXPx = (() => {
+          if (preferredHeadLeftX !== null) {
+            return (preferredHeadLeftX + horizontalRenderOffsetX) * scoreScaleX + SCORE_STAGE_BORDER_PX
+          }
+          const axisX = timelineBundle?.publicAxisLayout?.tickToX.get(safeStartTick)
+          const fallbackXInScore =
+            typeof axisX === 'number' && Number.isFinite(axisX)
+              ? axisX + horizontalRenderOffsetX
+              : frame.measureX + frame.measureWidth * (safeStartTick / Math.max(1, measureTicks))
+          return fallbackXInScore * scoreScaleX + SCORE_STAGE_BORDER_PX
+        })()
+        const buttonLeftXPx = textAnchorXPx - CHORD_LABEL_LEFT_INSET_PX
+        if (!Number.isFinite(buttonLeftXPx)) return
+        const key = `chord-ruler-${pairIndex + 1}-${entry.beatIndex}`
+        markers.set(key, {
+          key,
+          pairIndex,
+          beatIndex: entry.beatIndex,
+          label: entry.label,
+          startTick: safeStartTick,
+          endTick: safeEndTick,
+          xPx: buttonLeftXPx,
+        })
+      })
+    })
+    return markers
+  }, [
+    chordMarkerLayoutRevision,
+    horizontalMeasureFramesByPair,
+    horizontalRenderOffsetX,
+    measurePairs,
+    measurePairsFromImport,
+    measureTimeSignaturesFromImport,
+    scoreScaleX,
+    layoutStabilityKey,
+  ])
+  useEffect(() => {
+    if (!activeChordSelection) return
+    if (chordRulerMarkerMetaByKey.has(activeChordSelection.markerKey)) return
+    setActiveChordSelection(null)
+  }, [activeChordSelection, chordRulerMarkerMetaByKey])
+  const chordRulerMarkers = useMemo(() => {
+    if (chordRulerMarkerMetaByKey.size === 0) return [] as ChordRulerMarker[]
+    return [...chordRulerMarkerMetaByKey.values()].map((marker) => ({
+      key: marker.key,
+      xPx: marker.xPx,
+      label: marker.label,
+      isActive: activeChordSelection?.markerKey === marker.key,
+      pairIndex: marker.pairIndex,
+      beatIndex: marker.beatIndex,
+    }))
+  }, [activeChordSelection, chordRulerMarkerMetaByKey])
+  const onChordRulerMarkerClick = useCallback((markerKey: string) => {
+    const marker = chordRulerMarkerMetaByKey.get(markerKey)
+    if (!marker) return
+    const targetPair = measurePairsRef.current[marker.pairIndex]
+    if (!targetPair) return
+    const nextSelections = buildSelectionsForMeasureTickRange(targetPair, marker.startTick, marker.endTick)
+    resetMidiStepChain()
+    setActiveAccidentalSelection(null)
+    setActiveTieSelection(null)
+    setSelectedMeasureScope(null)
+    setDraggingSelection(null)
+    if (nextSelections.length > 0) {
+      setIsSelectionVisible(true)
+      setSelectedSelections(nextSelections)
+      setActiveSelection(nextSelections[0])
+    } else {
+      setIsSelectionVisible(false)
+      setSelectedSelections([])
+    }
+    setActiveChordSelection({
+      markerKey: marker.key,
+      pairIndex: marker.pairIndex,
+      startTick: marker.startTick,
+      endTick: marker.endTick,
+    })
+  }, [chordRulerMarkerMetaByKey, resetMidiStepChain])
+  const resolveChordHighlightContentBounds = useCallback((params: {
+    pairIndex: number
+    startTick: number
+    endTick: number
+  }): { leftXRaw: number; rightXRaw: number } | null => {
+    const safeStartTick = Math.max(0, Math.round(params.startTick))
+    const safeEndTick = Math.max(safeStartTick, Math.round(params.endTick))
+    if (safeEndTick <= safeStartTick) return null
+
+    const pair = measurePairsRef.current[params.pairIndex]
+    if (!pair) return null
+    const pairLayouts = noteLayoutsByPairRef.current.get(params.pairIndex) ?? []
+    if (pairLayouts.length === 0) return null
+
+    const layoutByStaffNoteIndex = new Map<string, NoteLayout>()
+    pairLayouts.forEach((layout) => {
+      layoutByStaffNoteIndex.set(`${layout.staff}:${layout.noteIndex}`, layout)
+    })
+
+    let minLeftX = Number.POSITIVE_INFINITY
+    let maxRightX = Number.NEGATIVE_INFINITY
+    const acceptBounds = (left: number, right: number) => {
+      if (!Number.isFinite(left) || !Number.isFinite(right)) return
+      if (right <= left) return
+      minLeftX = Math.min(minLeftX, left)
+      maxRightX = Math.max(maxRightX, right)
+    }
+
+    ;(['treble', 'bass'] as const).forEach((staff) => {
+      const staffNotes = staff === 'treble' ? pair.treble : pair.bass
+      const onsetTicksByNoteIndex = buildStaffOnsetTicks(staffNotes)
+      staffNotes.forEach((note, noteIndex) => {
+        if (note.isRest) return
+        const onsetTick = onsetTicksByNoteIndex[noteIndex]
+        if (!Number.isFinite(onsetTick)) return
+        if (onsetTick < safeStartTick || onsetTick >= safeEndTick) return
+
+        const layout = layoutByStaffNoteIndex.get(`${staff}:${noteIndex}`) ?? null
+        if (!layout) return
+
+        const leftCandidates: number[] = []
+        if (Number.isFinite(layout.x)) leftCandidates.push(layout.x)
+        layout.noteHeads.forEach((head) => {
+          if (Number.isFinite(head.hitMinX)) {
+            leftCandidates.push(head.hitMinX as number)
+          } else if (Number.isFinite(head.x)) {
+            leftCandidates.push(head.x)
+          }
+        })
+        layout.accidentalLayouts.forEach((accidental) => {
+          if (Number.isFinite(accidental.hitMinX)) {
+            leftCandidates.push(accidental.hitMinX as number)
+            return
+          }
+          if (!Number.isFinite(accidental.x)) return
+          if (Number.isFinite(accidental.hitRadiusX)) {
+            leftCandidates.push(accidental.x - (accidental.hitRadiusX as number))
+            return
+          }
+          leftCandidates.push(accidental.x - 4)
+        })
+
+        const rightCandidates: number[] = []
+        layout.noteHeads.forEach((head) => {
+          if (Number.isFinite(head.hitMaxX)) {
+            rightCandidates.push(head.hitMaxX as number)
+            return
+          }
+          if (Number.isFinite(head.x)) {
+            rightCandidates.push(head.x + 9)
+          }
+        })
+        if (Number.isFinite(layout.spacingRightX)) {
+          rightCandidates.push(layout.spacingRightX)
+        }
+        if (rightCandidates.length === 0 && Number.isFinite(layout.x)) {
+          rightCandidates.push(layout.x + 9)
+        }
+        if (rightCandidates.length === 0 && Number.isFinite(layout.rightX)) {
+          rightCandidates.push(layout.rightX)
+        }
+
+        const noteLeft = leftCandidates.length > 0 ? Math.min(...leftCandidates) : Number.POSITIVE_INFINITY
+        const noteRight = rightCandidates.length > 0 ? Math.max(...rightCandidates) : Number.NEGATIVE_INFINITY
+        acceptBounds(noteLeft, noteRight)
+      })
+    })
+
+    if (!Number.isFinite(minLeftX) || !Number.isFinite(maxRightX)) return null
+    if (maxRightX <= minLeftX) return null
+    return {
+      leftXRaw: minLeftX,
+      rightXRaw: maxRightX,
+    }
+  }, [])
   const selectedMeasureHighlightRectPx = useMemo(() => {
+    void layoutStabilityKey
+    const measurePadX = 6
+    const measurePadY = 4
+    if (activeChordSelection !== null) {
+      const measureLayout = measureLayoutsRef.current.get(activeChordSelection.pairIndex) ?? null
+      if (!measureLayout) return null
+      const contentBounds = resolveChordHighlightContentBounds({
+        pairIndex: activeChordSelection.pairIndex,
+        startTick: activeChordSelection.startTick,
+        endTick: activeChordSelection.endTick,
+      })
+      if (!contentBounds) return null
+      const trebleTopRaw = Number.isFinite(measureLayout.trebleLineTopY) ? measureLayout.trebleLineTopY : measureLayout.trebleY
+      const trebleBottomRaw =
+        Number.isFinite(measureLayout.trebleLineBottomY) ? measureLayout.trebleLineBottomY : measureLayout.trebleY + 40
+      const bassTopRaw = Number.isFinite(measureLayout.bassLineTopY) ? measureLayout.bassLineTopY : measureLayout.bassY
+      const bassBottomRaw =
+        Number.isFinite(measureLayout.bassLineBottomY) ? measureLayout.bassLineBottomY : measureLayout.bassY + 40
+      const trebleTop = Math.min(trebleTopRaw, trebleBottomRaw)
+      const trebleBottom = Math.max(trebleTopRaw, trebleBottomRaw)
+      const bassTop = Math.min(bassTopRaw, bassBottomRaw)
+      const bassBottom = Math.max(bassTopRaw, bassBottomRaw)
+      const lineTop = Math.min(trebleTop, bassTop)
+      const lineBottom = Math.max(trebleBottom, bassBottom)
+      const x = scoreSurfaceOffsetXPx + contentBounds.leftXRaw * scoreScaleX + SCORE_STAGE_BORDER_PX
+      const y = scoreSurfaceOffsetYPx + lineTop * scoreScaleY + SCORE_STAGE_BORDER_PX
+      const width = (contentBounds.rightXRaw - contentBounds.leftXRaw) * scoreScaleX
+      const height = (lineBottom - lineTop) * scoreScaleY
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height)) {
+        return null
+      }
+      if (width <= 0 || height <= 0) return null
+      return {
+        x: x - CHORD_HIGHLIGHT_PAD_X_PX,
+        y: y - CHORD_HIGHLIGHT_PAD_Y_PX,
+        width: width + CHORD_HIGHLIGHT_PAD_X_PX * 2,
+        height: height + CHORD_HIGHLIGHT_PAD_Y_PX * 2,
+      }
+    }
     if (selectedMeasureScope === null) return null
     const measureLayout = measureLayoutsRef.current.get(selectedMeasureScope.pairIndex) ?? null
     if (!measureLayout) return null
-    const padX = 6
-    const padY = 4
     const x = scoreSurfaceOffsetXPx + measureLayout.measureX * scoreScaleX + SCORE_STAGE_BORDER_PX
     const lineTopRaw =
       selectedMeasureScope.staff === 'treble'
@@ -4241,12 +4623,14 @@ function App() {
     }
     if (width <= 0 || height <= 0) return null
     return {
-      x: x - padX,
-      y: y - padY,
-      width: width + padX * 2,
-      height: height + padY * 2,
+      x: x - measurePadX,
+      y: y - measurePadY,
+      width: width + measurePadX * 2,
+      height: height + measurePadY * 2,
     }
   }, [
+    activeChordSelection,
+    resolveChordHighlightContentBounds,
     selectedMeasureScope,
     scoreSurfaceOffsetXPx,
     scoreSurfaceOffsetYPx,
@@ -5096,6 +5480,8 @@ function App() {
         scoreSurfaceOffsetXPx={scoreSurfaceOffsetXPx}
         scoreSurfaceOffsetYPx={scoreSurfaceOffsetYPx}
         measureRulerTicks={measureRulerTicks}
+        chordRulerMarkers={chordRulerMarkers}
+        onChordRulerMarkerClick={onChordRulerMarkerClick}
         selectedMeasureHighlightRectPx={selectedMeasureHighlightRectPx}
         draggingSelection={draggingSelection}
         scoreRef={scoreRef}

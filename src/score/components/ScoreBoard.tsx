@@ -16,6 +16,15 @@ export function ScoreBoard(props: {
     xPx: number
     label: string
   }>
+  chordRulerMarkers: Array<{
+    key: string
+    xPx: number
+    label: string
+    isActive: boolean
+    pairIndex: number
+    beatIndex: 1 | 3
+  }>
+  onChordRulerMarkerClick: (markerKey: string) => void
   selectedMeasureHighlightRectPx?: { x: number; y: number; width: number; height: number } | null
   draggingSelection: { noteId: string; staff: 'treble' | 'bass'; keyIndex: number } | null
   scoreRef: RefObject<HTMLCanvasElement | null>
@@ -42,6 +51,8 @@ export function ScoreBoard(props: {
     scoreSurfaceOffsetXPx,
     scoreSurfaceOffsetYPx,
     measureRulerTicks,
+    chordRulerMarkers,
+    onChordRulerMarkerClick,
     selectedMeasureHighlightRectPx = null,
     draggingSelection,
     scoreRef,
@@ -61,13 +72,27 @@ export function ScoreBoard(props: {
   return (
     <section className="board">
       <div className="score-scroll horizontal-view" ref={scoreScrollRef} tabIndex={0}>
-        <div className="score-ruler-strip" style={{ width: `${displayScoreWidth}px` }} aria-hidden="true">
-          <div className="measure-ruler-inline">
+        <div className="score-ruler-strip" style={{ width: `${displayScoreWidth}px` }}>
+          <div className="measure-ruler-inline" aria-hidden="true">
             {measureRulerTicks.map((tick) => (
               <div className="measure-ruler-tick" key={tick.key} style={{ left: `${tick.xPx}px` }}>
                 <span className="measure-ruler-label">{tick.label}</span>
                 <span className="measure-ruler-mark" />
               </div>
+            ))}
+          </div>
+          <div className="chord-ruler-inline">
+            {chordRulerMarkers.map((marker) => (
+              <button
+                type="button"
+                className={`chord-ruler-marker${marker.isActive ? ' is-active' : ''}`}
+                key={marker.key}
+                style={{ left: `${marker.xPx}px` }}
+                onClick={() => onChordRulerMarkerClick(marker.key)}
+                aria-label={`第${marker.pairIndex + 1}小节第${marker.beatIndex}拍和弦 ${marker.label}`}
+              >
+                <span className="chord-ruler-label">{marker.label}</span>
+              </button>
             ))}
           </div>
         </div>
