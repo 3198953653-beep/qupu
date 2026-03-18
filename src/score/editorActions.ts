@@ -2,6 +2,7 @@ import type { ChangeEvent, Dispatch, MutableRefObject, SetStateAction } from 're
 import * as Tone from 'tone'
 import { createAiVariation } from './ai'
 import {
+  DEFAULT_DEMO_MEASURE_COUNT,
   DURATION_BEATS,
   DURATION_TONE,
   QUARTER_NOTE_SECONDS,
@@ -11,7 +12,7 @@ import {
 import { clearImportedSourceState } from './importSourceState'
 import { buildMusicXmlExportPayload } from './musicXmlActions'
 import { toTonePitch } from './pitchUtils'
-import { buildNotesFromPattern } from './scoreOps'
+import { buildBassMockNotes, buildNotesFromPattern } from './scoreOps'
 import type {
   ImportFeedback,
   MeasurePair,
@@ -183,13 +184,25 @@ export function runAiDraftAction(params: {
 export function applyRhythmPresetAction(params: {
   presetId: RhythmPresetId
   clearImportedSourceParams: Parameters<typeof clearImportedSourceState>[0]
+  sourceNotes: ScoreNote[]
   setIsRhythmLinked: StateSetter<boolean>
   setNotes: StateSetter<ScoreNote[]>
+  setBassNotes: StateSetter<ScoreNote[]>
   setActiveSelection: StateSetter<Selection>
   setRhythmPreset: StateSetter<RhythmPresetId>
+  measureRepeatCount?: number
 }): void {
-  const { presetId, clearImportedSourceParams, setIsRhythmLinked, setNotes, setActiveSelection, setRhythmPreset } =
-    params
+  const {
+    presetId,
+    clearImportedSourceParams,
+    sourceNotes,
+    setIsRhythmLinked,
+    setNotes,
+    setBassNotes,
+    setActiveSelection,
+    setRhythmPreset,
+    measureRepeatCount = DEFAULT_DEMO_MEASURE_COUNT,
+  } = params
 
   const preset = RHYTHM_PRESETS.find((item) => item.id === presetId)
   if (!preset) return
@@ -197,12 +210,13 @@ export function applyRhythmPresetAction(params: {
   setIsRhythmLinked(false)
   clearImportedSourceState(clearImportedSourceParams)
 
-  let nextActive = ''
-  setNotes((current) => {
-    const next = buildNotesFromPattern(preset.pattern, current)
-    nextActive = next[0]?.id ?? ''
-    return next
-  })
+  const safeRepeatCount = Number.isFinite(measureRepeatCount) ? Math.max(1, Math.round(measureRepeatCount)) : 1
+  const expandedPattern = Array.from({ length: safeRepeatCount }, () => preset.pattern).flat()
+  const nextTreble = buildNotesFromPattern(expandedPattern, sourceNotes)
+  const nextBass = buildBassMockNotes(nextTreble)
+  const nextActive = nextTreble[0]?.id ?? ''
+  setNotes(nextTreble)
+  setBassNotes(nextBass)
   if (nextActive) {
     setActiveSelection({ noteId: nextActive, staff: 'treble', keyIndex: 0 })
   }

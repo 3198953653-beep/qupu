@@ -8,6 +8,7 @@ import {
   resetScoreAction,
   runAiDraftAction,
 } from './editorActions'
+import { DEFAULT_DEMO_MEASURE_COUNT } from './constants'
 import { applyImportedScoreState, importMusicXmlTextAndApply } from './musicXmlActions'
 import type {
   DragState,
@@ -242,10 +243,13 @@ export function useEditorHandlers(params: {
     applyRhythmPresetAction({
       presetId,
       clearImportedSourceParams: clearImportedSourceBase,
+      sourceNotes: notes,
       setIsRhythmLinked,
       setNotes,
+      setBassNotes,
       setActiveSelection,
       setRhythmPreset,
+      measureRepeatCount: DEFAULT_DEMO_MEASURE_COUNT,
     })
   }
 

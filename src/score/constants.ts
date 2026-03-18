@@ -17,12 +17,22 @@ export const PIANO_MIN_MIDI = 21 // A0
 export const PIANO_MAX_MIDI = 108 // C8
 export const CHROMATIC_STEPS = ['c', 'c#', 'd', 'd#', 'e', 'f', 'f#', 'g', 'g#', 'a', 'a#', 'b'] as const
 
-export const INITIAL_NOTES: ScoreNote[] = [
-  { id: 'n1', pitch: 'c/5', duration: 'q' },
-  { id: 'n2', pitch: 'e/5', duration: 'q' },
-  { id: 'n3', pitch: 'g/4', duration: 'q' },
-  { id: 'n4', pitch: 'd/5', duration: 'q' },
+export const DEFAULT_DEMO_MEASURE_COUNT = 16
+
+const INITIAL_TREBLE_MEASURE_TEMPLATE: ReadonlyArray<Pick<ScoreNote, 'pitch' | 'duration'>> = [
+  { pitch: 'c/5', duration: 'q' },
+  { pitch: 'e/5', duration: 'q' },
+  { pitch: 'g/4', duration: 'q' },
+  { pitch: 'd/5', duration: 'q' },
 ]
+
+export const INITIAL_NOTES: ScoreNote[] = Array.from({ length: DEFAULT_DEMO_MEASURE_COUNT }, (_, measureIndex) =>
+  INITIAL_TREBLE_MEASURE_TEMPLATE.map((entry, slotIndex) => ({
+    id: `seed-t-${measureIndex + 1}-${slotIndex + 1}`,
+    pitch: entry.pitch,
+    duration: entry.duration,
+  })),
+).flat()
 
 export const DURATION_BEATS: Record<NoteDuration, number> = {
   w: 4,
@@ -211,7 +221,7 @@ export const SAMPLE_MUSIC_XML = `<?xml version="1.0" encoding="UTF-8"?>
 </score-partwise>
 `
 
-export const BASS_MOCK_PATTERN: Pitch[] = ['c/3', 'g/2', 'a/2', 'e/3', 'f/2', 'c/3', 'd/3', 'g/2']
+export const BASS_MOCK_PATTERN: Pitch[] = ['c/3', 'g/2', 'a/2', 'e/3']
 
 export const STEP_TO_SEMITONE: Record<string, number> = {
   C: 0,
