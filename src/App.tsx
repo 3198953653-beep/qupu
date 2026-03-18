@@ -58,6 +58,8 @@ import {
 } from './score/accidentalEdits'
 import { applyDeleteTieSelection, type TieDeleteFailureReason } from './score/tieEdits'
 import { applyMidiStepInput, type MidiStepInputMode } from './score/midiStepEdits'
+import { applyDeleteMeasureSelection, type MeasureDeleteFailureReason } from './score/measureEdits'
+import { isStaffFullMeasureRest, resolvePairTimeSignature } from './score/measureRestUtils'
 import { appendIntervalKey, deleteSelectedKey, findSelectionLocationInPairs } from './score/keyboardEdits'
 import { applyClipboardPaste, buildClipboardFromSelections, type CopyPasteFailureReason } from './score/copyPasteEdits'
 import { getMidiNoteNumber, toPitchFromMidiWithKeyPreference } from './score/midiInput'
@@ -232,6 +234,19 @@ function getDeleteTieFailureMessage(reason: TieDeleteFailureReason): string {
       return '未找到目标延音线'
     case 'no-op':
       return '当前延音线已不存在'
+    default:
+      return '当前操作暂不支持'
+  }
+}
+
+function getDeleteMeasureFailureMessage(reason: MeasureDeleteFailureReason): string {
+  switch (reason) {
+    case 'selection-not-found':
+      return '未找到可删除的小节'
+    case 'invalid-scope':
+      return '当前未选中小节范围'
+    case 'unsupported-grouping':
+      return '当前拍号下无法生成满小节休止'
     default:
       return '当前操作暂不支持'
   }
@@ -953,9 +968,24 @@ function appendUniqueSelection(current: Selection[], next: Selection): Selection
   return [...current, next]
 }
 
-function buildSelectionsForMeasureStaff(pair: MeasurePair, staff: Selection['staff']): Selection[] {
-  const selections: Selection[] = []
+function buildSelectionsForMeasureStaff(
+  pair: MeasurePair,
+  staff: Selection['staff'],
+  options?: {
+    collapseFullMeasureRest?: boolean
+    timeSignature?: TimeSignature | null
+  },
+): Selection[] {
   const notes = staff === 'treble' ? pair.treble : pair.bass
+  if (
+    options?.collapseFullMeasureRest &&
+    options.timeSignature &&
+    isStaffFullMeasureRest(notes, options.timeSignature) &&
+    notes[0]
+  ) {
+    return [{ noteId: notes[0].id, staff, keyIndex: 0 }]
+  }
+  const selections: Selection[] = []
   notes.forEach((note) => {
     const keyCount = 1 + (note.chordPitches?.length ?? 0)
     for (let keyIndex = 0; keyIndex < keyCount; keyIndex += 1) {
@@ -2002,7 +2032,11 @@ function App() {
         setSelectedMeasureScope(null)
         return
       }
-      const nextSelections = buildSelectionsForMeasureStaff(targetPair, staff)
+      const timeSignature = resolvePairTimeSignature(pairIndex, measureTimeSignaturesFromImportRef.current)
+      const nextSelections = buildSelectionsForMeasureStaff(targetPair, staff, {
+        collapseFullMeasureRest: true,
+        timeSignature,
+      })
       if (nextSelections.length === 0) {
         setIsSelectionVisible(false)
         setSelectedSelections([])
@@ -3644,6 +3678,36 @@ function App() {
         return
       }
 
+      if (event.key === 'Delete' && selectedMeasureScope && isSelectionVisible) {
+        const deleteAttempt = applyDeleteMeasureSelection({
+          pairs: measurePairs,
+          selectedMeasureScope,
+          importedMode: measurePairsFromImportRef.current !== null,
+          keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
+          timeSignaturesByMeasure: measureTimeSignaturesFromImportRef.current,
+        })
+        if (deleteAttempt.error || !deleteAttempt.result) {
+          const message = getDeleteMeasureFailureMessage(deleteAttempt.error ?? 'selection-not-found')
+          setNotationPaletteLastAction(message)
+          console.info('[measure-delete]', message)
+          return
+        }
+        event.preventDefault()
+        applyKeyboardEditResult(
+          deleteAttempt.result.nextPairs,
+          deleteAttempt.result.nextSelection,
+          deleteAttempt.result.nextSelections,
+        )
+        setSelectedMeasureScope({
+          pairIndex: selectedMeasureScope.pairIndex,
+          staff: selectedMeasureScope.staff,
+        })
+        setSelectedSelections([deleteAttempt.result.nextSelection])
+        setNotationPaletteLastAction('已清空该小节并替换为全休止符')
+        console.info('[measure-delete] 已清空该小节并替换为全休止符', selectedMeasureScope)
+        return
+      }
+
       if (!isSelectionVisible) return
 
       if (
@@ -3712,6 +3776,7 @@ function App() {
     measurePairs,
     activeSelection,
     selectedSelections,
+    selectedMeasureScope,
     measureKeyFifthsFromImport,
     applyKeyboardEditResult,
     moveSelectionsByKeyboardSteps,

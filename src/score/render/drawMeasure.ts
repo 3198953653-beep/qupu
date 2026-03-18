@@ -22,6 +22,7 @@ import type { AppliedTimeAxisSpacingMetrics, TimeAxisSpacingConfig } from '../la
 import { getStepOctaveAlterFromPitch } from '../pitchMath'
 import { buildPitchLineMap, createPianoPitches, getPitchLine, getStrictStemDirection } from '../pitchUtils'
 import { getTieFrozenIncoming } from '../tieFrozen'
+import { isStaffFullMeasureRest } from '../measureRestUtils'
 import { getDragPreviewTargetKey } from './dragPreviewOverrides'
 import { buildTieLayout } from './tieLayoutGeometry'
 import type { RenderedNoteKey } from '../accidentals'
@@ -158,6 +159,12 @@ type PreviewNoteOverride = {
   staff: StaffKind
   pitch: Pitch
   keyIndex: number
+}
+
+type RenderedMeasureNote = {
+  vexNote: StaveNote
+  renderedKeys: RenderedNoteKey[]
+  sourceNoteIndex: number
 }
 
 export type DrawMeasureParams = {
@@ -525,50 +532,18 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     }
   }
 
-  const trebleRendered = measure.treble.map((note) => {
-    const rendered = resolveRenderedNoteData(note, 'treble')
-    const renderedKeys: RenderedNoteKey[] = rendered.isRest
-      ? [{ pitch: rendered.rootPitch, accidental: null, keyIndex: 0 }]
-      : (() => {
-          const forceChordIndex =
-            !lockPreviewAccidentalLayout && rendered.previewedKeyIndex !== null && rendered.previewedKeyIndex > 0
-              ? rendered.previewedKeyIndex - 1
-              : null
-          return buildRenderedNoteKeys(
-            note,
-            'treble',
-            rendered.rootPitch,
-            rendered.chordPitches,
-            keyFifths,
-            previewAccidentalStateBeforeNote,
-            !lockPreviewAccidentalLayout && rendered.previewedKeyIndex === 0,
-            forceChordIndex,
-            treblePreviewAccidentalOverrides?.get(note.id) ?? null,
-            getPitchLine,
-          )
-        })()
-    const dots = getDurationDots(note.duration)
-    const vexNote = new StaveNote({
-      keys: renderedKeys.map((entry) => entry.pitch),
-      duration: rendered.isRest ? `${toVexDuration(note.duration)}r` : toVexDuration(note.duration),
-      dots,
-      clef: 'treble',
-      stemDirection: getStrictStemDirection(rendered.rootPitch),
-    })
-    if (!rendered.isRest) {
-      renderedKeys.forEach((entry, keyIndex) => {
-        if (!entry.accidental) return
-        vexNote.addModifier(new Accidental(entry.accidental), keyIndex)
-      })
-    }
-    if (dots > 0) {
-      Dot.buildAndAttach([vexNote], { all: true })
-    }
-    return { vexNote, renderedKeys }
-  })
+  const trebleIsFullMeasureRest = isStaffFullMeasureRest(measure.treble, timeSignature)
+  const bassIsFullMeasureRest = isStaffFullMeasureRest(measure.bass, timeSignature)
 
-  const bassRendered = measure.bass.map((note) => {
-    const rendered = resolveRenderedNoteData(note, 'bass')
+  const buildRenderedStaffNote = (params: {
+    note: ScoreNote
+    noteIndex: number
+    staff: StaffKind
+    previewAccidentalOverrides: Map<string, Map<number, string | null>> | null
+    forceWholeMeasureRestGlyph: boolean
+  }): RenderedMeasureNote => {
+    const { note, noteIndex, staff, previewAccidentalOverrides, forceWholeMeasureRestGlyph } = params
+    const rendered = resolveRenderedNoteData(note, staff)
     const renderedKeys: RenderedNoteKey[] = rendered.isRest
       ? [{ pitch: rendered.rootPitch, accidental: null, keyIndex: 0 }]
       : (() => {
@@ -578,41 +553,121 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
               : null
           return buildRenderedNoteKeys(
             note,
-            'bass',
+            staff,
             rendered.rootPitch,
             rendered.chordPitches,
             keyFifths,
             previewAccidentalStateBeforeNote,
             !lockPreviewAccidentalLayout && rendered.previewedKeyIndex === 0,
             forceChordIndex,
-            bassPreviewAccidentalOverrides?.get(note.id) ?? null,
+            previewAccidentalOverrides?.get(note.id) ?? null,
             getPitchLine,
           )
         })()
-    const dots = getDurationDots(note.duration)
-    const vexNote = new StaveNote({
-      keys: renderedKeys.map((entry) => entry.pitch),
-      duration: rendered.isRest ? `${toVexDuration(note.duration)}r` : toVexDuration(note.duration),
-      dots,
-      clef: 'bass',
-      autoStem: true,
-    })
-    if (!rendered.isRest) {
-      renderedKeys.forEach((entry, keyIndex) => {
-        if (!entry.accidental) return
-        vexNote.addModifier(new Accidental(entry.accidental), keyIndex)
-      })
+
+    const clef = staff === 'treble' ? 'treble' : 'bass'
+    const vexNote = forceWholeMeasureRestGlyph
+      ? new StaveNote({
+          keys: ['r/4'],
+          duration: 'wr',
+          clef,
+          line: 4,
+          alignCenter: true,
+          durationOverride: new Fraction(
+            Math.max(1, Math.round(timeSignature.beats)),
+            Math.max(1, Math.round(timeSignature.beatType)),
+          ),
+        })
+      : (() => {
+          const dots = getDurationDots(note.duration)
+          const nextVexNote =
+            staff === 'treble'
+              ? new StaveNote({
+                  keys: renderedKeys.map((entry) => entry.pitch),
+                  duration: rendered.isRest ? `${toVexDuration(note.duration)}r` : toVexDuration(note.duration),
+                  dots,
+                  clef,
+                  stemDirection: getStrictStemDirection(rendered.rootPitch),
+                })
+              : new StaveNote({
+                  keys: renderedKeys.map((entry) => entry.pitch),
+                  duration: rendered.isRest ? `${toVexDuration(note.duration)}r` : toVexDuration(note.duration),
+                  dots,
+                  clef,
+                  autoStem: true,
+                })
+          if (!rendered.isRest) {
+            renderedKeys.forEach((entry, keyIndex) => {
+              if (!entry.accidental) return
+              nextVexNote.addModifier(new Accidental(entry.accidental), keyIndex)
+            })
+          }
+          if (dots > 0) {
+            Dot.buildAndAttach([nextVexNote], { all: true })
+          }
+          return nextVexNote
+        })()
+
+    return {
+      vexNote,
+      renderedKeys,
+      sourceNoteIndex: noteIndex,
     }
-    if (dots > 0) {
-      Dot.buildAndAttach([vexNote], { all: true })
+  }
+
+  const buildRenderedStaffNotes = (
+    staff: StaffKind,
+    sourceNotes: ScoreNote[],
+    previewAccidentalOverrides: Map<string, Map<number, string | null>> | null,
+    fullMeasureRestMode: boolean,
+  ): RenderedMeasureNote[] => {
+    if (fullMeasureRestMode && sourceNotes[0]) {
+      return [
+        buildRenderedStaffNote({
+          note: sourceNotes[0],
+          noteIndex: 0,
+          staff,
+          previewAccidentalOverrides,
+          forceWholeMeasureRestGlyph: true,
+        }),
+      ]
     }
-    return { vexNote, renderedKeys }
-  })
+    return sourceNotes.map((note, noteIndex) =>
+      buildRenderedStaffNote({
+        note,
+        noteIndex,
+        staff,
+        previewAccidentalOverrides,
+        forceWholeMeasureRestGlyph: false,
+      }),
+    )
+  }
+
+  const trebleRendered = buildRenderedStaffNotes(
+    'treble',
+    measure.treble,
+    treblePreviewAccidentalOverrides,
+    trebleIsFullMeasureRest,
+  )
+  const bassRendered = buildRenderedStaffNotes(
+    'bass',
+    measure.bass,
+    bassPreviewAccidentalOverrides,
+    bassIsFullMeasureRest,
+  )
 
   const trebleVexNotes = trebleRendered.map((entry) => entry.vexNote)
   const bassVexNotes = bassRendered.map((entry) => entry.vexNote)
   trebleVexNotes.forEach((vexNote) => vexNote.setStave(trebleStave))
   bassVexNotes.forEach((vexNote) => vexNote.setStave(bassStave))
+  const trebleRenderedBySourceIndex = new Map<number, RenderedMeasureNote>()
+  const bassRenderedBySourceIndex = new Map<number, RenderedMeasureNote>()
+  trebleRendered.forEach((entry) => {
+    trebleRenderedBySourceIndex.set(entry.sourceNoteIndex, entry)
+  })
+  bassRendered.forEach((entry) => {
+    bassRenderedBySourceIndex.set(entry.sourceNoteIndex, entry)
+  })
 
   if (highlightStaff === 'treble' || highlightStaff === 'bass') {
     const measureHighlightStyle = { fillStyle: '#2437E8', strokeStyle: '#2437E8' }
@@ -623,8 +678,10 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     }
   }
 
-  trebleRendered.forEach(({ vexNote, renderedKeys }, noteIndex) => {
-    const noteId = measure.treble[noteIndex].id
+  trebleRendered.forEach(({ vexNote, renderedKeys, sourceNoteIndex }) => {
+    const sourceNote = measure.treble[sourceNoteIndex]
+    if (!sourceNote) return
+    const noteId = sourceNote.id
     const layoutKey = getLayoutNoteKey('treble', noteId)
     const draggingKeySet = draggingKeySetByLayout.get(layoutKey)
     const selectedKeySet = selectionKeySetByLayout.get(layoutKey)
@@ -637,8 +694,10 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     })
   })
 
-  bassRendered.forEach(({ vexNote, renderedKeys }, noteIndex) => {
-    const noteId = measure.bass[noteIndex].id
+  bassRendered.forEach(({ vexNote, renderedKeys, sourceNoteIndex }) => {
+    const sourceNote = measure.bass[sourceNoteIndex]
+    if (!sourceNote) return
+    const noteId = sourceNote.id
     const layoutKey = getLayoutNoteKey('bass', noteId)
     const draggingKeySet = draggingKeySetByLayout.get(layoutKey)
     const selectedKeySet = selectionKeySetByLayout.get(layoutKey)
@@ -655,12 +714,12 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     const applyAccidentalHighlight = (
       staff: StaffKind,
       sourceNotes: ScoreNote[],
-      rendered: Array<{ vexNote: StaveNote; renderedKeys: RenderedNoteKey[] }>,
+      renderedBySourceIndex: Map<number, RenderedMeasureNote>,
     ) => {
       if (activeAccidentalSelection.staff !== staff) return
       sourceNotes.forEach((sourceNote, noteIndex) => {
         if (sourceNote.id !== activeAccidentalSelection.noteId) return
-        const renderedEntry = rendered[noteIndex]
+        const renderedEntry = renderedBySourceIndex.get(noteIndex)
         if (!renderedEntry) return
         const renderedIndex = renderedEntry.renderedKeys.findIndex(
           (entry) => entry.keyIndex === activeAccidentalSelection.keyIndex,
@@ -672,8 +731,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         accidentalModifier?.setStyle({ fillStyle: '#2437E8', strokeStyle: '#2437E8' })
       })
     }
-    applyAccidentalHighlight('treble', measure.treble, trebleRendered)
-    applyAccidentalHighlight('bass', measure.bass, bassRendered)
+    applyAccidentalHighlight('treble', measure.treble, trebleRenderedBySourceIndex)
+    applyAccidentalHighlight('bass', measure.bass, bassRenderedBySourceIndex)
   }
 
   const trebleVoice = new Voice({ numBeats: timeSignature.beats, beatValue: timeSignature.beatType }).addTickables(trebleVexNotes)
@@ -728,13 +787,42 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     alignRenderedX('bass', measure.bass, bassRendered)
   }
 
+  const alignRenderedRestToMeasureCenter = (staff: StaffKind, entry: RenderedMeasureNote | undefined) => {
+    if (!entry) return
+    const targetStave = staff === 'treble' ? trebleStave : bassStave
+    const targetX = targetStave.getX() + targetStave.getWidth() / 2
+    const headBeginX = entry.vexNote.getNoteHeadBeginX()
+    const headEndX = entry.vexNote.getNoteHeadEndX()
+    const centerFromHeads =
+      Number.isFinite(headBeginX) && Number.isFinite(headEndX)
+        ? (headBeginX + headEndX) / 2
+        : Number.NaN
+    const fallbackAbsoluteX = entry.vexNote.getAbsoluteX()
+    const fallbackCenter =
+      Number.isFinite(fallbackAbsoluteX) && Number.isFinite(entry.vexNote.getGlyphWidth())
+        ? fallbackAbsoluteX + entry.vexNote.getGlyphWidth() / 2
+        : Number.NaN
+    const currentCenterX = Number.isFinite(centerFromHeads) ? centerFromHeads : fallbackCenter
+    if (!Number.isFinite(currentCenterX)) return
+    const delta = targetX - currentCenterX
+    if (Math.abs(delta) < 0.001) return
+    entry.vexNote.setXShift(entry.vexNote.getXShift() + delta)
+  }
+
+  if (trebleIsFullMeasureRest) {
+    alignRenderedRestToMeasureCenter('treble', trebleRendered[0])
+  }
+  if (bassIsFullMeasureRest) {
+    alignRenderedRestToMeasureCenter('bass', bassRendered[0])
+  }
+
   const alignRenderedAccidentalOffset = (
     staff: StaffKind,
     sourceNotes: ScoreNote[],
-    rendered: { vexNote: StaveNote; renderedKeys: RenderedNoteKey[] }[],
+    renderedBySourceIndex: Map<number, RenderedMeasureNote>,
   ) => {
     sourceNotes.forEach((sourceNote, noteIndex) => {
-      const renderedEntry = rendered[noteIndex]
+      const renderedEntry = renderedBySourceIndex.get(noteIndex)
       if (!renderedEntry) return
       const layoutKey = getLayoutNoteKey(staff, sourceNote.id)
       const targetByKeyIndex = staticAccidentalRightXById?.get(layoutKey)
@@ -814,18 +902,18 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     })
   }
 
-  alignRenderedAccidentalOffset('treble', measure.treble, trebleRendered)
-  alignRenderedAccidentalOffset('bass', measure.bass, bassRendered)
+  alignRenderedAccidentalOffset('treble', measure.treble, trebleRenderedBySourceIndex)
+  alignRenderedAccidentalOffset('bass', measure.bass, bassRenderedBySourceIndex)
 
   if (debugCapture) {
     const rows: DragDebugRow[] = []
     const captureDebugRowsForStaff = (
       staff: StaffKind,
       sourceNotes: ScoreNote[],
-      rendered: { vexNote: StaveNote; renderedKeys: RenderedNoteKey[] }[],
+      renderedBySourceIndex: Map<number, RenderedMeasureNote>,
     ) => {
       sourceNotes.forEach((sourceNote, noteIndex) => {
-        const renderedEntry = rendered[noteIndex]
+        const renderedEntry = renderedBySourceIndex.get(noteIndex)
         if (!renderedEntry) return
         const noteKey = getLayoutNoteKey(staff, sourceNote.id)
         const staticRecord = debugCapture.staticByNoteKey.get(noteKey)
@@ -877,8 +965,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       })
     }
 
-    captureDebugRowsForStaff('treble', measure.treble, trebleRendered)
-    captureDebugRowsForStaff('bass', measure.bass, bassRendered)
+    captureDebugRowsForStaff('treble', measure.treble, trebleRenderedBySourceIndex)
+    captureDebugRowsForStaff('bass', measure.bass, bassRenderedBySourceIndex)
     debugCapture.pushSnapshot({
       frame: debugCapture.frame,
       pairIndex,
@@ -1365,10 +1453,12 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     const buildMinimalLayouts = (
       staff: StaffKind,
       sourceNotes: ScoreNote[],
-      rendered: { vexNote: StaveNote }[],
+      rendered: RenderedMeasureNote[],
     ): NoteLayout[] =>
-      sourceNotes.map((sourceNote, noteIndex) => {
-        const vexNote = rendered[noteIndex]?.vexNote
+      rendered.flatMap((renderedEntry) => {
+        const sourceNote = sourceNotes[renderedEntry.sourceNoteIndex]
+        if (!sourceNote) return []
+        const vexNote = renderedEntry.vexNote
         const x = vexNote ? getRenderedNoteVisualX(vexNote) : 0
         let spacingRightX = vexNote ? getRenderedNoteVisualX(vexNote) + 9 : x
         if (vexNote) {
@@ -1383,7 +1473,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           id: sourceNote.id,
           staff,
           pairIndex,
-          noteIndex,
+          noteIndex: renderedEntry.sourceNoteIndex,
           x,
           rightX: spacingRightX,
           spacingRightX,
@@ -1495,7 +1585,9 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   }
 
   noteLayouts.push(
-    ...trebleRendered.map(({ vexNote, renderedKeys }, noteIndex) => {
+    ...trebleRendered.flatMap(({ vexNote, renderedKeys, sourceNoteIndex }) => {
+      const sourceNote = measure.treble[sourceNoteIndex]
+      if (!sourceNote) return []
       const ys = vexNote.getYs()
       const renderedHeadXByIndex = new Map<number, number>()
       renderedKeys.forEach((_, renderedIndex) => {
@@ -1553,12 +1645,12 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       const rootHead = noteHeads.find((head) => head.keyIndex === 0) ?? noteHeads[0]
       const noteSpacingRightX = getRenderedNoteSpacingRightX(vexNote, noteHeads)
       const noteRightX = isSpacingOnlyLayout ? noteSpacingRightX : getRenderedNoteRightX(vexNote, noteHeads)
-      const layoutKey = getLayoutNoteKey('treble', measure.treble[noteIndex].id)
+      const layoutKey = getLayoutNoteKey('treble', sourceNote.id)
       return {
-        id: measure.treble[noteIndex].id,
+        id: sourceNote.id,
         staff: 'treble' as const,
         pairIndex,
-        noteIndex,
+        noteIndex: sourceNoteIndex,
         x: getRenderedNoteVisualX(vexNote),
         rightX: noteRightX,
         spacingRightX: noteSpacingRightX,
@@ -1573,7 +1665,9 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     }),
   )
   noteLayouts.push(
-    ...bassRendered.map(({ vexNote, renderedKeys }, noteIndex) => {
+    ...bassRendered.flatMap(({ vexNote, renderedKeys, sourceNoteIndex }) => {
+      const sourceNote = measure.bass[sourceNoteIndex]
+      if (!sourceNote) return []
       const ys = vexNote.getYs()
       const renderedHeadXByIndex = new Map<number, number>()
       renderedKeys.forEach((_, renderedIndex) => {
@@ -1631,12 +1725,12 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       const rootHead = noteHeads.find((head) => head.keyIndex === 0) ?? noteHeads[0]
       const noteSpacingRightX = getRenderedNoteSpacingRightX(vexNote, noteHeads)
       const noteRightX = isSpacingOnlyLayout ? noteSpacingRightX : getRenderedNoteRightX(vexNote, noteHeads)
-      const layoutKey = getLayoutNoteKey('bass', measure.bass[noteIndex].id)
+      const layoutKey = getLayoutNoteKey('bass', sourceNote.id)
       return {
-        id: measure.bass[noteIndex].id,
+        id: sourceNote.id,
         staff: 'bass' as const,
         pairIndex,
-        noteIndex,
+        noteIndex: sourceNoteIndex,
         x: getRenderedNoteVisualX(vexNote),
         rightX: noteRightX,
         spacingRightX: noteSpacingRightX,
