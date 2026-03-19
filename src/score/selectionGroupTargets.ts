@@ -6,6 +6,7 @@ import type {
   ImportedNoteLocation,
   MeasureLayout,
   MeasurePair,
+  NoteLayout,
   Pitch,
   ScoreNote,
   Selection,
@@ -44,6 +45,134 @@ function resolveSelectionLocationInPairs(
     }
   }
   return null
+}
+
+function buildPreviewTargetForSelection(params: {
+  selection: Selection
+  measurePairs: MeasurePair[]
+  importedNoteLookup: Map<string, ImportedNoteLocation>
+  measureLayouts: Map<number, MeasureLayout>
+  importedKeyFifths: number[] | null
+}): DragTieTarget | null {
+  const {
+    selection,
+    measurePairs,
+    importedNoteLookup,
+    measureLayouts,
+    importedKeyFifths,
+  } = params
+  const location = resolveSelectionLocationInPairs(measurePairs, selection, importedNoteLookup)
+  if (!location) return null
+  const pair = measurePairs[location.pairIndex]
+  const notes = location.staff === 'treble' ? pair?.treble : pair?.bass
+  const note = notes?.[location.noteIndex]
+  const pitch = getSelectedPitch(note, selection.keyIndex)
+  if (!note || !pitch) return null
+
+  const contextKeyFifths = resolveKeyFifthsForPair({
+    pairIndex: location.pairIndex,
+    measureLayouts,
+    importedKeyFifths,
+  })
+  const contextAccidentalStateBeforeNote =
+    notes && note.id === selection.noteId
+      ? buildAccidentalStateBeforeNote(notes, location.noteIndex, contextKeyFifths)
+      : new Map<string, number>()
+
+  return {
+    pairIndex: location.pairIndex,
+    noteIndex: location.noteIndex,
+    staff: selection.staff,
+    noteId: note.id,
+    keyIndex: selection.keyIndex,
+    pitch,
+    contextKeyFifths,
+    contextAccidentalStateBeforeNote,
+  }
+}
+
+function resolveSelectionHeadX(params: {
+  selection: Selection
+  target: DragTieTarget
+  noteLayouts: NoteLayout[]
+}): number {
+  const { selection, target, noteLayouts } = params
+  const layout =
+    noteLayouts.find(
+      (item) =>
+        item.id === target.noteId &&
+        item.staff === target.staff &&
+        item.pairIndex === target.pairIndex &&
+        item.noteIndex === target.noteIndex,
+    ) ??
+    noteLayouts.find((item) => item.id === selection.noteId && item.staff === selection.staff) ??
+    null
+  if (!layout) return Number.POSITIVE_INFINITY
+  const head =
+    layout.noteHeads.find((item) => item.keyIndex === selection.keyIndex) ??
+    layout.noteHeads[0] ??
+    null
+  return head?.x ?? layout.x
+}
+
+export function buildSelectionPreviewLeadTarget(params: {
+  effectiveSelections: Selection[]
+  primarySelection: Selection
+  noteLayouts: NoteLayout[]
+  measurePairs: MeasurePair[]
+  importedNoteLookup: Map<string, ImportedNoteLocation>
+  measureLayouts: Map<number, MeasureLayout>
+  importedKeyFifths: number[] | null
+}): DragTieTarget | null {
+  const {
+    effectiveSelections,
+    primarySelection,
+    noteLayouts,
+    measurePairs,
+    importedNoteLookup,
+    measureLayouts,
+    importedKeyFifths,
+  } = params
+
+  const candidates = effectiveSelections
+    .map((selection) => {
+      const target = buildPreviewTargetForSelection({
+        selection,
+        measurePairs,
+        importedNoteLookup,
+        measureLayouts,
+        importedKeyFifths,
+      })
+      if (!target) return null
+      return {
+        selection,
+        target,
+        headX: resolveSelectionHeadX({ selection, target, noteLayouts }),
+      }
+    })
+    .filter((candidate): candidate is { selection: Selection; target: DragTieTarget; headX: number } => candidate !== null)
+
+  const fallbackTarget = buildPreviewTargetForSelection({
+    selection: primarySelection,
+    measurePairs,
+    importedNoteLookup,
+    measureLayouts,
+    importedKeyFifths,
+  })
+  if (candidates.length === 0) return fallbackTarget
+
+  candidates.sort((left, right) => {
+    if (left.headX !== right.headX) return left.headX - right.headX
+    if (left.selection.staff !== right.selection.staff) {
+      return left.selection.staff === 'treble' ? -1 : 1
+    }
+    if (left.target.pairIndex !== right.target.pairIndex) return left.target.pairIndex - right.target.pairIndex
+    if (left.target.noteIndex !== right.target.noteIndex) return left.target.noteIndex - right.target.noteIndex
+    if (left.selection.keyIndex !== right.selection.keyIndex) return left.selection.keyIndex - right.selection.keyIndex
+    return left.selection.noteId.localeCompare(right.selection.noteId)
+  })
+
+  return candidates[0]?.target ?? fallbackTarget
 }
 
 export function buildSelectionGroupMoveTargets(params: {

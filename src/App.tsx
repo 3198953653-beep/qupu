@@ -30,6 +30,11 @@ import { useDragHandlers } from './score/dragHandlers'
 import { useEditorHandlers } from './score/editorHandlers'
 import { buildMusicXmlExportPayload } from './score/musicXmlActions'
 import {
+  previewScoreNote,
+  resolveScoreNotePreviewPitch,
+  type ScoreNotePreviewMode,
+} from './score/notePreview'
+import {
   useImportedRefsSync,
   useRendererCleanup,
   useRhythmLinkedBassSync,
@@ -984,6 +989,15 @@ type ActiveChordSelection = {
   endTick: number
 }
 
+type NotePreviewDebugEvent = {
+  sequence: number
+  atMs: number
+  noteId: string
+  keyIndex: number
+  mode: ScoreNotePreviewMode
+  pitch: Pitch
+}
+
 function escapeCssId(id: string): string {
   if (typeof (window as unknown as { CSS?: { escape?: (value: string) => string } }).CSS?.escape === 'function') {
     return (window as unknown as { CSS: { escape: (value: string) => string } }).CSS.escape(id)
@@ -1681,6 +1695,8 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const osmdDirectFileInputRef = useRef<HTMLInputElement | null>(null)
   const synthRef = useRef<Tone.PolySynth | Tone.Sampler | null>(null)
+  const notePreviewEventsRef = useRef<NotePreviewDebugEvent[]>([])
+  const notePreviewSequenceRef = useRef(0)
 
   const noteLayoutsRef = useRef<NoteLayout[]>([])
   const noteLayoutsByPairRef = useRef<Map<number, NoteLayout[]>>(new Map())
@@ -2129,6 +2145,45 @@ function App() {
     setActiveChordSelection(null)
   }, [])
 
+  const handlePreviewScoreNote = useCallback((params: {
+    note: ScoreNote
+    keyIndex: number
+    mode: ScoreNotePreviewMode
+    targetPitch?: Pitch | null
+  }) => {
+    const { note, keyIndex, mode, targetPitch = null } = params
+    const resolvedPitch = resolveScoreNotePreviewPitch({
+      note,
+      keyIndex,
+      targetPitch,
+    })
+    if (!resolvedPitch) return
+
+    notePreviewSequenceRef.current += 1
+    notePreviewEventsRef.current.push({
+      sequence: notePreviewSequenceRef.current,
+      atMs: Date.now(),
+      noteId: note.id,
+      keyIndex,
+      mode,
+      pitch: resolvedPitch,
+    })
+    if (notePreviewEventsRef.current.length > 240) {
+      notePreviewEventsRef.current.splice(0, notePreviewEventsRef.current.length - 240)
+    }
+
+    void previewScoreNote({
+      synth: synthRef.current,
+      note,
+      keyIndex,
+      mode,
+      targetPitch,
+    }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(`[audio] 音符试听失败：${message}`)
+    })
+  }, [])
+
   const {
     clearDragOverlay,
     onSurfacePointerMove,
@@ -2269,6 +2324,7 @@ function App() {
       clearActiveChordSelection()
       setIsSelectionVisible(true)
     },
+    onPreviewScoreNote: handlePreviewScoreNote,
     measurePairsFromImportRef,
     importedNoteLookupRef,
     measureKeyFifthsFromImportRef,
@@ -5215,6 +5271,10 @@ function App() {
           ...frame,
           rows: frame.rows.map((row) => ({ ...row })),
         })),
+      getNotePreviewEvents: () => notePreviewEventsRef.current.map((event) => ({ ...event })),
+      clearNotePreviewEvents: () => {
+        notePreviewEventsRef.current = []
+      },
       getDragSessionState: () => {
         const drag = dragRef.current
         if (!drag) return null
@@ -5226,6 +5286,7 @@ function App() {
           noteIndex: drag.noteIndex,
           pitch: drag.pitch,
           previewStarted: drag.previewStarted,
+          groupPreviewLeadTarget: drag.groupPreviewLeadTarget ? { ...drag.groupPreviewLeadTarget } : null,
           linkedTieTargets: drag.linkedTieTargets?.map((target) => ({ ...target })) ?? [],
           previousTieTarget: drag.previousTieTarget ? { ...drag.previousTieTarget } : null,
           previewFrozenBoundary: drag.previewFrozenBoundary

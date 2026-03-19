@@ -11,6 +11,7 @@ import {
 } from './constants'
 import { clearImportedSourceState } from './importSourceState'
 import { buildMusicXmlExportPayload } from './musicXmlActions'
+import { ensureToneStarted, type PlaybackSynth } from './notePreview'
 import { toTonePitch } from './pitchUtils'
 import { buildBassMockNotes, buildNotesFromPattern } from './scoreOps'
 import type {
@@ -35,7 +36,7 @@ function formatMusicXmlTextareaPreview(xmlText: string): string {
 }
 
 export async function playScoreAction(params: {
-  synth: Tone.PolySynth | Tone.Sampler | null
+  synth: PlaybackSynth | null
   notes: ScoreNote[]
   bassNotes: ScoreNote[]
   stopPlayTimerRef: MutableRefObject<number | null>
@@ -44,10 +45,7 @@ export async function playScoreAction(params: {
   const { synth, notes, bassNotes, stopPlayTimerRef, setIsPlaying } = params
   if (!synth) return
 
-  await Tone.start()
-  if (synth instanceof Tone.Sampler && !synth.loaded) {
-    await Tone.loaded()
-  }
+  await ensureToneStarted()
   setIsPlaying(true)
 
   const start = Tone.now() + 0.05

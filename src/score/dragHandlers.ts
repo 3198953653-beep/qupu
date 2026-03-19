@@ -1,6 +1,7 @@
 import { startTransition } from 'react'
 import type { Dispatch, MutableRefObject, PointerEvent, SetStateAction } from 'react'
 import { commitDragPitchToScoreData } from './dragInteractions'
+import { getStaffStepDelta, resolveGroupedTargetPitch } from './dragPitchTransform'
 import {
   handleBeginDragPointer,
   handleEndDragPointer,
@@ -11,10 +12,11 @@ import type { BlankPointerPayload } from './dragPointerHandlers'
 import {
   clearDragOverlayCanvas,
   drawSelectionOverlay,
-  getDragDebugReportText,
   ensureDragLayoutCache,
+  getDragDebugReportText,
 } from './dragPreviewController'
 import { flushPendingDragFrame, scheduleDragCommitFrame } from './dragScheduler'
+import type { ScoreNotePreviewMode } from './notePreview'
 import { flattenBassFromPairs, flattenTrebleFromPairs } from './scoreOps'
 import type { TimeAxisSpacingConfig } from './layout/timeAxisSpacing'
 import type { MeasureTimelineBundle } from './timeline/types'
@@ -76,6 +78,13 @@ export function useDragHandlers(params: {
   onBlankPointerDown?: (payload: BlankPointerPayload) => void
   onSelectionActivated?: () => void
   onSelectionTapRelease?: (selection: Selection) => void
+  onPreviewScoreNote?: (params: {
+    note: ScoreNote
+    keyIndex: number
+    mode: ScoreNotePreviewMode
+    targetPitch?: Pitch | null
+  }) => void;
+
   measurePairsFromImportRef: MutableRefObject<MeasurePair[] | null>
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
   measureKeyFifthsFromImportRef: MutableRefObject<number[] | null>
@@ -142,6 +151,7 @@ export function useDragHandlers(params: {
     onBlankPointerDown,
     onSelectionActivated,
     onSelectionTapRelease,
+    onPreviewScoreNote,
     measurePairsFromImportRef,
     importedNoteLookupRef,
     measureKeyFifthsFromImportRef,
@@ -160,6 +170,65 @@ export function useDragHandlers(params: {
     timeAxisSpacingConfig,
     spacingLayoutMode = 'custom',
   } = params
+
+  const resolvePreviewNoteByTarget = (target: {
+    pairIndex: number
+    noteIndex: number
+    staff: Selection['staff']
+    noteId: string
+  }): ScoreNote | null => {
+    const importedPairs = measurePairsFromImportRef.current
+    if (importedPairs) {
+      const importedPair = importedPairs[target.pairIndex]
+      const importedNotes = target.staff === 'treble' ? importedPair?.treble : importedPair?.bass
+      const importedNote = importedNotes?.[target.noteIndex]
+      if (importedNote?.id === target.noteId) return importedNote
+    }
+
+    const currentPair = measurePairsRef.current[target.pairIndex]
+    const currentNotes = target.staff === 'treble' ? currentPair?.treble : currentPair?.bass
+    const currentNote = currentNotes?.[target.noteIndex]
+    if (currentNote?.id === target.noteId) return currentNote
+
+    const noteById = target.staff === 'treble' ? trebleNoteById : bassNoteById
+    return noteById.get(target.noteId) ?? null
+  }
+
+  const resolveDragPreviewPayload = (
+    drag: DragState,
+    pitch: Pitch,
+  ): { note: ScoreNote; keyIndex: number; mode: ScoreNotePreviewMode; targetPitch: Pitch } | null => {
+    const previewTarget = drag.groupPreviewLeadTarget ?? {
+      pairIndex: drag.pairIndex,
+      noteIndex: drag.noteIndex,
+      staff: drag.staff,
+      noteId: drag.noteId,
+      keyIndex: drag.keyIndex,
+      pitch: drag.originPitch,
+    }
+    const note = resolvePreviewNoteByTarget(previewTarget)
+    if (!note) return null
+
+    const isPrimaryTarget =
+      previewTarget.noteId === drag.noteId &&
+      previewTarget.staff === drag.staff &&
+      previewTarget.pairIndex === drag.pairIndex &&
+      previewTarget.noteIndex === drag.noteIndex &&
+      previewTarget.keyIndex === drag.keyIndex
+    const targetPitch = isPrimaryTarget
+      ? pitch
+      : resolveGroupedTargetPitch(
+          previewTarget,
+          getStaffStepDelta(drag.originPitch, pitch),
+        ) ?? previewTarget.pitch
+
+    return {
+      note,
+      keyIndex: previewTarget.keyIndex,
+      mode: 'drag',
+      targetPitch,
+    }
+  }
 
   const clearDragOverlay = () => {
     setDragPreviewState(null)
@@ -226,6 +295,10 @@ export function useDragHandlers(params: {
     const nextDrag = { ...drag, pitch }
     dragRef.current = nextDrag
     drawDragMeasurePreview(nextDrag)
+    const previewPayload = resolveDragPreviewPayload(nextDrag, pitch)
+    if (previewPayload) {
+      onPreviewScoreNote?.(previewPayload)
+    }
   }
 
   const commitDragPitchToScore = (drag: DragState, pitch: Pitch) => {
@@ -315,6 +388,12 @@ export function useDragHandlers(params: {
       setDraggingSelection,
       onSelectionActivated,
       onSelectionTapRelease,
+      onPreviewPendingDragPitch: (drag, pitch) => {
+        const previewPayload = resolveDragPreviewPayload(drag, pitch)
+        if (previewPayload) {
+          onPreviewScoreNote?.(previewPayload)
+        }
+      },
     })
   }
 
@@ -346,6 +425,7 @@ export function useDragHandlers(params: {
       onTiePointerDown,
       onBlankPointerDown,
       onSelectionActivated,
+      onPreviewScoreNote,
     })
   }
 

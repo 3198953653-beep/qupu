@@ -2,10 +2,12 @@ import type { Dispatch, MutableRefObject, PointerEvent, SetStateAction } from 'r
 import { getHitTarget } from './layout/hitTest'
 import type { HitGridIndex } from './layout/hitTest'
 import { buildDragStateForHit, getDragMovePitch } from './dragInteractions'
-import { buildSelectionGroupMoveTargets } from './selectionGroupTargets'
+import { resolveCurrentNoteForHit } from './dragStart'
+import { buildSelectionGroupMoveTargets, buildSelectionPreviewLeadTarget } from './selectionGroupTargets'
 import { buildSelectionsInTimelineRange } from './selectionTimelineRange'
 import { getTieFrozenIncoming } from './tieFrozen'
 import { cloneTieSelection } from './tieSelection'
+import type { ScoreNotePreviewMode } from './notePreview'
 import type {
   DragDebugSnapshot,
   DragState,
@@ -187,6 +189,12 @@ export function handleBeginDragPointer(params: {
   onTiePointerDown?: (selection: TieSelection) => void
   onBlankPointerDown?: (payload: BlankPointerPayload) => void
   onSelectionActivated?: () => void
+  onPreviewScoreNote?: (params: {
+    note: ScoreNote
+    keyIndex: number
+    mode: ScoreNotePreviewMode
+    targetPitch?: Pitch | null
+  }) => void
 }): void {
   const {
     event,
@@ -215,6 +223,7 @@ export function handleBeginDragPointer(params: {
     onTiePointerDown,
     onBlankPointerDown,
     onSelectionActivated,
+    onPreviewScoreNote,
   } = params
 
   if (!surface) return
@@ -306,6 +315,13 @@ export function handleBeginDragPointer(params: {
 
   const hit = { layout: hitTarget.layout, head: hitTarget.head }
   const hitHead = hitTarget.head
+  const currentHitNote = resolveCurrentNoteForHit({
+    hitLayout: hit.layout,
+    importedPairs,
+    importedNoteLookup,
+    trebleNoteById,
+    bassNoteById,
+  })
 
   event.preventDefault()
   dragPreviewFrameRef.current = 0
@@ -363,6 +379,15 @@ export function handleBeginDragPointer(params: {
   dragState.groupMoveTargets = buildSelectionGroupMoveTargets({
     effectiveSelections,
     primarySelection: selection,
+    measurePairs: importedPairs ?? currentMeasurePairs,
+    importedNoteLookup,
+    measureLayouts,
+    importedKeyFifths,
+  })
+  dragState.groupPreviewLeadTarget = buildSelectionPreviewLeadTarget({
+    effectiveSelections,
+    primarySelection: selection,
+    noteLayouts,
     measurePairs: importedPairs ?? currentMeasurePairs,
     importedNoteLookup,
     measureLayouts,
@@ -446,6 +471,13 @@ export function handleBeginDragPointer(params: {
   } else {
     dragState.previewFrozenBoundary = null
   }
+  if (currentHitNote) {
+    onPreviewScoreNote?.({
+      note: currentHitNote,
+      keyIndex: hitHead.keyIndex,
+      mode: 'click',
+    })
+  }
   onSelectionPointerDown?.(selection, effectiveSelections, selectionMode)
   setActiveSelection(upsertSelection(selection))
   setDraggingSelection(upsertNullableSelection(selection))
@@ -496,6 +528,7 @@ export function handleEndDragPointer(params: {
   setDraggingSelection: StateSetter<Selection | null>
   onSelectionActivated?: () => void
   onSelectionTapRelease?: (selection: Selection) => void
+  onPreviewPendingDragPitch?: (drag: DragState, pitch: Pitch) => void
 }): void {
   const {
     event,
@@ -509,6 +542,7 @@ export function handleEndDragPointer(params: {
     setDraggingSelection,
     onSelectionActivated,
     onSelectionTapRelease,
+    onPreviewPendingDragPitch,
   } = params
 
   const drag = dragRef.current
@@ -522,6 +556,9 @@ export function handleEndDragPointer(params: {
   dragPendingRef.current = null
   let finalPitch = drag.pitch
   if (pending && pending.drag.pointerId === drag.pointerId) {
+    if (pending.pitch !== drag.pitch) {
+      onPreviewPendingDragPitch?.(pending.drag, pending.pitch)
+    }
     finalPitch = pending.pitch
   }
   // Restore selected-note highlight immediately on release, then commit pitch.

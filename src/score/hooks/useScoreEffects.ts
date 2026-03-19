@@ -4,6 +4,7 @@ import { Renderer } from 'vexflow'
 import type { SystemMeasureRange } from '../layout/demand'
 import { buildHitGridIndex } from '../layout/hitTest'
 import { getVisibleSystemRange } from '../layout/viewport'
+import type { PlaybackSynth } from '../notePreview'
 import { renderVisibleSystems } from '../render/renderVisibleSystems'
 import { syncBassNotesToTreble } from '../scoreOps'
 import type { MeasureTimelineBundle } from '../timeline/types'
@@ -25,8 +26,6 @@ import type {
 } from '../types'
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>
-type PlaybackSynth = Tone.PolySynth | Tone.Sampler
-
 const PIANO_SAMPLE_URLS: Record<string, string> = {
   A0: 'A0.mp3',
   C1: 'C1.mp3',
@@ -417,26 +416,24 @@ export function useSynthLifecycle(params: {
   const { synthRef } = params
   useEffect(() => {
     const fallbackSynth = new Tone.PolySynth(Tone.Synth).toDestination()
+    synthRef.current = fallbackSynth
     const sampler = new Tone.Sampler({
       urls: PIANO_SAMPLE_URLS,
       baseUrl: PIANO_SAMPLE_BASE_URL,
       release: 1.8,
     }).toDestination()
-    synthRef.current = sampler
     let isDisposed = false
-    let isFallbackDisposed = false
     void Tone.loaded()
       .then(() => {
         if (isDisposed) return
-        if (synthRef.current !== sampler) return
+        if (!sampler.loaded) return
         console.info('[audio] 高质量钢琴音源已加载（Salamander Sampler）。')
+        synthRef.current = sampler
         fallbackSynth.dispose()
-        isFallbackDisposed = true
       })
       .catch((error: unknown) => {
         if (isDisposed) return
         sampler.dispose()
-        synthRef.current = fallbackSynth
         const message = error instanceof Error ? error.message : String(error)
         console.warn(`[audio] 钢琴采样加载失败，已回退到默认合成器：${message}`)
       })
@@ -444,9 +441,13 @@ export function useSynthLifecycle(params: {
       isDisposed = true
       const currentSynth = synthRef.current
       currentSynth?.dispose()
-      if (!isFallbackDisposed && currentSynth !== fallbackSynth) {
+      if (currentSynth !== fallbackSynth) {
         fallbackSynth.dispose()
       }
+      if (currentSynth !== sampler) {
+        sampler.dispose()
+      }
+      synthRef.current = null
     }
   }, [synthRef])
 }

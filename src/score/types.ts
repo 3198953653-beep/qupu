@@ -206,6 +206,7 @@ export type DragState = {
   keyIndex: number
   pairIndex: number
   noteIndex: number
+  groupPreviewLeadTarget?: DragTieTarget | null
   linkedTieTargets?: DragTieTarget[]
   previousTieTarget?: DragTieTarget | null
   previewFrozenBoundary?: {

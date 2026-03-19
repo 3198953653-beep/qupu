@@ -87,6 +87,7 @@ export function createDragStateFromHit(params: {
     keyIndex: hit.head.keyIndex,
     pairIndex: hit.layout.pairIndex,
     noteIndex: hit.layout.noteIndex,
+    groupPreviewLeadTarget: null,
     pointerId,
     surfaceTop,
     surfaceClientToScoreScaleY,
