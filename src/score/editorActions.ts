@@ -1,17 +1,14 @@
 import type { ChangeEvent, Dispatch, MutableRefObject, SetStateAction } from 'react'
-import * as Tone from 'tone'
 import { createAiVariation } from './ai'
 import {
   DEFAULT_DEMO_MEASURE_COUNT,
-  DURATION_BEATS,
-  DURATION_TONE,
-  QUARTER_NOTE_SECONDS,
   RHYTHM_PRESETS,
   SAMPLE_MUSIC_XML,
 } from './constants'
 import { clearImportedSourceState } from './importSourceState'
 import { buildMusicXmlExportPayload } from './musicXmlActions'
 import { ensureToneStarted, type PlaybackSynth } from './notePreview'
+import type { PlaybackTimelineEvent } from './playbackTimeline'
 import { toTonePitch } from './pitchUtils'
 import { buildBassMockNotes, buildNotesFromPattern } from './scoreOps'
 import type {
@@ -27,6 +24,25 @@ import type {
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>
 const MUSIC_XML_TEXTAREA_MAX_CHARS = 2000
+const PLAYBACK_VELOCITY_BY_STAFF = {
+  treble: 0.92,
+  bass: 0.72,
+} as const
+
+function clearPlaybackTimeouts(params: {
+  stopPlayTimerRef: MutableRefObject<number | null>
+  playbackPointTimerIdsRef: MutableRefObject<number[]>
+}): void {
+  const { stopPlayTimerRef, playbackPointTimerIdsRef } = params
+  if (stopPlayTimerRef.current !== null) {
+    window.clearTimeout(stopPlayTimerRef.current)
+    stopPlayTimerRef.current = null
+  }
+  playbackPointTimerIdsRef.current.forEach((timerId) => {
+    window.clearTimeout(timerId)
+  })
+  playbackPointTimerIdsRef.current = []
+}
 
 function formatMusicXmlTextareaPreview(xmlText: string): string {
   if (xmlText.length <= MUSIC_XML_TEXTAREA_MAX_CHARS) return xmlText
@@ -36,37 +52,124 @@ function formatMusicXmlTextareaPreview(xmlText: string): string {
 }
 
 export async function playScoreAction(params: {
-  synth: PlaybackSynth | null
-  notes: ScoreNote[]
-  bassNotes: ScoreNote[]
+  synthRef: MutableRefObject<PlaybackSynth | null>
+  playbackTimelineEvents: PlaybackTimelineEvent[]
   stopPlayTimerRef: MutableRefObject<number | null>
+  playbackPointTimerIdsRef: MutableRefObject<number[]>
+  playbackSessionIdRef: MutableRefObject<number>
   setIsPlaying: StateSetter<boolean>
+  onPlaybackStart?: (params: { sessionId: number; firstEvent: PlaybackTimelineEvent | null }) => void
+  onPlaybackPoint?: (params: { sessionId: number; event: PlaybackTimelineEvent }) => void
+  onPlaybackComplete?: (params: { sessionId: number; lastEvent: PlaybackTimelineEvent | null }) => void
 }): Promise<void> {
-  const { synth, notes, bassNotes, stopPlayTimerRef, setIsPlaying } = params
-  if (!synth) return
-
-  await ensureToneStarted()
-  setIsPlaying(true)
-
-  const start = Tone.now() + 0.05
-  let cursor = start
-  notes.forEach((note, index) => {
-    const bassNote = bassNotes[index]
-    synth.triggerAttackRelease(toTonePitch(note.pitch), DURATION_TONE[note.duration], cursor)
-    if (bassNote) {
-      synth.triggerAttackRelease(toTonePitch(bassNote.pitch), DURATION_TONE[bassNote.duration], cursor, 0.72)
-    }
-    cursor += DURATION_BEATS[note.duration] * QUARTER_NOTE_SECONDS
-  })
-
-  if (stopPlayTimerRef.current !== null) {
-    window.clearTimeout(stopPlayTimerRef.current)
+  const {
+    synthRef,
+    playbackTimelineEvents,
+    stopPlayTimerRef,
+    playbackPointTimerIdsRef,
+    playbackSessionIdRef,
+    setIsPlaying,
+    onPlaybackStart,
+    onPlaybackPoint,
+    onPlaybackComplete,
+  } = params
+  if (!synthRef.current) return
+  if (playbackTimelineEvents.length === 0) {
+    setIsPlaying(false)
+    return
   }
 
+  await ensureToneStarted()
+  clearPlaybackTimeouts({
+    stopPlayTimerRef,
+    playbackPointTimerIdsRef,
+  })
+
+  const sessionId = playbackSessionIdRef.current + 1
+  playbackSessionIdRef.current = sessionId
+  setIsPlaying(true)
+  const firstEvent = playbackTimelineEvents[0] ?? null
+  const lastEvent = playbackTimelineEvents[playbackTimelineEvents.length - 1] ?? null
+
+  const runPlaybackEvent = (event: PlaybackTimelineEvent) => {
+    if (playbackSessionIdRef.current !== sessionId) return
+    const synth = synthRef.current
+    if (!synth) return
+    event.targets.forEach((target) => {
+      synth.triggerAttackRelease(
+        toTonePitch(target.pitch),
+        target.durationTone,
+        undefined,
+        PLAYBACK_VELOCITY_BY_STAFF[target.staff],
+      )
+    })
+    onPlaybackPoint?.({
+      sessionId,
+      event,
+    })
+  }
+
+  onPlaybackStart?.({
+    sessionId,
+    firstEvent,
+  })
+
+  playbackTimelineEvents.forEach((event) => {
+    const timeoutMs = Math.max(0, Math.round(event.atSeconds * 1000))
+    if (timeoutMs === 0) {
+      runPlaybackEvent(event)
+      return
+    }
+    const timerId = window.setTimeout(() => {
+      runPlaybackEvent(event)
+    }, timeoutMs)
+    playbackPointTimerIdsRef.current.push(timerId)
+  })
+
+  const completionDelayMs = Math.max(
+    200,
+    Math.round((lastEvent?.atSeconds ?? 0) * 1000) + 220,
+  )
   stopPlayTimerRef.current = window.setTimeout(() => {
+    if (playbackSessionIdRef.current !== sessionId) return
     setIsPlaying(false)
     stopPlayTimerRef.current = null
-  }, Math.max(200, (cursor - start) * 1000 + 200))
+    playbackPointTimerIdsRef.current = []
+    onPlaybackComplete?.({
+      sessionId,
+      lastEvent,
+    })
+  }, completionDelayMs)
+}
+
+export function stopPlaybackAction(params: {
+  synthRef: MutableRefObject<PlaybackSynth | null>
+  stopPlayTimerRef: MutableRefObject<number | null>
+  playbackPointTimerIdsRef: MutableRefObject<number[]>
+  playbackSessionIdRef: MutableRefObject<number>
+  setIsPlaying: StateSetter<boolean>
+}): void {
+  const {
+    synthRef,
+    stopPlayTimerRef,
+    playbackPointTimerIdsRef,
+    playbackSessionIdRef,
+    setIsPlaying,
+  } = params
+  clearPlaybackTimeouts({
+    stopPlayTimerRef,
+    playbackPointTimerIdsRef,
+  })
+  playbackSessionIdRef.current += 1
+  setIsPlaying(false)
+  const stoppableSynth = synthRef.current as (PlaybackSynth & { releaseAll?: (time?: number) => void }) | null
+  if (stoppableSynth && typeof stoppableSynth.releaseAll === 'function') {
+    try {
+      stoppableSynth.releaseAll()
+    } catch {
+      // Some Tone voices can already be disposed/released; ignore best-effort stop failures.
+    }
+  }
 }
 
 export async function handleMusicXmlFileChange(params: {

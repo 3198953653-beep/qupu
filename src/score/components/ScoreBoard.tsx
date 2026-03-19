@@ -3,6 +3,7 @@ import { SelectionInspector } from './SelectionInspector'
 
 export function ScoreBoard(props: {
   scoreScrollRef: RefObject<HTMLDivElement | null>
+  scoreStageRef: RefObject<HTMLDivElement | null>
   displayScoreWidth: number
   displayScoreHeight: number
   scoreSurfaceLogicalWidthPx: number
@@ -25,6 +26,8 @@ export function ScoreBoard(props: {
     beatIndex: 1 | 3
   }>
   onChordRulerMarkerClick: (markerKey: string) => void
+  playheadRectPx?: { x: number; y: number; width: number; height: number } | null
+  playheadStatus: 'idle' | 'playing'
   selectedMeasureHighlightRectPx?: { x: number; y: number; width: number; height: number } | null
   draggingSelection: { noteId: string; staff: 'treble' | 'bass'; keyIndex: number } | null
   scoreRef: RefObject<HTMLCanvasElement | null>
@@ -42,6 +45,7 @@ export function ScoreBoard(props: {
 }) {
   const {
     scoreScrollRef,
+    scoreStageRef,
     displayScoreWidth,
     displayScoreHeight,
     scoreSurfaceLogicalWidthPx,
@@ -53,6 +57,8 @@ export function ScoreBoard(props: {
     measureRulerTicks,
     chordRulerMarkers,
     onChordRulerMarkerClick,
+    playheadRectPx = null,
+    playheadStatus,
     selectedMeasureHighlightRectPx = null,
     draggingSelection,
     scoreRef,
@@ -96,7 +102,11 @@ export function ScoreBoard(props: {
             ))}
           </div>
         </div>
-        <div className="score-stage horizontal-view" style={{ width: `${displayScoreWidth}px`, height: `${displayScoreHeight}px` }}>
+        <div
+          className="score-stage horizontal-view"
+          ref={scoreStageRef}
+          style={{ width: `${displayScoreWidth}px`, height: `${displayScoreHeight}px` }}
+        >
           <canvas
             className={`score-surface ${draggingSelection ? 'is-dragging' : ''}`}
             ref={scoreRef}
@@ -135,6 +145,18 @@ export function ScoreBoard(props: {
                 top: `${selectedMeasureHighlightRectPx.y}px`,
                 width: `${selectedMeasureHighlightRectPx.width}px`,
                 height: `${selectedMeasureHighlightRectPx.height}px`,
+              }}
+              aria-hidden="true"
+            />
+          )}
+          {playheadRectPx && (
+            <div
+              className={`score-playhead${playheadStatus === 'playing' ? ' is-playing' : ''}`}
+              style={{
+                left: `${playheadRectPx.x}px`,
+                top: `${playheadRectPx.y}px`,
+                width: `${playheadRectPx.width}px`,
+                height: `${playheadRectPx.height}px`,
               }}
               aria-hidden="true"
             />

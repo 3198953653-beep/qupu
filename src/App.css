@@ -791,6 +791,20 @@
   box-sizing: border-box;
 }
 
+.score-playhead {
+  position: absolute;
+  pointer-events: none;
+  z-index: 4;
+  box-sizing: border-box;
+  background: #d22f2f;
+  box-shadow: 0 0 0 1px rgba(162, 26, 26, 0.12);
+}
+
+.score-playhead.is-playing {
+  background: #f6d129;
+  box-shadow: 0 0 0 1px rgba(197, 157, 16, 0.14);
+}
+
 .inspector {
   border-top: 1px solid #d6e0e5;
   padding: 0.85rem 1rem 1rem;

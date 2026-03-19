@@ -13,7 +13,9 @@ import {
   PREVIEW_START_THRESHOLD_PX,
   SCORE_TOP_PADDING,
   STEP_TO_SEMITONE,
+  SYSTEM_BASS_OFFSET_Y,
   SYSTEM_HEIGHT,
+  SYSTEM_TREBLE_OFFSET_Y,
   TICKS_PER_BEAT,
 } from './score/constants'
 import { buildAccidentalStateBeforeNote, getEffectivePitchForStaffPosition } from './score/accidentals'
@@ -27,8 +29,10 @@ import {
 import { solveHorizontalMeasureWidths } from './score/layout/horizontalMeasureWidthSolver'
 import { resolveEffectiveBoundary } from './score/layout/effectiveBoundary'
 import { useDragHandlers } from './score/dragHandlers'
+import { stopPlaybackAction } from './score/editorActions'
 import { useEditorHandlers } from './score/editorHandlers'
 import { buildMusicXmlExportPayload } from './score/musicXmlActions'
+import { buildPlaybackTimeline, type PlaybackTimelineEvent } from './score/playbackTimeline'
 import {
   previewScoreNote,
   resolveScoreNotePreviewPitch,
@@ -95,6 +99,9 @@ import type {
   MeasurePair,
   MusicXmlMetadata,
   NoteLayout,
+  PlaybackCursorRect,
+  PlaybackCursorState,
+  PlaybackPoint,
   Pitch,
   RhythmPresetId,
   ScoreNote,
@@ -109,6 +116,11 @@ const INSPECTOR_SEQUENCE_PREVIEW_LIMIT = 64
 const MANUAL_SCALE_BASELINE = 1
 const DEFAULT_PAGE_HORIZONTAL_PADDING_PX = 86
 const SCORE_STAGE_BORDER_PX = 1
+const PLAYHEAD_OFFSET_PX = 2
+const PLAYHEAD_WIDTH_PX = 2
+const PLAYHEAD_VERTICAL_MARGIN_PX = 15
+const PLAYHEAD_VIEWPORT_MARGIN_X_PX = 72
+const PLAYHEAD_VIEWPORT_MARGIN_Y_PX = 24
 const ENABLE_AUTO_FIRST_MEASURE_DRAG_DEBUG = false
 const HORIZONTAL_VIEW_MEASURE_WIDTH_PX = 220
 const HORIZONTAL_VIEW_MIN_MEASURE_WIDTH_PX = 1
@@ -998,6 +1010,15 @@ type NotePreviewDebugEvent = {
   pitch: Pitch
 }
 
+type PlaybackCursorDebugEvent = {
+  sequence: number
+  sessionId: number
+  atMs: number
+  kind: 'start' | 'point' | 'complete'
+  point: PlaybackPoint | null
+  status: 'idle' | 'playing'
+}
+
 function escapeCssId(id: string): string {
   if (typeof (window as unknown as { CSS?: { escape?: (value: string) => string } }).CSS?.escape === 'function') {
     return (window as unknown as { CSS: { escape: (value: string) => string } }).CSS.escape(id)
@@ -1007,6 +1028,10 @@ function escapeCssId(id: string): string {
 
 function getSelectionKey(selection: Selection): string {
   return `${selection.staff}|${selection.noteId}|${selection.keyIndex}`
+}
+
+function getPlaybackPointKey(point: PlaybackPoint): string {
+  return `${point.pairIndex}:${point.onsetTick}`
 }
 
 function isSameSelection(left: Selection, right: Selection): boolean {
@@ -1620,6 +1645,10 @@ function App() {
   const [draggingSelection, setDraggingSelection] = useState<Selection | null>(null)
   const [dragPreviewState, setDragPreviewState] = useState<DragState | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
+  const [playbackCursorPoint, setPlaybackCursorPoint] = useState<PlaybackPoint | null>(null)
+  const [playbackCursorColor, setPlaybackCursorColor] = useState<'red' | 'yellow'>('red')
+  const [playbackSessionId, setPlaybackSessionId] = useState(0)
+  const [playbackCursorResetVersion, setPlaybackCursorResetVersion] = useState(1)
   const [musicXmlInput, setMusicXmlInput] = useState<string>('')
   const [importFeedback, setImportFeedback] = useState<ImportFeedback>({ kind: 'idle', message: '' })
   const [isNotationPaletteOpen, setIsNotationPaletteOpen] = useState(false)
@@ -1676,6 +1705,7 @@ function App() {
   const scoreRef = useRef<HTMLCanvasElement | null>(null)
   const scoreOverlayRef = useRef<HTMLCanvasElement | null>(null)
   const scoreScrollRef = useRef<HTMLDivElement | null>(null)
+  const scoreStageRef = useRef<HTMLDivElement | null>(null)
   const osmdPreviewContainerRef = useRef<HTMLDivElement | null>(null)
   const osmdPreviewPagesRef = useRef<HTMLElement[]>([])
   const osmdPreviewInstanceRef = useRef<OsmdPreviewInstance | null>(null)
@@ -1697,6 +1727,8 @@ function App() {
   const synthRef = useRef<Tone.PolySynth | Tone.Sampler | null>(null)
   const notePreviewEventsRef = useRef<NotePreviewDebugEvent[]>([])
   const notePreviewSequenceRef = useRef(0)
+  const playbackCursorEventsRef = useRef<PlaybackCursorDebugEvent[]>([])
+  const playbackCursorSequenceRef = useRef(0)
 
   const noteLayoutsRef = useRef<NoteLayout[]>([])
   const noteLayoutsByPairRef = useRef<Map<number, NoteLayout[]>>(new Map())
@@ -1719,6 +1751,9 @@ function App() {
   const overlayRendererSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 })
   const overlayLastRectRef = useRef<MeasureLayout['overlayRect'] | null>(null)
   const stopPlayTimerRef = useRef<number | null>(null)
+  const playbackPointTimerIdsRef = useRef<number[]>([])
+  const playbackSessionIdRef = useRef(0)
+  const lastAppliedPlaybackCursorResetVersionRef = useRef(0)
   const measurePairsFromImportRef = useRef<MeasurePair[] | null>(null)
   const measureKeyFifthsFromImportRef = useRef<number[] | null>(null)
   const measureDivisionsFromImportRef = useRef<number[] | null>(null)
@@ -1754,6 +1789,22 @@ function App() {
     () => measurePairsFromImport ?? buildMeasurePairs(notes, bassNotes),
     [measurePairsFromImport, notes, bassNotes],
   )
+  const playbackTimelineEvents = useMemo(
+    () =>
+      buildPlaybackTimeline({
+        measurePairs,
+        timeSignaturesByMeasure: measureTimeSignaturesFromImport,
+      }),
+    [measurePairs, measureTimeSignaturesFromImport],
+  )
+  const playbackTimelineEventByPointKey = useMemo(
+    () =>
+      new Map<string, PlaybackTimelineEvent>(
+        playbackTimelineEvents.map((event) => [getPlaybackPointKey(event.point), event] as const),
+      ),
+    [playbackTimelineEvents],
+  )
+  const firstPlaybackPoint = playbackTimelineEvents[0]?.point ?? null
   const spacingLayoutMode: SpacingLayoutMode = 'custom'
   const getWidthProbeContext = useCallback((): ReturnType<Renderer['getContext']> | null => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return null
@@ -2184,6 +2235,103 @@ function App() {
     })
   }, [])
 
+  const requestPlaybackCursorReset = useCallback(() => {
+    setPlaybackCursorResetVersion((current) => current + 1)
+  }, [])
+
+  useEffect(() => {
+    if (lastAppliedPlaybackCursorResetVersionRef.current === playbackCursorResetVersion) return
+    lastAppliedPlaybackCursorResetVersionRef.current = playbackCursorResetVersion
+    setPlaybackCursorPoint(firstPlaybackPoint)
+    setPlaybackCursorColor('red')
+  }, [firstPlaybackPoint, playbackCursorResetVersion])
+
+  const appendPlaybackCursorDebugEvent = useCallback((params: {
+    kind: PlaybackCursorDebugEvent['kind']
+    sessionId: number
+    point: PlaybackPoint | null
+    status: PlaybackCursorDebugEvent['status']
+  }) => {
+    const { kind, sessionId, point, status } = params
+    playbackCursorSequenceRef.current += 1
+    playbackCursorEventsRef.current.push({
+      sequence: playbackCursorSequenceRef.current,
+      sessionId,
+      atMs: Date.now(),
+      kind,
+      point: point ? { ...point } : null,
+      status,
+    })
+    if (playbackCursorEventsRef.current.length > 240) {
+      playbackCursorEventsRef.current.splice(0, playbackCursorEventsRef.current.length - 240)
+    }
+  }, [])
+
+  const stopActivePlaybackSession = useCallback(() => {
+    stopPlaybackAction({
+      synthRef,
+      stopPlayTimerRef,
+      playbackPointTimerIdsRef,
+      playbackSessionIdRef,
+      setIsPlaying,
+    })
+    const nextSessionId = playbackSessionIdRef.current
+    setPlaybackSessionId(nextSessionId)
+    setPlaybackCursorColor('red')
+  }, [])
+
+  const handlePlaybackStart = useCallback((params: {
+    sessionId: number
+    firstEvent: PlaybackTimelineEvent | null
+  }) => {
+    const { sessionId, firstEvent } = params
+    setPlaybackSessionId(sessionId)
+    setPlaybackCursorColor('yellow')
+    if (firstEvent) {
+      setPlaybackCursorPoint(firstEvent.point)
+    }
+    appendPlaybackCursorDebugEvent({
+      kind: 'start',
+      sessionId,
+      point: firstEvent?.point ?? null,
+      status: 'playing',
+    })
+  }, [appendPlaybackCursorDebugEvent])
+
+  const handlePlaybackPoint = useCallback((params: {
+    sessionId: number
+    event: PlaybackTimelineEvent
+  }) => {
+    const { sessionId, event } = params
+    setPlaybackSessionId(sessionId)
+    setPlaybackCursorPoint(event.point)
+    setPlaybackCursorColor('yellow')
+    appendPlaybackCursorDebugEvent({
+      kind: 'point',
+      sessionId,
+      point: event.point,
+      status: 'playing',
+    })
+  }, [appendPlaybackCursorDebugEvent])
+
+  const handlePlaybackComplete = useCallback((params: {
+    sessionId: number
+    lastEvent: PlaybackTimelineEvent | null
+  }) => {
+    const { sessionId, lastEvent } = params
+    setPlaybackSessionId(sessionId)
+    if (lastEvent) {
+      setPlaybackCursorPoint(lastEvent.point)
+    }
+    setPlaybackCursorColor('red')
+    appendPlaybackCursorDebugEvent({
+      kind: 'complete',
+      sessionId,
+      point: lastEvent?.point ?? null,
+      status: 'idle',
+    })
+  }, [appendPlaybackCursorDebugEvent])
+
   const {
     clearDragOverlay,
     onSurfacePointerMove,
@@ -2357,9 +2505,15 @@ function App() {
   } = useEditorHandlers({
     synthRef,
     notes,
-    bassNotes,
+    playbackTimelineEvents,
     stopPlayTimerRef,
+    playbackPointTimerIdsRef,
+    playbackSessionIdRef,
     setIsPlaying,
+    onPlaybackStart: handlePlaybackStart,
+    onPlaybackPoint: handlePlaybackPoint,
+    onPlaybackComplete: handlePlaybackComplete,
+    onImportedScoreApplied: requestPlaybackCursorReset,
     setNotes,
     setBassNotes,
     setMeasurePairsFromImport,
@@ -2394,40 +2548,70 @@ function App() {
   }, [])
 
   const importMusicXmlTextWithCollapseReset = useCallback((xmlText: string) => {
+    stopActivePlaybackSession()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     importMusicXmlText(xmlText)
-  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, importMusicXmlText])
+  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, importMusicXmlText, stopActivePlaybackSession])
 
   const importMusicXmlFromTextareaWithCollapseReset = useCallback(() => {
+    stopActivePlaybackSession()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     importMusicXmlFromTextarea()
-  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, importMusicXmlFromTextarea])
+  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, importMusicXmlFromTextarea, stopActivePlaybackSession])
 
   const onMusicXmlFileChangeWithCollapseReset = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    stopActivePlaybackSession()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     await onMusicXmlFileChange(event)
-  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, onMusicXmlFileChange])
+  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, onMusicXmlFileChange, stopActivePlaybackSession])
 
   const loadSampleMusicXmlWithCollapseReset = useCallback(() => {
+    stopActivePlaybackSession()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     loadSampleMusicXml()
-  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, loadSampleMusicXml])
+  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, loadSampleMusicXml, stopActivePlaybackSession])
 
   const resetScoreWithCollapseReset = useCallback(() => {
+    stopActivePlaybackSession()
+    requestPlaybackCursorReset()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     resetScore()
-  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, resetScore])
+  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, requestPlaybackCursorReset, resetScore, stopActivePlaybackSession])
 
   const applyRhythmPresetWithCollapseReset = useCallback((presetId: RhythmPresetId) => {
+    stopActivePlaybackSession()
+    requestPlaybackCursorReset()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     applyRhythmPreset(presetId)
-  }, [applyRhythmPreset, clearActiveChordSelection, clearFullMeasureRestCollapseScopes])
+  }, [applyRhythmPreset, clearActiveChordSelection, clearFullMeasureRestCollapseScopes, requestPlaybackCursorReset, stopActivePlaybackSession])
+
+  useEffect(() => {
+    return () => {
+      if (stopPlayTimerRef.current !== null) {
+        window.clearTimeout(stopPlayTimerRef.current)
+        stopPlayTimerRef.current = null
+      }
+      playbackPointTimerIdsRef.current.forEach((timerId) => {
+        window.clearTimeout(timerId)
+      })
+      playbackPointTimerIdsRef.current = []
+      playbackSessionIdRef.current += 1
+      const stoppableSynth = synthRef.current as (Tone.PolySynth | Tone.Sampler | { releaseAll?: (time?: number) => void }) | null
+      if (stoppableSynth && typeof stoppableSynth.releaseAll === 'function') {
+        try {
+          stoppableSynth.releaseAll()
+        } catch {
+          // Ignore best-effort cleanup failures on disposed Tone voices.
+        }
+      }
+    }
+  }, [])
 
   useEffect(() => {
     const hasActiveTreble = notes.some((note) => note.id === activeSelection.noteId)
@@ -4370,6 +4554,127 @@ function App() {
   const scoreSurfaceOffsetXPx = horizontalRenderOffsetX * scoreScaleX
   const scaledRenderedScoreHeight = Math.max(1, scoreHeight * scoreScaleY)
   const scoreSurfaceOffsetYPx = Math.max(0, (displayScoreHeight - scaledRenderedScoreHeight) / 2)
+  const playheadStatus: 'idle' | 'playing' = playbackCursorColor === 'yellow' ? 'playing' : 'idle'
+  const playheadRectPx = useMemo<PlaybackCursorRect | null>(() => {
+    void layoutStabilityKey
+    void chordMarkerLayoutRevision
+    if (!playbackCursorPoint) return null
+    const playbackEvent = playbackTimelineEventByPointKey.get(getPlaybackPointKey(playbackCursorPoint)) ?? null
+    if (!playbackEvent) return null
+
+    const pairLayouts = noteLayoutsByPairRef.current.get(playbackCursorPoint.pairIndex) ?? []
+    const layoutByStaffNoteIndex = new Map<string, NoteLayout>()
+    pairLayouts.forEach((layout) => {
+      layoutByStaffNoteIndex.set(`${layout.staff}:${layout.noteIndex}`, layout)
+    })
+
+    let bestHeadCandidate:
+      | {
+          globalX: number
+          staffPriority: number
+          noteIndex: number
+          keyIndex: number
+        }
+      | null = null
+
+    for (const target of playbackEvent.targets) {
+      const layout = layoutByStaffNoteIndex.get(`${target.staff}:${target.noteIndex}`) ?? null
+      if (!layout) continue
+      const head = layout.noteHeads.find((item) => item.keyIndex === target.keyIndex) ?? null
+      if (!head) continue
+      const localLeftX = Number.isFinite(head.hitMinX) ? (head.hitMinX as number) : head.x
+      if (!Number.isFinite(localLeftX)) continue
+      const candidate = {
+        globalX: localLeftX + horizontalRenderOffsetX,
+        staffPriority: target.staff === 'treble' ? 0 : 1,
+        noteIndex: target.noteIndex,
+        keyIndex: target.keyIndex,
+      }
+      if (
+        bestHeadCandidate === null ||
+        candidate.globalX < bestHeadCandidate.globalX - 0.001 ||
+        (Math.abs(candidate.globalX - bestHeadCandidate.globalX) <= 0.001 &&
+          (candidate.staffPriority < bestHeadCandidate.staffPriority ||
+            (candidate.staffPriority === bestHeadCandidate.staffPriority &&
+              (candidate.noteIndex < bestHeadCandidate.noteIndex ||
+                (candidate.noteIndex === bestHeadCandidate.noteIndex && candidate.keyIndex < bestHeadCandidate.keyIndex)))))
+      ) {
+        bestHeadCandidate = candidate
+      }
+    }
+
+    let globalHeadLeftX: number | null = null
+    if (bestHeadCandidate !== null) {
+      globalHeadLeftX = bestHeadCandidate.globalX
+    }
+    if (globalHeadLeftX === null) {
+      const timelineBundle = measureTimelineBundlesRef.current.get(playbackCursorPoint.pairIndex) ?? null
+      const axisX = timelineBundle?.publicAxisLayout?.tickToX.get(playbackCursorPoint.onsetTick)
+      if (typeof axisX === 'number' && Number.isFinite(axisX)) {
+        globalHeadLeftX = axisX + horizontalRenderOffsetX
+      }
+    }
+    if (globalHeadLeftX === null) {
+      const frame = horizontalMeasureFramesByPair[playbackCursorPoint.pairIndex] ?? null
+      if (frame) {
+        globalHeadLeftX =
+          frame.measureX +
+          frame.measureWidth * (playbackCursorPoint.onsetTick / Math.max(1, playbackEvent.measureTicks))
+      }
+    }
+    if (globalHeadLeftX === null || !Number.isFinite(globalHeadLeftX)) return null
+
+    const measureLayout =
+      measureLayoutsRef.current.get(playbackCursorPoint.pairIndex) ??
+      [...measureLayoutsRef.current.values()][0] ??
+      null
+    const trebleTopRaw =
+      measureLayout !== null && Number.isFinite(measureLayout.trebleLineTopY)
+        ? measureLayout.trebleLineTopY
+        : SCORE_TOP_PADDING + SYSTEM_TREBLE_OFFSET_Y
+    const trebleBottomRaw =
+      measureLayout !== null && Number.isFinite(measureLayout.trebleLineBottomY)
+        ? measureLayout.trebleLineBottomY
+        : SCORE_TOP_PADDING + SYSTEM_TREBLE_OFFSET_Y + 40
+    const bassTopRaw =
+      measureLayout !== null && Number.isFinite(measureLayout.bassLineTopY)
+        ? measureLayout.bassLineTopY
+        : SCORE_TOP_PADDING + SYSTEM_BASS_OFFSET_Y
+    const bassBottomRaw =
+      measureLayout !== null && Number.isFinite(measureLayout.bassLineBottomY)
+        ? measureLayout.bassLineBottomY
+        : SCORE_TOP_PADDING + SYSTEM_BASS_OFFSET_Y + 40
+    const lineTopRaw = Math.min(trebleTopRaw, trebleBottomRaw, bassTopRaw, bassBottomRaw)
+    const lineBottomRaw = Math.max(trebleTopRaw, trebleBottomRaw, bassTopRaw, bassBottomRaw)
+    const x = globalHeadLeftX * scoreScaleX + SCORE_STAGE_BORDER_PX - PLAYHEAD_OFFSET_PX
+    const y = scoreSurfaceOffsetYPx + lineTopRaw * scoreScaleY + SCORE_STAGE_BORDER_PX - PLAYHEAD_VERTICAL_MARGIN_PX
+    const bottomY =
+      scoreSurfaceOffsetYPx + lineBottomRaw * scoreScaleY + SCORE_STAGE_BORDER_PX + PLAYHEAD_VERTICAL_MARGIN_PX
+    const height = bottomY - y
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(height)) return null
+    if (height <= 0) return null
+    return {
+      x,
+      y,
+      width: PLAYHEAD_WIDTH_PX,
+      height,
+    }
+  }, [
+    chordMarkerLayoutRevision,
+    horizontalMeasureFramesByPair,
+    horizontalRenderOffsetX,
+    layoutStabilityKey,
+    playbackCursorPoint,
+    playbackTimelineEventByPointKey,
+    scoreScaleX,
+    scoreScaleY,
+    scoreSurfaceOffsetYPx,
+  ])
+  const playbackCursorState = useMemo<PlaybackCursorState>(() => ({
+    point: playbackCursorPoint ? { ...playbackCursorPoint } : null,
+    color: playbackCursorColor,
+    rectPx: playheadRectPx ? { ...playheadRectPx } : null,
+  }), [playbackCursorColor, playbackCursorPoint, playheadRectPx])
   const measureRulerTicks = useMemo(() => {
     if (horizontalMeasureFramesByPair.length === 0) return [] as Array<{ key: string; xPx: number; label: string }>
     return horizontalMeasureFramesByPair.map((frame, index) => {
@@ -4704,6 +5009,50 @@ function App() {
     scoreScaleY,
     layoutStabilityKey,
   ])
+  useEffect(() => {
+    if (playheadStatus !== 'playing' || !playheadRectPx) return
+    const scrollHost = scoreScrollRef.current
+    const scoreStage = scoreStageRef.current
+    if (!scrollHost || !scoreStage) return
+
+    const playheadLeft = scoreStage.offsetLeft + playheadRectPx.x
+    const playheadRight = playheadLeft + playheadRectPx.width
+    const playheadTop = scoreStage.offsetTop + playheadRectPx.y
+    const playheadBottom = playheadTop + playheadRectPx.height
+
+    let nextScrollLeft = scrollHost.scrollLeft
+    let nextScrollTop = scrollHost.scrollTop
+    const leftViewport = scrollHost.scrollLeft
+    const rightViewport = scrollHost.scrollLeft + scrollHost.clientWidth
+    const topViewport = scrollHost.scrollTop
+    const bottomViewport = scrollHost.scrollTop + scrollHost.clientHeight
+
+    if (playheadLeft - PLAYHEAD_VIEWPORT_MARGIN_X_PX < leftViewport) {
+      nextScrollLeft = Math.max(0, playheadLeft - PLAYHEAD_VIEWPORT_MARGIN_X_PX)
+    } else if (playheadRight + PLAYHEAD_VIEWPORT_MARGIN_X_PX > rightViewport) {
+      nextScrollLeft = Math.max(0, playheadRight + PLAYHEAD_VIEWPORT_MARGIN_X_PX - scrollHost.clientWidth)
+    }
+
+    if (playheadTop - PLAYHEAD_VIEWPORT_MARGIN_Y_PX < topViewport) {
+      nextScrollTop = Math.max(0, playheadTop - PLAYHEAD_VIEWPORT_MARGIN_Y_PX)
+    } else if (playheadBottom + PLAYHEAD_VIEWPORT_MARGIN_Y_PX > bottomViewport) {
+      nextScrollTop = Math.max(0, playheadBottom + PLAYHEAD_VIEWPORT_MARGIN_Y_PX - scrollHost.clientHeight)
+    }
+
+    const maxScrollLeft = Math.max(0, scrollHost.scrollWidth - scrollHost.clientWidth)
+    const maxScrollTop = Math.max(0, scrollHost.scrollHeight - scrollHost.clientHeight)
+    nextScrollLeft = Math.max(0, Math.min(maxScrollLeft, nextScrollLeft))
+    nextScrollTop = Math.max(0, Math.min(maxScrollTop, nextScrollTop))
+
+    if (Math.abs(nextScrollLeft - scrollHost.scrollLeft) < 0.5 && Math.abs(nextScrollTop - scrollHost.scrollTop) < 0.5) {
+      return
+    }
+    scrollHost.scrollTo({
+      left: nextScrollLeft,
+      top: nextScrollTop,
+      behavior: 'auto',
+    })
+  }, [playheadRectPx, playheadStatus, playbackSessionId])
   const formatDebugCoord = (value: number | null | undefined): string => {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 'null'
     return value.toFixed(3)
@@ -5245,6 +5594,9 @@ function App() {
       importMusicXmlText: (xmlText: string) => {
         importMusicXmlTextWithCollapseReset(xmlText)
       },
+      playScore: () => {
+        void playScore()
+      },
       getImportFeedback: () => importFeedbackRef.current,
       getScaleConfig: () => ({
         autoScaleEnabled,
@@ -5275,6 +5627,27 @@ function App() {
       clearNotePreviewEvents: () => {
         notePreviewEventsRef.current = []
       },
+      getPlaybackCursorState: () => ({
+        ...playbackCursorState,
+        point: playbackCursorState.point ? { ...playbackCursorState.point } : null,
+        rectPx: playbackCursorState.rectPx ? { ...playbackCursorState.rectPx } : null,
+        status: playheadStatus,
+        sessionId: playbackSessionId,
+      }),
+      getPlaybackCursorEvents: () => playbackCursorEventsRef.current.map((event) => ({
+        ...event,
+        point: event.point ? { ...event.point } : null,
+      })),
+      clearPlaybackCursorEvents: () => {
+        playbackCursorEventsRef.current = []
+      },
+      getPlaybackTimelinePoints: () =>
+        playbackTimelineEvents.map((event) => ({
+          pairIndex: event.pairIndex,
+          onsetTick: event.onsetTick,
+          atSeconds: event.atSeconds,
+          targetCount: event.targets.length,
+        })),
       getDragSessionState: () => {
         const drag = dragRef.current
         if (!drag) return null
@@ -5384,6 +5757,7 @@ function App() {
     }
   }, [
     importMusicXmlTextWithCollapseReset,
+    playScore,
     dumpAllMeasureCoordinateReport,
     dumpOsmdPreviewSystemMetrics,
     pageCount,
@@ -5404,6 +5778,10 @@ function App() {
     systemsPerPage,
     visibleSystemRange,
     activeSelection,
+    playbackCursorState,
+    playbackSessionId,
+    playheadStatus,
+    playbackTimelineEvents,
   ])
 
   return (
@@ -5542,6 +5920,7 @@ function App() {
 
       <ScoreBoard
         scoreScrollRef={scoreScrollRef}
+        scoreStageRef={scoreStageRef}
         displayScoreWidth={displayScoreWidth}
         displayScoreHeight={displayScoreHeight}
         scoreSurfaceLogicalWidthPx={scoreWidth}
@@ -5553,6 +5932,8 @@ function App() {
         measureRulerTicks={measureRulerTicks}
         chordRulerMarkers={chordRulerMarkers}
         onChordRulerMarkerClick={onChordRulerMarkerClick}
+        playheadRectPx={playheadRectPx}
+        playheadStatus={playheadStatus}
         selectedMeasureHighlightRectPx={selectedMeasureHighlightRectPx}
         draggingSelection={draggingSelection}
         scoreRef={scoreRef}

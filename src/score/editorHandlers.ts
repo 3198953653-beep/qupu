@@ -7,9 +7,11 @@ import {
   playScoreAction,
   resetScoreAction,
   runAiDraftAction,
+  stopPlaybackAction,
 } from './editorActions'
 import { DEFAULT_DEMO_MEASURE_COUNT } from './constants'
 import { applyImportedScoreState, importMusicXmlTextAndApply } from './musicXmlActions'
+import type { PlaybackTimelineEvent } from './playbackTimeline'
 import type {
   DragState,
   ImportFeedback,
@@ -29,9 +31,15 @@ type StateSetter<T> = Dispatch<SetStateAction<T>>
 export function useEditorHandlers(params: {
   synthRef: MutableRefObject<import('tone').PolySynth | import('tone').Sampler | null>
   notes: ScoreNote[]
-  bassNotes: ScoreNote[]
+  playbackTimelineEvents: PlaybackTimelineEvent[]
   stopPlayTimerRef: MutableRefObject<number | null>
+  playbackPointTimerIdsRef: MutableRefObject<number[]>
+  playbackSessionIdRef: MutableRefObject<number>
   setIsPlaying: StateSetter<boolean>
+  onPlaybackStart?: (params: { sessionId: number; firstEvent: PlaybackTimelineEvent | null }) => void
+  onPlaybackPoint?: (params: { sessionId: number; event: PlaybackTimelineEvent }) => void
+  onPlaybackComplete?: (params: { sessionId: number; lastEvent: PlaybackTimelineEvent | null }) => void
+  onImportedScoreApplied?: () => void
 
   setNotes: StateSetter<ScoreNote[]>
   setBassNotes: StateSetter<ScoreNote[]>
@@ -64,6 +72,7 @@ export function useEditorHandlers(params: {
   initialBassNotes: ScoreNote[]
 }): {
   playScore: () => Promise<void>
+  stopPlayback: () => void
   applyImportedScore: (result: ImportResult) => void
   importMusicXmlText: (xmlText: string) => void
   importMusicXmlFromTextarea: () => void
@@ -78,9 +87,15 @@ export function useEditorHandlers(params: {
   const {
     synthRef,
     notes,
-    bassNotes,
+    playbackTimelineEvents,
     stopPlayTimerRef,
+    playbackPointTimerIdsRef,
+    playbackSessionIdRef,
     setIsPlaying,
+    onPlaybackStart,
+    onPlaybackPoint,
+    onPlaybackComplete,
+    onImportedScoreApplied,
     setNotes,
     setBassNotes,
     setMeasurePairsFromImport,
@@ -113,10 +128,24 @@ export function useEditorHandlers(params: {
 
   const playScore = async () => {
     await playScoreAction({
-      synth: synthRef.current,
-      notes,
-      bassNotes,
+      synthRef,
+      playbackTimelineEvents,
       stopPlayTimerRef,
+      playbackPointTimerIdsRef,
+      playbackSessionIdRef,
+      setIsPlaying,
+      onPlaybackStart,
+      onPlaybackPoint,
+      onPlaybackComplete,
+    })
+  }
+
+  const stopPlayback = () => {
+    stopPlaybackAction({
+      synthRef,
+      stopPlayTimerRef,
+      playbackPointTimerIdsRef,
+      playbackSessionIdRef,
       setIsPlaying,
     })
   }
@@ -142,6 +171,7 @@ export function useEditorHandlers(params: {
       setDraggingSelection,
       setActiveSelection,
     })
+    onImportedScoreApplied?.()
   }
 
   const importMusicXmlText = (xmlText: string) => {
@@ -255,6 +285,7 @@ export function useEditorHandlers(params: {
 
   return {
     playScore,
+    stopPlayback,
     applyImportedScore,
     importMusicXmlText,
     importMusicXmlFromTextarea,

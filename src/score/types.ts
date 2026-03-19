@@ -200,6 +200,24 @@ export type Selection = {
   keyIndex: number
 }
 
+export type PlaybackPoint = {
+  pairIndex: number
+  onsetTick: number
+}
+
+export type PlaybackCursorRect = {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export type PlaybackCursorState = {
+  point: PlaybackPoint | null
+  color: 'red' | 'yellow'
+  rectPx: PlaybackCursorRect | null
+}
+
 export type DragState = {
   noteId: string
   staff: StaffKind
