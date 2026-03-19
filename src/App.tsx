@@ -4563,6 +4563,7 @@ function App() {
   }, [])
   const selectedMeasureHighlightRectPx = useMemo(() => {
     void layoutStabilityKey
+    void chordMarkerLayoutRevision
     const measurePadX = 6
     const measurePadY = 4
     if (activeChordSelection !== null) {
@@ -4604,7 +4605,11 @@ function App() {
     if (selectedMeasureScope === null) return null
     const measureLayout = measureLayoutsRef.current.get(selectedMeasureScope.pairIndex) ?? null
     if (!measureLayout) return null
-    const x = scoreSurfaceOffsetXPx + measureLayout.measureX * scoreScaleX + SCORE_STAGE_BORDER_PX
+    const frame = horizontalMeasureFramesByPair[selectedMeasureScope.pairIndex] ?? null
+    const x =
+      frame !== null
+        ? frame.measureX * scoreScaleX + SCORE_STAGE_BORDER_PX
+        : scoreSurfaceOffsetXPx + measureLayout.measureX * scoreScaleX + SCORE_STAGE_BORDER_PX
     const lineTopRaw =
       selectedMeasureScope.staff === 'treble'
         ? (Number.isFinite(measureLayout.trebleLineTopY) ? measureLayout.trebleLineTopY : measureLayout.trebleY)
@@ -4616,7 +4621,10 @@ function App() {
     const lineTop = Math.min(lineTopRaw, lineBottomRaw)
     const lineBottom = Math.max(lineTopRaw, lineBottomRaw)
     const y = scoreSurfaceOffsetYPx + lineTop * scoreScaleY + SCORE_STAGE_BORDER_PX
-    const width = measureLayout.measureWidth * scoreScaleX
+    const width =
+      frame !== null
+        ? frame.measureWidth * scoreScaleX
+        : measureLayout.measureWidth * scoreScaleX
     const height = (lineBottom - lineTop) * scoreScaleY
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height)) {
       return null
@@ -4630,6 +4638,8 @@ function App() {
     }
   }, [
     activeChordSelection,
+    chordMarkerLayoutRevision,
+    horizontalMeasureFramesByPair,
     resolveChordHighlightContentBounds,
     selectedMeasureScope,
     scoreSurfaceOffsetXPx,
