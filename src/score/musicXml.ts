@@ -8,6 +8,7 @@ import {
   STEP_TO_SEMITONE,
   TICKS_PER_BEAT,
 } from './constants'
+import type { ChordRulerEntry } from './chordRuler'
 import { getKeySignatureAlterForStep, getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './pitchMath'
 import {
   beatsToTicks,
@@ -18,6 +19,7 @@ import {
   getLastPitch,
   splitTicksToDurations,
 } from './scoreOps'
+import { buildImportedChordRulerEntries } from './importedChordRuler'
 import type {
   BeamTag,
   ImportResult,
@@ -231,6 +233,493 @@ function getMeasureTicksByTime(time: TimeSignature): number {
   const beatType = Number.isFinite(time.beatType) && time.beatType > 0 ? time.beatType : 4
   const ticks = Math.round(beats * TICKS_PER_BEAT * (4 / beatType))
   return Math.max(1, ticks)
+}
+
+type MeasureSlot = {
+  notes: Record<StaffKind, ScoreNote[]>
+  ticksUsed: Record<StaffKind, number>
+  touched: Record<StaffKind, boolean>
+  measureTicks: number
+}
+
+type VisiblePartContext = {
+  partEl: Element
+  defaultStaff: StaffKind
+}
+
+type ParsedVisibleMusicXmlData = {
+  measureSlots: MeasureSlot[]
+  measureKeyFifths: number[]
+  measureDivisions: number[]
+  measureTimeSignatures: TimeSignature[]
+}
+
+type ImportedChordPartAnalysis = {
+  looksLikeChordPart: boolean
+  entriesByMeasureIndex: ChordRulerEntry[][]
+}
+
+function getPartMeasureElements(partEl: Element, measureLimit: number): Element[] {
+  const measureEls = Array.from(partEl.getElementsByTagName('measure'))
+  if (!Number.isFinite(measureLimit)) return measureEls
+  return measureEls.slice(0, Math.max(0, Math.trunc(measureLimit)))
+}
+
+function toInternalTicksFromXmlDuration(durationValue: number, divisions: number): number {
+  if (!Number.isFinite(durationValue) || durationValue <= 0) return 0
+  const safeDivisions = Number.isFinite(divisions) && divisions > 0 ? divisions : 1
+  return Math.max(0, Math.round((durationValue / safeDivisions) * TICKS_PER_BEAT))
+}
+
+function partLooksLikeTwoStaffPiano(partEl: Element, measureLimit: number): boolean {
+  const measureEls = getPartMeasureElements(partEl, measureLimit)
+  let sawTrebleStaff = false
+  let sawBassStaff = false
+
+  for (const measureEl of measureEls) {
+    const stavesText = getFirstTagText(measureEl, 'staves')
+    const stavesValue = stavesText ? Number(stavesText) : Number.NaN
+    if (Number.isFinite(stavesValue) && stavesValue >= 2) {
+      return true
+    }
+
+    const noteEls = measureEl.getElementsByTagName('note')
+    for (let noteIndex = 0; noteIndex < noteEls.length; noteIndex += 1) {
+      const noteData = collectFastNoteData(noteEls[noteIndex])
+      if (noteData.staffText === '1') sawTrebleStaff = true
+      if (noteData.staffText === '2') sawBassStaff = true
+      if (sawTrebleStaff && sawBassStaff) return true
+    }
+  }
+
+  return false
+}
+
+function analyzeImportedChordPart(partEl: Element, measureLimit: number): ImportedChordPartAnalysis {
+  const entriesByMeasureIndex: ChordRulerEntry[][] = []
+  const measureEls = getPartMeasureElements(partEl, measureLimit)
+  let divisions = 1
+  let currentTime: TimeSignature = { beats: 4, beatType: 4 }
+  const seenStaffNumbers = new Set<string>()
+  let totalChordEvents = 0
+  let stackedChordEventCount = 0
+
+  for (let measureIndex = 0; measureIndex < measureEls.length; measureIndex += 1) {
+    const measureEl = measureEls[measureIndex]
+    const divisionsText = getFirstTagText(measureEl, 'divisions')
+    const maybeDivisions = divisionsText ? Number(divisionsText) : Number.NaN
+    if (Number.isFinite(maybeDivisions) && maybeDivisions > 0) {
+      divisions = maybeDivisions
+    }
+
+    const beatsText = getFirstTagText(measureEl, 'beats')
+    const beatTypeText = getFirstTagText(measureEl, 'beat-type')
+    const maybeBeats = beatsText ? Number(beatsText) : Number.NaN
+    const maybeBeatType = beatTypeText ? Number(beatTypeText) : Number.NaN
+    currentTime = {
+      beats: Number.isFinite(maybeBeats) && maybeBeats > 0 ? Math.round(maybeBeats) : currentTime.beats,
+      beatType:
+        Number.isFinite(maybeBeatType) && maybeBeatType > 0 ? Math.round(maybeBeatType) : currentTime.beatType,
+    }
+    const measureTicks = getMeasureTicksByTime(currentTime)
+
+    const eventsByRawStart = new Map<number, { startTick: number; durationTicks: number; notes: Array<{ step: string; alter: number; octave: number; midi: number }> }>()
+    let currentTimeRaw = 0
+    let lastChordStartRaw = 0
+
+    const children = measureEl.children
+    for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
+      const child = children[childIndex]
+      const tag = child.tagName.toLowerCase()
+      if (tag === 'backup') {
+        const durationText = child.getElementsByTagName('duration')[0]?.textContent?.trim()
+        const durationValue = durationText ? Number(durationText) : Number.NaN
+        if (Number.isFinite(durationValue)) {
+          currentTimeRaw -= durationValue
+        }
+        continue
+      }
+      if (tag === 'forward') {
+        const durationText = child.getElementsByTagName('duration')[0]?.textContent?.trim()
+        const durationValue = durationText ? Number(durationText) : Number.NaN
+        if (Number.isFinite(durationValue)) {
+          currentTimeRaw += durationValue
+        }
+        continue
+      }
+      if (tag !== 'note') continue
+
+      const noteData = collectFastNoteData(child)
+      if (noteData.isGrace) continue
+
+      const staffNumber = noteData.staffText?.trim() || '1'
+      seenStaffNumbers.add(staffNumber)
+
+      const rawDuration = noteData.durationValue ?? 0
+      if (noteData.isRest) {
+        if (!noteData.isChord) {
+          currentTimeRaw += rawDuration
+        }
+        continue
+      }
+
+      if (!noteData.pitchStep || noteData.pitchOctave === null || STEP_TO_SEMITONE[noteData.pitchStep] === undefined) {
+        if (!noteData.isChord) {
+          currentTimeRaw += rawDuration
+        }
+        continue
+      }
+
+      const startRaw = noteData.isChord ? lastChordStartRaw : currentTimeRaw
+      if (!noteData.isChord) {
+        lastChordStartRaw = startRaw
+      }
+
+      const startTick = Math.max(0, Math.min(measureTicks, toInternalTicksFromXmlDuration(startRaw, divisions)))
+      const durationTicks = Math.max(1, toInternalTicksFromXmlDuration(rawDuration, divisions))
+      const alter = noteData.pitchAlter ?? 0
+      const midi = (noteData.pitchOctave + 1) * 12 + (STEP_TO_SEMITONE[noteData.pitchStep] ?? 0) + alter
+      const event =
+        eventsByRawStart.get(startRaw) ??
+        {
+          startTick,
+          durationTicks,
+          notes: [],
+        }
+      event.startTick = startTick
+      event.durationTicks = Math.max(event.durationTicks, durationTicks)
+      event.notes.push({
+        step: noteData.pitchStep,
+        alter,
+        octave: noteData.pitchOctave,
+        midi,
+      })
+      eventsByRawStart.set(startRaw, event)
+
+      if (!noteData.isChord) {
+        currentTimeRaw += rawDuration
+      }
+    }
+
+    const events = [...eventsByRawStart.values()].sort((left, right) => left.startTick - right.startTick)
+    totalChordEvents += events.length
+    stackedChordEventCount += events.filter((event) => event.notes.length > 1).length
+    entriesByMeasureIndex[measureIndex] = buildImportedChordRulerEntries({
+      events,
+      timeSignature: currentTime,
+      measureTicks,
+    })
+  }
+
+  return {
+    looksLikeChordPart:
+      totalChordEvents > 0 &&
+      stackedChordEventCount > 0 &&
+      seenStaffNumbers.size <= 1 &&
+      entriesByMeasureIndex.some((entries) => entries.length > 0),
+    entriesByMeasureIndex,
+  }
+}
+
+function parseVisibleMusicXmlParts(params: {
+  partContexts: VisiblePartContext[]
+  measureLimit: number
+}): ParsedVisibleMusicXmlData {
+  const { partContexts, measureLimit } = params
+  const measureSlots: MeasureSlot[] = []
+  const measureKeyFifths: number[] = []
+  const measureDivisions: number[] = []
+  const measureTimeSignatures: TimeSignature[] = []
+
+  const ensureMeasureSlot = (index: number) => {
+    if (!measureSlots[index]) {
+      measureSlots[index] = {
+        notes: { treble: [], bass: [] },
+        ticksUsed: { treble: 0, bass: 0 },
+        touched: { treble: false, bass: false },
+        measureTicks: MEASURE_TICKS,
+      }
+    }
+    return measureSlots[index]
+  }
+
+  const lastPitch: Record<StaffKind, Pitch> = { treble: 'c/4', bass: 'c/3' }
+
+  partContexts.forEach(({ partEl, defaultStaff }) => {
+    const measureEls = getPartMeasureElements(partEl, measureLimit)
+    if (measureEls.length === 0) return
+
+    let divisions = 1
+    let currentFifths = 0
+    let currentTime: TimeSignature = { beats: 4, beatType: 4 }
+
+    for (let measureIndex = 0; measureIndex < measureEls.length; measureIndex += 1) {
+      const measureEl = measureEls[measureIndex]
+      const slot = ensureMeasureSlot(measureIndex)
+      const divisionsText = getFirstTagText(measureEl, 'divisions')
+      const maybeDivisions = divisionsText ? Number(divisionsText) : Number.NaN
+      if (Number.isFinite(maybeDivisions) && maybeDivisions > 0) {
+        divisions = maybeDivisions
+      }
+      if (measureDivisions[measureIndex] === undefined) {
+        measureDivisions[measureIndex] = Math.max(1, Math.round(divisions))
+      }
+
+      const beatsText = getFirstTagText(measureEl, 'beats')
+      const beatTypeText = getFirstTagText(measureEl, 'beat-type')
+      const maybeBeats = beatsText ? Number(beatsText) : Number.NaN
+      const maybeBeatType = beatTypeText ? Number(beatTypeText) : Number.NaN
+      currentTime = {
+        beats: Number.isFinite(maybeBeats) && maybeBeats > 0 ? Math.round(maybeBeats) : currentTime.beats,
+        beatType:
+          Number.isFinite(maybeBeatType) && maybeBeatType > 0 ? Math.round(maybeBeatType) : currentTime.beatType,
+      }
+      if (measureTimeSignatures[measureIndex] === undefined) {
+        measureTimeSignatures[measureIndex] = { ...currentTime }
+      }
+      slot.measureTicks = getMeasureTicksByTime(currentTime)
+
+      const fifthsText = getFirstTagText(measureEl, 'fifths')
+      const maybeFifths = fifthsText ? Number(fifthsText) : Number.NaN
+      if (Number.isFinite(maybeFifths)) {
+        currentFifths = Math.trunc(maybeFifths)
+      }
+      if (measureKeyFifths[measureIndex] === undefined) {
+        measureKeyFifths[measureIndex] = currentFifths
+      }
+
+      const measureAlterState: Record<StaffKind, Map<string, number>> = {
+        treble: new Map(),
+        bass: new Map(),
+      }
+
+      const noteEls = measureEl.getElementsByTagName('note')
+      for (let noteIndex = 0; noteIndex < noteEls.length; noteIndex += 1) {
+        const noteEl = noteEls[noteIndex]
+        const noteData = collectFastNoteData(noteEl)
+        if (noteData.isGrace) continue
+
+        const staff: StaffKind =
+          noteData.staffText === '2' ? 'bass' : noteData.staffText === '1' ? 'treble' : defaultStaff
+
+        if (noteData.isChord) {
+          if (noteData.isRest) continue
+          const chordStep = noteData.pitchStep
+          const chordOctave = noteData.pitchOctave
+          if (!chordStep || chordOctave === null || STEP_TO_SEMITONE[chordStep] === undefined) continue
+
+          const pitchKey = `${chordStep}${chordOctave}`
+          const carriedAlter = measureAlterState[staff].get(pitchKey)
+          const accidentalAlter = noteData.accidentalText ? ACCIDENTAL_TEXT_TO_ALTER[noteData.accidentalText] : undefined
+          const resolvedAlter =
+            noteData.pitchAlter ??
+            accidentalAlter ??
+            (carriedAlter !== undefined ? carriedAlter : getKeySignatureAlterForStep(chordStep, currentFifths))
+          const chordPitch = toPitchFromStepAlter(chordStep, resolvedAlter, chordOctave)
+          measureAlterState[staff].set(pitchKey, resolvedAlter)
+
+          const previous = slot.notes[staff][slot.notes[staff].length - 1]
+          if (!previous) continue
+
+          const nextChordPitches = previous.chordPitches ? [...previous.chordPitches, chordPitch] : [chordPitch]
+          const chordAccidental = (noteData.accidentalText ? ACCIDENTAL_TEXT_TO_SYMBOL[noteData.accidentalText] : undefined) ?? null
+          const nextChordAccidentals = previous.chordAccidentals
+            ? [...previous.chordAccidentals, chordAccidental]
+            : [chordAccidental]
+          const sourceChordTieStarts = previous.chordTieStarts
+            ? [...previous.chordTieStarts]
+            : new Array(nextChordPitches.length - 1).fill(false)
+          sourceChordTieStarts.push(Boolean(noteData.tieStart))
+          const sourceChordTieStops = previous.chordTieStops
+            ? [...previous.chordTieStops]
+            : new Array(nextChordPitches.length - 1).fill(false)
+          sourceChordTieStops.push(Boolean(noteData.tieStop))
+          const sourceChordTieFrozenIncomingPitches = previous.chordTieFrozenIncomingPitches
+            ? [...previous.chordTieFrozenIncomingPitches]
+            : new Array(nextChordPitches.length - 1).fill(null)
+          sourceChordTieFrozenIncomingPitches.push(noteData.tieFrozenIncomingPitch ?? null)
+          const sourceChordTieFrozenIncomingFromNoteIds = previous.chordTieFrozenIncomingFromNoteIds
+            ? [...previous.chordTieFrozenIncomingFromNoteIds]
+            : new Array(nextChordPitches.length - 1).fill(null)
+          sourceChordTieFrozenIncomingFromNoteIds.push(noteData.tieFrozenIncomingFromNoteId ?? null)
+          const sourceChordTieFrozenIncomingFromKeyIndices = previous.chordTieFrozenIncomingFromKeyIndices
+            ? [...previous.chordTieFrozenIncomingFromKeyIndices]
+            : new Array(nextChordPitches.length - 1).fill(null)
+          sourceChordTieFrozenIncomingFromKeyIndices.push(noteData.tieFrozenIncomingFromKeyIndex ?? null)
+
+          slot.notes[staff][slot.notes[staff].length - 1] = {
+            ...previous,
+            chordPitches: nextChordPitches,
+            chordAccidentals: nextChordAccidentals,
+            chordTieStarts: sourceChordTieStarts,
+            chordTieStops: sourceChordTieStops,
+            chordTieFrozenIncomingPitches: sourceChordTieFrozenIncomingPitches,
+            chordTieFrozenIncomingFromNoteIds: sourceChordTieFrozenIncomingFromNoteIds,
+            chordTieFrozenIncomingFromKeyIndices: sourceChordTieFrozenIncomingFromKeyIndices,
+          }
+          continue
+        }
+
+        if (slot.ticksUsed[staff] >= slot.measureTicks) continue
+
+        let beats: number | null = null
+        if (noteData.typeText) {
+          const base = NOTE_TYPE_TO_BEATS[noteData.typeText]
+          if (base) {
+            beats = base
+            let add = base / 2
+            for (let dotIndex = 0; dotIndex < noteData.dots; dotIndex += 1) {
+              beats += add
+              add /= 2
+            }
+          }
+        }
+        if (beats === null && noteData.durationValue !== null && divisions > 0) {
+          beats = noteData.durationValue / divisions
+        }
+        if (!beats) continue
+
+        const isRest = noteData.isRest
+        let pitch = lastPitch[staff]
+        if (!isRest && noteData.pitchStep && noteData.pitchOctave !== null && STEP_TO_SEMITONE[noteData.pitchStep] !== undefined) {
+          const pitchKey = `${noteData.pitchStep}${noteData.pitchOctave}`
+          const carriedAlter = measureAlterState[staff].get(pitchKey)
+          const accidentalAlter = noteData.accidentalText ? ACCIDENTAL_TEXT_TO_ALTER[noteData.accidentalText] : undefined
+          const resolvedAlter =
+            noteData.pitchAlter ??
+            accidentalAlter ??
+            (carriedAlter !== undefined ? carriedAlter : getKeySignatureAlterForStep(noteData.pitchStep, currentFifths))
+          pitch = toPitchFromStepAlter(noteData.pitchStep, resolvedAlter, noteData.pitchOctave)
+          measureAlterState[staff].set(pitchKey, resolvedAlter)
+        }
+        const explicitAccidental = isRest ? undefined : (noteData.accidentalText ? ACCIDENTAL_TEXT_TO_SYMBOL[noteData.accidentalText] : undefined) ?? null
+        const notePattern = splitTicksToDurations(beatsToTicks(beats, slot.measureTicks))
+
+        slot.touched[staff] = true
+        for (let patternIndex = 0; patternIndex < notePattern.length; patternIndex += 1) {
+          const duration = notePattern[patternIndex]
+          const durationTicks = DURATION_TICKS[duration]
+          if (slot.ticksUsed[staff] + durationTicks > slot.measureTicks) break
+          const nextNote: ScoreNote = {
+            id: createImportedNoteId(staff),
+            pitch,
+            duration,
+            isRest,
+          }
+          if (!isRest) {
+            nextNote.accidental = patternIndex === 0 ? explicitAccidental : null
+            if (patternIndex === 0) {
+              if (noteData.tieStart) nextNote.tieStart = true
+              if (noteData.tieStop) nextNote.tieStop = true
+              if (noteData.tieFrozenIncomingPitch) {
+                nextNote.tieFrozenIncomingPitch = noteData.tieFrozenIncomingPitch
+                nextNote.tieFrozenIncomingFromNoteId = noteData.tieFrozenIncomingFromNoteId
+                nextNote.tieFrozenIncomingFromKeyIndex = noteData.tieFrozenIncomingFromKeyIndex
+              }
+            }
+          }
+          slot.notes[staff].push(nextNote)
+          slot.ticksUsed[staff] += durationTicks
+        }
+
+        lastPitch[staff] = pitch
+      }
+    }
+  })
+
+  return {
+    measureSlots,
+    measureKeyFifths,
+    measureDivisions,
+    measureTimeSignatures,
+  }
+}
+
+function finalizeImportResult(params: {
+  parsedData: ParsedVisibleMusicXmlData
+  metadata: MusicXmlMetadata
+  importedChordRulerEntriesByMeasureIndex?: ChordRulerEntry[][] | null
+}): ImportResult {
+  const { parsedData, metadata, importedChordRulerEntriesByMeasureIndex = null } = params
+  const { measureSlots, measureKeyFifths, measureDivisions, measureTimeSignatures } = parsedData
+
+  const importedPairs: MeasurePair[] = []
+  const importedTrebleNotes: ScoreNote[] = []
+  const importedBassNotes: ScoreNote[] = []
+  const importedNoteLookup = new Map<string, ImportedNoteLocation>()
+  const importedChordRulerEntriesByPair: ChordRulerEntry[][] | null =
+    importedChordRulerEntriesByMeasureIndex ? [] : null
+  let trebleCarry = 'c/4'
+  let bassCarry = 'c/3'
+
+  measureSlots.forEach((slot, measureIndex) => {
+    if (!slot || (!slot.touched.treble && !slot.touched.bass)) return
+
+    const treblePitch = getLastPitch(slot.notes.treble, trebleCarry)
+    const bassPitch = getLastPitch(slot.notes.bass, bassCarry)
+    const treble = fillMissingTicksWithCarryNotes(
+      slot.notes.treble,
+      'treble',
+      slot.ticksUsed.treble,
+      treblePitch,
+      slot.measureTicks,
+    )
+    const bass = fillMissingTicksWithCarryNotes(slot.notes.bass, 'bass', slot.ticksUsed.bass, bassPitch, slot.measureTicks)
+
+    const pairIndex = importedPairs.length
+    for (let noteIndex = 0; noteIndex < treble.length; noteIndex += 1) {
+      const note = treble[noteIndex]
+      importedTrebleNotes.push(note)
+      importedNoteLookup.set(note.id, { pairIndex, noteIndex, staff: 'treble' })
+    }
+    for (let noteIndex = 0; noteIndex < bass.length; noteIndex += 1) {
+      const note = bass[noteIndex]
+      importedBassNotes.push(note)
+      importedNoteLookup.set(note.id, { pairIndex, noteIndex, staff: 'bass' })
+    }
+
+    trebleCarry = getLastPitch(treble, trebleCarry)
+    bassCarry = getLastPitch(bass, bassCarry)
+    importedPairs.push({ treble, bass })
+    importedChordRulerEntriesByPair?.push(importedChordRulerEntriesByMeasureIndex?.[measureIndex] ?? [])
+  })
+
+  if (importedPairs.length === 0) {
+    const fallbackPairs = buildMeasurePairs(INITIAL_NOTES, INITIAL_BASS_NOTES)
+    return {
+      trebleNotes: fallbackPairs.flatMap((pair) => pair.treble),
+      bassNotes: fallbackPairs.flatMap((pair) => pair.bass),
+      measurePairs: fallbackPairs,
+      measureKeyFifths: new Array(fallbackPairs.length).fill(0),
+      measureDivisions: new Array(fallbackPairs.length).fill(16),
+      measureTimeSignatures: new Array(fallbackPairs.length).fill(null).map(() => ({ beats: 4, beatType: 4 })),
+      metadata,
+      importedChordRulerEntriesByPair: null,
+    }
+  }
+
+  const alignedKeyFifths =
+    measureKeyFifths.length === importedPairs.length
+      ? measureKeyFifths
+      : importedPairs.map((_, index) => measureKeyFifths[index] ?? measureKeyFifths[index - 1] ?? 0)
+  const alignedDivisions = importedPairs.map(
+    (_, index) => measureDivisions[index] ?? measureDivisions[index - 1] ?? 16,
+  )
+  const alignedTimes = importedPairs.map(
+    (_, index) => measureTimeSignatures[index] ?? measureTimeSignatures[index - 1] ?? { beats: 4, beatType: 4 },
+  )
+
+  return {
+    trebleNotes: importedTrebleNotes,
+    bassNotes: importedBassNotes,
+    measurePairs: importedPairs,
+    measureKeyFifths: alignedKeyFifths,
+    measureDivisions: alignedDivisions,
+    measureTimeSignatures: alignedTimes,
+    metadata,
+    importedNoteLookup,
+    importedChordRulerEntriesByPair,
+  }
 }
 
 function escapeXml(value: string): string {
@@ -704,286 +1193,32 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
   if (partNodes.length === 0) {
     throw new Error('该乐谱文件中未找到 <part> 节点。')
   }
+  const firstPart = partNodes[0] ?? null
+  const secondPart = partNodes[1] ?? null
+  const chordPartAnalysis =
+    firstPart && secondPart && partLooksLikeTwoStaffPiano(firstPart, measureLimit)
+      ? analyzeImportedChordPart(secondPart, measureLimit)
+      : null
+  const shouldUseDedicatedChordImportPath =
+    firstPart !== null &&
+    chordPartAnalysis !== null &&
+    chordPartAnalysis.looksLikeChordPart
 
-  const measureSlots: {
-    notes: Record<StaffKind, ScoreNote[]>
-    ticksUsed: Record<StaffKind, number>
-    touched: Record<StaffKind, boolean>
-    measureTicks: number
-  }[] = []
-  const measureKeyFifths: number[] = []
-  const measureDivisions: number[] = []
-  const measureTimeSignatures: TimeSignature[] = []
-
-  const ensureMeasureSlot = (index: number) => {
-    if (!measureSlots[index]) {
-      measureSlots[index] = {
-        notes: { treble: [], bass: [] },
-        ticksUsed: { treble: 0, bass: 0 },
-        touched: { treble: false, bass: false },
-        measureTicks: MEASURE_TICKS,
-      }
-    }
-    return measureSlots[index]
-  }
-
-  const lastPitch: Record<StaffKind, Pitch> = { treble: 'c/4', bass: 'c/3' }
-
-  partNodes.forEach((partEl, partIndex) => {
-    const measureEls = partEl.getElementsByTagName('measure')
-    if (measureEls.length === 0) return
-
-    let divisions = 1
-    let currentFifths = 0
-    let currentTime: TimeSignature = { beats: 4, beatType: 4 }
-    const measureCount = Math.min(measureEls.length, measureLimit)
-    for (let measureIndex = 0; measureIndex < measureCount; measureIndex += 1) {
-      const measureEl = measureEls[measureIndex]
-      const slot = ensureMeasureSlot(measureIndex)
-      const divisionsText = getFirstTagText(measureEl, 'divisions')
-      const maybeDivisions = divisionsText ? Number(divisionsText) : Number.NaN
-      if (Number.isFinite(maybeDivisions) && maybeDivisions > 0) {
-        divisions = maybeDivisions
-      }
-      if (measureDivisions[measureIndex] === undefined) {
-        measureDivisions[measureIndex] = Math.max(1, Math.round(divisions))
-      }
-
-      const beatsText = getFirstTagText(measureEl, 'beats')
-      const beatTypeText = getFirstTagText(measureEl, 'beat-type')
-      const maybeBeats = beatsText ? Number(beatsText) : Number.NaN
-      const maybeBeatType = beatTypeText ? Number(beatTypeText) : Number.NaN
-      const nextBeats = Number.isFinite(maybeBeats) && maybeBeats > 0 ? Math.round(maybeBeats) : currentTime.beats
-      const nextBeatType =
-        Number.isFinite(maybeBeatType) && maybeBeatType > 0 ? Math.round(maybeBeatType) : currentTime.beatType
-      currentTime = { beats: nextBeats, beatType: nextBeatType }
-      if (measureTimeSignatures[measureIndex] === undefined) {
-        measureTimeSignatures[measureIndex] = { ...currentTime }
-      }
-      slot.measureTicks = getMeasureTicksByTime(currentTime)
-
-      const fifthsText = getFirstTagText(measureEl, 'fifths')
-      const maybeFifths = fifthsText ? Number(fifthsText) : Number.NaN
-      if (Number.isFinite(maybeFifths)) {
-        currentFifths = Math.trunc(maybeFifths)
-      }
-      if (measureKeyFifths[measureIndex] === undefined) {
-        measureKeyFifths[measureIndex] = currentFifths
-      }
-
-      const measureAlterState: Record<StaffKind, Map<string, number>> = {
-        treble: new Map(),
-        bass: new Map(),
-      }
-
-      const noteEls = measureEl.getElementsByTagName('note')
-      for (let noteIndex = 0; noteIndex < noteEls.length; noteIndex += 1) {
-        const noteEl = noteEls[noteIndex]
-        const noteData = collectFastNoteData(noteEl)
-        if (noteData.isGrace) continue
-
-        const staffText = noteData.staffText
-        const staff: StaffKind =
-          staffText === '2' ? 'bass' : staffText === '1' ? 'treble' : partNodes.length > 1 && partIndex === 1 ? 'bass' : 'treble'
-
-        const isChordTone = noteData.isChord
-        if (isChordTone) {
-          if (noteData.isRest) continue
-          const chordStep = noteData.pitchStep
-          const chordOctave = noteData.pitchOctave
-          if (!chordStep || chordOctave === null || STEP_TO_SEMITONE[chordStep] === undefined) continue
-
-          const pitchKey = `${chordStep}${chordOctave}`
-          const carriedAlter = measureAlterState[staff].get(pitchKey)
-          const accidentalAlter = noteData.accidentalText ? ACCIDENTAL_TEXT_TO_ALTER[noteData.accidentalText] : undefined
-          const resolvedAlter =
-            noteData.pitchAlter ??
-            accidentalAlter ??
-            (carriedAlter !== undefined ? carriedAlter : getKeySignatureAlterForStep(chordStep, currentFifths))
-          const chordPitch = toPitchFromStepAlter(chordStep, resolvedAlter, chordOctave)
-          measureAlterState[staff].set(pitchKey, resolvedAlter)
-
-          const previous = slot.notes[staff][slot.notes[staff].length - 1]
-          if (!previous) continue
-
-          const nextChordPitches = previous.chordPitches ? [...previous.chordPitches, chordPitch] : [chordPitch]
-          const chordAccidental = (noteData.accidentalText ? ACCIDENTAL_TEXT_TO_SYMBOL[noteData.accidentalText] : undefined) ?? null
-          const nextChordAccidentals = previous.chordAccidentals
-            ? [...previous.chordAccidentals, chordAccidental]
-            : [chordAccidental]
-          const sourceChordTieStarts = previous.chordTieStarts
-            ? [...previous.chordTieStarts]
-            : new Array(nextChordPitches.length - 1).fill(false)
-          sourceChordTieStarts.push(Boolean(noteData.tieStart))
-          const sourceChordTieStops = previous.chordTieStops
-            ? [...previous.chordTieStops]
-            : new Array(nextChordPitches.length - 1).fill(false)
-          sourceChordTieStops.push(Boolean(noteData.tieStop))
-          const sourceChordTieFrozenIncomingPitches = previous.chordTieFrozenIncomingPitches
-            ? [...previous.chordTieFrozenIncomingPitches]
-            : new Array(nextChordPitches.length - 1).fill(null)
-          sourceChordTieFrozenIncomingPitches.push(noteData.tieFrozenIncomingPitch ?? null)
-          const sourceChordTieFrozenIncomingFromNoteIds = previous.chordTieFrozenIncomingFromNoteIds
-            ? [...previous.chordTieFrozenIncomingFromNoteIds]
-            : new Array(nextChordPitches.length - 1).fill(null)
-          sourceChordTieFrozenIncomingFromNoteIds.push(noteData.tieFrozenIncomingFromNoteId ?? null)
-          const sourceChordTieFrozenIncomingFromKeyIndices = previous.chordTieFrozenIncomingFromKeyIndices
-            ? [...previous.chordTieFrozenIncomingFromKeyIndices]
-            : new Array(nextChordPitches.length - 1).fill(null)
-          sourceChordTieFrozenIncomingFromKeyIndices.push(noteData.tieFrozenIncomingFromKeyIndex ?? null)
-
-          slot.notes[staff][slot.notes[staff].length - 1] = {
-            ...previous,
-            chordPitches: nextChordPitches,
-            chordAccidentals: nextChordAccidentals,
-            chordTieStarts: sourceChordTieStarts,
-            chordTieStops: sourceChordTieStops,
-            chordTieFrozenIncomingPitches: sourceChordTieFrozenIncomingPitches,
-            chordTieFrozenIncomingFromNoteIds: sourceChordTieFrozenIncomingFromNoteIds,
-            chordTieFrozenIncomingFromKeyIndices: sourceChordTieFrozenIncomingFromKeyIndices,
-          }
-          continue
-        }
-
-        if (slot.ticksUsed[staff] >= slot.measureTicks) continue
-
-        let beats: number | null = null
-        if (noteData.typeText) {
-          const base = NOTE_TYPE_TO_BEATS[noteData.typeText]
-          if (base) {
-            beats = base
-            let add = base / 2
-            for (let dotIndex = 0; dotIndex < noteData.dots; dotIndex += 1) {
-              beats += add
-              add /= 2
-            }
-          }
-        }
-        if (beats === null && noteData.durationValue !== null && divisions > 0) {
-          beats = noteData.durationValue / divisions
-        }
-        if (!beats) continue
-
-        const isRest = noteData.isRest
-        let pitch = lastPitch[staff]
-        if (!isRest) {
-          if (noteData.pitchStep && noteData.pitchOctave !== null && STEP_TO_SEMITONE[noteData.pitchStep] !== undefined) {
-            const pitchKey = `${noteData.pitchStep}${noteData.pitchOctave}`
-            const carriedAlter = measureAlterState[staff].get(pitchKey)
-            const accidentalAlter = noteData.accidentalText ? ACCIDENTAL_TEXT_TO_ALTER[noteData.accidentalText] : undefined
-            const resolvedAlter =
-              noteData.pitchAlter ??
-              accidentalAlter ??
-              (carriedAlter !== undefined ? carriedAlter : getKeySignatureAlterForStep(noteData.pitchStep, currentFifths))
-            pitch = toPitchFromStepAlter(noteData.pitchStep, resolvedAlter, noteData.pitchOctave)
-            measureAlterState[staff].set(pitchKey, resolvedAlter)
-          }
-        }
-        const explicitAccidental = isRest ? undefined : (noteData.accidentalText ? ACCIDENTAL_TEXT_TO_SYMBOL[noteData.accidentalText] : undefined) ?? null
-        const notePattern = splitTicksToDurations(beatsToTicks(beats, slot.measureTicks))
-
-        slot.touched[staff] = true
-        for (let patternIndex = 0; patternIndex < notePattern.length; patternIndex += 1) {
-          const duration = notePattern[patternIndex]
-          const durationTicks = DURATION_TICKS[duration]
-          if (slot.ticksUsed[staff] + durationTicks > slot.measureTicks) break
-          const nextNote: ScoreNote = {
-            id: createImportedNoteId(staff),
-            pitch,
-            duration,
-            isRest,
-          }
-          if (!isRest) {
-            nextNote.accidental = patternIndex === 0 ? explicitAccidental : null
-            if (patternIndex === 0) {
-              if (noteData.tieStart) nextNote.tieStart = true
-              if (noteData.tieStop) nextNote.tieStop = true
-              if (noteData.tieFrozenIncomingPitch) {
-                nextNote.tieFrozenIncomingPitch = noteData.tieFrozenIncomingPitch
-                nextNote.tieFrozenIncomingFromNoteId = noteData.tieFrozenIncomingFromNoteId
-                nextNote.tieFrozenIncomingFromKeyIndex = noteData.tieFrozenIncomingFromKeyIndex
-              }
-            }
-          }
-          slot.notes[staff].push(nextNote)
-          slot.ticksUsed[staff] += durationTicks
-        }
-
-        lastPitch[staff] = pitch
-      }
-    }
+  const parsedVisibleData = parseVisibleMusicXmlParts({
+    partContexts: shouldUseDedicatedChordImportPath
+      ? [{ partEl: firstPart as Element, defaultStaff: 'treble' }]
+      : partNodes.map((partEl, partIndex) => ({
+          partEl,
+          defaultStaff: partNodes.length > 1 && partIndex === 1 ? 'bass' : 'treble',
+        })),
+    measureLimit,
   })
 
-  const importedPairs: MeasurePair[] = []
-  const importedTrebleNotes: ScoreNote[] = []
-  const importedBassNotes: ScoreNote[] = []
-  const importedNoteLookup = new Map<string, ImportedNoteLocation>()
-  let trebleCarry = 'c/4'
-  let bassCarry = 'c/3'
-
-  measureSlots.forEach((slot) => {
-    if (!slot || (!slot.touched.treble && !slot.touched.bass)) return
-
-    const treblePitch = getLastPitch(slot.notes.treble, trebleCarry)
-    const bassPitch = getLastPitch(slot.notes.bass, bassCarry)
-    const treble = fillMissingTicksWithCarryNotes(
-      slot.notes.treble,
-      'treble',
-      slot.ticksUsed.treble,
-      treblePitch,
-      slot.measureTicks,
-    )
-    const bass = fillMissingTicksWithCarryNotes(slot.notes.bass, 'bass', slot.ticksUsed.bass, bassPitch, slot.measureTicks)
-
-    const pairIndex = importedPairs.length
-    for (let noteIndex = 0; noteIndex < treble.length; noteIndex += 1) {
-      const note = treble[noteIndex]
-      importedTrebleNotes.push(note)
-      importedNoteLookup.set(note.id, { pairIndex, noteIndex, staff: 'treble' })
-    }
-    for (let noteIndex = 0; noteIndex < bass.length; noteIndex += 1) {
-      const note = bass[noteIndex]
-      importedBassNotes.push(note)
-      importedNoteLookup.set(note.id, { pairIndex, noteIndex, staff: 'bass' })
-    }
-
-    trebleCarry = getLastPitch(treble, trebleCarry)
-    bassCarry = getLastPitch(bass, bassCarry)
-    importedPairs.push({ treble, bass })
-  })
-
-  if (importedPairs.length === 0) {
-    const fallbackPairs = buildMeasurePairs(INITIAL_NOTES, INITIAL_BASS_NOTES)
-    return {
-      trebleNotes: fallbackPairs.flatMap((pair) => pair.treble),
-      bassNotes: fallbackPairs.flatMap((pair) => pair.bass),
-      measurePairs: fallbackPairs,
-      measureKeyFifths: new Array(fallbackPairs.length).fill(0),
-      measureDivisions: new Array(fallbackPairs.length).fill(16),
-      measureTimeSignatures: new Array(fallbackPairs.length).fill(null).map(() => ({ beats: 4, beatType: 4 })),
-      metadata,
-    }
-  }
-
-  const alignedKeyFifths =
-    measureKeyFifths.length === importedPairs.length
-      ? measureKeyFifths
-      : importedPairs.map((_, index) => measureKeyFifths[index] ?? measureKeyFifths[index - 1] ?? 0)
-  const alignedDivisions = importedPairs.map(
-    (_, index) => measureDivisions[index] ?? measureDivisions[index - 1] ?? 16,
-  )
-  const alignedTimes = importedPairs.map(
-    (_, index) => measureTimeSignatures[index] ?? measureTimeSignatures[index - 1] ?? { beats: 4, beatType: 4 },
-  )
-
-  return {
-    trebleNotes: importedTrebleNotes,
-    bassNotes: importedBassNotes,
-    measurePairs: importedPairs,
-    measureKeyFifths: alignedKeyFifths,
-    measureDivisions: alignedDivisions,
-    measureTimeSignatures: alignedTimes,
+  return finalizeImportResult({
+    parsedData: parsedVisibleData,
     metadata,
-    importedNoteLookup,
-  }
+    importedChordRulerEntriesByMeasureIndex: shouldUseDedicatedChordImportPath
+      ? chordPartAnalysis?.entriesByMeasureIndex ?? null
+      : null,
+  })
 }

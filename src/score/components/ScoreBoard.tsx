@@ -24,7 +24,8 @@ export function ScoreBoard(props: {
     label: string
     isActive: boolean
     pairIndex: number
-    beatIndex: 1 | 3
+    positionText: string
+    beatIndex?: number | null
   }>
   onChordRulerMarkerClick: (markerKey: string) => void
   playheadRectPx?: { x: number; y: number; width: number; height: number } | null
@@ -106,7 +107,7 @@ export function ScoreBoard(props: {
                 key={marker.key}
                 style={{ left: `${marker.xPx}px` }}
                 onClick={() => onChordRulerMarkerClick(marker.key)}
-                aria-label={`第${marker.pairIndex + 1}小节第${marker.beatIndex}拍和弦 ${marker.label}`}
+                aria-label={`第${marker.pairIndex + 1}小节${marker.positionText}和弦 ${marker.label}`}
               >
                 <span className="chord-ruler-label">{marker.label}</span>
               </button>

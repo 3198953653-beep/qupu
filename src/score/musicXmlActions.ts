@@ -2,6 +2,7 @@ import { startTransition, type Dispatch, type MutableRefObject, type SetStateAct
 import { flushSync } from 'react-dom'
 import MusicXmlImportWorker from './musicXmlImport.worker?worker'
 import { buildMusicXmlFromMeasurePairs, parseMusicXml } from './musicXml'
+import type { ChordRulerEntry } from './chordRuler'
 import { buildImportedNoteLookup } from './scoreOps'
 import type {
   DragState,
@@ -185,6 +186,7 @@ export function applyImportedScoreState(params: {
   measureTimeSignaturesFromImportRef: MutableRefObject<TimeSignature[] | null>
   setMusicXmlMetadataFromImport: StateSetter<MusicXmlMetadata | null>
   musicXmlMetadataFromImportRef: MutableRefObject<MusicXmlMetadata | null>
+  setImportedChordRulerEntriesByPairFromImport: StateSetter<ChordRulerEntry[][] | null>
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
   dragRef: MutableRefObject<DragState | null>
   clearDragOverlay: () => void
@@ -205,6 +207,7 @@ export function applyImportedScoreState(params: {
     measureTimeSignaturesFromImportRef,
     setMusicXmlMetadataFromImport,
     musicXmlMetadataFromImportRef,
+    setImportedChordRulerEntriesByPairFromImport,
     importedNoteLookupRef,
     dragRef,
     clearDragOverlay,
@@ -224,6 +227,7 @@ export function applyImportedScoreState(params: {
   measureTimeSignaturesFromImportRef.current = result.measureTimeSignatures
   setMusicXmlMetadataFromImport(result.metadata)
   musicXmlMetadataFromImportRef.current = result.metadata
+  setImportedChordRulerEntriesByPairFromImport(result.importedChordRulerEntriesByPair ?? null)
   importedNoteLookupRef.current = result.importedNoteLookup ?? buildImportedNoteLookup(result.measurePairs)
   dragRef.current = null
   clearDragOverlay()

@@ -1,4 +1,5 @@
 import { useRef, type ChangeEvent, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
+import type { ChordRulerEntry } from './chordRuler'
 import {
   applyRhythmPresetAction,
   exportMusicXmlFileAction,
@@ -55,6 +56,7 @@ export function useEditorHandlers(params: {
   measureTimeSignaturesFromImportRef: MutableRefObject<TimeSignature[] | null>
   setMusicXmlMetadataFromImport: StateSetter<MusicXmlMetadata | null>
   musicXmlMetadataFromImportRef: MutableRefObject<MusicXmlMetadata | null>
+  setImportedChordRulerEntriesByPairFromImport: StateSetter<ChordRulerEntry[][] | null>
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
   dragRef: MutableRefObject<DragState | null>
   clearDragOverlay: () => void
@@ -112,6 +114,7 @@ export function useEditorHandlers(params: {
     measureTimeSignaturesFromImportRef,
     setMusicXmlMetadataFromImport,
     musicXmlMetadataFromImportRef,
+    setImportedChordRulerEntriesByPairFromImport,
     importedNoteLookupRef,
     dragRef,
     clearDragOverlay,
@@ -169,6 +172,7 @@ export function useEditorHandlers(params: {
       measureTimeSignaturesFromImportRef,
       setMusicXmlMetadataFromImport,
       musicXmlMetadataFromImportRef,
+      setImportedChordRulerEntriesByPairFromImport,
       importedNoteLookupRef,
       dragRef,
       clearDragOverlay,
@@ -236,6 +240,7 @@ export function useEditorHandlers(params: {
     measureTimeSignaturesFromImportRef,
     setMusicXmlMetadataFromImport,
     musicXmlMetadataFromImportRef,
+    setImportedChordRulerEntriesByPairFromImport,
     importedNoteLookupRef,
     dragRef,
     clearDragOverlay,

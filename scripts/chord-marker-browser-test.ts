@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { chromium, type Browser, type Page } from 'playwright'
 import { DEFAULT_DEMO_MEASURE_COUNT } from '../src/score/constants'
@@ -9,10 +9,11 @@ import type { ImportFeedback, MeasurePair } from '../src/score/types'
 type ChordRulerMarkerDebugRow = {
   key: string
   pairIndex: number
-  beatIndex: 1 | 3
+  beatIndex?: number | null
   label: string
   startTick: number
   endTick: number
+  positionText: string
   xPx: number
   anchorSource: 'note-head' | 'spacing-tick' | 'axis' | 'frame'
 }
@@ -74,6 +75,7 @@ const DEV_PORT = 4175
 const DEV_URL = `http://${DEV_HOST}:${DEV_PORT}`
 const CHORD_LABEL_LEFT_INSET_PX = 8
 const SCORE_STAGE_BORDER_PX = 1
+const THREE_PART_MUSIC_XML_PATH = 'C:\\Users\\76743\\Desktop\\三个声部.musicxml'
 
 function buildTwoHalfNoteImportXml(): string {
   const measurePairs: MeasurePair[] = Array.from({ length: DEFAULT_DEMO_MEASURE_COUNT }, (_, measureIndex) => ({
@@ -455,6 +457,26 @@ function findMarker(rows: ChordRulerMarkerDebugRow[], pairIndex: number, beatInd
   return marker
 }
 
+function findMarkerByPositionText(
+  rows: ChordRulerMarkerDebugRow[],
+  pairIndex: number,
+  positionText: string,
+  label?: string,
+): ChordRulerMarkerDebugRow {
+  const marker = rows.find(
+    (row) =>
+      row.pairIndex === pairIndex &&
+      row.positionText === positionText &&
+      (label === undefined || row.label === label),
+  )
+  if (!marker) {
+    throw new Error(
+      `Missing chord marker for pairIndex=${pairIndex} positionText=${positionText}${label ? ` label=${label}` : ''}.`,
+    )
+  }
+  return marker
+}
+
 async function waitForWholeNoteDemo(page: Page): Promise<void> {
   await page.waitForFunction(() => {
     const api = (window as unknown as {
@@ -571,6 +593,29 @@ async function waitForWholeNoteImport(page: Page): Promise<void> {
   })
 }
 
+async function waitForImportedChordStaffMusicXml(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const api = (window as unknown as {
+      __scoreDebug: {
+        dumpAllMeasureCoordinates: () => MeasureCoordinateReport
+        getChordRulerMarkers: () => ChordRulerMarkerDebugRow[]
+      }
+    }).__scoreDebug
+    const report = api.dumpAllMeasureCoordinates()
+    const markers = api.getChordRulerMarkers()
+    const firstRow = report.rows[0]
+    if (!firstRow) return false
+    const bassNotes = firstRow.notes.filter((note) => note.staff === 'bass' && !note.isRest)
+    const bassPitches = bassNotes.map((note) => note.pitch)
+    const markerLabels = markers.slice(0, 4).map((marker) => marker.label)
+    return (
+      bassPitches.join(',') === 'c/3,g/3,c/4,d/4,e/4' &&
+      markerLabels.join(',') === 'Cadd9,Amadd9,Fadd9,Gadd9' &&
+      markers.length >= 12
+    )
+  })
+}
+
 async function waitForRestSelectionImport(page: Page): Promise<void> {
   await page.waitForFunction(() => {
     const api = (window as unknown as {
@@ -675,6 +720,7 @@ function getRequiredTrailingGap(row: MeasureCoordinateReport['rows'][number], la
 
 async function main() {
   const outputPath = process.argv[2] ?? path.resolve('debug', 'chord-marker-browser-report.json')
+  const importedChordPartXml = await readFile(THREE_PART_MUSIC_XML_PATH, 'utf8')
   const devServer = startDevServer()
   let browser: Browser | null = null
   devServer.stdout?.on('data', (chunk) => {
@@ -1264,6 +1310,70 @@ async function main() {
       },
     )
 
+    await importMusicXmlViaDebugApi(page, importedChordPartXml)
+    await waitForImportedChordStaffMusicXml(page)
+
+    const importedChordPartReport = await getMeasureCoordinates(page)
+    const importedChordPartFirstRow = importedChordPartReport.rows[0]
+    if (!importedChordPartFirstRow) {
+      throw new Error('Imported chord-staff MusicXML report is missing the first row.')
+    }
+    const importedChordBassPitches = importedChordPartFirstRow.notes
+      .filter((note) => note.staff === 'bass' && !note.isRest)
+      .map((note) => note.pitch)
+    if (importedChordBassPitches.join(',') !== 'c/3,g/3,c/4,d/4,e/4') {
+      throw new Error(
+        `Imported chord-staff file should keep the piano bass visible and hide the chord part, got bass=[${importedChordBassPitches.join(',')}].`,
+      )
+    }
+
+    const importedChordPartMarkers = await getChordMarkers(page)
+    const expectedImportedLeadMarkers: Array<{ pairIndex: number; label: string }> = [
+      { pairIndex: 0, label: 'Cadd9' },
+      { pairIndex: 1, label: 'Amadd9' },
+      { pairIndex: 2, label: 'Fadd9' },
+      { pairIndex: 3, label: 'Gadd9' },
+    ]
+    expectedImportedLeadMarkers.forEach(({ pairIndex, label }) => {
+      const marker = findMarkerByPositionText(importedChordPartMarkers, pairIndex, '第1拍', label)
+      if (marker.label !== label) {
+        throw new Error(`Imported marker label mismatch at pairIndex=${pairIndex}: expected=${label} actual=${marker.label}.`)
+      }
+    })
+
+    const measureFiveMarkers = importedChordPartMarkers.filter((marker) => marker.pairIndex === 4)
+    if (measureFiveMarkers.length !== 2) {
+      throw new Error(`Imported measure 5 should expose 2 chord markers, got ${measureFiveMarkers.length}.`)
+    }
+    const measureFiveBeat1Marker = findMarkerByPositionText(importedChordPartMarkers, 4, '第1拍', 'Cadd9')
+    const measureFiveBeat3Marker = findMarkerByPositionText(importedChordPartMarkers, 4, '第3拍', 'Cadd9')
+    if (measureFiveBeat3Marker.xPx <= measureFiveBeat1Marker.xPx + 10) {
+      throw new Error(
+        `Imported measure 5 markers should keep separate x positions: beat1=${measureFiveBeat1Marker.xPx} beat3=${measureFiveBeat3Marker.xPx}.`,
+      )
+    }
+
+    const measureFiveBeat1DomLeft = await getMarkerDomLeft(page, '第5小节第1拍和弦 Cadd9')
+    const measureFiveBeat3DomLeft = await getMarkerDomLeft(page, '第5小节第3拍和弦 Cadd9')
+    if (measureFiveBeat3DomLeft <= measureFiveBeat1DomLeft + 10) {
+      throw new Error(
+        `Imported measure 5 DOM markers should remain visually distinct: beat1=${measureFiveBeat1DomLeft} beat3=${measureFiveBeat3DomLeft}.`,
+      )
+    }
+
+    await clickButton(page, '第5小节第3拍和弦 Cadd9')
+    await page.waitForFunction(() => {
+      const api = (window as unknown as {
+        __scoreDebug: {
+          getActiveChordSelection: () => DebugActiveChordSelection | null
+          getSelectedSelections: () => DebugSelectedSelectionRow[]
+        }
+      }).__scoreDebug
+      const active = api.getActiveChordSelection()
+      const selectedRows = api.getSelectedSelections()
+      return !!active && active.pairIndex === 4 && active.startTick === 32 && active.endTick === 64 && selectedRows.length > 0
+    })
+
     const restSelectionImportXml = buildRestSelectionImportXml()
     await importMusicXmlViaDebugApi(page, restSelectionImportXml)
     await waitForRestSelectionImport(page)
@@ -1402,6 +1512,12 @@ async function main() {
         importedWholeDefaultTrailingTailTicks,
         importedWholeDefaultTrailingGap,
         importedWholeExpandedTrailingGap,
+      },
+      importedChordPartFirstRow,
+      importedChordPartMarkers,
+      importedChordPartMeasureFiveDomLeft: {
+        beat1: measureFiveBeat1DomLeft,
+        beat3: measureFiveBeat3DomLeft,
       },
       restSelectionRows,
       restActiveChordSelection,

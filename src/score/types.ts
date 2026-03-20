@@ -1,3 +1,5 @@
+import type { ChordRulerEntry } from './chordRuler'
+
 export type Pitch = string
 export type StemDirection = 1 | -1
 export type NoteDuration = 'w' | 'h' | 'q' | '8' | '16' | '32' | 'qd' | '8d' | '16d' | '32d'
@@ -64,6 +66,7 @@ export type ImportResult = {
   measureTimeSignatures: TimeSignature[]
   metadata: MusicXmlMetadata
   importedNoteLookup?: Map<string, ImportedNoteLocation>
+  importedChordRulerEntriesByPair?: ChordRulerEntry[][] | null
 }
 
 export type ImportFeedback = {

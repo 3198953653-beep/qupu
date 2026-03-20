@@ -1,4 +1,5 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
+import type { ChordRulerEntry } from './chordRuler'
 import type { DragState, ImportedNoteLocation, MeasurePair, MusicXmlMetadata, Selection, TimeSignature } from './types'
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>
@@ -14,6 +15,7 @@ export function clearImportedSourceState(params: {
   measureTimeSignaturesFromImportRef: MutableRefObject<TimeSignature[] | null>
   setMusicXmlMetadataFromImport: StateSetter<MusicXmlMetadata | null>
   musicXmlMetadataFromImportRef: MutableRefObject<MusicXmlMetadata | null>
+  setImportedChordRulerEntriesByPairFromImport?: StateSetter<ChordRulerEntry[][] | null>
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
   dragRef: MutableRefObject<DragState | null>
   clearDragOverlay: () => void
@@ -30,6 +32,7 @@ export function clearImportedSourceState(params: {
     measureTimeSignaturesFromImportRef,
     setMusicXmlMetadataFromImport,
     musicXmlMetadataFromImportRef,
+    setImportedChordRulerEntriesByPairFromImport,
     importedNoteLookupRef,
     dragRef,
     clearDragOverlay,
@@ -46,6 +49,7 @@ export function clearImportedSourceState(params: {
   measureTimeSignaturesFromImportRef.current = null
   setMusicXmlMetadataFromImport(null)
   musicXmlMetadataFromImportRef.current = null
+  setImportedChordRulerEntriesByPairFromImport?.(null)
   importedNoteLookupRef.current.clear()
   dragRef.current = null
   clearDragOverlay()

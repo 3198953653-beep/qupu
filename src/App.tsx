@@ -80,7 +80,7 @@ import { getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './score/pitch
 import { buildStaffOnsetTicks, compareTimelinePoint, resolveSelectionTimelinePoint } from './score/selectionTimelineRange'
 import { resolveForwardTieTargets, resolvePreviousTieTarget } from './score/tieChain'
 import { buildSelectionGroupMoveTargets } from './score/selectionGroupTargets'
-import { buildChordRulerEntries, getMeasureTicksFromTimeSignature } from './score/chordRuler'
+import { buildChordRulerEntries, getMeasureTicksFromTimeSignature, type ChordRulerEntry } from './score/chordRuler'
 import type { MeasureTimelineBundle } from './score/timeline/types'
 import type { NoteClipboardPayload } from './score/copyPasteTypes'
 import {
@@ -984,16 +984,18 @@ type ChordRulerMarker = {
   label: string
   isActive: boolean
   pairIndex: number
-  beatIndex: 1 | 3
+  positionText: string
+  beatIndex?: number | null
 }
 
 type ChordRulerMarkerMeta = {
   key: string
   pairIndex: number
-  beatIndex: 1 | 3
   label: string
   startTick: number
   endTick: number
+  positionText: string
+  beatIndex?: number | null
   xPx: number
   anchorSource: 'note-head' | 'spacing-tick' | 'axis' | 'frame'
 }
@@ -1675,6 +1677,7 @@ function App() {
   const [measureDivisionsFromImport, setMeasureDivisionsFromImport] = useState<number[] | null>(null)
   const [measureTimeSignaturesFromImport, setMeasureTimeSignaturesFromImport] = useState<TimeSignature[] | null>(null)
   const [musicXmlMetadataFromImport, setMusicXmlMetadataFromImport] = useState<MusicXmlMetadata | null>(null)
+  const [importedChordRulerEntriesByPairFromImport, setImportedChordRulerEntriesByPairFromImport] = useState<ChordRulerEntry[][] | null>(null)
   const [, setDragDebugReport] = useState<string>('')
   const [, setMeasureEdgeDebugReport] = useState<string>('')
   const [autoScaleEnabled, setAutoScaleEnabled] = useState(false)
@@ -1820,16 +1823,19 @@ function App() {
     [measurePairsFromImport, notes, bassNotes],
   )
   const chordRulerEntriesByPair = useMemo(
-    () =>
-      measurePairsFromImport !== null
-        ? null
-        : measurePairs.map((_, pairIndex) =>
-            buildChordRulerEntries({
-              pairIndex,
-              timeSignature: resolvePairTimeSignature(pairIndex, measureTimeSignaturesFromImport),
-            }),
-          ),
-    [measurePairs, measurePairsFromImport, measureTimeSignaturesFromImport],
+    () => {
+      if (measurePairsFromImport !== null) {
+        if (!importedChordRulerEntriesByPairFromImport) return null
+        return measurePairs.map((_, pairIndex) => importedChordRulerEntriesByPairFromImport[pairIndex] ?? [])
+      }
+      return measurePairs.map((_, pairIndex) =>
+        buildChordRulerEntries({
+          pairIndex,
+          timeSignature: resolvePairTimeSignature(pairIndex, measureTimeSignaturesFromImport),
+        }),
+      )
+    },
+    [importedChordRulerEntriesByPairFromImport, measurePairs, measurePairsFromImport, measureTimeSignaturesFromImport],
   )
   const supplementalSpacingTicksByPair = useMemo(
     () =>
@@ -2626,6 +2632,7 @@ function App() {
     measureTimeSignaturesFromImportRef,
     setMusicXmlMetadataFromImport,
     musicXmlMetadataFromImportRef,
+    setImportedChordRulerEntriesByPairFromImport,
     importedNoteLookupRef,
     dragRef,
     clearDragOverlay,
@@ -2942,6 +2949,7 @@ function App() {
     } else {
       measurePairsFromImportRef.current = null
       setMeasurePairsFromImport(null)
+      setImportedChordRulerEntriesByPairFromImport(null)
     }
     importedNoteLookupRef.current = buildImportedNoteLookup(restoredPairs)
     setNotes(flattenTrebleFromPairs(restoredPairs))
@@ -2965,6 +2973,7 @@ function App() {
     setFullMeasureRestCollapseScopeKeys,
     setMeasurePairsFromImport,
     setNotes,
+    setImportedChordRulerEntriesByPairFromImport,
     setDraggingSelection,
     setSelectedMeasureScope,
   ])
@@ -4843,7 +4852,6 @@ function App() {
     void layoutStabilityKey
     void chordMarkerLayoutRevision
     const markers = new Map<string, ChordRulerMarkerMeta>()
-    if (measurePairsFromImport !== null) return markers
     const resolveTickHeadLeftX = (params: {
       pairIndex: number
       startTick: number
@@ -4892,7 +4900,7 @@ function App() {
       const timeSignature = resolvePairTimeSignature(pairIndex, measureTimeSignaturesFromImport)
       const measureTicks = Math.max(1, timelineBundle?.measureTicks ?? getMeasureTicksFromTimeSignature(timeSignature))
       const chordEntries = chordRulerEntriesByPair?.[pairIndex] ?? []
-      chordEntries.forEach((entry) => {
+      chordEntries.forEach((entry, entryIndex) => {
         const safeStartTick = Math.max(0, Math.min(measureTicks, Math.round(entry.startTick)))
         const safeEndTick = Math.max(safeStartTick, Math.min(measureTicks, Math.round(entry.endTick)))
         if (safeEndTick <= safeStartTick) return
@@ -4927,7 +4935,7 @@ function App() {
           (anchorXInScore + horizontalRenderOffsetX) * scoreScaleX + SCORE_STAGE_BORDER_PX
         const buttonLeftXPx = textAnchorXPx - CHORD_LABEL_LEFT_INSET_PX
         if (!Number.isFinite(buttonLeftXPx)) return
-        const key = `chord-ruler-${pairIndex + 1}-${entry.beatIndex}`
+        const key = `chord-ruler-${pairIndex + 1}-${safeStartTick}-${entryIndex}`
         markers.set(key, {
           key,
           pairIndex,
@@ -4935,6 +4943,7 @@ function App() {
           label: entry.label,
           startTick: safeStartTick,
           endTick: safeEndTick,
+          positionText: entry.positionText,
           xPx: buttonLeftXPx,
           anchorSource,
         })
@@ -4948,7 +4957,6 @@ function App() {
     horizontalMeasureFramesByPair,
     horizontalRenderOffsetX,
     measurePairs,
-    measurePairsFromImport,
     measureTimeSignaturesFromImport,
     scoreScaleX,
     layoutStabilityKey,
@@ -4967,6 +4975,7 @@ function App() {
       label: marker.label,
       isActive: activeChordSelection?.markerKey === marker.key,
       pairIndex: marker.pairIndex,
+      positionText: marker.positionText,
       beatIndex: marker.beatIndex,
     }))
   }, [activeChordSelection, chordRulerMarkerMetaByKey])
@@ -6075,6 +6084,7 @@ function App() {
           label: marker.label,
           startTick: marker.startTick,
           endTick: marker.endTick,
+          positionText: marker.positionText,
           xPx: marker.xPx,
           anchorSource: marker.anchorSource,
         })),
