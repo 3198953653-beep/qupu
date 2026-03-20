@@ -44,6 +44,31 @@ type MeasureCoordinateReport = {
   }>
 }
 
+type DebugSelectedSelectionRow = {
+  noteId: string
+  staff: 'treble' | 'bass'
+  keyIndex: number
+  pairIndex: number | null
+  noteIndex: number | null
+  pitch: string | null
+  duration: string | null
+  isRest: boolean
+}
+
+type DebugActiveChordSelection = {
+  markerKey: string | null
+  pairIndex: number
+  startTick: number
+  endTick: number
+}
+
+type DebugHighlightRect = {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 const DEV_HOST = '127.0.0.1'
 const DEV_PORT = 4175
 const DEV_URL = `http://${DEV_HOST}:${DEV_PORT}`
@@ -74,6 +99,23 @@ function buildWholeNoteImportXml(): string {
     ],
     bass: [
       { id: `whole-import-bass-${measureIndex}-0`, pitch: 'c/3', duration: 'w' },
+    ],
+  }))
+  return buildMusicXmlFromMeasurePairs({
+    measurePairs,
+    timeSignaturesByMeasure: Array.from({ length: DEFAULT_DEMO_MEASURE_COUNT }, () => ({ beats: 4, beatType: 4 })),
+  })
+}
+
+function buildRestSelectionImportXml(): string {
+  const measurePairs: MeasurePair[] = Array.from({ length: DEFAULT_DEMO_MEASURE_COUNT }, (_, measureIndex) => ({
+    treble: [
+      { id: `rest-select-treble-${measureIndex}-0`, pitch: 'b/4', duration: 'h', isRest: true },
+      { id: `rest-select-treble-${measureIndex}-1`, pitch: 'c/5', duration: 'h' },
+    ],
+    bass: [
+      { id: `rest-select-bass-${measureIndex}-0`, pitch: 'd/3', duration: 'h', isRest: true },
+      { id: `rest-select-bass-${measureIndex}-1`, pitch: 'c/3', duration: 'h' },
     ],
   }))
   return buildMusicXmlFromMeasurePairs({
@@ -165,7 +207,11 @@ async function waitForDebugApi(page: Page): Promise<void> {
       typeof api.dumpAllMeasureCoordinates === 'function' &&
       typeof api.getChordRulerMarkers === 'function' &&
       typeof api.importMusicXmlText === 'function' &&
-      typeof api.getImportFeedback === 'function'
+      typeof api.getImportFeedback === 'function' &&
+      typeof api.applyChordSelectionRange === 'function' &&
+      typeof api.getSelectedSelections === 'function' &&
+      typeof api.getActiveChordSelection === 'function' &&
+      typeof api.getSelectedMeasureHighlightRect === 'function'
     )
   })
 }
@@ -240,6 +286,62 @@ async function getMeasureCoordinates(page: Page): Promise<MeasureCoordinateRepor
       }
     }).__scoreDebug
     return api.dumpAllMeasureCoordinates()
+  })
+}
+
+async function applyChordSelectionRange(
+  page: Page,
+  pairIndex: number,
+  startTick: number,
+  endTick: number,
+): Promise<number> {
+  return page.evaluate(
+    ({ pairIndex, startTick, endTick }) => {
+      const api = (window as unknown as {
+        __scoreDebug: {
+          applyChordSelectionRange: (
+            pairIndex: number,
+            startTick: number,
+            endTick: number,
+          ) => { selectedCount: number }
+        }
+      }).__scoreDebug
+      return api.applyChordSelectionRange(pairIndex, startTick, endTick).selectedCount
+    },
+    { pairIndex, startTick, endTick },
+  )
+}
+
+async function getSelectedSelections(page: Page): Promise<DebugSelectedSelectionRow[]> {
+  return page.evaluate(() => {
+    const api = (window as unknown as {
+      __scoreDebug: {
+        getSelectedSelections: () => DebugSelectedSelectionRow[]
+      }
+    }).__scoreDebug
+    return api.getSelectedSelections()
+  })
+}
+
+async function getActiveChordSelection(page: Page): Promise<DebugActiveChordSelection | null> {
+  return page.evaluate(() => {
+    const api = (window as unknown as {
+      __scoreDebug: {
+        getActiveChordSelection: () => DebugActiveChordSelection | null
+      }
+    }).__scoreDebug
+    return api.getActiveChordSelection()
+  })
+}
+
+async function getSelectedMeasureHighlightRect(page: Page): Promise<DebugHighlightRect | null> {
+  return page.evaluate(() => {
+    const api = (window as unknown as {
+      __scoreDebug: {
+        getSelectedMeasureHighlightRect: () => DebugHighlightRect | null
+      }
+    }).__scoreDebug
+    return api.getSelectedMeasureHighlightRect()
   })
 }
 
@@ -465,6 +567,38 @@ async function waitForWholeNoteImport(page: Page): Promise<void> {
       bassNotes[0]?.pitch === 'c/3' &&
       bassNotes[0]?.duration === 'w' &&
       (firstRow.spacingAnchorTicks ?? []).join(',') === '0'
+    )
+  })
+}
+
+async function waitForRestSelectionImport(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const api = (window as unknown as {
+      __scoreDebug: {
+        dumpAllMeasureCoordinates: () => MeasureCoordinateReport
+      }
+    }).__scoreDebug
+    const firstRow = api.dumpAllMeasureCoordinates().rows[0]
+    if (!firstRow) return false
+    const trebleNotes = firstRow.notes.filter((note) => note.staff === 'treble')
+    const bassNotes = firstRow.notes.filter((note) => note.staff === 'bass')
+    return (
+      trebleNotes.length === 2 &&
+      bassNotes.length === 2 &&
+      trebleNotes[0]?.isRest === true &&
+      trebleNotes[0]?.duration === 'h' &&
+      trebleNotes[0]?.onsetTicksInMeasure === 0 &&
+      trebleNotes[1]?.isRest === false &&
+      trebleNotes[1]?.pitch === 'c/5' &&
+      trebleNotes[1]?.duration === 'h' &&
+      trebleNotes[1]?.onsetTicksInMeasure === 32 &&
+      bassNotes[0]?.isRest === true &&
+      bassNotes[0]?.duration === 'h' &&
+      bassNotes[0]?.onsetTicksInMeasure === 0 &&
+      bassNotes[1]?.isRest === false &&
+      bassNotes[1]?.pitch === 'c/3' &&
+      bassNotes[1]?.duration === 'h' &&
+      bassNotes[1]?.onsetTicksInMeasure === 32
     )
   })
 }
@@ -1130,6 +1264,69 @@ async function main() {
       },
     )
 
+    const restSelectionImportXml = buildRestSelectionImportXml()
+    await importMusicXmlViaDebugApi(page, restSelectionImportXml)
+    await waitForRestSelectionImport(page)
+
+    const restSelectionCount = await applyChordSelectionRange(page, 0, 0, 32)
+    if (restSelectionCount !== 2) {
+      throw new Error(`Rest-only chord-range selection should capture 2 notes, got ${restSelectionCount}.`)
+    }
+    await page.waitForFunction(() => {
+      const api = (window as unknown as {
+        __scoreDebug: {
+          getSelectedSelections: () => DebugSelectedSelectionRow[]
+          getActiveChordSelection: () => DebugActiveChordSelection | null
+          getSelectedMeasureHighlightRect: () => DebugHighlightRect | null
+        }
+      }).__scoreDebug
+      const rows = api.getSelectedSelections()
+      const active = api.getActiveChordSelection()
+      const rect = api.getSelectedMeasureHighlightRect()
+      return (
+        rows.length === 2 &&
+        rows.every((row) => row.isRest === true) &&
+        !!active &&
+        active.markerKey === null &&
+        active.pairIndex === 0 &&
+        active.startTick === 0 &&
+        active.endTick === 32 &&
+        !!rect &&
+        rect.width > 0 &&
+        rect.height > 0
+      )
+    })
+
+    const restSelectionRows = await getSelectedSelections(page)
+    if (!restSelectionRows.every((row) => row.isRest)) {
+      throw new Error(
+        `Rest-only chord-range selection should include only rests, got ${JSON.stringify(restSelectionRows)}.`,
+      )
+    }
+    const restSelectionDurations = restSelectionRows.map((row) => row.duration).join(',')
+    if (restSelectionDurations !== 'h,h') {
+      throw new Error(`Rest-only selection should keep the two half rests, got durations=[${restSelectionDurations}].`)
+    }
+    const restActiveChordSelection = await getActiveChordSelection(page)
+    if (
+      !restActiveChordSelection ||
+      restActiveChordSelection.markerKey !== null ||
+      restActiveChordSelection.pairIndex !== 0 ||
+      restActiveChordSelection.startTick !== 0 ||
+      restActiveChordSelection.endTick !== 32
+    ) {
+      throw new Error(
+        `Rest-only selection should keep a debug chord range on [0, 32), got ${JSON.stringify(restActiveChordSelection)}.`,
+      )
+    }
+    const restHighlightRect = await getSelectedMeasureHighlightRect(page)
+    if (!restHighlightRect || restHighlightRect.width <= 0 || restHighlightRect.height <= 0) {
+      throw new Error(`Rest-only chord-range selection should create a visible highlight, got ${JSON.stringify(restHighlightRect)}.`)
+    }
+    if (!(await hasChordHighlight(page))) {
+      throw new Error('Rest-only chord-range selection should show the chord highlight overlay.')
+    }
+
     await clickButton(page, '重置')
     await waitForDefaultDemo(page)
 
@@ -1206,6 +1403,9 @@ async function main() {
         importedWholeDefaultTrailingGap,
         importedWholeExpandedTrailingGap,
       },
+      restSelectionRows,
+      restActiveChordSelection,
+      restHighlightRect,
       defaultMarkers,
       wholeMarkers,
       halfMarkers,

@@ -999,7 +999,7 @@ type ChordRulerMarkerMeta = {
 }
 
 type ActiveChordSelection = {
-  markerKey: string
+  markerKey: string | null
   pairIndex: number
   startTick: number
   endTick: number
@@ -1195,7 +1195,6 @@ function buildSelectionsForMeasureTickRange(
     const notes = staff === 'treble' ? pair.treble : pair.bass
     const onsetTicksByNoteIndex = buildStaffOnsetTicks(notes)
     notes.forEach((note, noteIndex) => {
-      if (note.isRest) return
       const onsetTick = onsetTicksByNoteIndex[noteIndex]
       if (!Number.isFinite(onsetTick)) return
       if (onsetTick < safeStartTick || onsetTick >= safeEndTick) return
@@ -4956,6 +4955,7 @@ function App() {
   ])
   useEffect(() => {
     if (!activeChordSelection) return
+    if (activeChordSelection.markerKey === null) return
     if (chordRulerMarkerMetaByKey.has(activeChordSelection.markerKey)) return
     setActiveChordSelection(null)
   }, [activeChordSelection, chordRulerMarkerMetaByKey])
@@ -4970,12 +4970,15 @@ function App() {
       beatIndex: marker.beatIndex,
     }))
   }, [activeChordSelection, chordRulerMarkerMetaByKey])
-  const onChordRulerMarkerClick = useCallback((markerKey: string) => {
-    const marker = chordRulerMarkerMetaByKey.get(markerKey)
-    if (!marker) return
-    const targetPair = measurePairsRef.current[marker.pairIndex]
-    if (!targetPair) return
-    const nextSelections = buildSelectionsForMeasureTickRange(targetPair, marker.startTick, marker.endTick)
+  const applyChordSelectionRange = useCallback((params: {
+    pairIndex: number
+    startTick: number
+    endTick: number
+    markerKey?: string | null
+  }): Selection[] => {
+    const targetPair = measurePairsRef.current[params.pairIndex]
+    if (!targetPair) return []
+    const nextSelections = buildSelectionsForMeasureTickRange(targetPair, params.startTick, params.endTick)
     resetMidiStepChain()
     setActiveAccidentalSelection(null)
     setActiveTieSelection(null)
@@ -4990,12 +4993,23 @@ function App() {
       setSelectedSelections([])
     }
     setActiveChordSelection({
-      markerKey: marker.key,
+      markerKey: params.markerKey ?? null,
+      pairIndex: params.pairIndex,
+      startTick: params.startTick,
+      endTick: params.endTick,
+    })
+    return nextSelections
+  }, [resetMidiStepChain])
+  const onChordRulerMarkerClick = useCallback((markerKey: string) => {
+    const marker = chordRulerMarkerMetaByKey.get(markerKey)
+    if (!marker) return
+    applyChordSelectionRange({
       pairIndex: marker.pairIndex,
       startTick: marker.startTick,
       endTick: marker.endTick,
+      markerKey: marker.key,
     })
-  }, [chordRulerMarkerMetaByKey, resetMidiStepChain])
+  }, [applyChordSelectionRange, chordRulerMarkerMetaByKey])
   const resolveChordHighlightContentBounds = useCallback((params: {
     pairIndex: number
     startTick: number
@@ -5027,8 +5041,7 @@ function App() {
     ;(['treble', 'bass'] as const).forEach((staff) => {
       const staffNotes = staff === 'treble' ? pair.treble : pair.bass
       const onsetTicksByNoteIndex = buildStaffOnsetTicks(staffNotes)
-      staffNotes.forEach((note, noteIndex) => {
-        if (note.isRest) return
+      staffNotes.forEach((_, noteIndex) => {
         const onsetTick = onsetTicksByNoteIndex[noteIndex]
         if (!Number.isFinite(onsetTick)) return
         if (onsetTick < safeStartTick || onsetTick >= safeEndTick) return
@@ -6013,6 +6026,47 @@ function App() {
           latestPlayheadDebugSnapshotRef.current?.seq ?? playheadDebugSequenceRef.current,
         ) ??
         (latestPlayheadDebugSnapshotRef.current ? { ...latestPlayheadDebugSnapshotRef.current } : null),
+      applyChordSelectionRange: (pairIndex: number, startTick: number, endTick: number) => ({
+        selectedCount: applyChordSelectionRange({
+          pairIndex,
+          startTick,
+          endTick,
+          markerKey: null,
+        }).length,
+      }),
+      getSelectedSelections: () =>
+        selectedSelectionsRef.current.map((selection) => {
+          const matchedEntry = (() => {
+            for (let pairIndex = 0; pairIndex < measurePairsRef.current.length; pairIndex += 1) {
+              const pair = measurePairsRef.current[pairIndex]
+              if (!pair) continue
+              const staffNotes = selection.staff === 'treble' ? pair.treble : pair.bass
+              const noteIndex = staffNotes.findIndex((note) => note.id === selection.noteId)
+              if (noteIndex < 0) continue
+              return {
+                pairIndex,
+                noteIndex,
+                note: staffNotes[noteIndex] ?? null,
+              }
+            }
+            return {
+              pairIndex: null,
+              noteIndex: null,
+              note: null as ScoreNote | null,
+            }
+          })()
+          return {
+            ...selection,
+            pairIndex: matchedEntry.pairIndex,
+            noteIndex: matchedEntry.noteIndex,
+            pitch: matchedEntry.note?.pitch ?? null,
+            duration: matchedEntry.note?.duration ?? null,
+            isRest: matchedEntry.note?.isRest === true,
+          }
+        }),
+      getActiveChordSelection: () => (activeChordSelection ? { ...activeChordSelection } : null),
+      getSelectedMeasureHighlightRect: () =>
+        selectedMeasureHighlightRectPx ? { ...selectedMeasureHighlightRectPx } : null,
       getChordRulerMarkers: () =>
         [...chordRulerMarkerMetaByKey.values()].map((marker) => ({
           key: marker.key,
@@ -6167,6 +6221,9 @@ function App() {
     playbackTimelineEvents,
     chordRulerMarkerMetaByKey,
     measurePlayheadDebugLogRow,
+    applyChordSelectionRange,
+    activeChordSelection,
+    selectedMeasureHighlightRectPx,
   ])
 
   return (
