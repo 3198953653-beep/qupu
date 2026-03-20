@@ -805,6 +805,23 @@
   box-shadow: 0 0 0 1px rgba(197, 157, 16, 0.14);
 }
 
+.playhead-debug-panel {
+  border-top: 1px solid #d6e0e5;
+  padding: 0.85rem 1rem 1rem;
+  display: grid;
+  gap: 0.45rem;
+  background: rgba(247, 251, 255, 0.92);
+}
+
+.playhead-debug-panel h2 {
+  margin: 0;
+  font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
+  font-size: 0.95rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #20445a;
+}
+
 .inspector {
   border-top: 1px solid #d6e0e5;
   padding: 0.85rem 1rem 1rem;

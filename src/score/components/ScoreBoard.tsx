@@ -1,9 +1,10 @@
-﻿import type { PointerEvent, RefObject } from 'react'
+import { useEffect, useRef, type PointerEvent, type RefObject } from 'react'
 import { SelectionInspector } from './SelectionInspector'
 
 export function ScoreBoard(props: {
   scoreScrollRef: RefObject<HTMLDivElement | null>
   scoreStageRef: RefObject<HTMLDivElement | null>
+  playheadRef: RefObject<HTMLDivElement | null>
   displayScoreWidth: number
   displayScoreHeight: number
   scoreSurfaceLogicalWidthPx: number
@@ -42,10 +43,12 @@ export function ScoreBoard(props: {
   selectedPoolSize: number
   trebleSequenceText: string
   bassSequenceText: string
+  playheadDebugLogText: string
 }) {
   const {
     scoreScrollRef,
     scoreStageRef,
+    playheadRef,
     displayScoreWidth,
     displayScoreHeight,
     scoreSurfaceLogicalWidthPx,
@@ -73,7 +76,15 @@ export function ScoreBoard(props: {
     selectedPoolSize,
     trebleSequenceText,
     bassSequenceText,
+    playheadDebugLogText,
   } = props
+  const playheadDebugLogRef = useRef<HTMLTextAreaElement | null>(null)
+
+  useEffect(() => {
+    const logElement = playheadDebugLogRef.current
+    if (!logElement) return
+    logElement.scrollTop = logElement.scrollHeight
+  }, [playheadDebugLogText])
 
   return (
     <section className="board">
@@ -151,6 +162,7 @@ export function ScoreBoard(props: {
           )}
           {playheadRectPx && (
             <div
+              ref={playheadRef}
               className={`score-playhead${playheadStatus === 'playing' ? ' is-playing' : ''}`}
               style={{
                 left: `${playheadRectPx.x}px`,
@@ -163,6 +175,18 @@ export function ScoreBoard(props: {
           )}
         </div>
       </div>
+
+      <section className="playhead-debug-panel">
+        <h2>播放线位置日志</h2>
+        <textarea
+          ref={playheadDebugLogRef}
+          className="debug-log"
+          readOnly
+          value={playheadDebugLogText}
+          spellCheck={false}
+          aria-label="播放线位置日志"
+        />
+      </section>
 
       <SelectionInspector
         selectedStaffLabel={selectedStaffLabel}

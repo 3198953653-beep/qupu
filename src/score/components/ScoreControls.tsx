@@ -7,6 +7,7 @@ import { NotationPalette } from './NotationPalette'
 export function ScoreControls(props: {
   isPlaying: boolean
   onPlayScore: () => void
+  onStopScore: () => void
   onReset: () => void
   showInScoreMeasureNumbers: boolean
   onToggleInScoreMeasureNumbers: () => void
@@ -71,6 +72,7 @@ export function ScoreControls(props: {
   const {
     isPlaying,
     onPlayScore,
+    onStopScore,
     onReset,
     showInScoreMeasureNumbers,
     onToggleInScoreMeasureNumbers,
@@ -150,6 +152,7 @@ export function ScoreControls(props: {
         <button type="button" onClick={onPlayScore} disabled={isPlaying}>
           {isPlaying ? '播放中...' : '播放小节'}
         </button>
+        <button type="button" onClick={onStopScore} disabled={!isPlaying}>停止</button>
         <button type="button" onClick={onReset}>重置</button>
         <button type="button" onClick={onToggleInScoreMeasureNumbers}>
           {showInScoreMeasureNumbers ? '谱面序号：开' : '谱面序号：关'}
