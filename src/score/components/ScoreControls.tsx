@@ -9,6 +9,8 @@ export function ScoreControls(props: {
   onPlayScore: () => void
   onStopScore: () => void
   onReset: () => void
+  playheadFollowEnabled: boolean
+  onTogglePlayheadFollow: () => void
   showInScoreMeasureNumbers: boolean
   onToggleInScoreMeasureNumbers: () => void
   onOpenMusicXmlFilePicker: () => void
@@ -74,6 +76,8 @@ export function ScoreControls(props: {
     onPlayScore,
     onStopScore,
     onReset,
+    playheadFollowEnabled,
+    onTogglePlayheadFollow,
     showInScoreMeasureNumbers,
     onToggleInScoreMeasureNumbers,
     onOpenMusicXmlFilePicker,
@@ -154,6 +158,9 @@ export function ScoreControls(props: {
         </button>
         <button type="button" onClick={onStopScore} disabled={!isPlaying}>停止</button>
         <button type="button" onClick={onReset}>重置</button>
+        <button type="button" onClick={onTogglePlayheadFollow}>
+          {playheadFollowEnabled ? '播放线跟踪：开' : '播放线跟踪：关'}
+        </button>
         <button type="button" onClick={onToggleInScoreMeasureNumbers}>
           {showInScoreMeasureNumbers ? '谱面序号：开' : '谱面序号：关'}
         </button>

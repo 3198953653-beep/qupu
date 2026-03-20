@@ -150,6 +150,7 @@ const PDF_CJK_FONT_URL = new URL('./assets/fonts/NotoSansSC-Regular.ttf', import
 const UNDO_HISTORY_LIMIT = 120
 const LOCAL_STORAGE_MIDI_INPUT_KEY = 'score.midi.selectedInputId'
 const LOCAL_STORAGE_EDITOR_MEASURE_NUMBER_KEY = 'score.editor.showInScoreMeasureNumbers'
+const LOCAL_STORAGE_PLAYHEAD_FOLLOW_KEY = 'score.playhead.followEnabled'
 const CHORD_LABEL_LEFT_INSET_PX = 8
 const CHORD_HIGHLIGHT_PAD_X_PX = 4
 const CHORD_HIGHLIGHT_PAD_Y_PX = 4
@@ -1677,6 +1678,13 @@ function App() {
   const [autoScaleEnabled, setAutoScaleEnabled] = useState(false)
   const [manualScalePercent, setManualScalePercent] = useState(100)
   const [canvasHeightPercent, setCanvasHeightPercent] = useState(100)
+  const [playheadFollowEnabled, setPlayheadFollowEnabled] = useState(() => {
+    if (typeof window === 'undefined') return true
+    const storedValue = window.localStorage.getItem(LOCAL_STORAGE_PLAYHEAD_FOLLOW_KEY)
+    if (storedValue === '1' || storedValue === 'true') return true
+    if (storedValue === '0' || storedValue === 'false') return false
+    return true
+  })
   const [showInScoreMeasureNumbers, setShowInScoreMeasureNumbers] = useState(false)
   const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
   const [timeAxisSpacingConfig, setTimeAxisSpacingConfig] = useState(DEFAULT_TIME_AXIS_SPACING_CONFIG)
@@ -1729,6 +1737,7 @@ function App() {
   const osmdPreviewShowPageNumbersRef = useRef<boolean>(true)
   const osmdPreviewPageIndexRef = useRef<number>(0)
   const osmdPreviewLastRebalanceStatsRef = useRef<OsmdPreviewRebalanceStats | null>(null)
+  const playheadFollowHydratedRef = useRef(false)
   const showInScoreMeasureNumbersHydratedRef = useRef(false)
   const osmdPreviewZoomCommitTimerRef = useRef<number | null>(null)
   const osmdPreviewMarginApplyTimerRef = useRef<number | null>(null)
@@ -3095,6 +3104,20 @@ function App() {
     if (midiNoteNumber === null) return
     applyMidiReplacementByNoteNumber(midiNoteNumber)
   }, [applyMidiReplacementByNoteNumber])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    playheadFollowHydratedRef.current = true
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!playheadFollowHydratedRef.current) return
+    window.localStorage.setItem(
+      LOCAL_STORAGE_PLAYHEAD_FOLLOW_KEY,
+      playheadFollowEnabled ? '1' : '0',
+    )
+  }, [playheadFollowEnabled])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -5056,7 +5079,7 @@ function App() {
     }
   }, [])
   useEffect(() => {
-    if (playheadStatus !== 'playing' || !playheadRectPx) return
+    if (playheadStatus !== 'playing' || !playheadRectPx || !playheadFollowEnabled) return
 
     const scrollHost = scoreScrollRef.current
     const geometry = measurePlayheadViewportGeometry()
@@ -5105,7 +5128,7 @@ function App() {
       top: nextScrollTop,
       behavior: 'auto',
     })
-  }, [measurePlayheadViewportGeometry, playheadRectPx, playheadStatus, playbackSessionId])
+  }, [measurePlayheadViewportGeometry, playheadFollowEnabled, playheadRectPx, playheadStatus, playbackSessionId])
   const measurePlayheadDebugLogRow = useCallback((sequence: number): PlayheadDebugLogRow | null => {
     const geometry = measurePlayheadViewportGeometry()
     if (!geometry) return null
@@ -5955,6 +5978,8 @@ function App() {
         onPlayScore={playScore}
         onStopScore={stopActivePlaybackSession}
         onReset={resetScoreWithCollapseReset}
+        playheadFollowEnabled={playheadFollowEnabled}
+        onTogglePlayheadFollow={() => setPlayheadFollowEnabled((enabled) => !enabled)}
         showInScoreMeasureNumbers={showInScoreMeasureNumbers}
         onToggleInScoreMeasureNumbers={() => setShowInScoreMeasureNumbers((current) => !current)}
         autoScaleEnabled={autoScaleEnabled}

@@ -158,6 +158,55 @@ async function waitForDebugApi(page: Page): Promise<void> {
   })
 }
 
+async function waitForReadyPlayhead(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const api = (window as unknown as {
+      __scoreDebug: {
+        getPlaybackCursorState: () => PlaybackCursorState
+      }
+    }).__scoreDebug
+    const state = api.getPlaybackCursorState()
+    return state.status === 'idle' && state.color === 'red' && state.rectPx !== null
+  })
+}
+
+async function preparePlaybackFixture(page: Page): Promise<void> {
+  await setScoreScale(page)
+  await importMusicXmlViaDebugApi(page, buildRepeatedMusicXml(10))
+  await setScoreScale(page)
+  await page.waitForTimeout(250)
+  await waitForReadyPlayhead(page)
+}
+
+async function reloadAndWait(page: Page): Promise<void> {
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await waitForDebugApi(page)
+}
+
+async function getPlayheadFollowToggleText(page: Page): Promise<string> {
+  const button = page.getByRole('button', { name: /^播放线跟踪：(开|关)$/ })
+  await button.waitFor()
+  return ((await button.textContent()) ?? '').trim()
+}
+
+async function setPlayheadFollowEnabled(page: Page, enabled: boolean): Promise<void> {
+  const expectedLabel = `播放线跟踪：${enabled ? '开' : '关'}`
+  const button = page.getByRole('button', { name: /^播放线跟踪：(开|关)$/ })
+  await button.waitFor()
+  const currentLabel = ((await button.textContent()) ?? '').trim()
+  if (currentLabel === expectedLabel) return
+  await button.click()
+  await page.waitForFunction((label) => {
+    return [...document.querySelectorAll('button')].some((button) => button.textContent?.trim() === label)
+  }, expectedLabel)
+}
+
+async function clickButtonByText(page: Page, text: string): Promise<void> {
+  const button = page.getByRole('button', { name: text })
+  await button.waitFor()
+  await button.click()
+}
+
 async function setScoreScale(page: Page): Promise<void> {
   await page.evaluate((manualScalePercent) => {
     const api = (window as unknown as {
@@ -429,11 +478,31 @@ async function main() {
     const page = await browser.newPage({ viewport: { width: 820, height: 720 } })
     await page.goto(DEV_URL, { waitUntil: 'domcontentloaded' })
     await waitForDebugApi(page)
-    await setScoreScale(page)
-    await importMusicXmlViaDebugApi(page, buildRepeatedMusicXml(10))
-    await setScoreScale(page)
-    await page.waitForTimeout(250)
+    const defaultFollowToggleText = await getPlayheadFollowToggleText(page)
+    if (defaultFollowToggleText !== '播放线跟踪：开') {
+      throw new Error(`Expected default playhead follow toggle to be on, but got "${defaultFollowToggleText}".`)
+    }
 
+    await setPlayheadFollowEnabled(page, false)
+    await reloadAndWait(page)
+    const persistedOffToggleText = await getPlayheadFollowToggleText(page)
+    if (persistedOffToggleText !== '播放线跟踪：关') {
+      throw new Error(`Expected playhead follow toggle to persist as off after reload, but got "${persistedOffToggleText}".`)
+    }
+
+    await preparePlaybackFixture(page)
+
+    const followOffInitialScroll = await getScrollSnapshot(page)
+    const followOffInitialLogRows = await getPlayheadDebugLogRows(page)
+    await clearPlaybackCursorEvents(page)
+    await page.evaluate(() => {
+      const api = (window as unknown as {
+        __scoreDebug: {
+          playScore: () => void
+        }
+      }).__scoreDebug
+      api.playScore()
+    })
     await page.waitForFunction(() => {
       const api = (window as unknown as {
         __scoreDebug: {
@@ -441,8 +510,98 @@ async function main() {
         }
       }).__scoreDebug
       const state = api.getPlaybackCursorState()
-      return state.status === 'idle' && state.color === 'red' && state.rectPx !== null
+      return state.status === 'playing' && state.color === 'yellow'
     })
+    await page.waitForFunction(
+      ({ expectedScrollLeft, expectedScrollTop }) => {
+        const scrollHost = document.querySelector('.score-scroll.horizontal-view') as HTMLDivElement | null
+        const playhead = document.querySelector('.score-playhead') as HTMLDivElement | null
+        if (!scrollHost || !playhead) return false
+        const scrollHostRect = scrollHost.getBoundingClientRect()
+        const playheadRect = playhead.getBoundingClientRect()
+        const playheadLeft = playheadRect.left - scrollHostRect.left
+        const playheadRight = playheadRect.right - scrollHostRect.left
+        return (
+          Math.abs(scrollHost.scrollLeft - expectedScrollLeft) <= 1 &&
+          Math.abs(scrollHost.scrollTop - expectedScrollTop) <= 1 &&
+          playheadLeft > scrollHost.clientWidth + 4 &&
+          playheadRight > scrollHost.clientWidth + 4
+        )
+      },
+      {
+        expectedScrollLeft: followOffInitialScroll.scrollLeft,
+        expectedScrollTop: followOffInitialScroll.scrollTop,
+      },
+      { timeout: 20_000 },
+    )
+    await page.waitForTimeout(120)
+
+    const followOffMidScroll = await getScrollSnapshot(page)
+    const followOffMidGeometry = await getPlayheadDomGeometry(page)
+    const followOffMidLogRows = await getPlayheadDebugLogRows(page)
+    if (Math.abs(followOffMidScroll.scrollLeft - followOffInitialScroll.scrollLeft) > 1) {
+      throw new Error(
+        `Playhead follow disabled but scrollLeft still changed during playback: initial=${followOffInitialScroll.scrollLeft} current=${followOffMidScroll.scrollLeft}`,
+      )
+    }
+    if (Math.abs(followOffMidScroll.scrollTop - followOffInitialScroll.scrollTop) > 1) {
+      throw new Error(
+        `Playhead follow disabled but scrollTop still changed during playback: initial=${followOffInitialScroll.scrollTop} current=${followOffMidScroll.scrollTop}`,
+      )
+    }
+    if (followOffMidLogRows.length <= followOffInitialLogRows.length) {
+      throw new Error('Playhead debug log did not continue updating while follow was disabled.')
+    }
+    if (
+      followOffMidGeometry.playheadX === null ||
+      followOffMidGeometry.playheadX <= followOffMidGeometry.containerRightX + 4
+    ) {
+      throw new Error(
+        `Expected playhead to move outside the container when follow is disabled, but playheadX=${followOffMidGeometry.playheadX}.`,
+      )
+    }
+
+    await setPlayheadFollowEnabled(page, true)
+    await page.waitForFunction(
+      ({ previousScrollLeft }) => {
+        const scrollHost = document.querySelector('.score-scroll.horizontal-view') as HTMLDivElement | null
+        const playhead = document.querySelector('.score-playhead') as HTMLDivElement | null
+        if (!scrollHost || !playhead) return false
+        const scrollHostRect = scrollHost.getBoundingClientRect()
+        const playheadRect = playhead.getBoundingClientRect()
+        const playheadLeft = playheadRect.left - scrollHostRect.left
+        const playheadRight = playheadRect.right - scrollHostRect.left
+        return (
+          scrollHost.scrollLeft > previousScrollLeft + 1 &&
+          playheadLeft >= -1 &&
+          playheadRight <= scrollHost.clientWidth + 1
+        )
+      },
+      { previousScrollLeft: followOffMidScroll.scrollLeft },
+      { timeout: 10_000 },
+    )
+    const followOnRecoveredScroll = await getScrollSnapshot(page)
+    if (followOnRecoveredScroll.scrollLeft <= followOffMidScroll.scrollLeft + 1) {
+      throw new Error('Playhead follow was re-enabled during playback, but horizontal auto-scroll did not resume.')
+    }
+    await clickButtonByText(page, '停止')
+    await page.waitForFunction(() => {
+      const api = (window as unknown as {
+        __scoreDebug: {
+          getPlaybackCursorState: () => PlaybackCursorState
+        }
+      }).__scoreDebug
+      const state = api.getPlaybackCursorState()
+      return state.status === 'idle' && state.color === 'red'
+    })
+
+    await reloadAndWait(page)
+    const persistedOnToggleText = await getPlayheadFollowToggleText(page)
+    if (persistedOnToggleText !== '播放线跟踪：开') {
+      throw new Error(`Expected playhead follow toggle to persist as on after reload, but got "${persistedOnToggleText}".`)
+    }
+
+    await preparePlaybackFixture(page)
 
     const initialState = await getPlaybackCursorState(page)
     const timelinePoints = await getPlaybackTimelinePoints(page)
