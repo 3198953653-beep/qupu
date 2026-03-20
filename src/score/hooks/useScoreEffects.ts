@@ -192,6 +192,7 @@ export function useScoreRenderEffect(params: {
   renderOffsetX?: number
   measureKeyFifthsFromImport: number[] | null
   measureTimeSignaturesFromImport: TimeSignature[] | null
+  supplementalSpacingTicksByPair?: number[][] | null
   activeSelection?: Selection | null
   activeAccidentalSelection?: Selection | null
   activeTieSegmentKey?: string | null
@@ -236,6 +237,7 @@ export function useScoreRenderEffect(params: {
     renderOffsetX = 0,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
+    supplementalSpacingTicksByPair = null,
     activeSelection = null,
     activeAccidentalSelection = null,
     activeTieSegmentKey = null,
@@ -338,6 +340,7 @@ export function useScoreRenderEffect(params: {
         renderOffsetX,
         measureKeyFifthsFromImport,
         measureTimeSignaturesFromImport,
+        supplementalSpacingTicksByPair,
         activeSelection,
         activeAccidentalSelection,
         activeTieSegmentKey,
@@ -380,6 +383,7 @@ export function useScoreRenderEffect(params: {
     renderOffsetX,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
+    supplementalSpacingTicksByPair,
     activeSelection,
     activeAccidentalSelection,
     activeTieSegmentKey,

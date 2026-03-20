@@ -35,6 +35,7 @@ export type SolveHorizontalMeasureWidthsParams = {
   measurePairs: MeasurePair[]
   measureKeyFifthsByPair: number[] | null
   measureTimeSignaturesByPair: TimeSignature[] | null
+  supplementalSpacingTicksByPair?: number[][] | null
   spacingConfig: TimeAxisSpacingConfig
   minMeasureWidthPx: number
   maxIterations?: number
@@ -52,6 +53,7 @@ type MeasureSpacingProbe = {
   effectiveLeftGapPx: number
   effectiveRightGapPx: number
   rightOverflowPx: number
+  spacingAnchorGapFirstToLastPx: number
 }
 
 const MIN_FORMAT_WIDTH_PX = 8
@@ -139,8 +141,9 @@ function buildMeasureWidthCacheKey(params: {
   meta: SolverMeasureMeta
   spacingConfig: TimeAxisSpacingConfig
   minMeasureWidthPx: number
+  supplementalSpacingTicksSignature: string
 }): string {
-  const { meta, spacingConfig, minMeasureWidthPx } = params
+  const { meta, spacingConfig, minMeasureWidthPx, supplementalSpacingTicksSignature } = params
   const ratios = spacingConfig.durationGapRatios
   return [
     SOLVER_CACHE_VERSION,
@@ -165,6 +168,7 @@ function buildMeasureWidthCacheKey(params: {
     `r8=${ratios.eighth}`,
     `r4=${ratios.quarter}`,
     `r2=${ratios.half}`,
+    `spacingTicks=${supplementalSpacingTicksSignature}`,
     `treble=${serializeStaffNotesForWidthCache(meta.measure.treble)}`,
     `bass=${serializeStaffNotesForWidthCache(meta.measure.bass)}`,
   ].join('||')
@@ -210,17 +214,19 @@ function probeMeasureSpacing(
   meta: SolverMeasureMeta,
   measureWidth: number,
   spacingConfig: TimeAxisSpacingConfig,
+  supplementalSpacingTicks: readonly number[] | null,
 ): MeasureSpacingProbe | null {
   const geometry = buildMeasureProbeGeometry(meta, measureWidth)
-  let probeTimelineBundle: ReturnType<typeof buildMeasureTimelineBundle> | null = null
+  const baseTimelineBundle = buildMeasureTimelineBundle({
+    measure: meta.measure,
+    measureIndex: meta.pairIndex,
+    timeSignature: meta.timeSignature,
+    spacingConfig,
+    timelineMode: 'dual',
+    supplementalSpacingTicks,
+  })
+  let probeTimelineBundle: ReturnType<typeof buildMeasureTimelineBundle> | null = baseTimelineBundle
   if (PUBLIC_AXIS_CONSUMPTION_MODE === 'merged') {
-    const baseTimelineBundle = buildMeasureTimelineBundle({
-      measure: meta.measure,
-      measureIndex: meta.pairIndex,
-      timeSignature: meta.timeSignature,
-      spacingConfig,
-      timelineMode: 'dual',
-    })
     const effectiveBoundary = resolveEffectiveBoundary({
       measureX: 0,
       measureWidth,
@@ -244,6 +250,9 @@ function probeMeasureSpacing(
           effectiveBoundaryEndX: number
           effectiveLeftGapPx: number
           effectiveRightGapPx: number
+          spacingOccupiedLeftX: number
+          spacingOccupiedRightX: number
+          spacingAnchorGapFirstToLastPx: number
         }
       | null
   } = { current: null }
@@ -269,6 +278,7 @@ function probeMeasureSpacing(
     timeAxisSpacingConfig: spacingConfig,
     spacingLayoutMode: 'custom',
     publicAxisLayout: resolvePublicAxisLayoutForConsumption(probeTimelineBundle),
+    spacingAnchorTicks: probeTimelineBundle?.spacingAnchorTicks ?? null,
     preferMeasureBarlineAxis: meta.preferMeasureStartBarlineAxis,
     preferMeasureEndBarlineAxis: meta.preferMeasureEndBarlineAxis,
     enableEdgeGapCap: true,
@@ -279,6 +289,9 @@ function probeMeasureSpacing(
             effectiveBoundaryEndX: number
             effectiveLeftGapPx: number
             effectiveRightGapPx: number
+            spacingOccupiedLeftX: number
+            spacingOccupiedRightX: number
+            spacingAnchorGapFirstToLastPx: number
           }
         | null,
     ) => {
@@ -295,6 +308,7 @@ function probeMeasureSpacing(
       effectiveLeftGapPx: appliedMetrics.effectiveLeftGapPx,
       effectiveRightGapPx: appliedMetrics.effectiveRightGapPx,
       rightOverflowPx: Math.max(0, -appliedMetrics.effectiveRightGapPx),
+      spacingAnchorGapFirstToLastPx: Math.max(0, appliedMetrics.spacingAnchorGapFirstToLastPx),
     }
   }
   if (measureNoteLayouts.length === 0) {
@@ -302,6 +316,7 @@ function probeMeasureSpacing(
       effectiveLeftGapPx: 0,
       effectiveRightGapPx: 0,
       rightOverflowPx: 0,
+      spacingAnchorGapFirstToLastPx: 0,
     }
   }
 
@@ -318,7 +333,28 @@ function probeMeasureSpacing(
       lastVisualRightX = Math.max(lastVisualRightX, rightX)
     }
   })
-  if (!Number.isFinite(firstVisualLeftX) || !Number.isFinite(lastVisualRightX)) return null
+  const anchorTicks = probeTimelineBundle?.spacingAnchorTicks ?? []
+  const anchorLeftX =
+    anchorTicks.length > 0
+      ? probeTimelineBundle?.spacingTickToX.get(anchorTicks[0] as number) ?? Number.NaN
+      : Number.NaN
+  const anchorRightX =
+    anchorTicks.length > 0
+      ? probeTimelineBundle?.spacingTickToX.get(anchorTicks[anchorTicks.length - 1] as number) ?? Number.NaN
+      : Number.NaN
+  const occupiedLeftX =
+    Number.isFinite(anchorLeftX) && Number.isFinite(firstVisualLeftX)
+      ? Math.min(firstVisualLeftX, anchorLeftX)
+      : Number.isFinite(anchorLeftX)
+        ? anchorLeftX
+        : firstVisualLeftX
+  const occupiedRightX =
+    Number.isFinite(anchorRightX) && Number.isFinite(lastVisualRightX)
+      ? Math.max(lastVisualRightX, anchorRightX)
+      : Number.isFinite(anchorRightX)
+        ? anchorRightX
+        : lastVisualRightX
+  if (!Number.isFinite(occupiedLeftX) || !Number.isFinite(occupiedRightX)) return null
 
   const boundary = resolveEffectiveBoundary({
     measureX: 0,
@@ -328,12 +364,16 @@ function probeMeasureSpacing(
     showStartDecorations: meta.showStartDecorations,
     showEndDecorations: meta.showEndDecorations,
   })
-  const effectiveLeftGapPx = firstVisualLeftX - boundary.effectiveStartX
-  const effectiveRightGapPx = boundary.effectiveEndX - lastVisualRightX
+  const effectiveLeftGapPx = occupiedLeftX - boundary.effectiveStartX
+  const effectiveRightGapPx = boundary.effectiveEndX - occupiedRightX
   return {
     effectiveLeftGapPx,
     effectiveRightGapPx,
-    rightOverflowPx: Math.max(0, lastVisualRightX - boundary.effectiveEndX),
+    rightOverflowPx: Math.max(0, occupiedRightX - boundary.effectiveEndX),
+    spacingAnchorGapFirstToLastPx:
+      Number.isFinite(anchorLeftX) && Number.isFinite(anchorRightX)
+        ? Math.max(0, anchorRightX - anchorLeftX)
+        : 0,
   }
 }
 
@@ -343,6 +383,7 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
     measurePairs,
     measureKeyFifthsByPair,
     measureTimeSignaturesByPair,
+    supplementalSpacingTicksByPair = null,
     spacingConfig,
     minMeasureWidthPx,
     maxIterations = 20,
@@ -373,12 +414,16 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
 
   return metas.map((meta) => {
     const shouldProbePrecisely = meta.pairIndex < eagerProbeMeasureLimit
+    const supplementalSpacingTicks = supplementalSpacingTicksByPair?.[meta.pairIndex] ?? null
+    const supplementalSpacingTicksSignature =
+      supplementalSpacingTicks && supplementalSpacingTicks.length > 0 ? supplementalSpacingTicks.join(',') : '-'
     const cacheKey =
       shouldProbePrecisely && widthCache !== undefined
         ? buildMeasureWidthCacheKey({
             meta,
             spacingConfig,
             minMeasureWidthPx,
+            supplementalSpacingTicksSignature,
           })
         : null
     if (cacheKey && widthCache) {
@@ -398,6 +443,7 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
       timeSignature: meta.timeSignature,
       spacingConfig,
       timelineMode: 'dual',
+      supplementalSpacingTicks,
     })
     const timelineSpan = getMeasureUniformTimelineWeightSpan(
       meta.measure,
@@ -424,25 +470,27 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
     }
 
     for (let iteration = 0; iteration < maxIterations; iteration += 1) {
-      const probe = probeMeasureSpacing(context, meta, width, spacingConfig)
+      const probe = probeMeasureSpacing(context, meta, width, spacingConfig, supplementalSpacingTicks)
       if (!probe) break
       const leftDeficit = Math.max(0, minGapPx - probe.effectiveLeftGapPx)
       const rightDeficit = Math.max(0, minGapPx - probe.effectiveRightGapPx)
       const leftExcess = Math.max(0, probe.effectiveLeftGapPx - maxGapPx)
       const rightExcess = Math.max(0, probe.effectiveRightGapPx - maxGapPx)
+      const timelineCompressionDeficit = Math.max(0, timelineSpan - probe.spacingAnchorGapFirstToLastPx)
 
       if (
         probe.rightOverflowPx <= EPS &&
         leftDeficit <= EPS &&
         rightDeficit <= EPS &&
+        timelineCompressionDeficit <= EPS &&
         leftExcess <= EPS &&
         rightExcess <= EPS
       ) {
         break
       }
 
-      if (probe.rightOverflowPx > EPS || leftDeficit > EPS || rightDeficit > EPS) {
-        const growBy = probe.rightOverflowPx + leftDeficit + rightDeficit + STEP_PAD_PX
+      if (probe.rightOverflowPx > EPS || leftDeficit > EPS || rightDeficit > EPS || timelineCompressionDeficit > EPS) {
+        const growBy = probe.rightOverflowPx + leftDeficit + rightDeficit + timelineCompressionDeficit + STEP_PAD_PX
         width = Number((Math.max(minMeasureWidthPx, width + growBy)).toFixed(3))
         continue
       }

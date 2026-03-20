@@ -10,7 +10,7 @@ import { buildMusicXmlExportPayload } from './musicXmlActions'
 import { ensureToneStarted, type PlaybackSynth } from './notePreview'
 import type { PlaybackTimelineEvent } from './playbackTimeline'
 import { toTonePitch } from './pitchUtils'
-import { buildBassMockNotes, buildNotesFromPattern } from './scoreOps'
+import { buildBassMockNotes, buildNotesFromPattern, buildWholeNoteDemoNotes } from './scoreOps'
 import type {
   ImportFeedback,
   MeasurePair,
@@ -200,6 +200,38 @@ export function loadSampleMusicXmlAction(params: {
   const { setMusicXmlInput, importMusicXmlText } = params
   setMusicXmlInput(SAMPLE_MUSIC_XML)
   importMusicXmlText(SAMPLE_MUSIC_XML)
+}
+
+export function loadWholeNoteDemoAction(params: {
+  clearImportedSourceParams: Parameters<typeof clearImportedSourceState>[0]
+  setNotes: StateSetter<ScoreNote[]>
+  setBassNotes: StateSetter<ScoreNote[]>
+  setActiveSelection: StateSetter<Selection>
+  setRhythmPreset: StateSetter<RhythmPresetId>
+  setImportFeedback: StateSetter<ImportFeedback>
+  setIsRhythmLinked: StateSetter<boolean>
+  measureRepeatCount?: number
+}): void {
+  const {
+    clearImportedSourceParams,
+    setNotes,
+    setBassNotes,
+    setActiveSelection,
+    setRhythmPreset,
+    setImportFeedback,
+    setIsRhythmLinked,
+    measureRepeatCount = DEFAULT_DEMO_MEASURE_COUNT,
+  } = params
+  const { trebleNotes, bassNotes } = buildWholeNoteDemoNotes(measureRepeatCount)
+  setNotes(trebleNotes)
+  setBassNotes(bassNotes)
+  clearImportedSourceState(clearImportedSourceParams)
+  if (trebleNotes[0]) {
+    setActiveSelection({ noteId: trebleNotes[0].id, staff: 'treble', keyIndex: 0 })
+  }
+  setRhythmPreset('quarter')
+  setImportFeedback({ kind: 'idle', message: '' })
+  setIsRhythmLinked(false)
 }
 
 export function exportMusicXmlFileAction(params: {

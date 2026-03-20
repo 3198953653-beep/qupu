@@ -4,6 +4,7 @@ import {
   exportMusicXmlFileAction,
   handleMusicXmlFileChange,
   loadSampleMusicXmlAction,
+  loadWholeNoteDemoAction,
   playScoreAction,
   resetScoreAction,
   runAiDraftAction,
@@ -79,6 +80,7 @@ export function useEditorHandlers(params: {
   openMusicXmlFilePicker: () => void
   onMusicXmlFileChange: (event: ChangeEvent<HTMLInputElement>) => Promise<void>
   loadSampleMusicXml: () => void
+  loadWholeNoteDemo: () => void
   exportMusicXmlFile: () => void
   resetScore: () => void
   runAiDraft: () => void
@@ -241,6 +243,23 @@ export function useEditorHandlers(params: {
     importRequestIdRef.current += 1
   }
 
+  const loadWholeNoteDemo = () => {
+    invalidatePendingImport()
+    loadWholeNoteDemoAction({
+      clearImportedSourceParams: {
+        ...clearImportedSourceBase,
+        setDraggingSelection,
+      },
+      setNotes,
+      setBassNotes,
+      setActiveSelection,
+      setRhythmPreset,
+      setImportFeedback,
+      setIsRhythmLinked,
+      measureRepeatCount: DEFAULT_DEMO_MEASURE_COUNT,
+    })
+  }
+
   const resetScore = () => {
     invalidatePendingImport()
     resetScoreAction({
@@ -292,6 +311,7 @@ export function useEditorHandlers(params: {
     openMusicXmlFilePicker,
     onMusicXmlFileChange,
     loadSampleMusicXml,
+    loadWholeNoteDemo,
     exportMusicXmlFile,
     resetScore,
     runAiDraft,

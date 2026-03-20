@@ -223,6 +223,7 @@ export type DrawMeasureParams = {
   staticNoteXById?: Map<string, number> | null
   staticAccidentalRightXById?: Map<string, Map<number, number>> | null
   publicAxisLayout?: PublicAxisLayout | null
+  spacingAnchorTicks?: number[] | null
   preferMeasureBarlineAxis?: boolean
   preferMeasureEndBarlineAxis?: boolean
   enableEdgeGapCap?: boolean
@@ -288,6 +289,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     staticNoteXById = null,
     staticAccidentalRightXById = null,
     publicAxisLayout = null,
+    spacingAnchorTicks = null,
     preferMeasureBarlineAxis = !isSystemStart && !showKeySignature && !showTimeSignature,
     preferMeasureEndBarlineAxis = !showEndTimeSignature,
     enableEdgeGapCap = true,
@@ -768,6 +770,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       measureStartBarX: measureX,
       measureEndBarX: measureX + measureWidth,
       publicAxisLayout,
+      spacingAnchorTicks,
       preferMeasureBarlineAxis,
       preferMeasureEndBarlineAxis,
       enableEdgeGapCap,

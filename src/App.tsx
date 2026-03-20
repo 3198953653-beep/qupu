@@ -76,6 +76,7 @@ import { getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './score/pitch
 import { buildStaffOnsetTicks, compareTimelinePoint, resolveSelectionTimelinePoint } from './score/selectionTimelineRange'
 import { resolveForwardTieTargets, resolvePreviousTieTarget } from './score/tieChain'
 import { buildSelectionGroupMoveTargets } from './score/selectionGroupTargets'
+import { buildChordRulerEntries, getMeasureTicksFromTimeSignature } from './score/chordRuler'
 import type { MeasureTimelineBundle } from './score/timeline/types'
 import type { NoteClipboardPayload } from './score/copyPasteTypes'
 import {
@@ -306,13 +307,6 @@ function getAutoScoreScale(measureCount: number): number {
   if (measureCount >= 56) return 0.86
   if (measureCount >= 36) return 0.92
   return 1
-}
-
-function getBeatTicksByTimeSignature(timeSignature: TimeSignature): number {
-  const beatType = Math.max(1, Number.isFinite(timeSignature.beatType) ? Math.round(timeSignature.beatType) : 4)
-  const rawBeatTicks = TICKS_PER_BEAT * (4 / beatType)
-  if (!Number.isFinite(rawBeatTicks) || rawBeatTicks <= 0) return TICKS_PER_BEAT
-  return Math.max(1, Math.round(rawBeatTicks))
 }
 
 function clampScalePercent(value: number): number {
@@ -994,6 +988,7 @@ type ChordRulerMarkerMeta = {
   startTick: number
   endTick: number
   xPx: number
+  anchorSource: 'note-head' | 'spacing-tick' | 'axis' | 'frame'
 }
 
 type ActiveChordSelection = {
@@ -1642,6 +1637,7 @@ function App() {
   const [notes, setNotes] = useState<ScoreNote[]>(INITIAL_NOTES)
   const [bassNotes, setBassNotes] = useState<ScoreNote[]>(INITIAL_BASS_NOTES)
   const [rhythmPreset, setRhythmPreset] = useState<RhythmPresetId>('quarter')
+  const [wholeNoteDemoActive, setWholeNoteDemoActive] = useState(false)
   const [activeSelection, setActiveSelection] = useState<Selection>({ noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 })
   const [activeAccidentalSelection, setActiveAccidentalSelection] = useState<Selection | null>(null)
   const [activeTieSelection, setActiveTieSelection] = useState<TieSelection | null>(null)
@@ -1816,6 +1812,25 @@ function App() {
     () => measurePairsFromImport ?? buildMeasurePairs(notes, bassNotes),
     [measurePairsFromImport, notes, bassNotes],
   )
+  const chordRulerEntriesByPair = useMemo(
+    () =>
+      measurePairsFromImport !== null
+        ? null
+        : measurePairs.map((_, pairIndex) =>
+            buildChordRulerEntries({
+              pairIndex,
+              timeSignature: resolvePairTimeSignature(pairIndex, measureTimeSignaturesFromImport),
+            }),
+          ),
+    [measurePairs, measurePairsFromImport, measureTimeSignaturesFromImport],
+  )
+  const supplementalSpacingTicksByPair = useMemo(
+    () =>
+      chordRulerEntriesByPair
+        ? chordRulerEntriesByPair.map((entries) => entries.map((entry) => entry.startTick))
+        : null,
+    [chordRulerEntriesByPair],
+  )
   const playbackTimelineEvents = useMemo(
     () =>
       buildPlaybackTimeline({
@@ -1863,6 +1878,7 @@ function App() {
       measurePairs,
       measureKeyFifthsByPair: measureKeyFifthsFromImport,
       measureTimeSignaturesByPair: measureTimeSignaturesFromImport,
+      supplementalSpacingTicksByPair,
       spacingConfig: timeAxisSpacingConfig,
       minMeasureWidthPx: HORIZONTAL_VIEW_MIN_MEASURE_WIDTH_PX,
       maxIterations: solverMaxIterations,
@@ -1874,6 +1890,7 @@ function App() {
     measurePairs,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
+    supplementalSpacingTicksByPair,
     timeAxisSpacingConfig,
   ])
   const horizontalEstimatedMeasureWidthTotal = useMemo(() => {
@@ -2126,6 +2143,7 @@ function App() {
     renderOffsetX: horizontalRenderOffsetX,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
+    supplementalSpacingTicksByPair,
     activeSelection: isSelectionVisible ? activeSelection : null,
     activeAccidentalSelection,
     activeTieSegmentKey: activeTieSelection?.key ?? null,
@@ -2526,6 +2544,7 @@ function App() {
     openMusicXmlFilePicker,
     onMusicXmlFileChange,
     loadSampleMusicXml,
+    loadWholeNoteDemo,
     exportMusicXmlFile,
     resetScore,
     applyRhythmPreset,
@@ -2578,6 +2597,7 @@ function App() {
     stopActivePlaybackSession()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
+    setWholeNoteDemoActive(false)
     importMusicXmlText(xmlText)
   }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, importMusicXmlText, stopActivePlaybackSession])
 
@@ -2585,6 +2605,7 @@ function App() {
     stopActivePlaybackSession()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
+    setWholeNoteDemoActive(false)
     importMusicXmlFromTextarea()
   }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, importMusicXmlFromTextarea, stopActivePlaybackSession])
 
@@ -2592,6 +2613,7 @@ function App() {
     stopActivePlaybackSession()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
+    setWholeNoteDemoActive(false)
     await onMusicXmlFileChange(event)
   }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, onMusicXmlFileChange, stopActivePlaybackSession])
 
@@ -2599,14 +2621,31 @@ function App() {
     stopActivePlaybackSession()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
+    setWholeNoteDemoActive(false)
     loadSampleMusicXml()
   }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, loadSampleMusicXml, stopActivePlaybackSession])
+
+  const loadWholeNoteDemoWithCollapseReset = useCallback(() => {
+    stopActivePlaybackSession()
+    requestPlaybackCursorReset()
+    clearFullMeasureRestCollapseScopes()
+    clearActiveChordSelection()
+    setWholeNoteDemoActive(true)
+    loadWholeNoteDemo()
+  }, [
+    clearActiveChordSelection,
+    clearFullMeasureRestCollapseScopes,
+    loadWholeNoteDemo,
+    requestPlaybackCursorReset,
+    stopActivePlaybackSession,
+  ])
 
   const resetScoreWithCollapseReset = useCallback(() => {
     stopActivePlaybackSession()
     requestPlaybackCursorReset()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
+    setWholeNoteDemoActive(false)
     resetScore()
   }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, requestPlaybackCursorReset, resetScore, stopActivePlaybackSession])
 
@@ -2615,6 +2654,7 @@ function App() {
     requestPlaybackCursorReset()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
+    setWholeNoteDemoActive(false)
     applyRhythmPreset(presetId)
   }, [applyRhythmPreset, clearActiveChordSelection, clearFullMeasureRestCollapseScopes, requestPlaybackCursorReset, stopActivePlaybackSession])
 
@@ -4732,75 +4772,83 @@ function App() {
     void chordMarkerLayoutRevision
     const markers = new Map<string, ChordRulerMarkerMeta>()
     if (measurePairsFromImport !== null) return markers
-    const resolveStaffHeadLeftX = (params: {
+    const resolveTickHeadLeftX = (params: {
       pairIndex: number
-      staff: 'treble' | 'bass'
       startTick: number
     }): number | null => {
-      const { pairIndex, staff, startTick } = params
+      const { pairIndex, startTick } = params
       const pair = measurePairs[pairIndex]
       if (!pair) return null
-      const staffNotes = staff === 'treble' ? pair.treble : pair.bass
-      const onsetTicksByNoteIndex = buildStaffOnsetTicks(staffNotes)
-      const targetNoteIndex = onsetTicksByNoteIndex.findIndex((tick) => tick === startTick)
-      if (targetNoteIndex < 0) return null
-      const targetNote = staffNotes[targetNoteIndex]
-      if (!targetNote || targetNote.isRest) return null
       const pairLayouts = noteLayoutsByPairRef.current.get(pairIndex) ?? []
-      const targetLayout =
-        pairLayouts.find((layout) => layout.staff === staff && layout.noteIndex === targetNoteIndex) ?? null
-      if (!targetLayout) return null
-      const rootHead = targetLayout.noteHeads.find((head) => head.keyIndex === 0) ?? targetLayout.noteHeads[0] ?? null
-      if (!rootHead) return null
-      const headLeftX = Number.isFinite(rootHead.hitMinX) ? (rootHead.hitMinX as number) : rootHead.x
-      if (!Number.isFinite(headLeftX)) return null
-      return headLeftX
+      if (pairLayouts.length === 0) return null
+
+      const trebleOnsetTicksByIndex = buildStaffOnsetTicks(pair.treble)
+      const bassOnsetTicksByIndex = buildStaffOnsetTicks(pair.bass)
+      let bestCandidate: { headLeftX: number; staffPriority: number; noteIndex: number } | null = null
+
+      for (const layout of pairLayouts) {
+        const sourceNote = layout.staff === 'treble' ? pair.treble[layout.noteIndex] : pair.bass[layout.noteIndex]
+        if (!sourceNote || sourceNote.isRest) continue
+        const onsetTicksByIndex = layout.staff === 'treble' ? trebleOnsetTicksByIndex : bassOnsetTicksByIndex
+        const onsetTick = onsetTicksByIndex[layout.noteIndex]
+        if (onsetTick !== startTick) continue
+        const rootHead = layout.noteHeads.find((head) => head.keyIndex === 0) ?? layout.noteHeads[0] ?? null
+        if (!rootHead) continue
+        const headLeftX = Number.isFinite(rootHead.hitMinX) ? (rootHead.hitMinX as number) : rootHead.x
+        if (!Number.isFinite(headLeftX)) continue
+        const candidate = {
+          headLeftX,
+          staffPriority: layout.staff === 'treble' ? 0 : 1,
+          noteIndex: layout.noteIndex,
+        }
+        if (
+          bestCandidate === null ||
+          candidate.headLeftX < bestCandidate.headLeftX - 0.001 ||
+          (Math.abs(candidate.headLeftX - bestCandidate.headLeftX) <= 0.001 &&
+            (candidate.staffPriority < bestCandidate.staffPriority ||
+              (candidate.staffPriority === bestCandidate.staffPriority && candidate.noteIndex < bestCandidate.noteIndex)))
+        ) {
+          bestCandidate = candidate
+        }
+      }
+
+      if (bestCandidate === null) return null
+      return bestCandidate.headLeftX
     }
     horizontalMeasureFramesByPair.forEach((frame, pairIndex) => {
       const timelineBundle = measureTimelineBundlesRef.current.get(pairIndex) ?? null
       const timeSignature = resolvePairTimeSignature(pairIndex, measureTimeSignaturesFromImport)
-      const beatTicks = getBeatTicksByTimeSignature(timeSignature)
-      const measureTicks = Math.max(1, timelineBundle?.measureTicks ?? Math.round(timeSignature.beats * beatTicks))
-      const isOddMeasure = (pairIndex + 1) % 2 === 1
-      const chordEntries: Array<{ beatIndex: 1 | 3; label: string; startTick: number }> = [
-        {
-          beatIndex: 1,
-          label: isOddMeasure ? 'C' : 'F',
-          startTick: 0,
-        },
-        {
-          beatIndex: 3,
-          label: isOddMeasure ? 'Am' : 'G',
-          startTick: Math.max(0, Math.round(beatTicks * 2)),
-        },
-      ]
+      const measureTicks = Math.max(1, timelineBundle?.measureTicks ?? getMeasureTicksFromTimeSignature(timeSignature))
+      const chordEntries = chordRulerEntriesByPair?.[pairIndex] ?? []
       chordEntries.forEach((entry) => {
         const safeStartTick = Math.max(0, Math.min(measureTicks, Math.round(entry.startTick)))
-        const safeEndTick = Math.max(safeStartTick, Math.min(measureTicks, safeStartTick + beatTicks * 2))
+        const safeEndTick = Math.max(safeStartTick, Math.min(measureTicks, Math.round(entry.endTick)))
         if (safeEndTick <= safeStartTick) return
-        const trebleHeadLeftX = resolveStaffHeadLeftX({
-          pairIndex,
-          staff: 'treble',
-          startTick: safeStartTick,
-        })
-        const preferredHeadLeftX =
-          trebleHeadLeftX ??
-          resolveStaffHeadLeftX({
-            pairIndex,
-            staff: 'bass',
-            startTick: safeStartTick,
-          })
-        const textAnchorXPx = (() => {
-          if (preferredHeadLeftX !== null) {
-            return (preferredHeadLeftX + horizontalRenderOffsetX) * scoreScaleX + SCORE_STAGE_BORDER_PX
+        const exactHeadLeftX = resolveTickHeadLeftX({ pairIndex, startTick: safeStartTick })
+        let anchorSource: ChordRulerMarkerMeta['anchorSource'] = 'frame'
+        let anchorXInScore: number | null = null
+        if (exactHeadLeftX !== null) {
+          anchorSource = 'note-head'
+          anchorXInScore = exactHeadLeftX
+        } else {
+          const spacingTickX = timelineBundle?.spacingTickToX.get(safeStartTick)
+          if (typeof spacingTickX === 'number' && Number.isFinite(spacingTickX)) {
+            anchorSource = 'spacing-tick'
+            anchorXInScore = spacingTickX
+          } else {
+            const axisX = timelineBundle?.publicAxisLayout?.tickToX.get(safeStartTick)
+            if (typeof axisX === 'number' && Number.isFinite(axisX)) {
+              anchorSource = 'axis'
+              anchorXInScore = axisX
+            } else {
+              anchorSource = 'frame'
+              anchorXInScore = frame.measureX + frame.measureWidth * (safeStartTick / Math.max(1, measureTicks))
+            }
           }
-          const axisX = timelineBundle?.publicAxisLayout?.tickToX.get(safeStartTick)
-          const fallbackXInScore =
-            typeof axisX === 'number' && Number.isFinite(axisX)
-              ? axisX + horizontalRenderOffsetX
-              : frame.measureX + frame.measureWidth * (safeStartTick / Math.max(1, measureTicks))
-          return fallbackXInScore * scoreScaleX + SCORE_STAGE_BORDER_PX
-        })()
+        }
+        if (typeof anchorXInScore !== 'number' || !Number.isFinite(anchorXInScore)) return
+        const textAnchorXPx =
+          (anchorXInScore + horizontalRenderOffsetX) * scoreScaleX + SCORE_STAGE_BORDER_PX
         const buttonLeftXPx = textAnchorXPx - CHORD_LABEL_LEFT_INSET_PX
         if (!Number.isFinite(buttonLeftXPx)) return
         const key = `chord-ruler-${pairIndex + 1}-${entry.beatIndex}`
@@ -4812,12 +4860,14 @@ function App() {
           startTick: safeStartTick,
           endTick: safeEndTick,
           xPx: buttonLeftXPx,
+          anchorSource,
         })
       })
     })
     return markers
   }, [
     chordMarkerLayoutRevision,
+    chordRulerEntriesByPair,
     horizontalMeasureFramesByPair,
     horizontalRenderOffsetX,
     measurePairs,
@@ -5610,8 +5660,30 @@ function App() {
             : effectiveBoundary && Number.isFinite(lastVisualRightX)
               ? Number((effectiveBoundary.effectiveEndX - lastVisualRightX).toFixed(3))
               : null,
+        spacingOccupiedLeftX:
+          measureLayout && Number.isFinite(measureLayout.spacingOccupiedLeftX)
+            ? Number((measureLayout.spacingOccupiedLeftX as number).toFixed(3))
+            : null,
+        spacingOccupiedRightX:
+          measureLayout && Number.isFinite(measureLayout.spacingOccupiedRightX)
+            ? Number((measureLayout.spacingOccupiedRightX as number).toFixed(3))
+            : null,
+        spacingAnchorGapFirstToLastPx:
+          measureLayout && Number.isFinite(measureLayout.spacingAnchorGapFirstToLastPx)
+            ? Number((measureLayout.spacingAnchorGapFirstToLastPx as number).toFixed(3))
+            : null,
         timeAxisTicksPerBeat: TICKS_PER_BEAT,
         legacyOnsets: timelineBundle?.legacyOnsets ?? orderedOnsets,
+        spacingAnchorTicks: timelineBundle?.spacingAnchorTicks ?? orderedOnsets,
+        spacingTickToX:
+          timelineBundle?.spacingTickToX
+            ? Object.fromEntries(
+                [...timelineBundle.spacingTickToX.entries()].map(([tick, x]) => [
+                  String(tick),
+                  toRoundedNumber(x, 3),
+                ]),
+              )
+            : {},
         trebleTimelineEvents:
           timelineBundle?.trebleTimeline.events.map((event) => ({
             noteId: event.noteId,
@@ -5819,6 +5891,17 @@ function App() {
           latestPlayheadDebugSnapshotRef.current?.seq ?? playheadDebugSequenceRef.current,
         ) ??
         (latestPlayheadDebugSnapshotRef.current ? { ...latestPlayheadDebugSnapshotRef.current } : null),
+      getChordRulerMarkers: () =>
+        [...chordRulerMarkerMetaByKey.values()].map((marker) => ({
+          key: marker.key,
+          pairIndex: marker.pairIndex,
+          beatIndex: marker.beatIndex,
+          label: marker.label,
+          startTick: marker.startTick,
+          endTick: marker.endTick,
+          xPx: marker.xPx,
+          anchorSource: marker.anchorSource,
+        })),
       getPlaybackTimelinePoints: () =>
         playbackTimelineEvents.map((event) => ({
           pairIndex: event.pairIndex,
@@ -5960,6 +6043,7 @@ function App() {
     playbackSessionId,
     playheadStatus,
     playbackTimelineEvents,
+    chordRulerMarkerMetaByKey,
     measurePlayheadDebugLogRow,
   ])
 
@@ -6073,6 +6157,7 @@ function App() {
         }}
         onOpenMusicXmlFilePicker={openMusicXmlFilePicker}
         onLoadSampleMusicXml={loadSampleMusicXmlWithCollapseReset}
+        onLoadWholeNoteDemo={loadWholeNoteDemoWithCollapseReset}
         onExportMusicXmlFile={exportMusicXmlFile}
         onOpenOsmdPreview={openOsmdPreview}
         onOpenBeamGroupingTool={openBeamGroupingTool}
@@ -6097,6 +6182,7 @@ function App() {
         onOsmdDirectFileChange={onOsmdDirectFileChange}
         importFeedback={importFeedback}
         rhythmPreset={rhythmPreset}
+        wholeNoteDemoActive={wholeNoteDemoActive}
         onApplyRhythmPreset={applyRhythmPresetWithCollapseReset}
       />
 

@@ -294,6 +294,9 @@ export type MeasureLayout = {
   effectiveBoundaryEndX?: number
   effectiveLeftGapPx?: number
   effectiveRightGapPx?: number
+  spacingOccupiedLeftX?: number
+  spacingOccupiedRightX?: number
+  spacingAnchorGapFirstToLastPx?: number
   overlayRect: {
     x: number
     y: number

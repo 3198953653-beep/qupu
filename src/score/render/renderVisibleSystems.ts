@@ -3,7 +3,6 @@ import {
   SCORE_PAGE_PADDING_X,
   SCORE_TOP_PADDING,
   SYSTEM_BASS_OFFSET_Y,
-  DURATION_TICKS,
   SYSTEM_GAP_Y,
   SYSTEM_HEIGHT,
   SYSTEM_TREBLE_OFFSET_Y,
@@ -19,6 +18,7 @@ import { drawCrossMeasureTies } from './drawCrossMeasureTies'
 import { buildDragPreviewOverrides } from './dragPreviewOverrides'
 import {
   DEFAULT_TIME_AXIS_SPACING_CONFIG,
+  type AppliedTimeAxisSpacingMetrics,
   attachMeasureTimelineAxisLayout,
   buildMeasureTimelineBundle,
   getMeasureUniformTimelineWeightSpan,
@@ -201,63 +201,86 @@ function getLayoutSpacingRightX(layout: NoteLayout): number {
   return Number.isFinite(layout.rightX) ? layout.rightX : layout.x
 }
 
-function getMeasureSpacingRightEdge(layouts: NoteLayout[]): number {
-  if (layouts.length === 0) return Number.NEGATIVE_INFINITY
-  let maxSpacingRightX = Number.NEGATIVE_INFINITY
+function getMeasureGlyphBounds(layouts: NoteLayout[]): { leftX: number; rightX: number } | null {
+  if (layouts.length === 0) return null
+  let minGlyphLeftX = Number.POSITIVE_INFINITY
+  let maxGlyphRightX = Number.NEGATIVE_INFINITY
   for (const layout of layouts) {
+    if (Number.isFinite(layout.x)) {
+      minGlyphLeftX = Math.min(minGlyphLeftX, layout.x)
+    }
     const spacingRightX = getLayoutSpacingRightX(layout)
-    if (spacingRightX > maxSpacingRightX) maxSpacingRightX = spacingRightX
+    if (spacingRightX > maxGlyphRightX) {
+      maxGlyphRightX = spacingRightX
+    }
   }
-  return maxSpacingRightX
+  if (!Number.isFinite(minGlyphLeftX) || !Number.isFinite(maxGlyphRightX)) return null
+  return { leftX: minGlyphLeftX, rightX: maxGlyphRightX }
 }
 
-function getLayoutOnsetAnchorXs(layouts: NoteLayout[], measure: MeasurePair): number[] {
-  const onsetByNoteKey = new Map<string, number>()
-  let trebleTicks = 0
-  measure.treble.forEach((note, noteIndex) => {
-    onsetByNoteKey.set(`treble:${noteIndex}`, trebleTicks)
-    trebleTicks += DURATION_TICKS[note.duration] ?? 16
-  })
-  let bassTicks = 0
-  measure.bass.forEach((note, noteIndex) => {
-    onsetByNoteKey.set(`bass:${noteIndex}`, bassTicks)
-    bassTicks += DURATION_TICKS[note.duration] ?? 16
-  })
+function getMeasureSpacingOccupiedBounds(params: {
+  layouts: NoteLayout[]
+  spacingMetrics?: AppliedTimeAxisSpacingMetrics | null
+}): { leftX: number; rightX: number } | null {
+  const { layouts, spacingMetrics = null } = params
+  const glyphBounds = getMeasureGlyphBounds(layouts)
+  const spacingOccupiedLeftX =
+    spacingMetrics && Number.isFinite(spacingMetrics.spacingOccupiedLeftX)
+      ? spacingMetrics.spacingOccupiedLeftX
+      : Number.NaN
+  const spacingOccupiedRightX =
+    spacingMetrics && Number.isFinite(spacingMetrics.spacingOccupiedRightX)
+      ? spacingMetrics.spacingOccupiedRightX
+      : Number.NaN
+  const occupiedLeftX =
+    Number.isFinite(spacingOccupiedLeftX) && glyphBounds
+      ? Math.min(glyphBounds.leftX, spacingOccupiedLeftX)
+      : Number.isFinite(spacingOccupiedLeftX)
+        ? spacingOccupiedLeftX
+        : glyphBounds?.leftX ?? Number.NaN
+  const occupiedRightX =
+    Number.isFinite(spacingOccupiedRightX) && glyphBounds
+      ? Math.max(glyphBounds.rightX, spacingOccupiedRightX)
+      : Number.isFinite(spacingOccupiedRightX)
+        ? spacingOccupiedRightX
+        : glyphBounds?.rightX ?? Number.NaN
 
-  const onsetXMap = new Map<number, number>()
-  layouts.forEach((layout) => {
-    const onsetTicks = onsetByNoteKey.get(`${layout.staff}:${layout.noteIndex}`)
-    if (onsetTicks === undefined || !Number.isFinite(layout.x)) return
-    const current = onsetXMap.get(onsetTicks)
-    onsetXMap.set(onsetTicks, current === undefined ? layout.x : Math.min(current, layout.x))
-  })
+  if (!Number.isFinite(occupiedLeftX) || !Number.isFinite(occupiedRightX)) return null
+  return {
+    leftX: occupiedLeftX,
+    rightX: occupiedRightX,
+  }
+}
 
-  return [...onsetXMap.entries()]
-    .sort((left, right) => left[0] - right[0])
-    .map((entry) => entry[1])
+function getMeasureSpacingRightEdge(params: {
+  layouts: NoteLayout[]
+  spacingMetrics?: AppliedTimeAxisSpacingMetrics | null
+}): number {
+  const occupiedBounds = getMeasureSpacingOccupiedBounds(params)
+  return occupiedBounds ? occupiedBounds.rightX : Number.NEGATIVE_INFINITY
 }
 
 function getMeasureEdgeExcessPx(params: {
   layouts: NoteLayout[]
-  measure: MeasurePair
   leftBoundaryX: number
   rightBoundaryX: number
   maxBarlineEdgeGapPx: number
+  spacingMetrics?: AppliedTimeAxisSpacingMetrics | null
 }): number {
   const {
     layouts,
-    measure,
     leftBoundaryX,
     rightBoundaryX,
     maxBarlineEdgeGapPx,
+    spacingMetrics = null,
   } = params
   if (!Number.isFinite(maxBarlineEdgeGapPx)) return 0
   if (!Number.isFinite(leftBoundaryX) || !Number.isFinite(rightBoundaryX) || leftBoundaryX >= rightBoundaryX) return 0
   const maxGap = Math.max(0, maxBarlineEdgeGapPx)
-  const onsetAnchors = getLayoutOnsetAnchorXs(layouts, measure)
-  if (onsetAnchors.length === 0) return 0
-  const firstX = onsetAnchors[0]
-  const lastX = onsetAnchors[onsetAnchors.length - 1]
+  const occupiedBounds = getMeasureSpacingOccupiedBounds({ layouts, spacingMetrics })
+  if (!occupiedBounds) return 0
+  const firstX = occupiedBounds.leftX
+  const lastX = occupiedBounds.rightX
   if (!Number.isFinite(firstX) || !Number.isFinite(lastX)) return 0
   const leftGap = firstX - leftBoundaryX
   const rightGap = rightBoundaryX - lastX
@@ -281,6 +304,7 @@ export function renderVisibleSystems(params: {
   renderOffsetX?: number
   measureKeyFifthsFromImport: number[] | null
   measureTimeSignaturesFromImport: TimeSignature[] | null
+  supplementalSpacingTicksByPair?: number[][] | null
   activeSelection: Selection | null
   activeAccidentalSelection?: Selection | null
   activeTieSegmentKey?: string | null
@@ -320,6 +344,7 @@ export function renderVisibleSystems(params: {
     renderOffsetX = 0,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
+    supplementalSpacingTicksByPair = null,
     activeSelection,
     activeAccidentalSelection = null,
     activeTieSegmentKey = null,
@@ -524,6 +549,7 @@ export function renderVisibleSystems(params: {
           timeSignature: entry.timeSignature,
           spacingConfig,
           timelineMode: 'dual',
+          supplementalSpacingTicks: supplementalSpacingTicksByPair?.[entry.pairIndex] ?? null,
         }),
       )
     })
@@ -619,19 +645,23 @@ export function renderVisibleSystems(params: {
       effectiveBoundaryStartX: number
       effectiveBoundaryEndX: number
       widthPx: number
+      spacingAnchorTicks?: number[] | null
+      spacingTickToX?: Map<number, number> | null
     }) => {
       const baseBundle = systemTimelineBundles.get(params.pairIndex)
       if (!baseBundle) return
-      nextTimelineBundlesByPair.set(
-        params.pairIndex,
-        attachMeasureTimelineAxisLayout({
-          bundle: baseBundle,
-          effectiveBoundaryStartX: params.effectiveBoundaryStartX,
-          effectiveBoundaryEndX: params.effectiveBoundaryEndX,
-          widthPx: params.widthPx,
-          spacingConfig,
-        }),
-      )
+      const nextBundle = attachMeasureTimelineAxisLayout({
+        bundle: baseBundle,
+        effectiveBoundaryStartX: params.effectiveBoundaryStartX,
+        effectiveBoundaryEndX: params.effectiveBoundaryEndX,
+        widthPx: params.widthPx,
+        spacingConfig,
+      })
+      nextTimelineBundlesByPair.set(params.pairIndex, {
+        ...nextBundle,
+        spacingAnchorTicks: params.spacingAnchorTicks ? [...params.spacingAnchorTicks] : nextBundle.spacingAnchorTicks,
+        spacingTickToX: params.spacingTickToX ? new Map(params.spacingTickToX) : nextBundle.spacingTickToX,
+      })
     }
     const buildTimelineBundleForRender = (params: {
       entry: (typeof systemMeta)[number]
@@ -668,15 +698,7 @@ export function renderVisibleSystems(params: {
       noteEndX: number
       showStartDecorations: boolean
       showEndDecorations: boolean
-      spacingMetrics:
-        | {
-            effectiveBoundaryStartX: number
-            effectiveBoundaryEndX: number
-            effectiveLeftGapPx: number
-            effectiveRightGapPx: number
-          }
-        | null
-        | undefined
+      spacingMetrics: AppliedTimeAxisSpacingMetrics | null | undefined
     }) => {
       const {
         measureX,
@@ -795,14 +817,7 @@ export function renderVisibleSystems(params: {
           }
         }
 
-        let spacingMetrics:
-          | {
-              effectiveBoundaryStartX: number
-              effectiveBoundaryEndX: number
-              effectiveLeftGapPx: number
-              effectiveRightGapPx: number
-            }
-          | null = null
+        let spacingMetrics: AppliedTimeAxisSpacingMetrics | null = null
         let staffLineBounds = {
           trebleLineTopY: trebleY,
           trebleLineBottomY: trebleY + 40,
@@ -838,6 +853,7 @@ export function renderVisibleSystems(params: {
           timeAxisSpacingConfig: spacingConfig,
           spacingLayoutMode,
           publicAxisLayout: resolvePublicAxisLayoutForConsumption(timelineBundle),
+          spacingAnchorTicks: timelineBundle?.spacingAnchorTicks ?? null,
           staticNoteXById: previewStaticNoteXById ?? translatedFrozenSpacing?.staticNoteXById ?? null,
           staticAccidentalRightXById:
             previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
@@ -898,6 +914,7 @@ export function renderVisibleSystems(params: {
           showEndDecorations: !entry.preferMeasureEndBarlineAxis,
           spacingMetrics,
         })
+        const currentSpacingMetrics = spacingMetrics as AppliedTimeAxisSpacingMetrics | null
         nextMeasureLayouts.set(entry.pairIndex, {
           pairIndex: entry.pairIndex,
           measureX,
@@ -924,6 +941,9 @@ export function renderVisibleSystems(params: {
           effectiveBoundaryEndX: effectiveLayoutMetrics.effectiveBoundaryEndX,
           effectiveLeftGapPx: effectiveLayoutMetrics.effectiveLeftGapPx,
           effectiveRightGapPx: effectiveLayoutMetrics.effectiveRightGapPx,
+          spacingOccupiedLeftX: currentSpacingMetrics?.spacingOccupiedLeftX,
+          spacingOccupiedRightX: currentSpacingMetrics?.spacingOccupiedRightX,
+          spacingAnchorGapFirstToLastPx: currentSpacingMetrics?.spacingAnchorGapFirstToLastPx,
           overlayRect,
         })
         attachTimelineBundleForMeasure({
@@ -931,6 +951,8 @@ export function renderVisibleSystems(params: {
           effectiveBoundaryStartX: effectiveLayoutMetrics.effectiveBoundaryStartX,
           effectiveBoundaryEndX: effectiveLayoutMetrics.effectiveBoundaryEndX,
           widthPx: measureWidth,
+          spacingAnchorTicks: currentSpacingMetrics ? currentSpacingMetrics.spacingAnchorTicks : null,
+          spacingTickToX: currentSpacingMetrics ? currentSpacingMetrics.spacingTickToX : null,
         })
       })
       drawCrossMeasureTiesForSystem()
@@ -1012,14 +1034,7 @@ export function renderVisibleSystems(params: {
             context.restore()
           }
         }
-        let spacingMetrics:
-          | {
-              effectiveBoundaryStartX: number
-              effectiveBoundaryEndX: number
-              effectiveLeftGapPx: number
-              effectiveRightGapPx: number
-            }
-          | null = null
+        let spacingMetrics: AppliedTimeAxisSpacingMetrics | null = null
         let staffLineBounds = {
           trebleLineTopY: trebleY,
           trebleLineBottomY: trebleY + 40,
@@ -1055,6 +1070,7 @@ export function renderVisibleSystems(params: {
           timeAxisSpacingConfig: spacingConfig,
           spacingLayoutMode,
           publicAxisLayout: resolvePublicAxisLayoutForConsumption(timelineBundle),
+          spacingAnchorTicks: timelineBundle?.spacingAnchorTicks ?? null,
           staticNoteXById: previewStaticNoteXById ?? translatedFrozenSpacing?.staticNoteXById ?? null,
           staticAccidentalRightXById:
             previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
@@ -1115,6 +1131,7 @@ export function renderVisibleSystems(params: {
           showEndDecorations: !entry.preferMeasureEndBarlineAxis,
           spacingMetrics,
         })
+        const currentSpacingMetrics = spacingMetrics as AppliedTimeAxisSpacingMetrics | null
         nextMeasureLayouts.set(entry.pairIndex, {
           pairIndex: entry.pairIndex,
           measureX,
@@ -1141,6 +1158,9 @@ export function renderVisibleSystems(params: {
           effectiveBoundaryEndX: effectiveLayoutMetrics.effectiveBoundaryEndX,
           effectiveLeftGapPx: effectiveLayoutMetrics.effectiveLeftGapPx,
           effectiveRightGapPx: effectiveLayoutMetrics.effectiveRightGapPx,
+          spacingOccupiedLeftX: currentSpacingMetrics?.spacingOccupiedLeftX,
+          spacingOccupiedRightX: currentSpacingMetrics?.spacingOccupiedRightX,
+          spacingAnchorGapFirstToLastPx: currentSpacingMetrics?.spacingAnchorGapFirstToLastPx,
           overlayRect,
         })
         attachTimelineBundleForMeasure({
@@ -1148,6 +1168,8 @@ export function renderVisibleSystems(params: {
           effectiveBoundaryStartX: effectiveLayoutMetrics.effectiveBoundaryStartX,
           effectiveBoundaryEndX: effectiveLayoutMetrics.effectiveBoundaryEndX,
           widthPx: measureWidth,
+          spacingAnchorTicks: currentSpacingMetrics ? currentSpacingMetrics.spacingAnchorTicks : null,
+          spacingTickToX: currentSpacingMetrics ? currentSpacingMetrics.spacingTickToX : null,
         })
       })
       drawCrossMeasureTiesForSystem()
@@ -1252,6 +1274,7 @@ export function renderVisibleSystems(params: {
         noteStartX: spacingLeftLimitX,
         noteEndX: spacingRightLimitX,
       })
+      let spacingMetrics: AppliedTimeAxisSpacingMetrics | null = null
       const measureNoteLayouts = drawMeasureToContext({
         context,
         measure: entry.measure,
@@ -1281,6 +1304,7 @@ export function renderVisibleSystems(params: {
         timeAxisSpacingConfig: spacingConfig,
         spacingLayoutMode,
         publicAxisLayout: resolvePublicAxisLayoutForConsumption(timelineBundle),
+        spacingAnchorTicks: timelineBundle?.spacingAnchorTicks ?? null,
         // Width probing must be fully deterministic by score content only.
         // Do not feed previous-frame frozen spacing into the probe solver.
         staticNoteXById: null,
@@ -1296,8 +1320,14 @@ export function renderVisibleSystems(params: {
         // Probe with the same edge-cap path as final render so residual edge
         // excess can feed width recovery.
         enableEdgeGapCap: true,
+        onSpacingMetrics: (metrics) => {
+          spacingMetrics = metrics
+        },
       })
-      const spacingRightEdge = getMeasureSpacingRightEdge(measureNoteLayouts)
+      const spacingRightEdge = getMeasureSpacingRightEdge({
+        layouts: measureNoteLayouts,
+        spacingMetrics,
+      })
       if (!Number.isFinite(spacingRightEdge)) {
         const stats: MeasureProbeStats = { overflowPx: null, edgeExcessPx: 0 }
         measureProbeStatsCache.set(cacheKey, stats)
@@ -1307,10 +1337,10 @@ export function renderVisibleSystems(params: {
         overflowPx: spacingRightEdge - spacingRightLimitX,
         edgeExcessPx: getMeasureEdgeExcessPx({
           layouts: measureNoteLayouts,
-          measure: entry.measure,
           leftBoundaryX: spacingLeftLimitX,
           rightBoundaryX: spacingRightLimitX,
           maxBarlineEdgeGapPx: spacingConfig.maxBarlineEdgeGapPx,
+          spacingMetrics,
         }),
       }
       measureProbeStatsCache.set(cacheKey, stats)
@@ -1372,14 +1402,7 @@ export function renderVisibleSystems(params: {
       const frozenSpacing = frozenSpacingByPairIndex.get(entry.pairIndex) ?? null
       const translatedFrozenSpacing =
         frozenSpacing !== null ? translateFrozenSpacingToMeasureX(frozenSpacing, measureX) : null
-      let spacingMetrics:
-        | {
-            effectiveBoundaryStartX: number
-            effectiveBoundaryEndX: number
-            effectiveLeftGapPx: number
-            effectiveRightGapPx: number
-          }
-        | null = null
+      let spacingMetrics: AppliedTimeAxisSpacingMetrics | null = null
       let staffLineBounds = {
         trebleLineTopY: trebleY,
         trebleLineBottomY: trebleY + 40,
@@ -1415,6 +1438,7 @@ export function renderVisibleSystems(params: {
         timeAxisSpacingConfig: spacingConfig,
         spacingLayoutMode,
         publicAxisLayout: resolvePublicAxisLayoutForConsumption(timelineBundle),
+        spacingAnchorTicks: timelineBundle?.spacingAnchorTicks ?? null,
         staticNoteXById: previewStaticNoteXById ?? translatedFrozenSpacing?.staticNoteXById ?? null,
         staticAccidentalRightXById:
           previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
@@ -1475,6 +1499,7 @@ export function renderVisibleSystems(params: {
         showEndDecorations: !entry.preferMeasureEndBarlineAxis,
         spacingMetrics,
       })
+      const currentSpacingMetrics = spacingMetrics as AppliedTimeAxisSpacingMetrics | null
       nextMeasureLayouts.set(entry.pairIndex, {
         pairIndex: entry.pairIndex,
         measureX,
@@ -1501,6 +1526,9 @@ export function renderVisibleSystems(params: {
         effectiveBoundaryEndX: effectiveLayoutMetrics.effectiveBoundaryEndX,
         effectiveLeftGapPx: effectiveLayoutMetrics.effectiveLeftGapPx,
         effectiveRightGapPx: effectiveLayoutMetrics.effectiveRightGapPx,
+        spacingOccupiedLeftX: currentSpacingMetrics?.spacingOccupiedLeftX,
+        spacingOccupiedRightX: currentSpacingMetrics?.spacingOccupiedRightX,
+        spacingAnchorGapFirstToLastPx: currentSpacingMetrics?.spacingAnchorGapFirstToLastPx,
         overlayRect,
       })
       attachTimelineBundleForMeasure({
@@ -1508,6 +1536,8 @@ export function renderVisibleSystems(params: {
         effectiveBoundaryStartX: effectiveLayoutMetrics.effectiveBoundaryStartX,
         effectiveBoundaryEndX: effectiveLayoutMetrics.effectiveBoundaryEndX,
         widthPx: measureWidth,
+        spacingAnchorTicks: currentSpacingMetrics ? currentSpacingMetrics.spacingAnchorTicks : null,
+        spacingTickToX: currentSpacingMetrics ? currentSpacingMetrics.spacingTickToX : null,
       })
     })
     drawCrossMeasureTiesForSystem()

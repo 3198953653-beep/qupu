@@ -15,6 +15,7 @@ export function ScoreControls(props: {
   onToggleInScoreMeasureNumbers: () => void
   onOpenMusicXmlFilePicker: () => void
   onLoadSampleMusicXml: () => void
+  onLoadWholeNoteDemo: () => void
   onExportMusicXmlFile: () => void
   onOpenOsmdPreview: () => void
   onOpenBeamGroupingTool: () => void
@@ -43,6 +44,7 @@ export function ScoreControls(props: {
   onOsmdDirectFileChange: (event: ChangeEvent<HTMLInputElement>) => void
   importFeedback: ImportFeedback
   rhythmPreset: RhythmPresetId
+  wholeNoteDemoActive: boolean
   onApplyRhythmPreset: (presetId: RhythmPresetId) => void
   autoScaleEnabled: boolean
   autoScalePercent: number
@@ -82,6 +84,7 @@ export function ScoreControls(props: {
     onToggleInScoreMeasureNumbers,
     onOpenMusicXmlFilePicker,
     onLoadSampleMusicXml,
+    onLoadWholeNoteDemo,
     onExportMusicXmlFile,
     onOpenOsmdPreview,
     onOpenBeamGroupingTool,
@@ -106,6 +109,7 @@ export function ScoreControls(props: {
     onOsmdDirectFileChange,
     importFeedback,
     rhythmPreset,
+    wholeNoteDemoActive,
     onApplyRhythmPreset,
     autoScaleEnabled,
     autoScalePercent,
@@ -570,11 +574,18 @@ export function ScoreControls(props: {
       </section>
 
       <section className="rhythm-row">
+        <button
+          type="button"
+          className={`rhythm-btn ${wholeNoteDemoActive ? 'active' : ''}`}
+          onClick={onLoadWholeNoteDemo}
+        >
+          加载全音符示例
+        </button>
         {RHYTHM_PRESETS.map((preset) => (
           <button
             key={preset.id}
             type="button"
-            className={`rhythm-btn ${rhythmPreset === preset.id ? 'active' : ''}`}
+            className={`rhythm-btn ${!wholeNoteDemoActive && rhythmPreset === preset.id ? 'active' : ''}`}
             onClick={() => onApplyRhythmPreset(preset.id)}
           >
             {preset.label}

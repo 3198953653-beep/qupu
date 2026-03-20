@@ -64,6 +64,8 @@ export type MeasureTimelineBundle = {
   measureIndex: number
   measureTicks: number
   legacyOnsets: number[]
+  spacingAnchorTicks: number[]
+  spacingTickToX: Map<number, number>
   trebleTimeline: StaffTimeline
   bassTimeline: StaffTimeline
   publicTimeline: PublicMergedTimeline

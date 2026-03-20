@@ -67,6 +67,33 @@ export function buildBassMockNotes(sourceNotes: ScoreNote[]): ScoreNote[] {
   }))
 }
 
+export function buildWholeNoteDemoNotes(measureCount: number): {
+  trebleNotes: ScoreNote[]
+  bassNotes: ScoreNote[]
+} {
+  const safeMeasureCount = Number.isFinite(measureCount) ? Math.max(1, Math.round(measureCount)) : 1
+  const trebleNotes: ScoreNote[] = []
+  const bassNotes: ScoreNote[] = []
+
+  for (let measureIndex = 0; measureIndex < safeMeasureCount; measureIndex += 1) {
+    trebleNotes.push({
+      id: `whole-demo-t-${measureIndex + 1}`,
+      pitch: 'c/5',
+      duration: 'w',
+    })
+    bassNotes.push({
+      id: `whole-demo-b-${measureIndex + 1}`,
+      pitch: 'c/3',
+      duration: 'w',
+    })
+  }
+
+  return {
+    trebleNotes,
+    bassNotes,
+  }
+}
+
 export function syncBassNotesToTreble(trebleNotes: ScoreNote[], currentBass: ScoreNote[]): ScoreNote[] {
   return trebleNotes.map((trebleNote, index) => ({
     id: currentBass[index]?.id ?? `bass-${index + 1}`,
