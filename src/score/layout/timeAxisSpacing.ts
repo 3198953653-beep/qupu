@@ -41,8 +41,6 @@ type ApplyUnifiedTimeAxisSpacingParams = {
 }
 
 const MIN_RENDER_WIDTH_PX = 1
-const DEFAULT_LEFT_EDGE_PADDING_PX = 2
-const DEFAULT_RIGHT_EDGE_PADDING_PX = 3
 const DEFAULT_NOTE_HEAD_WIDTH_PX = 9
 const TICKS_PER_QUARTER = 16
 const DEFAULT_COMPACT_TAIL_ANCHOR_TICKS = 4
@@ -60,12 +58,9 @@ export type TimeAxisSpacingConfig = {
   minGapBeats: number
   gapGamma: number
   gapBaseWeight: number
-  leftEdgePaddingPx: number
-  rightEdgePaddingPx: number
+  leadingBarlineGapPx: number
   interOnsetPaddingPx: number
   baseMinGap32Px: number
-  minBarlineEdgeGapPx: number
-  maxBarlineEdgeGapPx: number
   durationGapRatios: DurationGapRatioConfig
 }
 
@@ -75,6 +70,7 @@ export type DurationGapRatioConfig = {
   eighth: number
   quarter: number
   half: number
+  whole: number
 }
 
 export type PublicAxisConsumptionMode = 'legacy' | 'merged'
@@ -87,49 +83,17 @@ export const DEFAULT_TIME_AXIS_SPACING_CONFIG: TimeAxisSpacingConfig = {
   minGapBeats: MIN_GAP_BEATS,
   gapGamma: GAP_GAMMA,
   gapBaseWeight: GAP_BASE_WEIGHT,
-  leftEdgePaddingPx: DEFAULT_LEFT_EDGE_PADDING_PX,
-  rightEdgePaddingPx: DEFAULT_RIGHT_EDGE_PADDING_PX,
+  leadingBarlineGapPx: 9.7,
   interOnsetPaddingPx: 1,
   baseMinGap32Px: 6.9,
-  minBarlineEdgeGapPx: 9.7,
-  maxBarlineEdgeGapPx: 12.7,
   durationGapRatios: {
     thirtySecond: 0.7,
     sixteenth: 0.78,
     eighth: 0.93,
     quarter: 1.02,
     half: 1.22,
+    whole: 1.4,
   },
-}
-
-function resolveEffectiveEdgeGapRange(
-  spacingConfig: TimeAxisSpacingConfig,
-): { minGapPx: number; maxGapPx: number } {
-  const maxGapPx = Math.max(0, spacingConfig.maxBarlineEdgeGapPx)
-  const minCandidate = Number.isFinite(spacingConfig.minBarlineEdgeGapPx)
-    ? Math.max(0, spacingConfig.minBarlineEdgeGapPx)
-    : 0
-  const minGapPx = minCandidate <= maxGapPx ? minCandidate : maxGapPx
-  return { minGapPx, maxGapPx }
-}
-
-function resolveEffectiveEdgePadding(
-  spacingConfig: TimeAxisSpacingConfig,
-): { leftPadPx: number; rightPadPx: number; minGapPx: number; maxGapPx: number } {
-  const { minGapPx, maxGapPx } = resolveEffectiveEdgeGapRange(spacingConfig)
-  const leftPadPx = Math.min(maxGapPx, Math.max(0, Math.max(spacingConfig.leftEdgePaddingPx, minGapPx)))
-  const rightPadPx = Math.min(maxGapPx, Math.max(0, Math.max(spacingConfig.rightEdgePaddingPx, minGapPx)))
-  return { leftPadPx, rightPadPx, minGapPx, maxGapPx }
-}
-
-export function getUniformTickSpacingPadding(
-  spacingConfig: TimeAxisSpacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
-): { startPadPx: number; endPadPx: number } {
-  const { leftPadPx, rightPadPx } = resolveEffectiveEdgePadding(spacingConfig)
-  return {
-    startPadPx: leftPadPx + UNIFORM_TICK_SPACING_START_GUARD_PX,
-    endPadPx: Math.max(0, rightPadPx + UNIFORM_TICK_SPACING_END_GUARD_PX),
-  }
 }
 
 function getTickDuration(note: ScoreNote): number {
@@ -278,47 +242,181 @@ export function buildEffectiveSpacingTicks(params: {
     .sort((left, right) => left - right)
 }
 
+type MeasureSpacingWeights = {
+  orderedTicks: number[]
+  leadingGapPx: number
+  segmentWeights: number[]
+  anchorSpanWeight: number
+  trailingTailTicks: number
+  trailingTailWeight: number
+  totalWeight: number
+}
+
+export type MeasureTimelineWeightMetrics = {
+  spacingAnchorTicks: number[]
+  leadingGapPx: number
+  anchorSpanPx: number
+  trailingTailTicks: number
+  trailingGapPx: number
+  totalWidthPx: number
+}
+
+export function getLeadingBarlineGapPx(
+  spacingConfig: TimeAxisSpacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
+): number {
+  if (!Number.isFinite(spacingConfig.leadingBarlineGapPx)) return 0
+  return Math.max(0, spacingConfig.leadingBarlineGapPx)
+}
+
+function buildMeasureSpacingWeights(params: {
+  spacingTicks: readonly number[]
+  measureTicks: number
+  spacingConfig?: TimeAxisSpacingConfig
+}): MeasureSpacingWeights {
+  const {
+    spacingTicks,
+    measureTicks,
+    spacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
+  } = params
+  const safeMeasureTicks = Math.max(1, Math.round(measureTicks))
+  const orderedTicks = [...new Set(spacingTicks)]
+    .map((tick) => clampMeasureTick(tick, safeMeasureTicks))
+    .filter((tick): tick is number => tick !== null && Number.isFinite(tick))
+    .sort((left, right) => left - right)
+  if (orderedTicks.length === 0) {
+    return {
+      orderedTicks: [],
+      leadingGapPx: 0,
+      segmentWeights: [],
+      anchorSpanWeight: 0,
+      trailingTailTicks: 0,
+      trailingTailWeight: 0,
+      totalWeight: 0,
+    }
+  }
+
+  const segmentWeights: number[] = []
+  let anchorSpanWeight = 0
+  for (let index = 1; index < orderedTicks.length; index += 1) {
+    const deltaTicks = Math.max(1, orderedTicks[index] - orderedTicks[index - 1])
+    const gapWeight = mapTickGapToWeight(deltaTicks, spacingConfig)
+    segmentWeights.push(gapWeight)
+    anchorSpanWeight += gapWeight
+  }
+
+  const lastTick = orderedTicks[orderedTicks.length - 1] ?? 0
+  const trailingTailTicks = Math.max(0, safeMeasureTicks - lastTick)
+  const trailingTailWeight = trailingTailTicks > 0 ? mapTickGapToWeight(trailingTailTicks, spacingConfig) : 0
+  const leadingGapPx = getLeadingBarlineGapPx(spacingConfig)
+  const totalWeight = anchorSpanWeight + trailingTailWeight
+
+  return {
+    orderedTicks,
+    leadingGapPx,
+    segmentWeights,
+    anchorSpanWeight,
+    trailingTailTicks,
+    trailingTailWeight,
+    totalWeight,
+  }
+}
+
+export function getMeasureUniformTimelineWeightMetrics(
+  measure: MeasurePair,
+  measureTicks: number,
+  spacingConfig: TimeAxisSpacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
+  timelineBundle: MeasureTimelineBundle | null = null,
+): MeasureTimelineWeightMetrics {
+  const spacingAnchorTicks =
+    timelineBundle?.spacingAnchorTicks?.length
+      ? [...timelineBundle.spacingAnchorTicks].sort((left, right) => left - right)
+      : timelineBundle?.legacyOnsets?.length
+        ? [...timelineBundle.legacyOnsets].sort((left, right) => left - right)
+        : collectMeasureOnsetTicks(measure).sort((left, right) => left - right)
+  const weights = buildMeasureSpacingWeights({
+    spacingTicks: spacingAnchorTicks,
+    measureTicks,
+    spacingConfig,
+  })
+  return {
+    spacingAnchorTicks: weights.orderedTicks,
+    leadingGapPx: weights.leadingGapPx,
+    anchorSpanPx: Math.max(0, weights.anchorSpanWeight),
+    trailingTailTicks: weights.trailingTailTicks,
+    trailingGapPx: Math.max(0, weights.trailingTailWeight),
+    totalWidthPx: Math.max(0, weights.leadingGapPx + weights.totalWeight),
+  }
+}
+
+export function getUniformTickSpacingPadding(
+  spacingConfig: TimeAxisSpacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
+  params?: { spacingTicks?: readonly number[] | null; measureTicks?: number | null },
+): { startPadPx: number; endPadPx: number; trailingTailTicks: number; trailingGapPx: number } {
+  const spacingTicks = params?.spacingTicks ?? null
+  const measureTicks = params?.measureTicks ?? null
+  if (
+    spacingTicks &&
+    spacingTicks.length > 0 &&
+    typeof measureTicks === 'number' &&
+    Number.isFinite(measureTicks) &&
+    measureTicks > 0
+  ) {
+    const weights = buildMeasureSpacingWeights({
+      spacingTicks,
+      measureTicks,
+      spacingConfig,
+    })
+    return {
+      startPadPx: weights.leadingGapPx + UNIFORM_TICK_SPACING_START_GUARD_PX,
+      endPadPx: Math.max(0, weights.trailingTailWeight + UNIFORM_TICK_SPACING_END_GUARD_PX),
+      trailingTailTicks: weights.trailingTailTicks,
+      trailingGapPx: Math.max(0, weights.trailingTailWeight),
+    }
+  }
+  return {
+    startPadPx: getLeadingBarlineGapPx(spacingConfig) + UNIFORM_TICK_SPACING_START_GUARD_PX,
+    endPadPx: Math.max(0, UNIFORM_TICK_SPACING_END_GUARD_PX),
+    trailingTailTicks: 0,
+    trailingGapPx: 0,
+  }
+}
+
 export function buildSpacingTickToX(params: {
   spacingTicks: readonly number[]
+  measureTicks: number
   effectiveBoundaryStartX: number
   effectiveBoundaryEndX: number
   spacingConfig?: TimeAxisSpacingConfig
 }): Map<number, number> {
   const {
     spacingTicks,
+    measureTicks,
     effectiveBoundaryStartX,
     effectiveBoundaryEndX,
     spacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
   } = params
   const tickToX = new Map<number, number>()
-  const orderedTicks = [...new Set(spacingTicks.filter((tick) => Number.isFinite(tick)))].sort((left, right) => left - right)
+  const weights = buildMeasureSpacingWeights({
+    spacingTicks,
+    measureTicks,
+    spacingConfig,
+  })
+  const orderedTicks = weights.orderedTicks
   if (orderedTicks.length === 0) return tickToX
 
-  const { startPadPx, endPadPx } = getUniformTickSpacingPadding(spacingConfig)
   const contentStartX = Math.min(
     effectiveBoundaryEndX,
-    effectiveBoundaryStartX + Math.max(0, startPadPx),
+    effectiveBoundaryStartX + Math.max(0, weights.leadingGapPx),
   )
-  const contentEndX = Math.max(
-    contentStartX,
-    effectiveBoundaryEndX - Math.max(0, endPadPx),
-  )
+  const distributableWidth = Math.max(0, effectiveBoundaryEndX - contentStartX)
 
   if (orderedTicks.length === 1) {
-    tickToX.set(orderedTicks[0], (contentStartX + contentEndX) * 0.5)
+    tickToX.set(orderedTicks[0], contentStartX)
     return tickToX
   }
 
-  const gapWeights: number[] = []
-  for (let index = 1; index < orderedTicks.length; index += 1) {
-    const deltaTicks = Math.max(1, orderedTicks[index] - orderedTicks[index - 1])
-    gapWeights.push(mapTickGapToWeight(deltaTicks, spacingConfig))
-  }
-
-  const totalWeight = gapWeights.reduce((sum, value) => sum + value, 0)
-  const spanWidth = Math.max(0, contentEndX - contentStartX)
-  if (totalWeight <= 0) {
-    const step = spanWidth / Math.max(1, orderedTicks.length - 1)
+  if (weights.totalWeight <= 0) {
+    const step = distributableWidth / Math.max(1, orderedTicks.length - 1)
     orderedTicks.forEach((tick, index) => {
       tickToX.set(tick, contentStartX + step * index)
     })
@@ -328,8 +426,8 @@ export function buildSpacingTickToX(params: {
   tickToX.set(orderedTicks[0], contentStartX)
   let cumulative = 0
   for (let index = 1; index < orderedTicks.length; index += 1) {
-    cumulative += gapWeights[index - 1]
-    tickToX.set(orderedTicks[index], contentStartX + spanWidth * (cumulative / totalWeight))
+    cumulative += weights.segmentWeights[index - 1] ?? 0
+    tickToX.set(orderedTicks[index], contentStartX + distributableWidth * (cumulative / weights.totalWeight))
   }
 
   return tickToX
@@ -358,7 +456,10 @@ export function buildMeasureTimelineBundle(params: {
     measureTicks,
     supplementalTicks: supplementalSpacingTicks,
   })
-  const { startPadPx, endPadPx } = getUniformTickSpacingPadding(spacingConfig)
+  const { startPadPx, endPadPx } = getUniformTickSpacingPadding(spacingConfig, {
+    spacingTicks: spacingAnchorTicks,
+    measureTicks,
+  })
   const trebleTimeline = buildStaffTimeline(measure.treble, 'treble', measureIndex, measureTicks)
   const bassTimeline = buildStaffTimeline(measure.bass, 'bass', measureIndex, measureTicks)
   const publicTimeline = mergeStaffTimelines({
@@ -383,6 +484,7 @@ export function buildMeasureTimelineBundle(params: {
   })
   const spacingTickToX = buildSpacingTickToX({
     spacingTicks: spacingAnchorTicks,
+    measureTicks,
     effectiveBoundaryStartX: 0,
     effectiveBoundaryEndX: 1,
     spacingConfig,
@@ -422,7 +524,10 @@ export function attachMeasureTimelineAxisLayout(params: {
     spacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
     timelineScaleOverride = null,
   } = params
-  const { startPadPx, endPadPx } = getUniformTickSpacingPadding(spacingConfig)
+  const { startPadPx, endPadPx } = getUniformTickSpacingPadding(spacingConfig, {
+    spacingTicks: bundle.spacingAnchorTicks,
+    measureTicks: bundle.measureTicks,
+  })
   const publicAxisLayout = buildPublicAxisLayout({
     measureIndex: bundle.measureIndex,
     measureTicks: bundle.measureTicks,
@@ -439,6 +544,7 @@ export function attachMeasureTimelineAxisLayout(params: {
   })
   const spacingTickToX = buildSpacingTickToX({
     spacingTicks: bundle.spacingAnchorTicks,
+    measureTicks: bundle.measureTicks,
     effectiveBoundaryStartX,
     effectiveBoundaryEndX,
     spacingConfig,
@@ -468,18 +574,14 @@ export type UniformTickTimeline = {
   domainSpanTicks: number
 }
 
-type UniformTimelineWeightMap = {
-  timeline: UniformTickTimeline
-  orderedTicks: number[]
-  cumulativeWeightByTick: Map<number, number>
-  totalWeight: number
-}
-
 export type AppliedTimeAxisSpacingMetrics = {
   effectiveBoundaryStartX: number
   effectiveBoundaryEndX: number
   effectiveLeftGapPx: number
   effectiveRightGapPx: number
+  leadingGapPx: number
+  trailingTailTicks: number
+  trailingGapPx: number
   spacingOccupiedLeftX: number
   spacingOccupiedRightX: number
   spacingAnchorGapFirstToLastPx: number
@@ -548,6 +650,7 @@ function getDurationGapRatioByDeltaTicks(deltaTicks: number, ratios: DurationGap
     { ticks: 8, ratio: ratios.eighth },
     { ticks: 16, ratio: ratios.quarter },
     { ticks: 32, ratio: ratios.half },
+    { ticks: 64, ratio: ratios.whole },
   ]
   const safeTicks = Math.max(1, deltaTicks)
   if (safeTicks <= anchors[0].ticks) return anchors[0].ratio
@@ -580,195 +683,18 @@ function getDurationAddedMinGapPx(deltaTicks: number, spacingConfig: TimeAxisSpa
   return 0
 }
 
-function buildUniformTimelineWeightMap(
-  noteOnsets: number[],
-  measureTicks: number,
-  config: TimeAxisSpacingConfig,
-): UniformTimelineWeightMap {
-  const timeline = getUniformTickTimeline(noteOnsets, measureTicks)
-  const orderedTicks = [
-    ...new Set([
-      timeline.domainStartTicks,
-      ...[...new Set(noteOnsets)].filter(
-        (tick) => Number.isFinite(tick) && tick >= timeline.domainStartTicks && tick <= timeline.domainEndTicks,
-      ),
-      timeline.domainEndTicks,
-    ]),
-  ].sort((left, right) => left - right)
-
-  const cumulativeWeightByTick = new Map<number, number>()
-  if (orderedTicks.length === 0) {
-    return {
-      timeline,
-      orderedTicks: [],
-      cumulativeWeightByTick,
-      totalWeight: 1,
-    }
-  }
-
-  cumulativeWeightByTick.set(orderedTicks[0], 0)
-  let cumulativeWeight = 0
-  for (let i = 1; i < orderedTicks.length; i += 1) {
-    const deltaTicks = Math.max(1, orderedTicks[i] - orderedTicks[i - 1])
-    cumulativeWeight += mapTickGapToWeight(deltaTicks, config)
-    cumulativeWeightByTick.set(orderedTicks[i], cumulativeWeight)
-  }
-
-  return {
-    timeline,
-    orderedTicks,
-    cumulativeWeightByTick,
-    totalWeight: Math.max(0.0001, cumulativeWeight),
-  }
-}
-
-type EdgeGapCapResult = {
-  appliedShift: number
-  infeasiblePlacement: boolean
-}
-
-function applyMeasureEdgeGapCap(params: {
-  noteOnsets: number[]
-  targetXByOnset: Map<number, number>
-  edgeBoundaryStart: number
-  edgeBoundaryEnd: number
-  legalBoundaryStart: number
-  legalBoundaryEnd: number
-  firstLeftExtent: number
-  lastRightExtent: number
-  minBarlineEdgeGapPx: number
-  maxBarlineEdgeGapPx: number
-}): EdgeGapCapResult {
-  const noShift: EdgeGapCapResult = {
-    appliedShift: 0,
-    infeasiblePlacement: false,
-  }
-  const {
-    noteOnsets,
-    targetXByOnset,
-    edgeBoundaryStart,
-    edgeBoundaryEnd,
-    legalBoundaryStart,
-    legalBoundaryEnd,
-    firstLeftExtent,
-    lastRightExtent,
-    minBarlineEdgeGapPx,
-    maxBarlineEdgeGapPx,
-  } = params
-
-  if (!Number.isFinite(maxBarlineEdgeGapPx)) return noShift
-  const maxGap = Math.max(0, maxBarlineEdgeGapPx)
-  const minGapCandidate = Number.isFinite(minBarlineEdgeGapPx) ? Math.max(0, minBarlineEdgeGapPx) : 0
-  const minGap = minGapCandidate <= maxGap ? minGapCandidate : maxGap
-  const hasEffectiveMinGap = minGap > 0
-  if (noteOnsets.length === 0) return noShift
-
-  const positions = noteOnsets.map((onset) => targetXByOnset.get(onset))
-  if (positions.some((value) => value === undefined || !Number.isFinite(value))) return noShift
-  const safePositions = positions as number[]
-
-  const firstIndex = 0
-  const lastIndex = safePositions.length - 1
-  const currentFirstX = safePositions[firstIndex]
-  const currentLastX = safePositions[lastIndex]
-  if (!Number.isFinite(currentFirstX) || !Number.isFinite(currentLastX)) return noShift
-
-  const minFirstX = legalBoundaryStart
-  const maxLastX = legalBoundaryEnd
-  if (!Number.isFinite(minFirstX) || !Number.isFinite(maxLastX) || minFirstX > maxLastX) return noShift
-
-  // Preferred path keeps all inter-onset spacing (pure translation).
-  const legalShiftMin = minFirstX - currentFirstX
-  const legalShiftMax = maxLastX - currentLastX
-  if (!Number.isFinite(legalShiftMin) || !Number.isFinite(legalShiftMax) || legalShiftMin > legalShiftMax) return noShift
-
-  // Cap is interpreted as visual edge distance: first/last note glyph edge to
-  // measure boundary. This keeps "=0" behavior aligned with user expectation
-  // (touching boundaries), instead of onset anchor distance.
-  const currentLeftEdgeGap = currentFirstX - firstLeftExtent - edgeBoundaryStart
-  const currentRightEdgeGap = edgeBoundaryEnd - (currentLastX + lastRightExtent)
-  if (!Number.isFinite(currentLeftEdgeGap) || !Number.isFinite(currentRightEdgeGap)) return noShift
-
-  // leftGap' = currentLeftEdgeGap + shift <= maxGap
-  // rightGap' = currentRightEdgeGap - shift <= maxGap
-  const capShiftMin = currentRightEdgeGap - maxGap
-  const capShiftMax = maxGap - currentLeftEdgeGap
-
-  const minShiftMin = minGap - currentLeftEdgeGap
-  const minShiftMax = currentRightEdgeGap - minGap
-  const feasibleShiftMin = Math.max(legalShiftMin, capShiftMin, hasEffectiveMinGap ? minShiftMin : Number.NEGATIVE_INFINITY)
-  const feasibleShiftMax = Math.min(legalShiftMax, capShiftMax, hasEffectiveMinGap ? minShiftMax : Number.POSITIVE_INFINITY)
-
-  const clampShift = (value: number): number => Math.max(legalShiftMin, Math.min(legalShiftMax, value))
-  const exceedsCapAt = (firstX: number, lastX: number): boolean => {
-    const leftEdgeGap = firstX - firstLeftExtent - edgeBoundaryStart
-    const rightEdgeGap = edgeBoundaryEnd - (lastX + lastRightExtent)
-    return leftEdgeGap > maxGap + 0.001 || rightEdgeGap > maxGap + 0.001
-  }
-  const exceedsCapAfterShift = (shift: number): boolean =>
-    exceedsCapAt(currentFirstX + shift, currentLastX + shift)
-  let resolvedShift = 0
-  let infeasiblePlacement = false
-  if (feasibleShiftMin <= feasibleShiftMax) {
-    resolvedShift = Math.max(feasibleShiftMin, Math.min(0, feasibleShiftMax))
-  } else {
-    // If min-gap constraints are infeasible, disable min-gap and keep max-gap behavior.
-    const feasibleWithoutMinShiftMin = Math.max(legalShiftMin, capShiftMin)
-    const feasibleWithoutMinShiftMax = Math.min(legalShiftMax, capShiftMax)
-    if (feasibleWithoutMinShiftMin <= feasibleWithoutMinShiftMax) {
-      resolvedShift = Math.max(feasibleWithoutMinShiftMin, Math.min(0, feasibleWithoutMinShiftMax))
-    } else {
-      // When cap constraints are infeasible under pure translation, prefer a
-      // balanced placement (left/right gaps as equal as possible) instead of
-      // forcing one side to the cap and exploding the opposite side.
-      const balancedShift = (currentRightEdgeGap - currentLeftEdgeGap) * 0.5
-      resolvedShift = clampShift(balancedShift)
-      infeasiblePlacement = true
-    }
-  }
-
-  if (!Number.isFinite(resolvedShift) || Math.abs(resolvedShift) < 0.001) {
-    const stillExceedsCap = Number.isFinite(resolvedShift) ? exceedsCapAfterShift(resolvedShift) : false
-    return {
-      appliedShift: 0,
-      infeasiblePlacement: infeasiblePlacement || stillExceedsCap,
-    }
-  }
-
-  for (let i = 0; i < safePositions.length; i += 1) {
-    targetXByOnset.set(noteOnsets[i], safePositions[i] + resolvedShift)
-  }
-
-  const stillExceedsCap = exceedsCapAfterShift(resolvedShift)
-  return {
-    appliedShift: resolvedShift,
-    infeasiblePlacement: infeasiblePlacement || stillExceedsCap,
-  }
-}
-
 export function getMeasureUniformTimelineWeightSpan(
   measure: MeasurePair,
   measureTicks: number,
   spacingConfig: TimeAxisSpacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
   timelineBundle: MeasureTimelineBundle | null = null,
 ): number {
-  void measureTicks
-  // Compatibility mode for layout stability:
-  // width solving keeps the legacy onset span while timeline refactor is
-  // validated in parallel. This preserves the previously tuned spacing rule.
-  const onsets =
-    timelineBundle?.spacingAnchorTicks?.length
-      ? [...timelineBundle.spacingAnchorTicks].sort((left, right) => left - right)
-      : timelineBundle?.legacyOnsets?.length
-        ? [...timelineBundle.legacyOnsets].sort((left, right) => left - right)
-      : collectMeasureOnsetTicks(measure).sort((left, right) => left - right)
-  if (onsets.length <= 1) return 0
-  let totalGapPx = 0
-  for (let i = 1; i < onsets.length; i += 1) {
-    const deltaTicks = Math.max(1, onsets[i] - onsets[i - 1])
-    totalGapPx += Math.max(0, mapTickGapToWeight(deltaTicks, spacingConfig))
-  }
-  return Math.max(0, totalGapPx)
+  return getMeasureUniformTimelineWeightMetrics(
+    measure,
+    measureTicks,
+    spacingConfig,
+    timelineBundle,
+  ).totalWidthPx
 }
 
 export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingParams): AppliedTimeAxisSpacingMetrics | null {
@@ -789,7 +715,6 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     spacingAnchorTicks = null,
     preferMeasureBarlineAxis = false,
     preferMeasureEndBarlineAxis = false,
-    enableEdgeGapCap = true,
   } = params
 
   const refs = [
@@ -847,14 +772,8 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
 
   const firstSpacingTick = onsetTicks[0]
   const lastSpacingTick = onsetTicks[onsetTicks.length - 1]
-  const firstOnsetRefs = refsByOnset.get(firstSpacingTick) ?? []
-  const lastOnsetRefs = refsByOnset.get(lastSpacingTick) ?? []
-  const firstLeftExtent = firstOnsetRefs.reduce((max, ref) => Math.max(max, ref.leftExtent), 0)
-  const lastRightExtent = lastOnsetRefs.reduce((max, ref) => Math.max(max, ref.rightExtent), 0)
 
   const usableFormatWidth = Math.max(MIN_RENDER_WIDTH_PX, formatWidth)
-  const { leftPadPx: cappedEdgePaddingLeft, rightPadPx: cappedEdgePaddingRight, minGapPx: minBarlineEdgeGapPx } =
-    resolveEffectiveEdgePadding(spacingConfig)
   const defaultAxisBoundaryStart = noteStartX
   const defaultAxisBoundaryEnd = noteStartX + usableFormatWidth
   const barlineAxisBoundaryStart =
@@ -875,24 +794,17 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
   })
   const axisBoundaryStart = uniformSpacingByTicks ? effectiveBoundary.effectiveStartX : defaultAxisBoundaryStart
   const axisBoundaryEnd = uniformSpacingByTicks ? effectiveBoundary.effectiveEndX : defaultAxisBoundaryEnd
-
-  const edgeLegalStartInset = firstLeftExtent
-  const edgeLegalEndInset = lastRightExtent
-  const startPad = uniformSpacingByTicks
-    ? Math.max(
-      Math.max(0, cappedEdgePaddingLeft + UNIFORM_TICK_SPACING_START_GUARD_PX),
-      edgeLegalStartInset + cappedEdgePaddingLeft,
-    )
-    : Math.max(1, edgeLegalStartInset + cappedEdgePaddingLeft)
-  const endPad = uniformSpacingByTicks
-    ? Math.max(
-      Math.max(0, cappedEdgePaddingRight + UNIFORM_TICK_SPACING_END_GUARD_PX),
-      edgeLegalEndInset + cappedEdgePaddingRight,
-    )
-    : Math.max(1, edgeLegalEndInset + cappedEdgePaddingRight)
-
-  const axisStart = axisBoundaryStart + startPad
-  const axisEnd = axisBoundaryEnd - endPad
+  const spacingWeights = buildMeasureSpacingWeights({
+    spacingTicks: onsetTicks,
+    measureTicks: measureTotalTicks,
+    spacingConfig,
+  })
+  const axisStart = Math.min(
+    axisBoundaryEnd,
+    axisBoundaryStart + Math.max(0, spacingWeights.leadingGapPx),
+  )
+  const axisEnd = Math.max(axisStart, axisBoundaryEnd)
+  const distributableWidth = Math.max(0, axisEnd - axisStart)
 
   const targetXByOnset = new Map<number, number>()
 
@@ -909,17 +821,21 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
   }
 
   if (targetXByOnset.size === 0 && uniformSpacingByTicks) {
-    const timelineWeightMap = buildUniformTimelineWeightMap(onsetTicks, measureTotalTicks, spacingConfig)
-    const spanWidth = Math.max(1, axisEnd - axisStart)
-    const intrinsicSpan = Math.max(0.0001, timelineWeightMap.totalWeight)
-    // Let widened measures actually open up their internal timeline spacing.
-    // Otherwise a larger measure would only center the same note cluster.
-    const timelineScale = spanWidth / intrinsicSpan
-    onsetTicks.forEach((onset) => {
-      const cumulativeWeight = timelineWeightMap.cumulativeWeightByTick.get(onset)
-      if (cumulativeWeight === undefined) return
-      targetXByOnset.set(onset, axisStart + cumulativeWeight * timelineScale)
-    })
+    if (onsetTicks.length === 1 || spacingWeights.totalWeight <= 0.0001) {
+      onsetTicks.forEach((onset) => {
+        targetXByOnset.set(onset, axisStart)
+      })
+    } else {
+      targetXByOnset.set(onsetTicks[0], axisStart)
+      let cumulativeWeight = 0
+      for (let index = 1; index < onsetTicks.length; index += 1) {
+        cumulativeWeight += spacingWeights.segmentWeights[index - 1] ?? 0
+        targetXByOnset.set(
+          onsetTicks[index],
+          axisStart + distributableWidth * (cumulativeWeight / Math.max(0.0001, spacingWeights.totalWeight)),
+        )
+      }
+    }
 
     if (onsetTicks.length > 1) {
       const onsetSequence = onsetTicks
@@ -960,44 +876,23 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
           adjustedPositions[i] = minAllowed
         }
       }
-
-      const hasAdjustedGap = adjustedPositions.some((x, index) => Math.abs(x - basePositions[index]) > 0.001)
-      if (hasAdjustedGap) {
-        const overflow = adjustedPositions[adjustedPositions.length - 1] - axisEnd
-        if (overflow > 0) {
-          const availableLeftShift = Math.max(0, adjustedPositions[0] - axisStart)
-          const shift = Math.min(overflow, availableLeftShift)
-          if (shift > 0) {
-            for (let i = 0; i < adjustedPositions.length; i += 1) {
-              adjustedPositions[i] -= shift
-            }
-          }
-        }
-
-        onsetSequence.forEach((onset, index) => {
-          targetXByOnset.set(onset, adjustedPositions[index])
-        })
-      }
+      onsetSequence.forEach((onset, index) => {
+        targetXByOnset.set(onset, adjustedPositions[index])
+      })
     }
   } else if (targetXByOnset.size === 0) {
 
     if (axisEnd <= axisStart) {
-      const fallbackX = noteStartX + usableFormatWidth * 0.5
+      const fallbackX = axisStart
       onsetTicks.forEach((onset) => {
         targetXByOnset.set(onset, fallbackX)
       })
     } else if (onsetTicks.length === 1) {
-      targetXByOnset.set(onsetTicks[0], (axisStart + axisEnd) * 0.5)
+      targetXByOnset.set(onsetTicks[0], axisStart)
     } else {
-      const spanWidth = axisEnd - axisStart
-      const gapWeights: number[] = []
-      for (let i = 1; i < onsetTicks.length; i += 1) {
-        const deltaTicks = Math.max(1, onsetTicks[i] - onsetTicks[i - 1])
-        gapWeights.push(mapTickGapToWeight(deltaTicks, spacingConfig))
-      }
-      const totalWeight = gapWeights.reduce((sum, value) => sum + value, 0)
-      if (totalWeight <= 0) {
-        const step = spanWidth / (onsetTicks.length - 1)
+      const totalWeight = Math.max(0, spacingWeights.totalWeight)
+      if (totalWeight <= 0.0001) {
+        const step = distributableWidth / (onsetTicks.length - 1)
         onsetTicks.forEach((onset, index) => {
           targetXByOnset.set(onset, axisStart + step * index)
         })
@@ -1005,9 +900,9 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
         targetXByOnset.set(onsetTicks[0], axisStart)
         let cumulative = 0
         for (let i = 1; i < onsetTicks.length; i += 1) {
-          cumulative += gapWeights[i - 1]
+          cumulative += spacingWeights.segmentWeights[i - 1] ?? 0
           const ratio = cumulative / totalWeight
-          targetXByOnset.set(onsetTicks[i], axisStart + spanWidth * ratio)
+          targetXByOnset.set(onsetTicks[i], axisStart + distributableWidth * ratio)
         }
       }
     }
@@ -1027,39 +922,10 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
         const glyphGap = rightExtents[index] + leftExtents[index + 1] + spacingConfig.interOnsetPaddingPx
         return Math.max(1, glyphGap + getDurationAddedMinGapPx(deltaTicks, spacingConfig))
       })
-      const spanWidth = Math.max(1, axisEnd - axisStart)
       const minGapTotal = minGaps.reduce((sum, value) => sum + value, 0)
-      const gapScale = minGapTotal > spanWidth ? spanWidth / minGapTotal : 1
+      const gapScale = minGapTotal > Math.max(1, distributableWidth) ? Math.max(1, distributableWidth) / minGapTotal : 1
       const scaledMinGaps = minGaps.map((value) => value * gapScale)
       const constrained = [...basePositions]
-
-      for (let i = 1; i < constrained.length; i += 1) {
-        const minAllowed = constrained[i - 1] + scaledMinGaps[i - 1]
-        if (constrained[i] < minAllowed) {
-          constrained[i] = minAllowed
-        }
-      }
-
-      const overflow = constrained[constrained.length - 1] - axisEnd
-      if (overflow > 0) {
-        for (let i = 0; i < constrained.length; i += 1) {
-          constrained[i] -= overflow
-        }
-      }
-
-      for (let i = constrained.length - 2; i >= 0; i -= 1) {
-        const maxAllowed = constrained[i + 1] - scaledMinGaps[i]
-        if (constrained[i] > maxAllowed) {
-          constrained[i] = maxAllowed
-        }
-      }
-
-      const underflow = axisStart - constrained[0]
-      if (underflow > 0) {
-        for (let i = 0; i < constrained.length; i += 1) {
-          constrained[i] += underflow
-        }
-      }
 
       for (let i = 1; i < constrained.length; i += 1) {
         const minAllowed = constrained[i - 1] + scaledMinGaps[i - 1]
@@ -1072,26 +938,6 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
         targetXByOnset.set(onset, constrained[index])
       })
     }
-  }
-
-  if (enableEdgeGapCap) {
-    const legalBoundaryStart = axisBoundaryStart + Math.max(0, edgeLegalStartInset)
-    const legalBoundaryEnd = axisBoundaryEnd - Math.max(0, edgeLegalEndInset)
-    applyMeasureEdgeGapCap({
-      noteOnsets: onsetTicks,
-      targetXByOnset,
-      // Use effective spacing boundaries (noteStartX / noteEndX when
-      // key/time signatures occupy measure edges) so edge-cap logic doesn't
-      // push notes into decorations.
-      edgeBoundaryStart: axisBoundaryStart,
-      edgeBoundaryEnd: axisBoundaryEnd,
-      legalBoundaryStart,
-      legalBoundaryEnd,
-      firstLeftExtent,
-      lastRightExtent,
-      minBarlineEdgeGapPx,
-      maxBarlineEdgeGapPx: spacingConfig.maxBarlineEdgeGapPx,
-    })
   }
 
   refs.forEach((ref) => {
@@ -1131,17 +977,19 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     ? Math.max(rightMostGlyphX, resolvedLastX)
     : resolvedLastX
   const spacingAnchorGapFirstToLastPx = Math.max(0, resolvedLastX - resolvedFirstX)
-  const effectiveLeftGapPx = spacingOccupiedLeftX - axisBoundaryStart
-  const effectiveRightGapPx = axisBoundaryEnd - spacingOccupiedRightX
+  const leadingGapPx = Math.max(0, resolvedFirstX - axisBoundaryStart)
+  const trailingGapPx = Math.max(0, axisBoundaryEnd - resolvedLastX)
+  const effectiveLeftGapPx = leadingGapPx
+  const effectiveRightGapPx = trailingGapPx
 
   return {
     effectiveBoundaryStartX: axisBoundaryStart,
     effectiveBoundaryEndX: axisBoundaryEnd,
-    // Always expose actual gap metrics, even when edge-cap translation is
-    // infeasible for the current width. Width solver needs real numbers to
-    // continue shrinking and converge to configured edge bounds.
     effectiveLeftGapPx,
     effectiveRightGapPx,
+    leadingGapPx,
+    trailingTailTicks: spacingWeights.trailingTailTicks,
+    trailingGapPx,
     spacingOccupiedLeftX,
     spacingOccupiedRightX,
     spacingAnchorGapFirstToLastPx,

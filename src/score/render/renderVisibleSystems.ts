@@ -50,7 +50,6 @@ import type {
 
 const OVERFLOW_ANALYSIS_MAX_PASSES = 16
 const OVERFLOW_RECOVERY_PAD_PX = 2
-const EDGE_EXCESS_SHRINK_MAX_STEP_PX = 48
 const MIN_TIMELINE_WEIGHT = 0.0001
 const MIN_FORMAT_WIDTH_PX = 8
 
@@ -284,36 +283,6 @@ function getMeasureSpacingRightEdge(params: {
 }): number {
   const occupiedBounds = getMeasureSpacingOccupiedBounds(params)
   return occupiedBounds ? occupiedBounds.rightX : Number.NEGATIVE_INFINITY
-}
-
-function getMeasureEdgeExcessPx(params: {
-  layouts: NoteLayout[]
-  leftBoundaryX: number
-  rightBoundaryX: number
-  maxBarlineEdgeGapPx: number
-  spacingMetrics?: AppliedTimeAxisSpacingMetrics | null
-}): number {
-  const {
-    layouts,
-    leftBoundaryX,
-    rightBoundaryX,
-    maxBarlineEdgeGapPx,
-    spacingMetrics = null,
-  } = params
-  if (!Number.isFinite(maxBarlineEdgeGapPx)) return 0
-  if (!Number.isFinite(leftBoundaryX) || !Number.isFinite(rightBoundaryX) || leftBoundaryX >= rightBoundaryX) return 0
-  const maxGap = Math.max(0, maxBarlineEdgeGapPx)
-  const occupiedBounds = getMeasureSpacingOccupiedBounds({ layouts, spacingMetrics })
-  if (!occupiedBounds) return 0
-  const firstX = occupiedBounds.leftX
-  const lastX = occupiedBounds.rightX
-  if (!Number.isFinite(firstX) || !Number.isFinite(lastX)) return 0
-  const leftGap = firstX - leftBoundaryX
-  const rightGap = rightBoundaryX - lastX
-  if (!Number.isFinite(leftGap) || !Number.isFinite(rightGap)) return 0
-  const leftExcess = Math.max(0, leftGap - maxGap)
-  const rightExcess = Math.max(0, rightGap - maxGap)
-  return leftExcess + rightExcess
 }
 
 export function renderVisibleSystems(params: {
@@ -956,6 +925,9 @@ export function renderVisibleSystems(params: {
           effectiveBoundaryEndX: effectiveLayoutMetrics.effectiveBoundaryEndX,
           effectiveLeftGapPx: effectiveLayoutMetrics.effectiveLeftGapPx,
           effectiveRightGapPx: effectiveLayoutMetrics.effectiveRightGapPx,
+          leadingGapPx: currentSpacingMetrics?.leadingGapPx,
+          trailingTailTicks: currentSpacingMetrics?.trailingTailTicks,
+          trailingGapPx: currentSpacingMetrics?.trailingGapPx,
           spacingOccupiedLeftX: currentSpacingMetrics?.spacingOccupiedLeftX,
           spacingOccupiedRightX: currentSpacingMetrics?.spacingOccupiedRightX,
           spacingAnchorGapFirstToLastPx: currentSpacingMetrics?.spacingAnchorGapFirstToLastPx,
@@ -1179,6 +1151,9 @@ export function renderVisibleSystems(params: {
           effectiveBoundaryEndX: effectiveLayoutMetrics.effectiveBoundaryEndX,
           effectiveLeftGapPx: effectiveLayoutMetrics.effectiveLeftGapPx,
           effectiveRightGapPx: effectiveLayoutMetrics.effectiveRightGapPx,
+          leadingGapPx: currentSpacingMetrics?.leadingGapPx,
+          trailingTailTicks: currentSpacingMetrics?.trailingTailTicks,
+          trailingGapPx: currentSpacingMetrics?.trailingGapPx,
           spacingOccupiedLeftX: currentSpacingMetrics?.spacingOccupiedLeftX,
           spacingOccupiedRightX: currentSpacingMetrics?.spacingOccupiedRightX,
           spacingAnchorGapFirstToLastPx: currentSpacingMetrics?.spacingAnchorGapFirstToLastPx,
@@ -1268,7 +1243,6 @@ export function renderVisibleSystems(params: {
 
     type MeasureProbeStats = {
       overflowPx: number | null
-      edgeExcessPx: number
     }
 
     const measureProbeStatsCache = new Map<string, MeasureProbeStats>()
@@ -1351,19 +1325,12 @@ export function renderVisibleSystems(params: {
         spacingMetrics,
       })
       if (!Number.isFinite(spacingRightEdge)) {
-        const stats: MeasureProbeStats = { overflowPx: null, edgeExcessPx: 0 }
+        const stats: MeasureProbeStats = { overflowPx: null }
         measureProbeStatsCache.set(cacheKey, stats)
         return stats
       }
       const stats: MeasureProbeStats = {
         overflowPx: spacingRightEdge - spacingRightLimitX,
-        edgeExcessPx: getMeasureEdgeExcessPx({
-          layouts: measureNoteLayouts,
-          leftBoundaryX: spacingLeftLimitX,
-          rightBoundaryX: spacingRightLimitX,
-          maxBarlineEdgeGapPx: spacingConfig.maxBarlineEdgeGapPx,
-          spacingMetrics,
-        }),
       }
       measureProbeStatsCache.set(cacheKey, stats)
       return stats
@@ -1375,13 +1342,9 @@ export function renderVisibleSystems(params: {
         systemMeta.forEach((entry, indexInSystem) => {
           const stats = getMeasureProbeStats(entry, measureWidths[indexInSystem] ?? 1)
           const overflow = stats.overflowPx
-          const edgeExcess = stats.edgeExcessPx
           let nextBonus = 0
           if (overflow !== null && overflow > 0.001) {
             nextBonus += overflow + OVERFLOW_RECOVERY_PAD_PX
-          }
-          if (edgeExcess > 0.001) {
-            nextBonus -= Math.min(edgeExcess, EDGE_EXCESS_SHRINK_MAX_STEP_PX)
           }
           if (Math.abs(nextBonus) <= 0.001) return
           fixedWidthBonuses[indexInSystem] = (fixedWidthBonuses[indexInSystem] ?? 0) + nextBonus
@@ -1554,6 +1517,9 @@ export function renderVisibleSystems(params: {
         effectiveBoundaryEndX: effectiveLayoutMetrics.effectiveBoundaryEndX,
         effectiveLeftGapPx: effectiveLayoutMetrics.effectiveLeftGapPx,
         effectiveRightGapPx: effectiveLayoutMetrics.effectiveRightGapPx,
+        leadingGapPx: currentSpacingMetrics?.leadingGapPx,
+        trailingTailTicks: currentSpacingMetrics?.trailingTailTicks,
+        trailingGapPx: currentSpacingMetrics?.trailingGapPx,
         spacingOccupiedLeftX: currentSpacingMetrics?.spacingOccupiedLeftX,
         spacingOccupiedRightX: currentSpacingMetrics?.spacingOccupiedRightX,
         spacingAnchorGapFirstToLastPx: currentSpacingMetrics?.spacingAnchorGapFirstToLastPx,

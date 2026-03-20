@@ -2,13 +2,13 @@ import { Renderer, Stave } from 'vexflow'
 import { SYSTEM_BASS_OFFSET_Y, SYSTEM_TREBLE_OFFSET_Y, TICKS_PER_BEAT } from '../constants'
 import { drawMeasureToContext } from '../render/drawMeasure'
 import type { MeasurePair, ScoreNote, TimeSignature } from '../types'
-import type { TimeAxisSpacingConfig } from './timeAxisSpacing'
+import type { AppliedTimeAxisSpacingMetrics, TimeAxisSpacingConfig } from './timeAxisSpacing'
 import {
   PUBLIC_AXIS_CONSUMPTION_MODE,
   attachMeasureTimelineAxisLayout,
   buildMeasureTimelineBundle,
+  getMeasureUniformTimelineWeightMetrics,
   getMeasureUniformTimelineWeightSpan,
-  getUniformTickSpacingPadding,
   resolvePublicAxisLayoutForConsumption,
 } from './timeAxisSpacing'
 import { resolveEffectiveBoundary } from './effectiveBoundary'
@@ -59,8 +59,8 @@ type MeasureProbeGeometry = {
 }
 
 type MeasureSpacingProbe = {
-  effectiveLeftGapPx: number
-  effectiveRightGapPx: number
+  leadingGapPx: number
+  trailingGapPx: number
   rightOverflowPx: number
   spacingAnchorGapFirstToLastPx: number
 }
@@ -68,7 +68,7 @@ type MeasureSpacingProbe = {
 const MIN_FORMAT_WIDTH_PX = 8
 const EPS = 0.05
 const STEP_PAD_PX = 0.5
-const SOLVER_CACHE_VERSION = 'v2'
+const SOLVER_CACHE_VERSION = 'v3'
 const SOLVER_CACHE_MAX_ENTRIES = 12000
 
 function resolveMeasureMeta(params: {
@@ -157,17 +157,15 @@ function buildMeasureWidthCacheKey(params: {
     `actualStart=${meta.actualStartDecorationWidthPx.toFixed(3)}`,
     `endDecor=${meta.showEndDecorations ? 1 : 0}`,
     `minW=${minMeasureWidthPx.toFixed(3)}`,
+    `lead=${spacingConfig.leadingBarlineGapPx}`,
     `g32=${spacingConfig.baseMinGap32Px}`,
-    `minEdge=${spacingConfig.minBarlineEdgeGapPx}`,
-    `maxEdge=${spacingConfig.maxBarlineEdgeGapPx}`,
-    `leftPad=${spacingConfig.leftEdgePaddingPx}`,
-    `rightPad=${spacingConfig.rightEdgePaddingPx}`,
     `inter=${spacingConfig.interOnsetPaddingPx}`,
     `r32=${ratios.thirtySecond}`,
     `r16=${ratios.sixteenth}`,
     `r8=${ratios.eighth}`,
     `r4=${ratios.quarter}`,
     `r2=${ratios.half}`,
+    `r1=${ratios.whole}`,
     `spacingTicks=${supplementalSpacingTicksSignature}`,
     `treble=${serializeStaffNotesForWidthCache(meta.measure.treble)}`,
     `bass=${serializeStaffNotesForWidthCache(meta.measure.bass)}`,
@@ -228,19 +226,7 @@ function probeMeasureSpacing(
       spacingConfig,
     })
   }
-  const spacingMetricsRef: {
-    current:
-      | {
-          effectiveBoundaryStartX: number
-          effectiveBoundaryEndX: number
-          effectiveLeftGapPx: number
-          effectiveRightGapPx: number
-          spacingOccupiedLeftX: number
-          spacingOccupiedRightX: number
-          spacingAnchorGapFirstToLastPx: number
-        }
-      | null
-  } = { current: null }
+  const spacingMetricsRef: { current: AppliedTimeAxisSpacingMetrics | null } = { current: null }
   const measureNoteLayouts = drawMeasureToContext({
     context,
     measure: meta.measure,
@@ -269,17 +255,7 @@ function probeMeasureSpacing(
     preferMeasureEndBarlineAxis: meta.preferMeasureEndBarlineAxis,
     enableEdgeGapCap: true,
     onSpacingMetrics: (
-      metrics:
-        | {
-            effectiveBoundaryStartX: number
-            effectiveBoundaryEndX: number
-            effectiveLeftGapPx: number
-            effectiveRightGapPx: number
-            spacingOccupiedLeftX: number
-            spacingOccupiedRightX: number
-            spacingAnchorGapFirstToLastPx: number
-          }
-        | null,
+      metrics: AppliedTimeAxisSpacingMetrics | null,
     ) => {
       spacingMetricsRef.current = metrics
     },
@@ -287,20 +263,20 @@ function probeMeasureSpacing(
   const appliedMetrics = spacingMetricsRef.current
   if (
     appliedMetrics &&
-    Number.isFinite(appliedMetrics.effectiveLeftGapPx) &&
-    Number.isFinite(appliedMetrics.effectiveRightGapPx)
+    Number.isFinite(appliedMetrics.leadingGapPx) &&
+    Number.isFinite(appliedMetrics.trailingGapPx)
   ) {
     return {
-      effectiveLeftGapPx: appliedMetrics.effectiveLeftGapPx,
-      effectiveRightGapPx: appliedMetrics.effectiveRightGapPx,
+      leadingGapPx: appliedMetrics.leadingGapPx,
+      trailingGapPx: appliedMetrics.trailingGapPx,
       rightOverflowPx: Math.max(0, -appliedMetrics.effectiveRightGapPx),
       spacingAnchorGapFirstToLastPx: Math.max(0, appliedMetrics.spacingAnchorGapFirstToLastPx),
     }
   }
   if (measureNoteLayouts.length === 0) {
     return {
-      effectiveLeftGapPx: 0,
-      effectiveRightGapPx: 0,
+      leadingGapPx: 0,
+      trailingGapPx: 0,
       rightOverflowPx: 0,
       spacingAnchorGapFirstToLastPx: 0,
     }
@@ -353,8 +329,8 @@ function probeMeasureSpacing(
   const effectiveLeftGapPx = occupiedLeftX - boundary.effectiveStartX
   const effectiveRightGapPx = boundary.effectiveEndX - occupiedRightX
   return {
-    effectiveLeftGapPx,
-    effectiveRightGapPx,
+    leadingGapPx: effectiveLeftGapPx,
+    trailingGapPx: effectiveRightGapPx,
     rightOverflowPx: Math.max(0, occupiedRightX - boundary.effectiveEndX),
     spacingAnchorGapFirstToLastPx:
       Number.isFinite(anchorLeftX) && Number.isFinite(anchorRightX)
@@ -382,16 +358,6 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
     widthCache.clear()
   }
 
-  const maxGapPx = Math.max(0, spacingConfig.maxBarlineEdgeGapPx)
-  const minGapCandidate = Math.max(0, spacingConfig.minBarlineEdgeGapPx)
-  const minGapPx = minGapCandidate <= maxGapPx ? minGapCandidate : maxGapPx
-  const uniformPadding = getUniformTickSpacingPadding(spacingConfig)
-  const sharedAxisPaddingPx = Math.max(
-    0,
-    Math.min(Math.max(0, uniformPadding.startPadPx), maxGapPx) +
-      Math.min(Math.max(0, uniformPadding.endPadPx), maxGapPx),
-  )
-  const edgeGapBudgetPx = maxGapPx * 2
   const metas = resolveMeasureMeta({
     measurePairs,
     keyFifthsByPair: measureKeyFifthsByPair,
@@ -438,9 +404,15 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
       spacingConfig,
       timelineBundle,
     )
+    const timelineMetrics = getMeasureUniformTimelineWeightMetrics(
+      meta.measure,
+      measureTicks,
+      spacingConfig,
+      timelineBundle,
+    )
     let width = Math.max(
       minSolvedMeasureWidthPx,
-      Number((sharedAxisPaddingPx + edgeGapBudgetPx + timelineSpan).toFixed(3)),
+      Number(timelineSpan.toFixed(3)),
     )
 
     if (!shouldProbePrecisely) {
@@ -453,34 +425,35 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
     for (let iteration = 0; iteration < maxIterations; iteration += 1) {
       const probe = probeMeasureSpacing(context, meta, width, spacingConfig, supplementalSpacingTicks)
       if (!probe) break
-      const leftDeficit = Math.max(0, minGapPx - probe.effectiveLeftGapPx)
-      const rightDeficit = Math.max(0, minGapPx - probe.effectiveRightGapPx)
-      const leftExcess = Math.max(0, probe.effectiveLeftGapPx - maxGapPx)
-      const rightExcess = Math.max(0, probe.effectiveRightGapPx - maxGapPx)
-      const timelineCompressionDeficit = Math.max(0, timelineSpan - probe.spacingAnchorGapFirstToLastPx)
+      const leadingGapDeficit = Math.max(0, timelineMetrics.leadingGapPx - probe.leadingGapPx)
+      const trailingGapDeficit = Math.max(0, timelineMetrics.trailingGapPx - probe.trailingGapPx)
+      const timelineCompressionDeficit = Math.max(0, timelineMetrics.anchorSpanPx - probe.spacingAnchorGapFirstToLastPx)
 
       if (
         probe.rightOverflowPx <= EPS &&
-        leftDeficit <= EPS &&
-        rightDeficit <= EPS &&
-        timelineCompressionDeficit <= EPS &&
-        leftExcess <= EPS &&
-        rightExcess <= EPS
+        leadingGapDeficit <= EPS &&
+        trailingGapDeficit <= EPS &&
+        timelineCompressionDeficit <= EPS
       ) {
         break
       }
 
-      if (probe.rightOverflowPx > EPS || leftDeficit > EPS || rightDeficit > EPS || timelineCompressionDeficit > EPS) {
-        const growBy = probe.rightOverflowPx + leftDeficit + rightDeficit + timelineCompressionDeficit + STEP_PAD_PX
+      if (
+        probe.rightOverflowPx > EPS ||
+        leadingGapDeficit > EPS ||
+        trailingGapDeficit > EPS ||
+        timelineCompressionDeficit > EPS
+      ) {
+        const growBy =
+          probe.rightOverflowPx +
+          leadingGapDeficit +
+          trailingGapDeficit +
+          timelineCompressionDeficit +
+          STEP_PAD_PX
         width = Number((Math.max(minSolvedMeasureWidthPx, width + growBy)).toFixed(3))
         continue
       }
-
-      const shrinkBy = Math.max(leftExcess, rightExcess)
-      if (shrinkBy <= EPS) break
-      const nextWidth = Number((Math.max(minSolvedMeasureWidthPx, width - shrinkBy)).toFixed(3))
-      if (Math.abs(nextWidth - width) <= EPS) break
-      width = nextWidth
+      break
     }
 
     if (cacheKey && widthCache) {

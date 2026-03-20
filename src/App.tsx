@@ -373,13 +373,8 @@ function clampBaseMinGap32Px(value: number): number {
   return Number(clamped.toFixed(2))
 }
 
-function clampMaxBarlineEdgeGapPx(value: number): number {
-  const clamped = clampNumber(value, 0, 40)
-  return Number(clamped.toFixed(2))
-}
-
-function clampMinBarlineEdgeGapPx(value: number): number {
-  const clamped = clampNumber(value, 0, 40)
+function clampLeadingBarlineGapPx(value: number): number {
+  const clamped = clampNumber(value, 0, 80)
   return Number(clamped.toFixed(2))
 }
 
@@ -2092,13 +2087,13 @@ function App() {
     const systemRangeKey = systemRanges.map((range) => `${range.startPairIndex}-${range.endPairIndexExclusive}`).join(',')
     const spacingKey = [
       timeAxisSpacingConfig.baseMinGap32Px,
-      timeAxisSpacingConfig.minBarlineEdgeGapPx,
-      timeAxisSpacingConfig.maxBarlineEdgeGapPx,
+      timeAxisSpacingConfig.leadingBarlineGapPx,
       timeAxisSpacingConfig.durationGapRatios.thirtySecond,
       timeAxisSpacingConfig.durationGapRatios.sixteenth,
       timeAxisSpacingConfig.durationGapRatios.eighth,
       timeAxisSpacingConfig.durationGapRatios.quarter,
       timeAxisSpacingConfig.durationGapRatios.half,
+      timeAxisSpacingConfig.durationGapRatios.whole,
       spacingLayoutMode,
     ].join(',')
     return `${scoreWidth}|${scoreHeight}|${pageHorizontalPaddingPx}|${systemRangeKey}|${spacingKey}`
@@ -2108,13 +2103,13 @@ function App() {
     pageHorizontalPaddingPx,
     systemRanges,
     timeAxisSpacingConfig.baseMinGap32Px,
-    timeAxisSpacingConfig.minBarlineEdgeGapPx,
-    timeAxisSpacingConfig.maxBarlineEdgeGapPx,
+    timeAxisSpacingConfig.leadingBarlineGapPx,
     timeAxisSpacingConfig.durationGapRatios.thirtySecond,
     timeAxisSpacingConfig.durationGapRatios.sixteenth,
     timeAxisSpacingConfig.durationGapRatios.eighth,
     timeAxisSpacingConfig.durationGapRatios.quarter,
     timeAxisSpacingConfig.durationGapRatios.half,
+    timeAxisSpacingConfig.durationGapRatios.whole,
     spacingLayoutMode,
   ])
   const [chordMarkerLayoutRevision, setChordMarkerLayoutRevision] = useState(0)
@@ -2259,16 +2254,14 @@ function App() {
     horizontalMeasureWidthCacheRef.current.clear()
   }, [
     timeAxisSpacingConfig.baseMinGap32Px,
-    timeAxisSpacingConfig.minBarlineEdgeGapPx,
-    timeAxisSpacingConfig.maxBarlineEdgeGapPx,
-    timeAxisSpacingConfig.leftEdgePaddingPx,
-    timeAxisSpacingConfig.rightEdgePaddingPx,
+    timeAxisSpacingConfig.leadingBarlineGapPx,
     timeAxisSpacingConfig.interOnsetPaddingPx,
     timeAxisSpacingConfig.durationGapRatios.thirtySecond,
     timeAxisSpacingConfig.durationGapRatios.sixteenth,
     timeAxisSpacingConfig.durationGapRatios.eighth,
     timeAxisSpacingConfig.durationGapRatios.quarter,
     timeAxisSpacingConfig.durationGapRatios.half,
+    timeAxisSpacingConfig.durationGapRatios.whole,
   ])
 
   const pushUndoSnapshot = useCallback((sourcePairs: MeasurePair[]) => {
@@ -5709,6 +5702,17 @@ function App() {
             showEndDecorations: measureLayout.showEndTimeSignature,
           })
         : null
+      const spacingAnchorTicks = timelineBundle?.spacingAnchorTicks ?? orderedOnsets
+      const firstSpacingTick = spacingAnchorTicks.length > 0 ? spacingAnchorTicks[0] ?? null : null
+      const lastSpacingTick = spacingAnchorTicks.length > 0 ? spacingAnchorTicks[spacingAnchorTicks.length - 1] ?? null : null
+      const firstSpacingTickX =
+        typeof firstSpacingTick === 'number' && Number.isFinite(firstSpacingTick)
+          ? timelineBundle?.spacingTickToX.get(firstSpacingTick) ?? timeAxisPointXByOnset.get(firstSpacingTick) ?? null
+          : null
+      const lastSpacingTickX =
+        typeof lastSpacingTick === 'number' && Number.isFinite(lastSpacingTick)
+          ? timelineBundle?.spacingTickToX.get(lastSpacingTick) ?? timeAxisPointXByOnset.get(lastSpacingTick) ?? null
+          : null
 
       return {
         pairIndex,
@@ -5760,6 +5764,24 @@ function App() {
             : effectiveBoundary && Number.isFinite(lastVisualRightX)
               ? Number((effectiveBoundary.effectiveEndX - lastVisualRightX).toFixed(3))
               : null,
+        leadingGapPx:
+          measureLayout && Number.isFinite(measureLayout.leadingGapPx)
+            ? Number((measureLayout.leadingGapPx as number).toFixed(3))
+            : effectiveBoundary && typeof firstSpacingTickX === 'number' && Number.isFinite(firstSpacingTickX)
+              ? Number((firstSpacingTickX - effectiveBoundary.effectiveStartX).toFixed(3))
+              : null,
+        trailingTailTicks:
+          measureLayout && Number.isFinite(measureLayout.trailingTailTicks)
+            ? Math.max(0, Math.round(measureLayout.trailingTailTicks as number))
+            : timelineBundle && typeof lastSpacingTick === 'number' && Number.isFinite(lastSpacingTick)
+              ? Math.max(0, Math.round(timelineBundle.measureTicks - lastSpacingTick))
+              : null,
+        trailingGapPx:
+          measureLayout && Number.isFinite(measureLayout.trailingGapPx)
+            ? Number((measureLayout.trailingGapPx as number).toFixed(3))
+            : effectiveBoundary && typeof lastSpacingTickX === 'number' && Number.isFinite(lastSpacingTickX)
+              ? Number((effectiveBoundary.effectiveEndX - lastSpacingTickX).toFixed(3))
+              : null,
         spacingOccupiedLeftX:
           measureLayout && Number.isFinite(measureLayout.spacingOccupiedLeftX)
             ? Number((measureLayout.spacingOccupiedLeftX as number).toFixed(3))
@@ -5774,7 +5796,7 @@ function App() {
             : null,
         timeAxisTicksPerBeat: TICKS_PER_BEAT,
         legacyOnsets: timelineBundle?.legacyOnsets ?? orderedOnsets,
-        spacingAnchorTicks: timelineBundle?.spacingAnchorTicks ?? orderedOnsets,
+        spacingAnchorTicks,
         spacingTickToX:
           timelineBundle?.spacingTickToX
             ? Object.fromEntries(
@@ -6176,13 +6198,13 @@ function App() {
         pageHorizontalPaddingPx={pageHorizontalPaddingPx}
         minMeasureWidthPx={safeMinMeasureWidthPx}
         baseMinGap32Px={timeAxisSpacingConfig.baseMinGap32Px}
-        minBarlineEdgeGapPx={timeAxisSpacingConfig.minBarlineEdgeGapPx}
-        maxBarlineEdgeGapPx={timeAxisSpacingConfig.maxBarlineEdgeGapPx}
+        leadingBarlineGapPx={timeAxisSpacingConfig.leadingBarlineGapPx}
         durationGapRatio32={timeAxisSpacingConfig.durationGapRatios.thirtySecond}
         durationGapRatio16={timeAxisSpacingConfig.durationGapRatios.sixteenth}
         durationGapRatio8={timeAxisSpacingConfig.durationGapRatios.eighth}
         durationGapRatio4={timeAxisSpacingConfig.durationGapRatios.quarter}
         durationGapRatio2={timeAxisSpacingConfig.durationGapRatios.half}
+        durationGapRatioWhole={timeAxisSpacingConfig.durationGapRatios.whole}
         onPageHorizontalPaddingPxChange={(nextValue) =>
           setPageHorizontalPaddingPx(clampPageHorizontalPaddingPx(nextValue))
         }
@@ -6193,16 +6215,10 @@ function App() {
             baseMinGap32Px: clampBaseMinGap32Px(nextValue),
           }))
         }
-        onMaxBarlineEdgeGapPxChange={(nextValue) =>
+        onLeadingBarlineGapPxChange={(nextValue) =>
           setTimeAxisSpacingConfig((current) => ({
             ...current,
-            maxBarlineEdgeGapPx: clampMaxBarlineEdgeGapPx(nextValue),
-          }))
-        }
-        onMinBarlineEdgeGapPxChange={(nextValue) =>
-          setTimeAxisSpacingConfig((current) => ({
-            ...current,
-            minBarlineEdgeGapPx: clampMinBarlineEdgeGapPx(nextValue),
+            leadingBarlineGapPx: clampLeadingBarlineGapPx(nextValue),
           }))
         }
         onDurationGapRatio32Change={(nextValue) =>
@@ -6247,6 +6263,15 @@ function App() {
             durationGapRatios: {
               ...current.durationGapRatios,
               half: clampDurationGapRatio(nextValue),
+            },
+          }))
+        }
+        onDurationGapRatioWholeChange={(nextValue) =>
+          setTimeAxisSpacingConfig((current) => ({
+            ...current,
+            durationGapRatios: {
+              ...current.durationGapRatios,
+              whole: clampDurationGapRatio(nextValue),
             },
           }))
         }

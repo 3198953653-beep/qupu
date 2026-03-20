@@ -6,6 +6,7 @@ export type PublicAxisDurationGapRatioConfig = {
   eighth: number
   quarter: number
   half: number
+  whole: number
 }
 
 export type PublicAxisSpacingConfig = {
@@ -19,10 +20,37 @@ const BASE_GAP_UNIT_PX = 3.5
 
 function mapTickGapToWeight(deltaTicks: number, config: PublicAxisSpacingConfig): number {
   const base32GapPx = Math.max(0, config.baseMinGap32Px)
-  const base32Ratio = Math.max(0.0001, config.durationGapRatios.thirtySecond)
   const safeTicks = Math.max(1, deltaTicks)
-  const weightPerTick = (base32GapPx * base32Ratio * BASE_GAP_UNIT_PX) / 2
-  return safeTicks * weightPerTick
+  const anchors: Array<{ ticks: number; ratio: number }> = [
+    { ticks: 2, ratio: config.durationGapRatios.thirtySecond },
+    { ticks: 4, ratio: config.durationGapRatios.sixteenth },
+    { ticks: 8, ratio: config.durationGapRatios.eighth },
+    { ticks: 16, ratio: config.durationGapRatios.quarter },
+    { ticks: 32, ratio: config.durationGapRatios.half },
+    { ticks: 64, ratio: config.durationGapRatios.whole },
+  ]
+  let ratio = anchors[anchors.length - 1]?.ratio ?? 1
+  if (safeTicks <= anchors[0].ticks) {
+    ratio = anchors[0].ratio
+  } else if (safeTicks < anchors[anchors.length - 1].ticks) {
+    for (let index = 1; index < anchors.length; index += 1) {
+      const left = anchors[index - 1]
+      const right = anchors[index]
+      if (safeTicks === right.ticks) {
+        ratio = right.ratio
+        break
+      }
+      if (safeTicks < right.ticks) {
+        const leftLog = Math.log2(left.ticks)
+        const rightLog = Math.log2(right.ticks)
+        const tickLog = Math.log2(safeTicks)
+        const blend = (tickLog - leftLog) / Math.max(0.0001, rightLog - leftLog)
+        ratio = left.ratio + (right.ratio - left.ratio) * blend
+        break
+      }
+    }
+  }
+  return base32GapPx * Math.max(0.0001, ratio) * BASE_GAP_UNIT_PX
 }
 
 export function getPublicTimelineAnchorTicks(

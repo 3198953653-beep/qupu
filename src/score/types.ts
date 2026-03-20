@@ -299,6 +299,9 @@ export type MeasureLayout = {
   effectiveBoundaryEndX?: number
   effectiveLeftGapPx?: number
   effectiveRightGapPx?: number
+  leadingGapPx?: number
+  trailingTailTicks?: number
+  trailingGapPx?: number
   spacingOccupiedLeftX?: number
   spacingOccupiedRightX?: number
   spacingAnchorGapFirstToLastPx?: number

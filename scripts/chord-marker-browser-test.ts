@@ -28,6 +28,9 @@ type MeasureCoordinateReport = {
     actualStartDecorationWidthPx?: number | null
     spacingAnchorTicks?: number[]
     spacingTickToX?: Record<string, number | null>
+    leadingGapPx?: number | null
+    trailingTailTicks?: number | null
+    trailingGapPx?: number | null
     spacingOccupiedLeftX?: number | null
     spacingOccupiedRightX?: number | null
     spacingAnchorGapFirstToLastPx?: number | null
@@ -56,6 +59,21 @@ function buildTwoHalfNoteImportXml(): string {
     bass: [
       { id: `two-half-bass-${measureIndex}-0`, pitch: 'c/3', duration: 'h' },
       { id: `two-half-bass-${measureIndex}-1`, pitch: 'c/3', duration: 'h' },
+    ],
+  }))
+  return buildMusicXmlFromMeasurePairs({
+    measurePairs,
+    timeSignaturesByMeasure: Array.from({ length: DEFAULT_DEMO_MEASURE_COUNT }, () => ({ beats: 4, beatType: 4 })),
+  })
+}
+
+function buildWholeNoteImportXml(): string {
+  const measurePairs: MeasurePair[] = Array.from({ length: DEFAULT_DEMO_MEASURE_COUNT }, (_, measureIndex) => ({
+    treble: [
+      { id: `whole-import-treble-${measureIndex}-0`, pitch: 'c/5', duration: 'w' },
+    ],
+    bass: [
+      { id: `whole-import-bass-${measureIndex}-0`, pitch: 'c/3', duration: 'w' },
     ],
   }))
   return buildMusicXmlFromMeasurePairs({
@@ -166,6 +184,15 @@ async function ensureSpacingPanelOpen(page: Page): Promise<void> {
     return
   }
   await clickButton(page, '间距大小')
+  await slider.waitFor()
+}
+
+async function ensureDurationRatioPanelOpen(page: Page): Promise<void> {
+  const slider = page.locator('#duration-ratio-32')
+  if (await slider.isVisible().catch(() => false)) {
+    return
+  }
+  await clickButton(page, '时值比例')
   await slider.waitFor()
 }
 
@@ -418,6 +445,30 @@ async function waitForTwoHalfImport(page: Page): Promise<void> {
   })
 }
 
+async function waitForWholeNoteImport(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const api = (window as unknown as {
+      __scoreDebug: {
+        dumpAllMeasureCoordinates: () => MeasureCoordinateReport
+      }
+    }).__scoreDebug
+    const report = api.dumpAllMeasureCoordinates()
+    const firstRow = report.rows[0]
+    if (!firstRow) return false
+    const trebleNotes = firstRow.notes.filter((note) => note.staff === 'treble' && !note.isRest)
+    const bassNotes = firstRow.notes.filter((note) => note.staff === 'bass' && !note.isRest)
+    return (
+      trebleNotes.length === 1 &&
+      bassNotes.length === 1 &&
+      trebleNotes[0]?.pitch === 'c/5' &&
+      trebleNotes[0]?.duration === 'w' &&
+      bassNotes[0]?.pitch === 'c/3' &&
+      bassNotes[0]?.duration === 'w' &&
+      (firstRow.spacingAnchorTicks ?? []).join(',') === '0'
+    )
+  })
+}
+
 function getSpacingTickX(row: MeasureCoordinateReport['rows'][number], tick: number): number {
   const value = row.spacingTickToX?.[String(tick)] ?? null
   if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -465,6 +516,27 @@ function getRequiredActualStartDecorationWidth(row: MeasureCoordinateReport['row
     throw new Error(`${label} actualStartDecorationWidthPx is missing.`)
   }
   return row.actualStartDecorationWidthPx
+}
+
+function getRequiredLeadingGap(row: MeasureCoordinateReport['rows'][number], label: string): number {
+  if (typeof row.leadingGapPx !== 'number' || !Number.isFinite(row.leadingGapPx)) {
+    throw new Error(`${label} leadingGapPx is missing.`)
+  }
+  return row.leadingGapPx
+}
+
+function getRequiredTrailingTailTicks(row: MeasureCoordinateReport['rows'][number], label: string): number {
+  if (typeof row.trailingTailTicks !== 'number' || !Number.isFinite(row.trailingTailTicks)) {
+    throw new Error(`${label} trailingTailTicks is missing.`)
+  }
+  return row.trailingTailTicks
+}
+
+function getRequiredTrailingGap(row: MeasureCoordinateReport['rows'][number], label: string): number {
+  if (typeof row.trailingGapPx !== 'number' || !Number.isFinite(row.trailingGapPx)) {
+    throw new Error(`${label} trailingGapPx is missing.`)
+  }
+  return row.trailingGapPx
 }
 
 async function main() {
@@ -601,6 +673,22 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('.score-measure-highlight') !== null)
 
     await ensureSpacingPanelOpen(page)
+    const spacingControlPresence = await page.evaluate(() => ({
+      hasLeadingGap: document.querySelector('#leading-barline-gap-range') !== null,
+      hasOldMaxGap: document.querySelector('#barline-edge-max-gap') !== null,
+      hasOldMinGap: document.querySelector('#barline-edge-min-gap') !== null,
+    }))
+    if (!spacingControlPresence.hasLeadingGap) {
+      throw new Error('Missing the new #leading-barline-gap-range control.')
+    }
+    if (spacingControlPresence.hasOldMaxGap || spacingControlPresence.hasOldMinGap) {
+      throw new Error('Old barline edge-gap controls should be removed from the spacing panel.')
+    }
+    await ensureDurationRatioPanelOpen(page)
+    const defaultWholeRatio = await getInputValue(page, '#duration-ratio-1')
+    if (Math.abs(defaultWholeRatio - 1.4) > 0.01) {
+      throw new Error(`Expected default whole-note duration ratio to be 1.4, got ${defaultWholeRatio}.`)
+    }
 
     const defaultMinMeasureWidthPx = await getInputValue(page, '#min-measure-width-input')
     if (defaultMinMeasureWidthPx !== 120) {
@@ -610,6 +698,9 @@ async function main() {
     const wholeDefaultWidth = getRequiredMeasureWidth(wholeDefaultFirstRow, 'Whole-note default first')
     const wholeDefaultRenderedWidth = getRequiredRenderedMeasureWidth(wholeDefaultFirstRow, 'Whole-note default first')
     const wholeDefaultGap = getSpacingGap(wholeDefaultFirstRow, 0, 32)
+    const wholeDefaultLeadingGap = getRequiredLeadingGap(wholeDefaultFirstRow, 'Whole-note default first')
+    const wholeDefaultTrailingTailTicks = getRequiredTrailingTailTicks(wholeDefaultFirstRow, 'Whole-note default first')
+    const wholeDefaultTrailingGap = getRequiredTrailingGap(wholeDefaultFirstRow, 'Whole-note default first')
     if (wholeDefaultWidth < 120) {
       throw new Error(`Whole-note default first measure should respect the 120px floor, got ${wholeDefaultWidth}.`)
     }
@@ -618,10 +709,30 @@ async function main() {
         `Whole-note first measure should render wider than its content width when start decorations exist: content=${wholeDefaultWidth.toFixed(3)} rendered=${wholeDefaultRenderedWidth.toFixed(3)}.`,
       )
     }
+    if (Math.abs(wholeDefaultLeadingGap - 9.7) > 1.0) {
+      throw new Error(`Whole-note default leading gap should stay near 9.7px, got ${wholeDefaultLeadingGap}.`)
+    }
+    if (wholeDefaultTrailingTailTicks !== 32) {
+      throw new Error(`Whole-note demo should expose a 32-tick trailing tail, got ${wholeDefaultTrailingTailTicks}.`)
+    }
+    if (!(wholeDefaultTrailingGap > 0)) {
+      throw new Error(`Whole-note demo trailing gap should be positive, got ${wholeDefaultTrailingGap}.`)
+    }
+
+    await setInputValue(page, '#leading-barline-gap-range', 22.5)
+    await page.waitForFunction((expectedLeadingGap) => {
+      const api = (window as unknown as {
+        __scoreDebug: {
+          dumpAllMeasureCoordinates: () => MeasureCoordinateReport
+        }
+      }).__scoreDebug
+      const row = api.dumpAllMeasureCoordinates().rows[0]
+      return !!row && typeof row.leadingGapPx === 'number' && Math.abs(row.leadingGapPx - expectedLeadingGap) <= 0.8
+    }, 22.5)
 
     await setInputValue(page, '#min-measure-width-input', 200)
     await page.waitForFunction(
-      ({ previousWidth, previousGap }) => {
+      ({ previousWidth, previousGap, expectedLeadingGap }) => {
         const api = (window as unknown as {
           __scoreDebug: {
             dumpAllMeasureCoordinates: () => MeasureCoordinateReport
@@ -635,9 +746,15 @@ async function main() {
           typeof row.spacingAnchorGapFirstToLastPx === 'number' && Number.isFinite(row.spacingAnchorGapFirstToLastPx)
             ? row.spacingAnchorGapFirstToLastPx
             : fallbackGap
-        return row.measureWidth >= 199.5 && row.measureWidth > previousWidth + 8 && gap > previousGap + 8
+        return (
+          row.measureWidth >= 199.5 &&
+          row.measureWidth > previousWidth + 8 &&
+          gap > previousGap + 8 &&
+          typeof row.leadingGapPx === 'number' &&
+          Math.abs(row.leadingGapPx - expectedLeadingGap) <= 0.8
+        )
       },
-      { previousWidth: wholeDefaultWidth, previousGap: wholeDefaultGap },
+      { previousWidth: wholeDefaultWidth, previousGap: wholeDefaultGap, expectedLeadingGap: 22.5 },
     )
 
     const wholeExpandedReport = await getMeasureCoordinates(page)
@@ -662,7 +779,7 @@ async function main() {
       return input?.value === '120'
     })
     await page.waitForFunction(
-      ({ baselineWidth, baselineGap }) => {
+      ({ baselineWidth, baselineGap, baselineLeadingGap }) => {
         const api = (window as unknown as {
           __scoreDebug: {
             dumpAllMeasureCoordinates: () => MeasureCoordinateReport
@@ -676,9 +793,14 @@ async function main() {
           typeof row.spacingAnchorGapFirstToLastPx === 'number' && Number.isFinite(row.spacingAnchorGapFirstToLastPx)
             ? row.spacingAnchorGapFirstToLastPx
             : fallbackGap
-        return Math.abs(row.measureWidth - baselineWidth) <= 1.5 && Math.abs(gap - baselineGap) <= 1.5
+        return (
+          Math.abs(row.measureWidth - baselineWidth) <= 1.5 &&
+          Math.abs(gap - baselineGap) <= 1.5 &&
+          typeof row.leadingGapPx === 'number' &&
+          Math.abs(row.leadingGapPx - baselineLeadingGap) <= 0.8
+        )
       },
-      { baselineWidth: wholeDefaultWidth, baselineGap: wholeDefaultGap },
+      { baselineWidth: wholeDefaultWidth, baselineGap: wholeDefaultGap, baselineLeadingGap: wholeDefaultLeadingGap },
     )
 
     const wholeResetSpacingReport = await getMeasureCoordinates(page)
@@ -900,6 +1022,114 @@ async function main() {
       throw new Error(`Two-half first measure should not shrink below the 120px floor, got ${twoHalfWidth}.`)
     }
 
+    const wholeNoteImportXml = buildWholeNoteImportXml()
+    await importMusicXmlViaDebugApi(page, wholeNoteImportXml)
+    await waitForWholeNoteImport(page)
+    await ensureSpacingPanelOpen(page)
+    await ensureDurationRatioPanelOpen(page)
+    await setInputValue(page, '#min-measure-width-input', 1)
+    await page.waitForFunction(() => {
+      const api = (window as unknown as {
+        __scoreDebug: {
+          dumpAllMeasureCoordinates: () => MeasureCoordinateReport
+        }
+      }).__scoreDebug
+      const row = api.dumpAllMeasureCoordinates().rows[0]
+      return !!row && row.trailingTailTicks === 64 && typeof row.measureWidth === 'number' && row.measureWidth < 110
+    })
+
+    const importedWholeDefaultReport = await getMeasureCoordinates(page)
+    const importedWholeDefaultFirstRow = importedWholeDefaultReport.rows[0]
+    if (!importedWholeDefaultFirstRow) {
+      throw new Error('Whole-note import report is missing the first row.')
+    }
+    const importedWholeDefaultTrailingTailTicks = getRequiredTrailingTailTicks(
+      importedWholeDefaultFirstRow,
+      'Whole-note import default first',
+    )
+    const importedWholeDefaultLeadingGap = getRequiredLeadingGap(
+      importedWholeDefaultFirstRow,
+      'Whole-note import default first',
+    )
+    const importedWholeDefaultTrailingGap = getRequiredTrailingGap(
+      importedWholeDefaultFirstRow,
+      'Whole-note import default first',
+    )
+    const importedWholeDefaultWidth = getRequiredMeasureWidth(
+      importedWholeDefaultFirstRow,
+      'Whole-note import default first',
+    )
+    if (importedWholeDefaultTrailingTailTicks !== 64) {
+      throw new Error(
+        `Whole-note import should expose a full-measure 64-tick trailing tail, got ${importedWholeDefaultTrailingTailTicks}.`,
+      )
+    }
+    if (!(importedWholeDefaultTrailingGap > 0)) {
+      throw new Error(
+        `Whole-note import trailing gap should be positive, got ${importedWholeDefaultTrailingGap}.`,
+      )
+    }
+
+    await setInputValue(page, '#duration-ratio-1', 2.2)
+    await page.waitForFunction(
+      ({ baselineTrailingGap, baselineLeadingGap, baselineWidth }) => {
+        const api = (window as unknown as {
+          __scoreDebug: {
+            dumpAllMeasureCoordinates: () => MeasureCoordinateReport
+          }
+        }).__scoreDebug
+        const row = api.dumpAllMeasureCoordinates().rows[0]
+        return (
+          !!row &&
+          row.trailingTailTicks === 64 &&
+          typeof row.trailingGapPx === 'number' &&
+          row.trailingGapPx > baselineTrailingGap + 8 &&
+          typeof row.measureWidth === 'number' &&
+          row.measureWidth > baselineWidth + 8 &&
+          typeof row.leadingGapPx === 'number' &&
+          Math.abs(row.leadingGapPx - baselineLeadingGap) <= 0.8
+        )
+      },
+      {
+        baselineTrailingGap: importedWholeDefaultTrailingGap,
+        baselineLeadingGap: importedWholeDefaultLeadingGap,
+        baselineWidth: importedWholeDefaultWidth,
+      },
+    )
+
+    const importedWholeExpandedReport = await getMeasureCoordinates(page)
+    const importedWholeExpandedFirstRow = importedWholeExpandedReport.rows[0]
+    if (!importedWholeExpandedFirstRow) {
+      throw new Error('Whole-note import expanded report is missing the first row.')
+    }
+    const importedWholeExpandedTrailingGap = getRequiredTrailingGap(
+      importedWholeExpandedFirstRow,
+      'Whole-note import expanded first',
+    )
+    const importedWholeExpandedWidth = getRequiredMeasureWidth(
+      importedWholeExpandedFirstRow,
+      'Whole-note import expanded first',
+    )
+    if (importedWholeExpandedTrailingGap <= importedWholeDefaultTrailingGap + 8) {
+      throw new Error(
+        `Whole-note ratio slider should expand the 64-tick tail gap: default=${importedWholeDefaultTrailingGap.toFixed(3)} expanded=${importedWholeExpandedTrailingGap.toFixed(3)}.`,
+      )
+    }
+    if (importedWholeExpandedWidth <= importedWholeDefaultWidth + 8) {
+      throw new Error(
+        `Whole-note ratio slider should widen the content width when min width no longer dominates: default=${importedWholeDefaultWidth.toFixed(3)} expanded=${importedWholeExpandedWidth.toFixed(3)}.`,
+      )
+    }
+
+    await clickSpacingReset(page)
+    await page.waitForFunction(
+      () => {
+        const minWidthInput = document.querySelector('#min-measure-width-input') as HTMLInputElement | null
+        const wholeRatioInput = document.querySelector('#duration-ratio-1') as HTMLInputElement | null
+        return minWidthInput?.value === '120' && wholeRatioInput?.value === '1.4'
+      },
+    )
+
     await clickButton(page, '重置')
     await waitForDefaultDemo(page)
 
@@ -965,6 +1195,16 @@ async function main() {
         wholeExpandedWidth,
         wholeDefaultGap,
         wholeExpandedGap,
+        wholeDefaultLeadingGap,
+        wholeDefaultTrailingTailTicks,
+        wholeDefaultTrailingGap,
+      },
+      wholeNoteImportTailComparison: {
+        defaultWholeRatio,
+        importedWholeDefaultLeadingGap,
+        importedWholeDefaultTrailingTailTicks,
+        importedWholeDefaultTrailingGap,
+        importedWholeExpandedTrailingGap,
       },
       defaultMarkers,
       wholeMarkers,

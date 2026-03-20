@@ -47,6 +47,9 @@ type MeasureDumpRow = {
   measureEndBarX?: number | null
   noteStartX?: number | null
   noteEndX?: number | null
+  leadingGapPx?: number | null
+  trailingTailTicks?: number | null
+  trailingGapPx?: number | null
   maxSpacingRightX?: number | null
   systemTop: number | null
   timeAxisTicksPerBeat: number | null
@@ -93,16 +96,9 @@ type DurationUniformitySample = {
 
 type BarlineEdgeSample = {
   pairIndex: number
-  firstOnsetTicksInMeasure: number
-  secondOnsetTicksInMeasure: number
-  lastPrevOnsetTicksInMeasure: number
-  lastOnsetTicksInMeasure: number
-  firstEdgeGapPx: number
-  firstInternalGapPx: number
-  firstEdgeRatio: number
-  lastEdgeGapPx: number
-  lastInternalGapPx: number
-  lastEdgeRatio: number
+  leadingGapPx: number
+  trailingTailTicks: number
+  trailingGapPx: number
   pass: boolean
 }
 
@@ -112,8 +108,8 @@ const DEV_URL = `http://${DEV_HOST}:${DEV_PORT}`
 const GAP_COMPARE_EPSILON = 0.001
 const TICK_COMPARE_EPSILON = 0.0001
 const DURATION_UNIFORMITY_EPSILON_PX = 0.01
-const EDGE_GAP_RATIO_MIN = 0.55
-const EDGE_GAP_RATIO_MAX = 0.98
+const LEADING_GAP_EPSILON_PX = 0.75
+const TRAILING_GAP_EPSILON_PX = 0.75
 const DEFAULT_MANUAL_SCALE_PERCENT = 100
 const DEFAULT_AUTO_SCALE_ENABLED = false
 
@@ -399,66 +395,17 @@ function buildLineBarlineEdgeAnalysis(rows: MergedMeasureDumpRow[]) {
   rows.forEach((row) => {
     if (!row.rendered || row.renderedPageIndex === null) return
     if (
-      typeof row.measureStartBarX !== 'number' ||
-      !Number.isFinite(row.measureStartBarX) ||
-      typeof row.measureEndBarX !== 'number' ||
-      !Number.isFinite(row.measureEndBarX)
-    ) {
-      return
-    }
-    const noteStartOffset =
-      typeof row.noteStartX === 'number' && Number.isFinite(row.noteStartX)
-        ? row.noteStartX - row.measureStartBarX
-        : null
-    const noteEndInset =
-      typeof row.noteEndX === 'number' && Number.isFinite(row.noteEndX)
-        ? row.measureEndBarX - row.noteEndX
-        : null
-    // Skip system-start measures with clef/key/time decorations, where barline-to-note
-    // includes decoration width and is not directly comparable to onset gaps.
-    if (noteStartOffset !== null && noteStartOffset > 12) return
-    if (noteEndInset !== null && noteEndInset > 12) return
-
-    const points = row.timeAxisPoints
-      .slice()
-      .filter((point) => typeof point.x === 'number' && Number.isFinite(point.x))
-      .sort((left, right) => left.onsetTicksInMeasure - right.onsetTicksInMeasure)
-    if (points.length < 2) return
-
-    const firstPoint = points[0]
-    const secondPoint = points[1]
-    const previousLastPoint = points[points.length - 2]
-    const lastPoint = points[points.length - 1]
-    if (
-      firstPoint.x === null ||
-      secondPoint.x === null ||
-      previousLastPoint.x === null ||
-      lastPoint.x === null
+      typeof row.leadingGapPx !== 'number' ||
+      !Number.isFinite(row.leadingGapPx) ||
+      typeof row.trailingTailTicks !== 'number' ||
+      !Number.isFinite(row.trailingTailTicks) ||
+      typeof row.trailingGapPx !== 'number' ||
+      !Number.isFinite(row.trailingGapPx)
     ) {
       return
     }
 
-    const firstInternalGapPx = secondPoint.x - firstPoint.x
-    const lastInternalGapPx = lastPoint.x - previousLastPoint.x
-    if (!Number.isFinite(firstInternalGapPx) || firstInternalGapPx <= 0) return
-    if (!Number.isFinite(lastInternalGapPx) || lastInternalGapPx <= 0) return
-
-    const firstEdgeGapPx = firstPoint.x - row.measureStartBarX
-    const rightSpacingBoundary =
-      typeof row.maxSpacingRightX === 'number' && Number.isFinite(row.maxSpacingRightX)
-        ? row.maxSpacingRightX
-        : lastPoint.x + 9
-    const lastEdgeGapPx = row.measureEndBarX - rightSpacingBoundary
-    if (!Number.isFinite(firstEdgeGapPx) || firstEdgeGapPx <= 0) return
-    if (!Number.isFinite(lastEdgeGapPx) || lastEdgeGapPx <= 0) return
-
-    const firstEdgeRatio = firstEdgeGapPx / firstInternalGapPx
-    const lastEdgeRatio = lastEdgeGapPx / lastInternalGapPx
-    const pass =
-      firstEdgeRatio >= EDGE_GAP_RATIO_MIN &&
-      firstEdgeRatio <= EDGE_GAP_RATIO_MAX &&
-      lastEdgeRatio >= EDGE_GAP_RATIO_MIN &&
-      lastEdgeRatio <= EDGE_GAP_RATIO_MAX
+    const pass = row.leadingGapPx >= 0 && row.trailingTailTicks >= 0 && row.trailingGapPx >= 0
 
     const normalizedSystemTop = roundOrNull(row.systemTop, 3)
     const lineKey = `${row.renderedPageIndex}|${normalizedSystemTop ?? `pair-${row.pairIndex}`}`
@@ -470,16 +417,9 @@ function buildLineBarlineEdgeAnalysis(rows: MergedMeasureDumpRow[]) {
     }
     entry.samples.push({
       pairIndex: row.pairIndex,
-      firstOnsetTicksInMeasure: firstPoint.onsetTicksInMeasure,
-      secondOnsetTicksInMeasure: secondPoint.onsetTicksInMeasure,
-      lastPrevOnsetTicksInMeasure: previousLastPoint.onsetTicksInMeasure,
-      lastOnsetTicksInMeasure: lastPoint.onsetTicksInMeasure,
-      firstEdgeGapPx,
-      firstInternalGapPx,
-      firstEdgeRatio,
-      lastEdgeGapPx,
-      lastInternalGapPx,
-      lastEdgeRatio,
+      leadingGapPx: row.leadingGapPx,
+      trailingTailTicks: Math.round(row.trailingTailTicks),
+      trailingGapPx: row.trailingGapPx,
       pass,
     })
     grouped.set(lineKey, entry)
@@ -496,25 +436,53 @@ function buildLineBarlineEdgeAnalysis(rows: MergedMeasureDumpRow[]) {
     .map((line) => {
       const sampleCount = line.samples.length
       const failedSamples = line.samples.filter((sample) => !sample.pass)
+      const leadingGapValues = line.samples.map((sample) => sample.leadingGapPx)
+      const minLeadingGapPx =
+        leadingGapValues.length > 0 ? Math.min(...leadingGapValues) : Number.POSITIVE_INFINITY
+      const maxLeadingGapPx =
+        leadingGapValues.length > 0 ? Math.max(...leadingGapValues) : Number.NEGATIVE_INFINITY
+      const leadingGapRangePx =
+        leadingGapValues.length > 0 ? maxLeadingGapPx - minLeadingGapPx : Number.NaN
+
+      const trailingGroups = new Map<number, number[]>()
+      line.samples.forEach((sample) => {
+        const bucket = trailingGroups.get(sample.trailingTailTicks) ?? []
+        bucket.push(sample.trailingGapPx)
+        trailingGroups.set(sample.trailingTailTicks, bucket)
+      })
+      const trailingGroupSummaries = [...trailingGroups.entries()]
+        .sort((left, right) => left[0] - right[0])
+        .map(([trailingTailTicks, gaps]) => {
+          const minGap = Math.min(...gaps)
+          const maxGap = Math.max(...gaps)
+          const rangePx = maxGap - minGap
+          return {
+            trailingTailTicks,
+            sampleCount: gaps.length,
+            minGapPx: roundOrNull(minGap, 3),
+            maxGapPx: roundOrNull(maxGap, 3),
+            rangePx: roundOrNull(rangePx, 4),
+            pass: gaps.length <= 1 || rangePx <= TRAILING_GAP_EPSILON_PX,
+          }
+        })
+      const trailingGroupsPass = trailingGroupSummaries.every((group) => group.pass)
+      const leadingGapPass = sampleCount <= 1 || leadingGapRangePx <= LEADING_GAP_EPSILON_PX
       return {
         lineKey: line.lineKey,
         pageIndex: line.pageIndex,
         systemTop: line.systemTop,
         sampleCount,
         failedSampleCount: failedSamples.length,
-        pass: sampleCount > 0 ? failedSamples.length === 0 : true,
+        leadingGapRangePx: roundOrNull(leadingGapRangePx, 4),
+        leadingGapPass,
+        trailingGroupsPass,
+        pass: sampleCount > 0 ? failedSamples.length === 0 && leadingGapPass && trailingGroupsPass : true,
+        trailingGroupSummaries,
         samples: line.samples.slice(0, 16).map((sample) => ({
           pairIndex: sample.pairIndex,
-          firstOnsetTicksInMeasure: sample.firstOnsetTicksInMeasure,
-          secondOnsetTicksInMeasure: sample.secondOnsetTicksInMeasure,
-          lastPrevOnsetTicksInMeasure: sample.lastPrevOnsetTicksInMeasure,
-          lastOnsetTicksInMeasure: sample.lastOnsetTicksInMeasure,
-          firstEdgeGapPx: roundOrNull(sample.firstEdgeGapPx, 3),
-          firstInternalGapPx: roundOrNull(sample.firstInternalGapPx, 3),
-          firstEdgeRatio: roundOrNull(sample.firstEdgeRatio, 4),
-          lastEdgeGapPx: roundOrNull(sample.lastEdgeGapPx, 3),
-          lastInternalGapPx: roundOrNull(sample.lastInternalGapPx, 3),
-          lastEdgeRatio: roundOrNull(sample.lastEdgeRatio, 4),
+          leadingGapPx: roundOrNull(sample.leadingGapPx, 3),
+          trailingTailTicks: sample.trailingTailTicks,
+          trailingGapPx: roundOrNull(sample.trailingGapPx, 3),
           pass: sample.pass,
         })),
       }
@@ -872,7 +840,7 @@ async function main() {
       `(compared=${lineDurationUniformity.comparedLineCount}, failed=${lineDurationUniformity.failedLineCount})`,
     )
     console.log(
-      `Line edge-gap rule (barline edge slightly < inner onset gap): ${lineBarlineEdgeAnalysis.passed ? 'PASS' : 'FAIL'} ` +
+      `Line anchor-gap rule (leading fixed, trailing follows tail ticks): ${lineBarlineEdgeAnalysis.passed ? 'PASS' : 'FAIL'} ` +
       `(compared=${lineBarlineEdgeAnalysis.comparedLineCount}, failed=${lineBarlineEdgeAnalysis.failedLineCount})`,
     )
     if (firstVsSecondMeasureComparison.comparable) {
@@ -909,8 +877,9 @@ async function main() {
           .forEach((sample) => {
             console.log(
               `Failed edge line ${line.lineKey} pair=${sample.pairIndex}: ` +
-                `left=${sample.firstEdgeGapPx}/${sample.firstInternalGapPx} (r=${sample.firstEdgeRatio}), ` +
-                `right=${sample.lastEdgeGapPx}/${sample.lastInternalGapPx} (r=${sample.lastEdgeRatio})`,
+                `leading=${sample.leadingGapPx}, ` +
+                `trailingTicks=${sample.trailingTailTicks}, ` +
+                `trailing=${sample.trailingGapPx}`,
             )
           })
       })
