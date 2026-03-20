@@ -912,10 +912,9 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     const timelineWeightMap = buildUniformTimelineWeightMap(onsetTicks, measureTotalTicks, spacingConfig)
     const spanWidth = Math.max(1, axisEnd - axisStart)
     const intrinsicSpan = Math.max(0.0001, timelineWeightMap.totalWeight)
-    // Keep inter-onset spacing stable across measures: do not stretch when
-    // there is extra measure width, only compress when axis span is smaller
-    // than intrinsic timeline span.
-    const timelineScale = Math.min(1, spanWidth / intrinsicSpan)
+    // Let widened measures actually open up their internal timeline spacing.
+    // Otherwise a larger measure would only center the same note cluster.
+    const timelineScale = spanWidth / intrinsicSpan
     onsetTicks.forEach((onset) => {
       const cumulativeWeight = timelineWeightMap.cumulativeWeightByTick.get(onset)
       if (cumulativeWeight === undefined) return

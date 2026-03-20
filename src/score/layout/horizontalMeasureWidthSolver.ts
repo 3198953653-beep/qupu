@@ -1,5 +1,4 @@
-import { BarlineType, Renderer, Stave } from 'vexflow'
-import { getKeySignatureSpecFromFifths } from '../accidentals'
+import { Renderer, Stave } from 'vexflow'
 import { SYSTEM_BASS_OFFSET_Y, SYSTEM_TREBLE_OFFSET_Y, TICKS_PER_BEAT } from '../constants'
 import { drawMeasureToContext } from '../render/drawMeasure'
 import type { MeasurePair, ScoreNote, TimeSignature } from '../types'
@@ -13,6 +12,13 @@ import {
   resolvePublicAxisLayoutForConsumption,
 } from './timeAxisSpacing'
 import { resolveEffectiveBoundary } from './effectiveBoundary'
+import {
+  applyMeasureStartDecorationsToStave,
+  resolveActualStartDecorationWidths,
+  resolveMeasureStartDecorationReserve,
+  resolveStartDecorationDisplayMetas,
+  toTimeSignatureKey,
+} from './startDecorationReserve'
 
 type SolverMeasureMeta = {
   pairIndex: number
@@ -25,7 +31,9 @@ type SolverMeasureMeta = {
   showEndTimeSignature: boolean
   includeMeasureStartDecorations: boolean
   showStartDecorations: boolean
+  showStartBoundaryReserve: boolean
   showEndDecorations: boolean
+  actualStartDecorationWidthPx: number
   preferMeasureStartBarlineAxis: boolean
   preferMeasureEndBarlineAxis: boolean
 }
@@ -44,6 +52,7 @@ export type SolveHorizontalMeasureWidthsParams = {
 }
 
 type MeasureProbeGeometry = {
+  renderedMeasureWidth: number
   noteStartX: number
   noteEndX: number
   formatWidth: number
@@ -59,14 +68,8 @@ type MeasureSpacingProbe = {
 const MIN_FORMAT_WIDTH_PX = 8
 const EPS = 0.05
 const STEP_PAD_PX = 0.5
-const SOLVER_CACHE_VERSION = 'v1'
+const SOLVER_CACHE_VERSION = 'v2'
 const SOLVER_CACHE_MAX_ENTRIES = 12000
-const EST_SYSTEM_START_DECORATION_PX = 96
-const EST_INLINE_DECORATION_PX = 24
-
-function toTimeSignatureKey(signature: TimeSignature): string {
-  return `${signature.beats}/${signature.beatType}`
-}
 
 function resolveMeasureMeta(params: {
   measurePairs: MeasurePair[]
@@ -74,47 +77,43 @@ function resolveMeasureMeta(params: {
   timeSignaturesByPair: TimeSignature[] | null
 }): SolverMeasureMeta[] {
   const { measurePairs, keyFifthsByPair, timeSignaturesByPair } = params
-  const metas: SolverMeasureMeta[] = []
-  let previousKeyFifths = 0
-  let previousTimeSignature: TimeSignature = { beats: 4, beatType: 4 }
+  const displayMetas = resolveStartDecorationDisplayMetas({
+    measureCount: measurePairs.length,
+    keyFifthsByPair,
+    timeSignaturesByPair,
+  })
+  const { actualStartDecorationWidthPxByPair } = resolveActualStartDecorationWidths({
+    metas: displayMetas,
+  })
 
-  for (let pairIndex = 0; pairIndex < measurePairs.length; pairIndex += 1) {
-    const measure = measurePairs[pairIndex]
-    const isSystemStart = pairIndex === 0
-    const keyFifths = keyFifthsByPair?.[pairIndex] ?? previousKeyFifths
-    const timeSignature = timeSignaturesByPair?.[pairIndex] ?? previousTimeSignature
-    const showKeySignature = isSystemStart || keyFifths !== previousKeyFifths
-    const showTimeSignature =
-      isSystemStart ||
-      timeSignature.beats !== previousTimeSignature.beats ||
-      timeSignature.beatType !== previousTimeSignature.beatType
-    const includeMeasureStartDecorations = !isSystemStart && (showKeySignature || showTimeSignature)
-    const showStartDecorations = isSystemStart || showKeySignature || showTimeSignature || includeMeasureStartDecorations
+  return displayMetas.map((displayMeta) => {
+    const actualStartDecorationWidthPx = actualStartDecorationWidthPxByPair[displayMeta.pairIndex] ?? 0
+    const startDecorationReserve = resolveMeasureStartDecorationReserve({
+      actualStartDecorationWidthPx,
+    })
+    const includeMeasureStartDecorations =
+      !displayMeta.isSystemStart && (displayMeta.showKeySignature || displayMeta.showTimeSignature)
     const showEndTimeSignature = false
     const showEndDecorations = showEndTimeSignature
-    const preferMeasureStartBarlineAxis = !showStartDecorations
-    const preferMeasureEndBarlineAxis = !showEndDecorations
 
-    metas.push({
-      pairIndex,
-      measure,
-      isSystemStart,
-      keyFifths,
-      showKeySignature,
-      timeSignature,
-      showTimeSignature,
+    return {
+      pairIndex: displayMeta.pairIndex,
+      measure: measurePairs[displayMeta.pairIndex] as MeasurePair,
+      isSystemStart: displayMeta.isSystemStart,
+      keyFifths: displayMeta.keyFifths,
+      showKeySignature: displayMeta.showKeySignature,
+      timeSignature: displayMeta.timeSignature,
+      showTimeSignature: displayMeta.showTimeSignature,
       showEndTimeSignature,
       includeMeasureStartDecorations,
-      showStartDecorations,
+      showStartDecorations: startDecorationReserve.showStartBoundaryReserve,
+      showStartBoundaryReserve: startDecorationReserve.showStartBoundaryReserve,
       showEndDecorations,
-      preferMeasureStartBarlineAxis,
-      preferMeasureEndBarlineAxis,
-    })
-
-    previousKeyFifths = keyFifths
-    previousTimeSignature = timeSignature
-  }
-  return metas
+      actualStartDecorationWidthPx,
+      preferMeasureStartBarlineAxis: startDecorationReserve.preferMeasureStartBarlineAxis,
+      preferMeasureEndBarlineAxis: !showEndDecorations,
+    }
+  })
 }
 
 function serializeScoreNoteForWidthCache(note: ScoreNote): string {
@@ -155,6 +154,7 @@ function buildMeasureWidthCacheKey(params: {
     `showT=${meta.showTimeSignature ? 1 : 0}`,
     `showEndT=${meta.showEndTimeSignature ? 1 : 0}`,
     `startDecor=${meta.showStartDecorations ? 1 : 0}`,
+    `actualStart=${meta.actualStartDecorationWidthPx.toFixed(3)}`,
     `endDecor=${meta.showEndDecorations ? 1 : 0}`,
     `minW=${minMeasureWidthPx.toFixed(3)}`,
     `g32=${spacingConfig.baseMinGap32Px}`,
@@ -174,35 +174,20 @@ function buildMeasureWidthCacheKey(params: {
   ].join('||')
 }
 
-function buildMeasureProbeGeometry(meta: SolverMeasureMeta, measureWidth: number): MeasureProbeGeometry {
-  const safeWidth = Math.max(1, Number(measureWidth.toFixed(3)))
-  const probeStave = new Stave(0, SYSTEM_TREBLE_OFFSET_Y, safeWidth)
-  if (meta.isSystemStart) {
-    probeStave.addClef('treble')
-    if (meta.showKeySignature) {
-      probeStave.addKeySignature(getKeySignatureSpecFromFifths(meta.keyFifths))
-    }
-    if (meta.showTimeSignature) {
-      probeStave.addTimeSignature(toTimeSignatureKey(meta.timeSignature))
-    }
-  } else {
-    probeStave.setBegBarType(BarlineType.NONE)
-    if (meta.showKeySignature) {
-      probeStave.addKeySignature(getKeySignatureSpecFromFifths(meta.keyFifths))
-    }
-    if (meta.showTimeSignature) {
-      probeStave.addTimeSignature(toTimeSignatureKey(meta.timeSignature))
-    }
-  }
+function buildMeasureProbeGeometry(meta: SolverMeasureMeta, contentMeasureWidth: number): MeasureProbeGeometry {
+  const safeContentWidth = Math.max(1, Number(contentMeasureWidth.toFixed(3)))
+  const renderedMeasureWidth = Math.max(1, Number((safeContentWidth + meta.actualStartDecorationWidthPx).toFixed(3)))
+  const probeStave = new Stave(0, SYSTEM_TREBLE_OFFSET_Y, renderedMeasureWidth)
+  applyMeasureStartDecorationsToStave(probeStave, 'treble', meta)
   if (meta.showEndTimeSignature) {
     probeStave.setEndTimeSignature(toTimeSignatureKey(meta.timeSignature))
   }
 
-  const rawNoteStartOffset = probeStave.getNoteStartX()
   const rawNoteEndOffset = probeStave.getNoteEndX()
-  const noteStartOffset = meta.preferMeasureStartBarlineAxis ? 0 : rawNoteStartOffset
+  const noteStartOffset = meta.preferMeasureStartBarlineAxis ? 0 : meta.actualStartDecorationWidthPx
   const noteEndOffset = rawNoteEndOffset
   return {
+    renderedMeasureWidth,
     noteStartX: noteStartOffset,
     noteEndX: noteEndOffset,
     formatWidth: Math.max(MIN_FORMAT_WIDTH_PX, noteEndOffset - noteStartOffset - 8),
@@ -212,11 +197,11 @@ function buildMeasureProbeGeometry(meta: SolverMeasureMeta, measureWidth: number
 function probeMeasureSpacing(
   context: ReturnType<Renderer['getContext']>,
   meta: SolverMeasureMeta,
-  measureWidth: number,
+  contentMeasureWidth: number,
   spacingConfig: TimeAxisSpacingConfig,
   supplementalSpacingTicks: readonly number[] | null,
 ): MeasureSpacingProbe | null {
-  const geometry = buildMeasureProbeGeometry(meta, measureWidth)
+  const geometry = buildMeasureProbeGeometry(meta, contentMeasureWidth)
   const baseTimelineBundle = buildMeasureTimelineBundle({
     measure: meta.measure,
     measureIndex: meta.pairIndex,
@@ -229,17 +214,17 @@ function probeMeasureSpacing(
   if (PUBLIC_AXIS_CONSUMPTION_MODE === 'merged') {
     const effectiveBoundary = resolveEffectiveBoundary({
       measureX: 0,
-      measureWidth,
+      measureWidth: geometry.renderedMeasureWidth,
       noteStartX: geometry.noteStartX,
       noteEndX: geometry.noteEndX,
-      showStartDecorations: !meta.preferMeasureStartBarlineAxis,
+      showStartDecorations: meta.showStartBoundaryReserve,
       showEndDecorations: !meta.preferMeasureEndBarlineAxis,
     })
     probeTimelineBundle = attachMeasureTimelineAxisLayout({
       bundle: baseTimelineBundle,
       effectiveBoundaryStartX: effectiveBoundary.effectiveStartX,
       effectiveBoundaryEndX: effectiveBoundary.effectiveEndX,
-      widthPx: measureWidth,
+      widthPx: geometry.renderedMeasureWidth,
       spacingConfig,
     })
   }
@@ -261,7 +246,7 @@ function probeMeasureSpacing(
     measure: meta.measure,
     pairIndex: meta.pairIndex,
     measureX: 0,
-    measureWidth,
+    measureWidth: geometry.renderedMeasureWidth,
     trebleY: SYSTEM_TREBLE_OFFSET_Y,
     bassY: SYSTEM_BASS_OFFSET_Y,
     isSystemStart: meta.isSystemStart,
@@ -274,6 +259,7 @@ function probeMeasureSpacing(
     draggingSelection: null,
     collectLayouts: true,
     skipPainting: true,
+    noteStartXOverride: geometry.noteStartX,
     formatWidthOverride: geometry.formatWidth,
     timeAxisSpacingConfig: spacingConfig,
     spacingLayoutMode: 'custom',
@@ -358,10 +344,10 @@ function probeMeasureSpacing(
 
   const boundary = resolveEffectiveBoundary({
     measureX: 0,
-    measureWidth,
+    measureWidth: geometry.renderedMeasureWidth,
     noteStartX: geometry.noteStartX,
     noteEndX: geometry.noteEndX,
-    showStartDecorations: meta.showStartDecorations,
+    showStartDecorations: meta.showStartBoundaryReserve,
     showEndDecorations: meta.showEndDecorations,
   })
   const effectiveLeftGapPx = occupiedLeftX - boundary.effectiveStartX
@@ -417,6 +403,7 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
     const supplementalSpacingTicks = supplementalSpacingTicksByPair?.[meta.pairIndex] ?? null
     const supplementalSpacingTicksSignature =
       supplementalSpacingTicks && supplementalSpacingTicks.length > 0 ? supplementalSpacingTicks.join(',') : '-'
+    const minSolvedMeasureWidthPx = Number(minMeasureWidthPx.toFixed(3))
     const cacheKey =
       shouldProbePrecisely && widthCache !== undefined
         ? buildMeasureWidthCacheKey({
@@ -429,7 +416,7 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
     if (cacheKey && widthCache) {
       const cachedWidth = widthCache.get(cacheKey)
       if (Number.isFinite(cachedWidth)) {
-        return Math.max(minMeasureWidthPx, cachedWidth as number)
+        return Math.max(minSolvedMeasureWidthPx, cachedWidth as number)
       }
     }
 
@@ -451,15 +438,9 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
       spacingConfig,
       timelineBundle,
     )
-    const estimatedDecorationWidth =
-      meta.isSystemStart
-        ? EST_SYSTEM_START_DECORATION_PX
-        : meta.showKeySignature || meta.showTimeSignature
-          ? EST_INLINE_DECORATION_PX
-          : 0
     let width = Math.max(
-      minMeasureWidthPx,
-      Number((sharedAxisPaddingPx + edgeGapBudgetPx + timelineSpan + estimatedDecorationWidth).toFixed(3)),
+      minSolvedMeasureWidthPx,
+      Number((sharedAxisPaddingPx + edgeGapBudgetPx + timelineSpan).toFixed(3)),
     )
 
     if (!shouldProbePrecisely) {
@@ -491,13 +472,13 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
 
       if (probe.rightOverflowPx > EPS || leftDeficit > EPS || rightDeficit > EPS || timelineCompressionDeficit > EPS) {
         const growBy = probe.rightOverflowPx + leftDeficit + rightDeficit + timelineCompressionDeficit + STEP_PAD_PX
-        width = Number((Math.max(minMeasureWidthPx, width + growBy)).toFixed(3))
+        width = Number((Math.max(minSolvedMeasureWidthPx, width + growBy)).toFixed(3))
         continue
       }
 
       const shrinkBy = Math.max(leftExcess, rightExcess)
       if (shrinkBy <= EPS) break
-      const nextWidth = Number((Math.max(minMeasureWidthPx, width - shrinkBy)).toFixed(3))
+      const nextWidth = Number((Math.max(minSolvedMeasureWidthPx, width - shrinkBy)).toFixed(3))
       if (Math.abs(nextWidth - width) <= EPS) break
       width = nextWidth
     }

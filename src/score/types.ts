@@ -3,6 +3,7 @@ export type StemDirection = 1 | -1
 export type NoteDuration = 'w' | 'h' | 'q' | '8' | '16' | '32' | 'qd' | '8d' | '16d' | '32d'
 export type NoteDurationBase = 'w' | 'h' | 'q' | '8' | '16' | '32'
 export type RhythmPresetId = 'quarter' | 'twoEighth' | 'fourSixteenth' | 'eightSixteenth' | 'shortDotted'
+export type BuiltInDemoMode = 'none' | 'whole-note' | 'half-note'
 export type StaffKind = 'treble' | 'bass'
 export type BeamTag = 'begin' | 'continue' | 'end'
 export type BeamLevelTag = 'begin' | 'continue' | 'end' | 'forward hook' | 'backward hook'
@@ -272,6 +273,8 @@ export type MeasureLayout = {
   pairIndex: number
   measureX: number
   measureWidth: number
+  contentMeasureWidth: number
+  renderedMeasureWidth: number
   trebleY: number
   bassY: number
   trebleLineTopY: number
@@ -290,6 +293,8 @@ export type MeasureLayout = {
   noteStartX: number
   noteEndX: number
   formatWidth: number
+  sharedStartDecorationReservePx?: number
+  actualStartDecorationWidthPx?: number
   effectiveBoundaryStartX?: number
   effectiveBoundaryEndX?: number
   effectiveLeftGapPx?: number
@@ -303,6 +308,14 @@ export type MeasureLayout = {
     width: number
     height: number
   }
+}
+
+export type MeasureFrame = {
+  measureX: number
+  measureWidth: number
+  contentMeasureWidth?: number
+  renderedMeasureWidth?: number
+  actualStartDecorationWidthPx?: number
 }
 
 export type EffectiveMeasureBoundary = {

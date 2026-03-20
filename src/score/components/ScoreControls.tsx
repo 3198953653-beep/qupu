@@ -1,6 +1,6 @@
 import { useRef, useState, type ChangeEvent, type RefObject } from 'react'
 import { RHYTHM_PRESETS } from '../constants'
-import type { ImportFeedback, RhythmPresetId } from '../types'
+import type { BuiltInDemoMode, ImportFeedback, RhythmPresetId } from '../types'
 import type { NotationPaletteItem, NotationPaletteSelection } from '../notationPaletteConfig'
 import { NotationPalette } from './NotationPalette'
 
@@ -16,6 +16,7 @@ export function ScoreControls(props: {
   onOpenMusicXmlFilePicker: () => void
   onLoadSampleMusicXml: () => void
   onLoadWholeNoteDemo: () => void
+  onLoadHalfNoteDemo: () => void
   onExportMusicXmlFile: () => void
   onOpenOsmdPreview: () => void
   onOpenBeamGroupingTool: () => void
@@ -44,7 +45,7 @@ export function ScoreControls(props: {
   onOsmdDirectFileChange: (event: ChangeEvent<HTMLInputElement>) => void
   importFeedback: ImportFeedback
   rhythmPreset: RhythmPresetId
-  wholeNoteDemoActive: boolean
+  activeBuiltInDemo: BuiltInDemoMode
   onApplyRhythmPreset: (presetId: RhythmPresetId) => void
   autoScaleEnabled: boolean
   autoScalePercent: number
@@ -54,6 +55,7 @@ export function ScoreControls(props: {
   canvasHeightPercent: number
   onCanvasHeightPercentChange: (nextPercent: number) => void
   pageHorizontalPaddingPx: number
+  minMeasureWidthPx: number
   baseMinGap32Px: number
   minBarlineEdgeGapPx: number
   maxBarlineEdgeGapPx: number
@@ -63,6 +65,7 @@ export function ScoreControls(props: {
   durationGapRatio4: number
   durationGapRatio2: number
   onPageHorizontalPaddingPxChange: (nextValue: number) => void
+  onMinMeasureWidthPxChange: (nextValue: number) => void
   onBaseMinGap32PxChange: (nextValue: number) => void
   onMinBarlineEdgeGapPxChange: (nextValue: number) => void
   onMaxBarlineEdgeGapPxChange: (nextValue: number) => void
@@ -85,6 +88,7 @@ export function ScoreControls(props: {
     onOpenMusicXmlFilePicker,
     onLoadSampleMusicXml,
     onLoadWholeNoteDemo,
+    onLoadHalfNoteDemo,
     onExportMusicXmlFile,
     onOpenOsmdPreview,
     onOpenBeamGroupingTool,
@@ -109,7 +113,7 @@ export function ScoreControls(props: {
     onOsmdDirectFileChange,
     importFeedback,
     rhythmPreset,
-    wholeNoteDemoActive,
+    activeBuiltInDemo,
     onApplyRhythmPreset,
     autoScaleEnabled,
     autoScalePercent,
@@ -119,6 +123,7 @@ export function ScoreControls(props: {
     canvasHeightPercent,
     onCanvasHeightPercentChange,
     pageHorizontalPaddingPx,
+    minMeasureWidthPx,
     baseMinGap32Px,
     minBarlineEdgeGapPx,
     maxBarlineEdgeGapPx,
@@ -128,6 +133,7 @@ export function ScoreControls(props: {
     durationGapRatio4,
     durationGapRatio2,
     onPageHorizontalPaddingPxChange,
+    onMinMeasureWidthPxChange,
     onBaseMinGap32PxChange,
     onMinBarlineEdgeGapPxChange,
     onMaxBarlineEdgeGapPxChange,
@@ -251,6 +257,32 @@ export function ScoreControls(props: {
         </div>
         {showGlobalGapPanel && (
           <div className="duration-base-grid">
+            <label htmlFor="min-measure-width-range">最小小节宽度（px）</label>
+            <input
+              id="min-measure-width-range"
+              type="range"
+              min={1}
+              max={320}
+              step={1}
+              value={minMeasureWidthPx}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onMinMeasureWidthPxChange)
+              }
+              onChange={(event) => handleFloatValue(event.target.value, onMinMeasureWidthPxChange)}
+            />
+            <input
+              id="min-measure-width-input"
+              type="number"
+              min={1}
+              max={320}
+              step={1}
+              value={minMeasureWidthPx}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onMinMeasureWidthPxChange)
+              }
+              onChange={(event) => handleFloatValue(event.target.value, onMinMeasureWidthPxChange)}
+            />
+
             <label htmlFor="duration-base-gap-32">全局间距大小</label>
             <input
               id="duration-base-gap-32"
@@ -576,16 +608,23 @@ export function ScoreControls(props: {
       <section className="rhythm-row">
         <button
           type="button"
-          className={`rhythm-btn ${wholeNoteDemoActive ? 'active' : ''}`}
+          className={`rhythm-btn ${activeBuiltInDemo === 'whole-note' ? 'active' : ''}`}
           onClick={onLoadWholeNoteDemo}
         >
           加载全音符示例
+        </button>
+        <button
+          type="button"
+          className={`rhythm-btn ${activeBuiltInDemo === 'half-note' ? 'active' : ''}`}
+          onClick={onLoadHalfNoteDemo}
+        >
+          加载二分音符示例
         </button>
         {RHYTHM_PRESETS.map((preset) => (
           <button
             key={preset.id}
             type="button"
-            className={`rhythm-btn ${!wholeNoteDemoActive && rhythmPreset === preset.id ? 'active' : ''}`}
+            className={`rhythm-btn ${activeBuiltInDemo === 'none' && rhythmPreset === preset.id ? 'active' : ''}`}
             onClick={() => onApplyRhythmPreset(preset.id)}
           >
             {preset.label}

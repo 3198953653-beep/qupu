@@ -28,6 +28,10 @@ import {
 } from './score/layout/timeAxisSpacing'
 import { solveHorizontalMeasureWidths } from './score/layout/horizontalMeasureWidthSolver'
 import { resolveEffectiveBoundary } from './score/layout/effectiveBoundary'
+import {
+  resolveActualStartDecorationWidths,
+  resolveStartDecorationDisplayMetas,
+} from './score/layout/startDecorationReserve'
 import { useDragHandlers } from './score/dragHandlers'
 import { stopPlaybackAction } from './score/editorActions'
 import { useEditorHandlers } from './score/editorHandlers'
@@ -91,11 +95,13 @@ import {
 } from './score/notationPaletteConfig'
 import type { HitGridIndex } from './score/layout/hitTest'
 import type {
+  BuiltInDemoMode,
   DragDebugSnapshot,
   DragState,
   ImportFeedback,
   ImportedNoteLocation,
   LayoutReflowHint,
+  MeasureFrame,
   MeasureLayout,
   MeasurePair,
   MusicXmlMetadata,
@@ -116,6 +122,9 @@ const SCORE_RENDER_BACKEND = Renderer.Backends.CANVAS
 const INSPECTOR_SEQUENCE_PREVIEW_LIMIT = 64
 const MANUAL_SCALE_BASELINE = 1
 const DEFAULT_PAGE_HORIZONTAL_PADDING_PX = 86
+const DEFAULT_MIN_MEASURE_WIDTH_PX = 120
+const MIN_MEASURE_WIDTH_PX_MIN = 1
+const MIN_MEASURE_WIDTH_PX_MAX = 320
 const SCORE_STAGE_BORDER_PX = 1
 const PLAYHEAD_OFFSET_PX = 2
 const PLAYHEAD_WIDTH_PX = 2
@@ -125,7 +134,6 @@ const PLAYHEAD_HORIZONTAL_SCROLL_LEFT_ANCHOR_PX = 72
 const PLAYHEAD_VIEWPORT_MARGIN_Y_PX = 24
 const ENABLE_AUTO_FIRST_MEASURE_DRAG_DEBUG = false
 const HORIZONTAL_VIEW_MEASURE_WIDTH_PX = 220
-const HORIZONTAL_VIEW_MIN_MEASURE_WIDTH_PX = 1
 const HORIZONTAL_VIEW_HEIGHT_PX = SCORE_TOP_PADDING * 2 + SYSTEM_HEIGHT + 26
 const MAX_CANVAS_RENDER_DIM_PX = 32760
 const HORIZONTAL_RENDER_BUFFER_PX = 400
@@ -377,6 +385,10 @@ function clampMinBarlineEdgeGapPx(value: number): number {
 
 function clampPageHorizontalPaddingPx(value: number): number {
   return Math.round(clampNumber(value, 8, 120))
+}
+
+function clampMinMeasureWidthPx(value: number): number {
+  return Math.round(clampNumber(value, MIN_MEASURE_WIDTH_PX_MIN, MIN_MEASURE_WIDTH_PX_MAX))
 }
 
 function clampOsmdPreviewZoomPercent(value: number): number {
@@ -1637,7 +1649,7 @@ function App() {
   const [notes, setNotes] = useState<ScoreNote[]>(INITIAL_NOTES)
   const [bassNotes, setBassNotes] = useState<ScoreNote[]>(INITIAL_BASS_NOTES)
   const [rhythmPreset, setRhythmPreset] = useState<RhythmPresetId>('quarter')
-  const [wholeNoteDemoActive, setWholeNoteDemoActive] = useState(false)
+  const [activeBuiltInDemo, setActiveBuiltInDemo] = useState<BuiltInDemoMode>('none')
   const [activeSelection, setActiveSelection] = useState<Selection>({ noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 })
   const [activeAccidentalSelection, setActiveAccidentalSelection] = useState<Selection | null>(null)
   const [activeTieSelection, setActiveTieSelection] = useState<TieSelection | null>(null)
@@ -1683,6 +1695,7 @@ function App() {
   })
   const [showInScoreMeasureNumbers, setShowInScoreMeasureNumbers] = useState(false)
   const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
+  const [minMeasureWidthPx, setMinMeasureWidthPx] = useState(DEFAULT_MIN_MEASURE_WIDTH_PX)
   const [timeAxisSpacingConfig, setTimeAxisSpacingConfig] = useState(DEFAULT_TIME_AXIS_SPACING_CONFIG)
   const [isOsmdPreviewOpen, setIsOsmdPreviewOpen] = useState(false)
   const [midiPermissionState, setMidiPermissionState] = useState<MidiPermissionState>('idle')
@@ -1848,6 +1861,7 @@ function App() {
   )
   const firstPlaybackPoint = playbackTimelineEvents[0]?.point ?? null
   const spacingLayoutMode: SpacingLayoutMode = 'custom'
+  const safeMinMeasureWidthPx = clampMinMeasureWidthPx(minMeasureWidthPx)
   const getWidthProbeContext = useCallback((): ReturnType<Renderer['getContext']> | null => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return null
     const probeWidth = 2048
@@ -1863,7 +1877,18 @@ function App() {
     widthProbeRendererRef.current = renderer
     return renderer.getContext()
   }, [])
-  const horizontalMeasureWidths = useMemo(() => {
+  const horizontalMeasureStartDecorationWidths = useMemo(() => {
+    if (measurePairs.length === 0) return []
+    const displayMetas = resolveStartDecorationDisplayMetas({
+      measureCount: measurePairs.length,
+      keyFifthsByPair: measureKeyFifthsFromImport,
+      timeSignaturesByPair: measureTimeSignaturesFromImport,
+    })
+    return resolveActualStartDecorationWidths({
+      metas: displayMetas,
+    }).actualStartDecorationWidthPxByPair
+  }, [measurePairs.length, measureKeyFifthsFromImport, measureTimeSignaturesFromImport])
+  const horizontalContentMeasureWidths = useMemo(() => {
     if (measurePairs.length === 0) return []
     const probeContext = getWidthProbeContext()
     if (!probeContext) {
@@ -1880,7 +1905,7 @@ function App() {
       measureTimeSignaturesByPair: measureTimeSignaturesFromImport,
       supplementalSpacingTicksByPair,
       spacingConfig: timeAxisSpacingConfig,
-      minMeasureWidthPx: HORIZONTAL_VIEW_MIN_MEASURE_WIDTH_PX,
+      minMeasureWidthPx: safeMinMeasureWidthPx,
       maxIterations: solverMaxIterations,
       eagerProbeMeasureLimit,
       widthCache: horizontalMeasureWidthCacheRef.current,
@@ -1891,13 +1916,21 @@ function App() {
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
     supplementalSpacingTicksByPair,
+    safeMinMeasureWidthPx,
     timeAxisSpacingConfig,
   ])
+  const horizontalRenderedMeasureWidths = useMemo(
+    () =>
+      horizontalContentMeasureWidths.map((contentMeasureWidth, pairIndex) =>
+        Math.max(1, contentMeasureWidth + (horizontalMeasureStartDecorationWidths[pairIndex] ?? 0)),
+      ),
+    [horizontalContentMeasureWidths, horizontalMeasureStartDecorationWidths],
+  )
   const horizontalEstimatedMeasureWidthTotal = useMemo(() => {
-    if (horizontalMeasureWidths.length === 0) return HORIZONTAL_VIEW_MEASURE_WIDTH_PX
-    const total = horizontalMeasureWidths.reduce((sum, width) => sum + width, 0)
+    if (horizontalRenderedMeasureWidths.length === 0) return HORIZONTAL_VIEW_MEASURE_WIDTH_PX
+    const total = horizontalRenderedMeasureWidths.reduce((sum, width) => sum + width, 0)
     return Math.max(HORIZONTAL_VIEW_MEASURE_WIDTH_PX, total)
-  }, [horizontalMeasureWidths])
+  }, [horizontalRenderedMeasureWidths])
   const autoScoreScale = useMemo(() => getAutoScoreScale(measurePairs.length), [measurePairs.length])
   const safeManualScalePercent = clampScalePercent(manualScalePercent)
   const safeCanvasHeightPercent = clampCanvasHeightPercent(canvasHeightPercent)
@@ -1933,14 +1966,42 @@ function App() {
     return byId
   }, [bassNotes])
   const horizontalMeasureFramesByPair = useMemo(() => {
-    if (horizontalMeasureWidths.length === 0) return [] as Array<{ measureX: number; measureWidth: number }>
+    if (horizontalRenderedMeasureWidths.length === 0) return [] as MeasureFrame[]
     let cursorX = pageHorizontalPaddingPx
-    return horizontalMeasureWidths.map((measureWidth) => {
-      const frame = { measureX: cursorX, measureWidth }
+    return horizontalRenderedMeasureWidths.map((measureWidth, pairIndex) => {
+      const contentMeasureWidth = horizontalContentMeasureWidths[pairIndex] ?? Math.max(1, measureWidth)
+      const actualStartDecorationWidthPx = horizontalMeasureStartDecorationWidths[pairIndex] ?? 0
+      const frame: MeasureFrame = {
+        measureX: cursorX,
+        measureWidth,
+        contentMeasureWidth,
+        renderedMeasureWidth: measureWidth,
+        actualStartDecorationWidthPx,
+      }
       cursorX += measureWidth
       return frame
     })
-  }, [horizontalMeasureWidths, pageHorizontalPaddingPx])
+  }, [
+    horizontalContentMeasureWidths,
+    horizontalRenderedMeasureWidths,
+    horizontalMeasureStartDecorationWidths,
+    pageHorizontalPaddingPx,
+  ])
+  const getMeasureFrameContentGeometry = useCallback((frame: MeasureFrame | null | undefined) => {
+    if (!frame) return null
+    const actualStartDecorationWidthPx =
+      typeof frame.actualStartDecorationWidthPx === 'number' && Number.isFinite(frame.actualStartDecorationWidthPx)
+        ? Math.max(0, frame.actualStartDecorationWidthPx)
+        : 0
+    const contentMeasureWidth =
+      typeof frame.contentMeasureWidth === 'number' && Number.isFinite(frame.contentMeasureWidth)
+        ? Math.max(1, frame.contentMeasureWidth)
+        : Math.max(1, frame.measureWidth - actualStartDecorationWidthPx)
+    return {
+      contentStartX: frame.measureX + actualStartDecorationWidthPx,
+      contentMeasureWidth,
+    }
+  }, [])
   const horizontalViewportWidthInScore = Math.max(1, horizontalViewportXRange.endX - horizontalViewportXRange.startX)
   const horizontalRenderSurfaceWidth = useMemo(() => {
     const desiredWidth = Math.ceil(horizontalViewportWidthInScore + HORIZONTAL_RENDER_BUFFER_PX * 2)
@@ -2545,6 +2606,7 @@ function App() {
     onMusicXmlFileChange,
     loadSampleMusicXml,
     loadWholeNoteDemo,
+    loadHalfNoteDemo,
     exportMusicXmlFile,
     resetScore,
     applyRhythmPreset,
@@ -2597,7 +2659,7 @@ function App() {
     stopActivePlaybackSession()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
-    setWholeNoteDemoActive(false)
+    setActiveBuiltInDemo('none')
     importMusicXmlText(xmlText)
   }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, importMusicXmlText, stopActivePlaybackSession])
 
@@ -2605,7 +2667,7 @@ function App() {
     stopActivePlaybackSession()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
-    setWholeNoteDemoActive(false)
+    setActiveBuiltInDemo('none')
     importMusicXmlFromTextarea()
   }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, importMusicXmlFromTextarea, stopActivePlaybackSession])
 
@@ -2613,7 +2675,7 @@ function App() {
     stopActivePlaybackSession()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
-    setWholeNoteDemoActive(false)
+    setActiveBuiltInDemo('none')
     await onMusicXmlFileChange(event)
   }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, onMusicXmlFileChange, stopActivePlaybackSession])
 
@@ -2621,7 +2683,7 @@ function App() {
     stopActivePlaybackSession()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
-    setWholeNoteDemoActive(false)
+    setActiveBuiltInDemo('none')
     loadSampleMusicXml()
   }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, loadSampleMusicXml, stopActivePlaybackSession])
 
@@ -2630,7 +2692,7 @@ function App() {
     requestPlaybackCursorReset()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
-    setWholeNoteDemoActive(true)
+    setActiveBuiltInDemo('whole-note')
     loadWholeNoteDemo()
   }, [
     clearActiveChordSelection,
@@ -2640,12 +2702,27 @@ function App() {
     stopActivePlaybackSession,
   ])
 
+  const loadHalfNoteDemoWithCollapseReset = useCallback(() => {
+    stopActivePlaybackSession()
+    requestPlaybackCursorReset()
+    clearFullMeasureRestCollapseScopes()
+    clearActiveChordSelection()
+    setActiveBuiltInDemo('half-note')
+    loadHalfNoteDemo()
+  }, [
+    clearActiveChordSelection,
+    clearFullMeasureRestCollapseScopes,
+    loadHalfNoteDemo,
+    requestPlaybackCursorReset,
+    stopActivePlaybackSession,
+  ])
+
   const resetScoreWithCollapseReset = useCallback(() => {
     stopActivePlaybackSession()
     requestPlaybackCursorReset()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
-    setWholeNoteDemoActive(false)
+    setActiveBuiltInDemo('none')
     resetScore()
   }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, requestPlaybackCursorReset, resetScore, stopActivePlaybackSession])
 
@@ -2654,7 +2731,7 @@ function App() {
     requestPlaybackCursorReset()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
-    setWholeNoteDemoActive(false)
+    setActiveBuiltInDemo('none')
     applyRhythmPreset(presetId)
   }, [applyRhythmPreset, clearActiveChordSelection, clearFullMeasureRestCollapseScopes, requestPlaybackCursorReset, stopActivePlaybackSession])
 
@@ -4697,10 +4774,12 @@ function App() {
     }
     if (globalHeadLeftX === null) {
       const frame = horizontalMeasureFramesByPair[playbackCursorPoint.pairIndex] ?? null
-      if (frame) {
+      const frameContentGeometry = getMeasureFrameContentGeometry(frame)
+      if (frame && frameContentGeometry) {
         globalHeadLeftX =
-          frame.measureX +
-          frame.measureWidth * (playbackCursorPoint.onsetTick / Math.max(1, playbackEvent.measureTicks))
+          frameContentGeometry.contentStartX +
+          frameContentGeometry.contentMeasureWidth *
+            (playbackCursorPoint.onsetTick / Math.max(1, playbackEvent.measureTicks))
       }
     }
     if (globalHeadLeftX === null || !Number.isFinite(globalHeadLeftX)) return null
@@ -4742,6 +4821,7 @@ function App() {
     }
   }, [
     chordMarkerLayoutRevision,
+    getMeasureFrameContentGeometry,
     horizontalMeasureFramesByPair,
     horizontalRenderOffsetX,
     layoutStabilityKey,
@@ -4841,8 +4921,12 @@ function App() {
               anchorSource = 'axis'
               anchorXInScore = axisX
             } else {
+              const frameContentGeometry = getMeasureFrameContentGeometry(frame)
               anchorSource = 'frame'
-              anchorXInScore = frame.measureX + frame.measureWidth * (safeStartTick / Math.max(1, measureTicks))
+              anchorXInScore = frameContentGeometry
+                ? frameContentGeometry.contentStartX +
+                  frameContentGeometry.contentMeasureWidth * (safeStartTick / Math.max(1, measureTicks))
+                : frame.measureX + frame.measureWidth * (safeStartTick / Math.max(1, measureTicks))
             }
           }
         }
@@ -4868,6 +4952,7 @@ function App() {
   }, [
     chordMarkerLayoutRevision,
     chordRulerEntriesByPair,
+    getMeasureFrameContentGeometry,
     horizontalMeasureFramesByPair,
     horizontalRenderOffsetX,
     measurePairs,
@@ -5328,9 +5413,11 @@ function App() {
       pairIndex,
       generatedAt: new Date().toISOString(),
       measureX: finiteOrNull(measureLayout?.measureX),
-      measureWidth: finiteOrNull(measureLayout?.measureWidth),
+      measureWidth: finiteOrNull(measureLayout?.contentMeasureWidth ?? measureLayout?.measureWidth),
       measureEndBarX: finiteOrNull(
-        measureLayout ? measureLayout.measureX + measureLayout.measureWidth : null,
+        measureLayout
+          ? measureLayout.measureX + (measureLayout.renderedMeasureWidth ?? measureLayout.measureWidth)
+          : null,
       ),
       noteStartX: finiteOrNull(measureLayout?.noteStartX),
       noteEndX: finiteOrNull(measureLayout?.noteEndX),
@@ -5628,14 +5715,27 @@ function App() {
         rendered: measureLayout !== null,
         timelineMode: timelineBundle?.timelineMode ?? 'legacy',
         measureX: measureLayout?.measureX ?? null,
-        measureWidth: measureLayout?.measureWidth ?? null,
+        measureWidth: measureLayout?.contentMeasureWidth ?? measureLayout?.measureWidth ?? null,
+        renderedMeasureWidthPx:
+          measureLayout?.renderedMeasureWidth ?? measureLayout?.measureWidth ?? null,
         systemTop: measureLayout?.systemTop ?? null,
         trebleY: measureLayout?.trebleY ?? null,
         bassY: measureLayout?.bassY ?? null,
         measureStartBarX: measureLayout?.measureX ?? null,
-        measureEndBarX: measureLayout ? measureLayout.measureX + measureLayout.measureWidth : null,
+        measureEndBarX:
+          measureLayout
+            ? measureLayout.measureX + (measureLayout.renderedMeasureWidth ?? measureLayout.measureWidth)
+            : null,
         noteStartX: measureLayout?.noteStartX ?? null,
         noteEndX: measureLayout?.noteEndX ?? null,
+        sharedStartDecorationReservePx:
+          measureLayout && Number.isFinite(measureLayout.sharedStartDecorationReservePx)
+            ? Number((measureLayout.sharedStartDecorationReservePx as number).toFixed(3))
+            : null,
+        actualStartDecorationWidthPx:
+          measureLayout && Number.isFinite(measureLayout.actualStartDecorationWidthPx)
+            ? Number((measureLayout.actualStartDecorationWidthPx as number).toFixed(3))
+            : null,
         effectiveBoundaryStartX:
           measureLayout && Number.isFinite(measureLayout.effectiveBoundaryStartX)
             ? Number((measureLayout.effectiveBoundaryStartX as number).toFixed(3))
@@ -6074,6 +6174,7 @@ function App() {
         canvasHeightPercent={safeCanvasHeightPercent}
         onCanvasHeightPercentChange={(nextPercent) => setCanvasHeightPercent(clampCanvasHeightPercent(nextPercent))}
         pageHorizontalPaddingPx={pageHorizontalPaddingPx}
+        minMeasureWidthPx={safeMinMeasureWidthPx}
         baseMinGap32Px={timeAxisSpacingConfig.baseMinGap32Px}
         minBarlineEdgeGapPx={timeAxisSpacingConfig.minBarlineEdgeGapPx}
         maxBarlineEdgeGapPx={timeAxisSpacingConfig.maxBarlineEdgeGapPx}
@@ -6085,6 +6186,7 @@ function App() {
         onPageHorizontalPaddingPxChange={(nextValue) =>
           setPageHorizontalPaddingPx(clampPageHorizontalPaddingPx(nextValue))
         }
+        onMinMeasureWidthPxChange={(nextValue) => setMinMeasureWidthPx(clampMinMeasureWidthPx(nextValue))}
         onBaseMinGap32PxChange={(nextValue) =>
           setTimeAxisSpacingConfig((current) => ({
             ...current,
@@ -6154,10 +6256,12 @@ function App() {
             durationGapRatios: { ...DEFAULT_TIME_AXIS_SPACING_CONFIG.durationGapRatios },
           })
           setPageHorizontalPaddingPx(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
+          setMinMeasureWidthPx(DEFAULT_MIN_MEASURE_WIDTH_PX)
         }}
         onOpenMusicXmlFilePicker={openMusicXmlFilePicker}
         onLoadSampleMusicXml={loadSampleMusicXmlWithCollapseReset}
         onLoadWholeNoteDemo={loadWholeNoteDemoWithCollapseReset}
+        onLoadHalfNoteDemo={loadHalfNoteDemoWithCollapseReset}
         onExportMusicXmlFile={exportMusicXmlFile}
         onOpenOsmdPreview={openOsmdPreview}
         onOpenBeamGroupingTool={openBeamGroupingTool}
@@ -6182,7 +6286,7 @@ function App() {
         onOsmdDirectFileChange={onOsmdDirectFileChange}
         importFeedback={importFeedback}
         rhythmPreset={rhythmPreset}
-        wholeNoteDemoActive={wholeNoteDemoActive}
+        activeBuiltInDemo={activeBuiltInDemo}
         onApplyRhythmPreset={applyRhythmPresetWithCollapseReset}
       />
 

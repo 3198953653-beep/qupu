@@ -14,6 +14,7 @@ import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
 import type {
   DragState,
   LayoutReflowHint,
+  MeasureFrame,
   MeasureLayout,
   MeasurePair,
   MusicXmlMetadata,
@@ -188,7 +189,7 @@ export function useScoreRenderEffect(params: {
   renderOriginSystemIndex: number
   visiblePairRange?: { startPairIndex: number; endPairIndexExclusive: number } | null
   clearViewportXRange?: { startX: number; endX: number } | null
-  measureFramesByPair?: Array<{ measureX: number; measureWidth: number }> | null
+  measureFramesByPair?: MeasureFrame[] | null
   renderOffsetX?: number
   measureKeyFifthsFromImport: number[] | null
   measureTimeSignaturesFromImport: TimeSignature[] | null

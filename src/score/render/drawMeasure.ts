@@ -457,10 +457,6 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         bassStave.addTimeSignature(timeSignatureLabel)
       }
     }
-    if (typeof noteStartXOverride === 'number') {
-      trebleStave.setNoteStartX(noteStartXOverride)
-      bassStave.setNoteStartX(noteStartXOverride)
-    }
   } else if (isSystemStart) {
     trebleStave.addClef('treble')
     bassStave.addClef('bass')
@@ -492,6 +488,11 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   if (endTimeSignatureLabel) {
     trebleStave.setEndTimeSignature(endTimeSignatureLabel)
     bassStave.setEndTimeSignature(endTimeSignatureLabel)
+  }
+
+  if (typeof noteStartXOverride === 'number') {
+    trebleStave.setNoteStartX(noteStartXOverride)
+    bassStave.setNoteStartX(noteStartXOverride)
   }
 
   // In barline-axis mode (mid-system measure without start decorations),

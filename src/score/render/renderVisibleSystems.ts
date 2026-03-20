@@ -1,4 +1,4 @@
-import { BarlineType, Renderer, Stave } from 'vexflow'
+import { Renderer, Stave } from 'vexflow'
 import {
   SCORE_PAGE_PADDING_X,
   SCORE_TOP_PADDING,
@@ -8,7 +8,6 @@ import {
   SYSTEM_TREBLE_OFFSET_Y,
   TICKS_PER_BEAT,
 } from '../constants'
-import { getKeySignatureSpecFromFifths } from '../accidentals'
 import { type SystemMeasureRange } from '../layout/demand'
 import { getLayoutNoteKey } from '../layout/renderPosition'
 import { buildMeasureOverlayRect } from '../layout/viewport'
@@ -27,10 +26,18 @@ import {
   type TimeAxisSpacingConfig,
 } from '../layout/timeAxisSpacing'
 import { resolveEffectiveBoundary } from '../layout/effectiveBoundary'
+import {
+  applyMeasureStartDecorationsToStave,
+  resolveActualStartDecorationWidths,
+  resolveMeasureStartDecorationReserve,
+  resolveStartDecorationDisplayMetas,
+  toTimeSignatureKey,
+} from '../layout/startDecorationReserve'
 import type { MeasureTimelineBundle } from '../timeline/types'
 import type {
   DragState,
   LayoutReflowHint,
+  MeasureFrame,
   MeasureLayout,
   MeasurePair,
   NoteLayout,
@@ -51,6 +58,23 @@ type FrozenMeasureSpacing = {
   baselineMeasureX: number
   staticNoteXById: Map<string, number>
   staticAccidentalRightXById: Map<string, Map<number, number>>
+}
+
+type RenderableSystemMeasureMeta = {
+  pairIndex: number
+  measure: MeasurePair
+  isSystemStart: boolean
+  keyFifths: number
+  showKeySignature: boolean
+  timeSignature: TimeSignature
+  showTimeSignature: boolean
+  nextTimeSignature: TimeSignature
+  showEndTimeSignature: boolean
+  includeMeasureStartDecorations: boolean
+  actualStartDecorationWidthPx: number
+  showStartBoundaryReserve: boolean
+  preferMeasureStartBarlineAxis: boolean
+  preferMeasureEndBarlineAxis: boolean
 }
 
 function tryBuildFrozenMeasureSpacing(params: {
@@ -155,13 +179,14 @@ function findPairIndexForSelection(
 type StableMeasureFrame = {
   measureX: number
   measureWidth: number
+  contentMeasureWidth: number
   noteStartX: number
   noteEndX: number
   formatWidth: number
 }
 
 function isFrameAlignedWithPreviousLayout(params: {
-  frame: { measureX: number; measureWidth: number }
+  frame: MeasureFrame
   previousLayout: MeasureLayout | null | undefined
   renderOffsetX: number
 }): boolean {
@@ -186,6 +211,7 @@ function collectStableSystemMeasureFrames(
     frames.push({
       measureX: previousLayout.measureX,
       measureWidth: previousLayout.measureWidth,
+      contentMeasureWidth: previousLayout.contentMeasureWidth,
       noteStartX: previousLayout.noteStartX,
       noteEndX: previousLayout.noteEndX,
       formatWidth: previousLayout.formatWidth,
@@ -300,7 +326,7 @@ export function renderVisibleSystems(params: {
   renderOriginSystemIndex?: number
   visiblePairRange?: { startPairIndex: number; endPairIndexExclusive: number } | null
   clearViewportXRange?: { startX: number; endX: number } | null
-  measureFramesByPair?: Array<{ measureX: number; measureWidth: number }> | null
+  measureFramesByPair?: MeasureFrame[] | null
   renderOffsetX?: number
   measureKeyFifthsFromImport: number[] | null
   measureTimeSignaturesFromImport: TimeSignature[] | null
@@ -449,6 +475,67 @@ export function renderVisibleSystems(params: {
     clearRenderSurface()
   }
 
+  const systemStartPairIndexSet = new Set<number>()
+  const systemEndPairIndexSet = new Set<number>()
+  systemRanges.forEach((range) => {
+    if (!range) return
+    systemStartPairIndexSet.add(range.startPairIndex)
+    const endPairIndex = Math.max(range.startPairIndex, range.endPairIndexExclusive) - 1
+    if (endPairIndex >= range.startPairIndex) {
+      systemEndPairIndexSet.add(endPairIndex)
+    }
+  })
+  const globalStartDecorationDisplayMetas = resolveStartDecorationDisplayMetas({
+    measureCount: measurePairs.length,
+    keyFifthsByPair: measureKeyFifthsFromImport,
+    timeSignaturesByPair: measureTimeSignaturesFromImport,
+    systemStartPairIndices: systemStartPairIndexSet,
+  })
+  const { actualStartDecorationWidthPxByPair } = resolveActualStartDecorationWidths({
+    metas: globalStartDecorationDisplayMetas,
+  })
+  const globalSystemMetaByPair: Array<RenderableSystemMeasureMeta | null> = globalStartDecorationDisplayMetas.map(
+    (displayMeta) => {
+      const measure = measurePairs[displayMeta.pairIndex]
+      if (!measure) return null
+
+      const actualStartDecorationWidthPx = actualStartDecorationWidthPxByPair[displayMeta.pairIndex] ?? 0
+      const startDecorationReserve = resolveMeasureStartDecorationReserve({
+        actualStartDecorationWidthPx,
+      })
+      const hasNextMeasure = displayMeta.pairIndex + 1 < measurePairs.length
+      const nextTimeSignature =
+        hasNextMeasure
+          ? measureTimeSignaturesFromImport?.[displayMeta.pairIndex + 1] ??
+            measureTimeSignaturesFromImport?.[displayMeta.pairIndex] ??
+            displayMeta.timeSignature
+          : displayMeta.timeSignature
+      const showEndTimeSignature =
+        hasNextMeasure &&
+        systemEndPairIndexSet.has(displayMeta.pairIndex) &&
+        (nextTimeSignature.beats !== displayMeta.timeSignature.beats ||
+          nextTimeSignature.beatType !== displayMeta.timeSignature.beatType)
+
+      return {
+        pairIndex: displayMeta.pairIndex,
+        measure,
+        isSystemStart: displayMeta.isSystemStart,
+        keyFifths: displayMeta.keyFifths,
+        showKeySignature: displayMeta.showKeySignature,
+        timeSignature: displayMeta.timeSignature,
+        showTimeSignature: displayMeta.showTimeSignature,
+        nextTimeSignature,
+        showEndTimeSignature,
+        includeMeasureStartDecorations:
+          !displayMeta.isSystemStart && (displayMeta.showKeySignature || displayMeta.showTimeSignature),
+        actualStartDecorationWidthPx,
+        showStartBoundaryReserve: startDecorationReserve.showStartBoundaryReserve,
+        preferMeasureStartBarlineAxis: startDecorationReserve.preferMeasureStartBarlineAxis,
+        preferMeasureEndBarlineAxis: !showEndTimeSignature,
+      }
+    },
+  )
+
   for (let systemIndex = startSystem; systemIndex <= endSystem; systemIndex += 1) {
     const range = systemRanges[systemIndex]
     if (!range) continue
@@ -469,74 +556,11 @@ export function renderVisibleSystems(params: {
     const bassY = systemTop + SYSTEM_BASS_OFFSET_Y
     const systemUsableWidth = Math.max(1, scoreWidth - pagePaddingX * 2)
 
-    const systemMeta: Array<{
-      pairIndex: number
-      measure: MeasurePair
-      isSystemStart: boolean
-      keyFifths: number
-      showKeySignature: boolean
-      timeSignature: TimeSignature
-      showTimeSignature: boolean
-      nextTimeSignature: TimeSignature
-      showEndTimeSignature: boolean
-      includeMeasureStartDecorations: boolean
-      preferMeasureStartBarlineAxis: boolean
-      preferMeasureEndBarlineAxis: boolean
-    }> = []
+    const systemMeta: RenderableSystemMeasureMeta[] = []
     for (let pairIndex = renderStartPairIndex; pairIndex < renderEndPairIndexExclusive; pairIndex += 1) {
-      const measure = measurePairs[pairIndex]
-      if (!measure) continue
-      const isSystemStart = pairIndex === systemStartPairIndex
-      const timeSignature =
-        measureTimeSignaturesFromImport?.[pairIndex] ??
-        measureTimeSignaturesFromImport?.[pairIndex - 1] ?? {
-          beats: 4,
-          beatType: 4,
-        }
-      const previousTimeSignature =
-        pairIndex > 0
-          ? measureTimeSignaturesFromImport?.[pairIndex - 1] ??
-            measureTimeSignaturesFromImport?.[pairIndex - 2] ?? {
-              beats: 4,
-              beatType: 4,
-            }
-          : timeSignature
-      const showTimeSignature =
-        pairIndex === 0 ||
-        timeSignature.beats !== previousTimeSignature.beats ||
-        timeSignature.beatType !== previousTimeSignature.beatType
-      const hasNextMeasure = pairIndex + 1 < measurePairs.length
-      const nextTimeSignature =
-        hasNextMeasure
-          ? measureTimeSignaturesFromImport?.[pairIndex + 1] ??
-            measureTimeSignaturesFromImport?.[pairIndex] ??
-            timeSignature
-          : timeSignature
-      const isSystemEnd = pairIndex === systemEndPairIndexExclusive - 1
-      const showEndTimeSignature =
-        hasNextMeasure &&
-        isSystemEnd &&
-        (nextTimeSignature.beats !== timeSignature.beats || nextTimeSignature.beatType !== timeSignature.beatType)
-      const keyFifths = measureKeyFifthsFromImport?.[pairIndex] ?? measureKeyFifthsFromImport?.[pairIndex - 1] ?? 0
-      const previousKeyFifths = pairIndex > 0 ? (measureKeyFifthsFromImport?.[pairIndex - 1] ?? 0) : keyFifths
-      const showKeySignature = isSystemStart || keyFifths !== previousKeyFifths
-      const includeMeasureStartDecorations = !isSystemStart && (showKeySignature || showTimeSignature)
-      const preferMeasureStartBarlineAxis = !isSystemStart && !showKeySignature && !showTimeSignature
-      const preferMeasureEndBarlineAxis = !showEndTimeSignature
-      systemMeta.push({
-        pairIndex,
-        measure,
-        isSystemStart,
-        keyFifths,
-        showKeySignature,
-        timeSignature,
-        showTimeSignature,
-        nextTimeSignature,
-        showEndTimeSignature,
-        includeMeasureStartDecorations,
-        preferMeasureStartBarlineAxis,
-        preferMeasureEndBarlineAxis,
-      })
+      const meta = globalSystemMetaByPair[pairIndex]
+      if (!meta) continue
+      systemMeta.push(meta)
     }
     if (systemMeta.length === 0) continue
     const systemTimelineBundles = new Map<number, MeasureTimelineBundle>()
@@ -593,34 +617,17 @@ export function renderVisibleSystems(params: {
     const probeGeometryCache = new Map<string, { noteStartOffset: number; noteEndOffset: number; formatWidth: number }>()
     const getMeasureProbeGeometry = (entry: (typeof systemMeta)[number], measureWidth: number) => {
       const safeWidth = Math.max(1, Number(measureWidth.toFixed(3)))
-      const cacheKey = `${entry.pairIndex}|${safeWidth.toFixed(3)}`
+      const cacheKey = `${entry.pairIndex}|${safeWidth.toFixed(3)}|${entry.actualStartDecorationWidthPx.toFixed(3)}`
       const cached = probeGeometryCache.get(cacheKey)
       if (cached) return cached
 
       const noteStartProbe = new Stave(0, trebleY, safeWidth)
-      if (entry.isSystemStart) {
-        noteStartProbe.addClef('treble')
-        if (entry.showKeySignature) {
-          noteStartProbe.addKeySignature(getKeySignatureSpecFromFifths(entry.keyFifths))
-        }
-        if (entry.showTimeSignature) {
-          noteStartProbe.addTimeSignature(`${entry.timeSignature.beats}/${entry.timeSignature.beatType}`)
-        }
-      } else {
-        noteStartProbe.setBegBarType(BarlineType.NONE)
-        if (entry.showKeySignature) {
-          noteStartProbe.addKeySignature(getKeySignatureSpecFromFifths(entry.keyFifths))
-        }
-        if (entry.showTimeSignature) {
-          noteStartProbe.addTimeSignature(`${entry.timeSignature.beats}/${entry.timeSignature.beatType}`)
-        }
-      }
+      applyMeasureStartDecorationsToStave(noteStartProbe, 'treble', entry)
       if (entry.showEndTimeSignature) {
-        noteStartProbe.setEndTimeSignature(`${entry.nextTimeSignature.beats}/${entry.nextTimeSignature.beatType}`)
+        noteStartProbe.setEndTimeSignature(toTimeSignatureKey(entry.nextTimeSignature))
       }
-      const rawNoteStartOffset = noteStartProbe.getNoteStartX()
       const rawNoteEndOffset = noteStartProbe.getNoteEndX()
-      const noteStartOffset = entry.preferMeasureStartBarlineAxis ? 0 : rawNoteStartOffset
+      const noteStartOffset = entry.preferMeasureStartBarlineAxis ? 0 : entry.actualStartDecorationWidthPx
       const noteEndOffset = rawNoteEndOffset
       const formatWidth = Math.max(MIN_FORMAT_WIDTH_PX, noteEndOffset - noteStartOffset - 8)
       const geometry = { noteStartOffset, noteEndOffset, formatWidth }
@@ -678,7 +685,7 @@ export function renderVisibleSystems(params: {
         measureWidth,
         noteStartX,
         noteEndX,
-        showStartDecorations: !entry.preferMeasureStartBarlineAxis,
+        showStartDecorations: entry.showStartBoundaryReserve,
         showEndDecorations: !entry.preferMeasureEndBarlineAxis,
       })
       const timelineBundle = attachMeasureTimelineAxisLayout({
@@ -794,6 +801,9 @@ export function renderVisibleSystems(params: {
         if (!frame) return
         const measureX = frame.measureX - renderOffsetX
         const measureWidth = Math.max(1, frame.measureWidth)
+        const contentMeasureWidth = Number.isFinite(frame.contentMeasureWidth)
+          ? Math.max(1, frame.contentMeasureWidth as number)
+          : Math.max(1, measureWidth - entry.actualStartDecorationWidthPx)
         const { noteStartX, noteEndX, formatWidth } = buildMeasureProbe(entry, measureX, measureWidth)
         const timelineBundle = buildTimelineBundleForRender({
           entry,
@@ -849,6 +859,7 @@ export function renderVisibleSystems(params: {
             selectedMeasureScope && selectedMeasureScope.pairIndex === entry.pairIndex
               ? selectedMeasureScope.staff
               : null,
+          noteStartXOverride: noteStartX,
           formatWidthOverride: formatWidth,
           timeAxisSpacingConfig: spacingConfig,
           spacingLayoutMode,
@@ -910,7 +921,7 @@ export function renderVisibleSystems(params: {
           measureWidth,
           noteStartX,
           noteEndX,
-          showStartDecorations: !entry.preferMeasureStartBarlineAxis,
+          showStartDecorations: entry.showStartBoundaryReserve,
           showEndDecorations: !entry.preferMeasureEndBarlineAxis,
           spacingMetrics,
         })
@@ -919,6 +930,8 @@ export function renderVisibleSystems(params: {
           pairIndex: entry.pairIndex,
           measureX,
           measureWidth,
+          contentMeasureWidth,
+          renderedMeasureWidth: measureWidth,
           trebleY,
           bassY,
           trebleLineTopY: staffLineBounds.trebleLineTopY,
@@ -937,6 +950,8 @@ export function renderVisibleSystems(params: {
           noteStartX,
           noteEndX,
           formatWidth,
+          sharedStartDecorationReservePx: entry.actualStartDecorationWidthPx,
+          actualStartDecorationWidthPx: entry.actualStartDecorationWidthPx,
           effectiveBoundaryStartX: effectiveLayoutMetrics.effectiveBoundaryStartX,
           effectiveBoundaryEndX: effectiveLayoutMetrics.effectiveBoundaryEndX,
           effectiveLeftGapPx: effectiveLayoutMetrics.effectiveLeftGapPx,
@@ -1005,6 +1020,7 @@ export function renderVisibleSystems(params: {
         const stableFrame = stableSystemFrames[indexInSystem]
         const measureX = stableFrame.measureX
         const measureWidth = stableFrame.measureWidth
+        const contentMeasureWidth = stableFrame.contentMeasureWidth
         const noteStartX = stableFrame.noteStartX
         const noteEndX = stableFrame.noteEndX
         const formatWidth = stableFrame.formatWidth
@@ -1062,12 +1078,13 @@ export function renderVisibleSystems(params: {
           draggingSelection,
           activeSelections,
           draggingSelections,
-          highlightStaff:
-            selectedMeasureScope && selectedMeasureScope.pairIndex === entry.pairIndex
-              ? selectedMeasureScope.staff
-              : null,
-          formatWidthOverride: formatWidth,
-          timeAxisSpacingConfig: spacingConfig,
+        highlightStaff:
+          selectedMeasureScope && selectedMeasureScope.pairIndex === entry.pairIndex
+            ? selectedMeasureScope.staff
+            : null,
+        noteStartXOverride: noteStartX,
+        formatWidthOverride: formatWidth,
+        timeAxisSpacingConfig: spacingConfig,
           spacingLayoutMode,
           publicAxisLayout: resolvePublicAxisLayoutForConsumption(timelineBundle),
           spacingAnchorTicks: timelineBundle?.spacingAnchorTicks ?? null,
@@ -1127,7 +1144,7 @@ export function renderVisibleSystems(params: {
           measureWidth,
           noteStartX,
           noteEndX,
-          showStartDecorations: !entry.preferMeasureStartBarlineAxis,
+          showStartDecorations: entry.showStartBoundaryReserve,
           showEndDecorations: !entry.preferMeasureEndBarlineAxis,
           spacingMetrics,
         })
@@ -1136,6 +1153,8 @@ export function renderVisibleSystems(params: {
           pairIndex: entry.pairIndex,
           measureX,
           measureWidth,
+          contentMeasureWidth,
+          renderedMeasureWidth: measureWidth,
           trebleY,
           bassY,
           trebleLineTopY: staffLineBounds.trebleLineTopY,
@@ -1154,6 +1173,8 @@ export function renderVisibleSystems(params: {
           noteStartX,
           noteEndX,
           formatWidth,
+          sharedStartDecorationReservePx: entry.actualStartDecorationWidthPx,
+          actualStartDecorationWidthPx: entry.actualStartDecorationWidthPx,
           effectiveBoundaryStartX: effectiveLayoutMetrics.effectiveBoundaryStartX,
           effectiveBoundaryEndX: effectiveLayoutMetrics.effectiveBoundaryEndX,
           effectiveLeftGapPx: effectiveLayoutMetrics.effectiveLeftGapPx,
@@ -1300,6 +1321,7 @@ export function renderVisibleSystems(params: {
             : null,
         collectLayouts: true,
         skipPainting: true,
+        noteStartXOverride: spacingLeftLimitX,
         formatWidthOverride: formatWidth,
         timeAxisSpacingConfig: spacingConfig,
         spacingLayoutMode,
@@ -1391,6 +1413,7 @@ export function renderVisibleSystems(params: {
       const measureWidth = measureWidths[indexInSystem] ?? Math.floor(systemUsableWidth / Math.max(1, systemMeta.length))
       const measureX = measureCursorX
       measureCursorX += measureWidth
+      const contentMeasureWidth = Math.max(1, measureWidth - entry.actualStartDecorationWidthPx)
       const { noteStartX, noteEndX, formatWidth } = buildMeasureProbe(entry, measureX, measureWidth)
       const timelineBundle = buildTimelineBundleForRender({
         entry,
@@ -1434,6 +1457,7 @@ export function renderVisibleSystems(params: {
           selectedMeasureScope && selectedMeasureScope.pairIndex === entry.pairIndex
             ? selectedMeasureScope.staff
             : null,
+        noteStartXOverride: noteStartX,
         formatWidthOverride: formatWidth,
         timeAxisSpacingConfig: spacingConfig,
         spacingLayoutMode,
@@ -1495,7 +1519,7 @@ export function renderVisibleSystems(params: {
         measureWidth,
         noteStartX,
         noteEndX,
-        showStartDecorations: !entry.preferMeasureStartBarlineAxis,
+        showStartDecorations: entry.showStartBoundaryReserve,
         showEndDecorations: !entry.preferMeasureEndBarlineAxis,
         spacingMetrics,
       })
@@ -1504,6 +1528,8 @@ export function renderVisibleSystems(params: {
         pairIndex: entry.pairIndex,
         measureX,
         measureWidth,
+        contentMeasureWidth,
+        renderedMeasureWidth: measureWidth,
         trebleY,
         bassY,
         trebleLineTopY: staffLineBounds.trebleLineTopY,
@@ -1522,6 +1548,8 @@ export function renderVisibleSystems(params: {
         noteStartX,
         noteEndX,
         formatWidth,
+        sharedStartDecorationReservePx: entry.actualStartDecorationWidthPx,
+        actualStartDecorationWidthPx: entry.actualStartDecorationWidthPx,
         effectiveBoundaryStartX: effectiveLayoutMetrics.effectiveBoundaryStartX,
         effectiveBoundaryEndX: effectiveLayoutMetrics.effectiveBoundaryEndX,
         effectiveLeftGapPx: effectiveLayoutMetrics.effectiveLeftGapPx,
