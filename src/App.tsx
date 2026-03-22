@@ -353,8 +353,7 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
-function getChordMarkerStyleMetrics(scalePercent: number, uniformPaddingPx: number): {
-  scale: number
+type ChordMarkerStyleMetrics = {
   buttonHeightPx: number
   fontSizePx: number
   paddingInlinePx: number
@@ -364,20 +363,25 @@ function getChordMarkerStyleMetrics(scalePercent: number, uniformPaddingPx: numb
   inlineHeightPx: number
   stripHeightPx: number
   labelLeftInsetPx: number
-} {
+}
+
+function roundChordMarkerPx(value: number): number {
+  return Math.round(value * 10) / 10
+}
+
+function getChordMarkerBaseStyleMetrics(scalePercent: number, uniformPaddingPx: number): ChordMarkerStyleMetrics {
   const safeScalePercent = clampChordMarkerUiScalePercent(scalePercent)
   const safePaddingPx = clampChordMarkerPaddingPx(uniformPaddingPx)
   const scale = safeScalePercent / 100
-  const fontSizePx = Math.round(Math.max(8, 10 * scale) * 10) / 10
+  const fontSizePx = roundChordMarkerPx(Math.max(8, 10 * scale))
   const paddingInlinePx = safePaddingPx
   const paddingBlockPx = safePaddingPx
-  const buttonHeightPx = Math.round((fontSizePx + paddingBlockPx * 2) * 10) / 10
-  const borderRadiusPx = Math.round(Math.max(5, 7 * scale) * 10) / 10
+  const buttonHeightPx = roundChordMarkerPx(fontSizePx + paddingBlockPx * 2)
+  const borderRadiusPx = roundChordMarkerPx(Math.max(5, 7 * scale))
   const inlineTopPx = 22
-  const inlineHeightPx = Math.round(Math.max(24, buttonHeightPx + 2) * 10) / 10
-  const stripHeightPx = Math.round(Math.max(46, inlineTopPx + inlineHeightPx) * 10) / 10
+  const inlineHeightPx = roundChordMarkerPx(Math.max(24, buttonHeightPx + 2))
+  const stripHeightPx = roundChordMarkerPx(Math.max(46, inlineTopPx + inlineHeightPx))
   return {
-    scale,
     buttonHeightPx,
     fontSizePx,
     paddingInlinePx,
@@ -387,6 +391,35 @@ function getChordMarkerStyleMetrics(scalePercent: number, uniformPaddingPx: numb
     inlineHeightPx,
     stripHeightPx,
     labelLeftInsetPx: paddingInlinePx,
+  }
+}
+
+function applyChordMarkerVisualZoom(
+  baseMetrics: ChordMarkerStyleMetrics,
+  zoomScale: number,
+): ChordMarkerStyleMetrics {
+  const safeZoomScale = Number.isFinite(zoomScale) && zoomScale > 0 ? zoomScale : 1
+  const buttonHeightPx = roundChordMarkerPx(baseMetrics.buttonHeightPx * safeZoomScale)
+  const fontSizePx = roundChordMarkerPx(baseMetrics.fontSizePx * safeZoomScale)
+  const paddingInlinePx = roundChordMarkerPx(baseMetrics.paddingInlinePx * safeZoomScale)
+  const paddingBlockPx = roundChordMarkerPx(baseMetrics.paddingBlockPx * safeZoomScale)
+  const borderRadiusPx = roundChordMarkerPx(baseMetrics.borderRadiusPx * safeZoomScale)
+  const inlineTopPx = baseMetrics.inlineTopPx
+  const inlineHeightPx = roundChordMarkerPx(baseMetrics.inlineHeightPx * safeZoomScale)
+  const baseBottomGapPx = Math.max(0, baseMetrics.stripHeightPx - (baseMetrics.inlineTopPx + baseMetrics.inlineHeightPx))
+  const stripHeightPx = roundChordMarkerPx(
+    inlineTopPx + inlineHeightPx + baseBottomGapPx * safeZoomScale,
+  )
+  return {
+    buttonHeightPx,
+    fontSizePx,
+    paddingInlinePx,
+    paddingBlockPx,
+    borderRadiusPx,
+    inlineTopPx,
+    inlineHeightPx,
+    stripHeightPx,
+    labelLeftInsetPx: roundChordMarkerPx(baseMetrics.labelLeftInsetPx * safeZoomScale),
   }
 }
 
@@ -1951,8 +1984,8 @@ function App() {
   const safeMinMeasureWidthPx = clampMinMeasureWidthPx(minMeasureWidthPx)
   const safeChordMarkerUiScalePercent = clampChordMarkerUiScalePercent(chordMarkerUiScalePercent)
   const safeChordMarkerPaddingPx = clampChordMarkerPaddingPx(chordMarkerPaddingPx)
-  const chordMarkerStyleMetrics = useMemo(
-    () => getChordMarkerStyleMetrics(safeChordMarkerUiScalePercent, safeChordMarkerPaddingPx),
+  const chordMarkerBaseStyleMetrics = useMemo(
+    () => getChordMarkerBaseStyleMetrics(safeChordMarkerUiScalePercent, safeChordMarkerPaddingPx),
     [safeChordMarkerPaddingPx, safeChordMarkerUiScalePercent],
   )
   const getWidthProbeContext = useCallback((): ReturnType<Renderer['getContext']> | null => {
@@ -2041,6 +2074,10 @@ function App() {
   const minScaleForCanvasHeight = provisionalDisplayScoreHeight / MAX_CANVAS_RENDER_DIM_PX
   const scoreScaleX = baseScoreScale
   const scoreScaleY = Math.max(baseScoreScale, minScaleForCanvasHeight)
+  const chordMarkerStyleMetrics = useMemo(
+    () => applyChordMarkerVisualZoom(chordMarkerBaseStyleMetrics, baseScoreScale),
+    [baseScoreScale, chordMarkerBaseStyleMetrics],
+  )
   const canvasHeightScale = safeCanvasHeightPercent / 100
   const viewportHeightScaleByZoom = Math.max(0.1, scoreScaleY / MANUAL_SCALE_BASELINE)
   const scoreScale = scoreScaleX
