@@ -125,10 +125,13 @@ const MANUAL_SCALE_BASELINE = 1
 const DEFAULT_PAGE_HORIZONTAL_PADDING_PX = 86
 const DEFAULT_MIN_MEASURE_WIDTH_PX = 120
 const DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT = 100
+const DEFAULT_CHORD_MARKER_PADDING_PX = 8
 const MIN_MEASURE_WIDTH_PX_MIN = 1
 const MIN_MEASURE_WIDTH_PX_MAX = 320
 const CHORD_MARKER_UI_SCALE_PERCENT_MIN = 60
 const CHORD_MARKER_UI_SCALE_PERCENT_MAX = 240
+const CHORD_MARKER_PADDING_PX_MIN = 0
+const CHORD_MARKER_PADDING_PX_MAX = 24
 const SCORE_STAGE_BORDER_PX = 1
 const PLAYHEAD_OFFSET_PX = 2
 const PLAYHEAD_WIDTH_PX = 2
@@ -339,16 +342,22 @@ function clampChordMarkerUiScalePercent(value: number): number {
   )
 }
 
+function clampChordMarkerPaddingPx(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_CHORD_MARKER_PADDING_PX
+  return Math.round(clampNumber(value, CHORD_MARKER_PADDING_PX_MIN, CHORD_MARKER_PADDING_PX_MAX) * 2) / 2
+}
+
 function clampNumber(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min
   return Math.max(min, Math.min(max, value))
 }
 
-function getChordMarkerStyleMetrics(scalePercent: number): {
+function getChordMarkerStyleMetrics(scalePercent: number, uniformPaddingPx: number): {
   scale: number
   buttonHeightPx: number
   fontSizePx: number
   paddingInlinePx: number
+  paddingBlockPx: number
   borderRadiusPx: number
   inlineTopPx: number
   inlineHeightPx: number
@@ -356,10 +365,12 @@ function getChordMarkerStyleMetrics(scalePercent: number): {
   labelLeftInsetPx: number
 } {
   const safeScalePercent = clampChordMarkerUiScalePercent(scalePercent)
+  const safePaddingPx = clampChordMarkerPaddingPx(uniformPaddingPx)
   const scale = safeScalePercent / 100
   const fontSizePx = Math.round(Math.max(8, 10 * scale) * 10) / 10
-  const paddingInlinePx = Math.round(Math.max(5, 8 * scale) * 10) / 10
-  const buttonHeightPx = Math.round(Math.max(18, 22 * scale) * 10) / 10
+  const paddingInlinePx = safePaddingPx
+  const paddingBlockPx = safePaddingPx
+  const buttonHeightPx = Math.round((fontSizePx + paddingBlockPx * 2) * 10) / 10
   const borderRadiusPx = Math.round(Math.max(5, 7 * scale) * 10) / 10
   const inlineTopPx = 22
   const inlineHeightPx = Math.round(Math.max(24, buttonHeightPx + 2) * 10) / 10
@@ -369,6 +380,7 @@ function getChordMarkerStyleMetrics(scalePercent: number): {
     buttonHeightPx,
     fontSizePx,
     paddingInlinePx,
+    paddingBlockPx,
     borderRadiusPx,
     inlineTopPx,
     inlineHeightPx,
@@ -1762,6 +1774,7 @@ function App() {
   const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
   const [minMeasureWidthPx, setMinMeasureWidthPx] = useState(DEFAULT_MIN_MEASURE_WIDTH_PX)
   const [chordMarkerUiScalePercent, setChordMarkerUiScalePercent] = useState(DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT)
+  const [chordMarkerPaddingPx, setChordMarkerPaddingPx] = useState(DEFAULT_CHORD_MARKER_PADDING_PX)
   const [timeAxisSpacingConfig, setTimeAxisSpacingConfig] = useState(DEFAULT_TIME_AXIS_SPACING_CONFIG)
   const [isOsmdPreviewOpen, setIsOsmdPreviewOpen] = useState(false)
   const [midiPermissionState, setMidiPermissionState] = useState<MidiPermissionState>('idle')
@@ -1934,9 +1947,10 @@ function App() {
   const spacingLayoutMode: SpacingLayoutMode = 'custom'
   const safeMinMeasureWidthPx = clampMinMeasureWidthPx(minMeasureWidthPx)
   const safeChordMarkerUiScalePercent = clampChordMarkerUiScalePercent(chordMarkerUiScalePercent)
+  const safeChordMarkerPaddingPx = clampChordMarkerPaddingPx(chordMarkerPaddingPx)
   const chordMarkerStyleMetrics = useMemo(
-    () => getChordMarkerStyleMetrics(safeChordMarkerUiScalePercent),
-    [safeChordMarkerUiScalePercent],
+    () => getChordMarkerStyleMetrics(safeChordMarkerUiScalePercent, safeChordMarkerPaddingPx),
+    [safeChordMarkerPaddingPx, safeChordMarkerUiScalePercent],
   )
   const getWidthProbeContext = useCallback((): ReturnType<Renderer['getContext']> | null => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return null
@@ -6375,6 +6389,7 @@ function App() {
         pageHorizontalPaddingPx={pageHorizontalPaddingPx}
         minMeasureWidthPx={safeMinMeasureWidthPx}
         chordMarkerUiScalePercent={safeChordMarkerUiScalePercent}
+        chordMarkerPaddingPx={safeChordMarkerPaddingPx}
         baseMinGap32Px={timeAxisSpacingConfig.baseMinGap32Px}
         leadingBarlineGapPx={timeAxisSpacingConfig.leadingBarlineGapPx}
         durationGapRatio32={timeAxisSpacingConfig.durationGapRatios.thirtySecond}
@@ -6389,6 +6404,9 @@ function App() {
         onMinMeasureWidthPxChange={(nextValue) => setMinMeasureWidthPx(clampMinMeasureWidthPx(nextValue))}
         onChordMarkerUiScalePercentChange={(nextValue) =>
           setChordMarkerUiScalePercent(clampChordMarkerUiScalePercent(nextValue))
+        }
+        onChordMarkerPaddingPxChange={(nextValue) =>
+          setChordMarkerPaddingPx(clampChordMarkerPaddingPx(nextValue))
         }
         onBaseMinGap32PxChange={(nextValue) =>
           setTimeAxisSpacingConfig((current) => ({
@@ -6464,6 +6482,7 @@ function App() {
           setPageHorizontalPaddingPx(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
           setMinMeasureWidthPx(DEFAULT_MIN_MEASURE_WIDTH_PX)
           setChordMarkerUiScalePercent(DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT)
+          setChordMarkerPaddingPx(DEFAULT_CHORD_MARKER_PADDING_PX)
         }}
         onOpenMusicXmlFilePicker={openMusicXmlFilePicker}
         onLoadSampleMusicXml={loadSampleMusicXmlWithCollapseReset}

@@ -11,6 +11,7 @@ export function ScoreBoard(props: {
     buttonHeightPx: number
     fontSizePx: number
     paddingInlinePx: number
+    paddingBlockPx: number
     borderRadiusPx: number
     inlineTopPx: number
     inlineHeightPx: number
@@ -105,6 +106,7 @@ export function ScoreBoard(props: {
     ['--chord-ruler-inline-height' as string]: `${chordMarkerStyleMetrics.inlineHeightPx}px`,
     ['--chord-ruler-marker-height' as string]: `${chordMarkerStyleMetrics.buttonHeightPx}px`,
     ['--chord-ruler-marker-padding-inline' as string]: `${chordMarkerStyleMetrics.paddingInlinePx}px`,
+    ['--chord-ruler-marker-padding-block' as string]: `${chordMarkerStyleMetrics.paddingBlockPx}px`,
     ['--chord-ruler-marker-radius' as string]: `${chordMarkerStyleMetrics.borderRadiusPx}px`,
     ['--chord-ruler-label-font-size' as string]: `${chordMarkerStyleMetrics.fontSizePx}px`,
   }

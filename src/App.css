@@ -689,10 +689,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: var(--chord-ruler-marker-height, 22px);
   border: none;
-  padding: 0;
   padding-inline: var(--chord-ruler-marker-padding-inline, 8px);
+  padding-block: var(--chord-ruler-marker-padding-block, 8px);
   margin: 0;
   box-sizing: border-box;
   border-radius: var(--chord-ruler-marker-radius, 7px);

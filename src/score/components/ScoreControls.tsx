@@ -59,6 +59,7 @@ export function ScoreControls(props: {
   pageHorizontalPaddingPx: number
   minMeasureWidthPx: number
   chordMarkerUiScalePercent: number
+  chordMarkerPaddingPx: number
   baseMinGap32Px: number
   leadingBarlineGapPx: number
   durationGapRatio32: number
@@ -70,6 +71,7 @@ export function ScoreControls(props: {
   onPageHorizontalPaddingPxChange: (nextValue: number) => void
   onMinMeasureWidthPxChange: (nextValue: number) => void
   onChordMarkerUiScalePercentChange: (nextValue: number) => void
+  onChordMarkerPaddingPxChange: (nextValue: number) => void
   onBaseMinGap32PxChange: (nextValue: number) => void
   onLeadingBarlineGapPxChange: (nextValue: number) => void
   onDurationGapRatio32Change: (nextValue: number) => void
@@ -131,6 +133,7 @@ export function ScoreControls(props: {
     pageHorizontalPaddingPx,
     minMeasureWidthPx,
     chordMarkerUiScalePercent,
+    chordMarkerPaddingPx,
     baseMinGap32Px,
     leadingBarlineGapPx,
     durationGapRatio32,
@@ -142,6 +145,7 @@ export function ScoreControls(props: {
     onPageHorizontalPaddingPxChange,
     onMinMeasureWidthPxChange,
     onChordMarkerUiScalePercentChange,
+    onChordMarkerPaddingPxChange,
     onBaseMinGap32PxChange,
     onLeadingBarlineGapPxChange,
     onDurationGapRatio32Change,
@@ -318,6 +322,32 @@ export function ScoreControls(props: {
                 handleFloatValue((event.target as HTMLInputElement).value, onChordMarkerUiScalePercentChange)
               }
               onChange={(event) => handleFloatValue(event.target.value, onChordMarkerUiScalePercentChange)}
+            />
+
+            <label htmlFor="chord-marker-padding-range">和弦标记内边距</label>
+            <input
+              id="chord-marker-padding-range"
+              type="range"
+              min={0}
+              max={24}
+              step={0.5}
+              value={chordMarkerPaddingPx}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onChordMarkerPaddingPxChange)
+              }
+              onChange={(event) => handleFloatValue(event.target.value, onChordMarkerPaddingPxChange)}
+            />
+            <input
+              id="chord-marker-padding-input"
+              type="number"
+              min={0}
+              max={24}
+              step={0.5}
+              value={chordMarkerPaddingPx}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onChordMarkerPaddingPxChange)
+              }
+              onChange={(event) => handleFloatValue(event.target.value, onChordMarkerPaddingPxChange)}
             />
 
             <label htmlFor="duration-base-gap-32">全局间距大小</label>
