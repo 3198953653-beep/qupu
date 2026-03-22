@@ -5,37 +5,6 @@
   gap: 1rem;
 }
 
-.hero {
-  background: linear-gradient(130deg, #0d2f46 0%, #155273 55%, #247684 100%);
-  color: #f2f7f8;
-  border-radius: 18px;
-  padding: 1.2rem 1.3rem;
-  box-shadow: 0 18px 45px -30px rgba(8, 30, 50, 0.85);
-}
-
-.eyebrow {
-  margin: 0 0 0.4rem;
-  font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  opacity: 0.9;
-}
-
-.hero h1 {
-  margin: 0;
-  font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
-  font-size: clamp(1.35rem, 3.5vw, 2rem);
-  line-height: 1.15;
-}
-
-.subtitle {
-  margin: 0.6rem 0 0;
-  max-width: 65ch;
-  color: #d9ecf2;
-  font-size: 0.94rem;
-}
-
 .control-row {
   display: flex;
   flex-wrap: wrap;
@@ -664,7 +633,7 @@
 .score-ruler-strip {
   position: relative;
   margin: 0;
-  height: 46px;
+  height: var(--chord-ruler-strip-height, 46px);
 }
 
 .measure-ruler-inline {
@@ -707,9 +676,9 @@
 .chord-ruler-inline {
   position: absolute;
   left: 0;
-  top: 22px;
+  top: var(--chord-ruler-inline-top, 22px);
   width: 100%;
-  height: 24px;
+  height: var(--chord-ruler-inline-height, 24px);
   pointer-events: none;
 }
 
@@ -720,13 +689,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 22px;
+  height: var(--chord-ruler-marker-height, 22px);
   border: none;
   padding: 0;
-  padding-inline: 8px;
+  padding-inline: var(--chord-ruler-marker-padding-inline, 8px);
   margin: 0;
   box-sizing: border-box;
-  border-radius: 7px;
+  border-radius: var(--chord-ruler-marker-radius, 7px);
   background: #d9eaff;
   pointer-events: auto;
   cursor: pointer;
@@ -741,7 +710,7 @@
   margin: 0;
   padding: 0;
   color: #1f4e74;
-  font-size: 10px;
+  font-size: var(--chord-ruler-label-font-size, 10px);
   line-height: 1;
   font-weight: 700;
 }
@@ -1200,15 +1169,5 @@
     grid-row: auto;
     max-height: none;
     overflow: visible;
-  }
-}
-
-@media (max-width: 700px) {
-  .hero {
-    padding: 1rem;
-  }
-
-  .subtitle {
-    font-size: 0.88rem;
   }
 }

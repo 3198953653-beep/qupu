@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { chromium, type Browser, type Page } from 'playwright'
+import { chordNameToDegree } from '../src/score/chordDegree'
 import { DEFAULT_DEMO_MEASURE_COUNT } from '../src/score/constants'
 import { buildMusicXmlFromMeasurePairs } from '../src/score/musicXml'
 import type { ImportFeedback, MeasurePair } from '../src/score/types'
@@ -11,11 +12,15 @@ type ChordRulerMarkerDebugRow = {
   pairIndex: number
   beatIndex?: number | null
   label: string
+  sourceLabel: string
+  displayLabel: string
   startTick: number
   endTick: number
   positionText: string
   xPx: number
   anchorSource: 'note-head' | 'spacing-tick' | 'axis' | 'frame'
+  keyFifths: number
+  keyMode: 'major' | 'minor'
 }
 
 type MeasureCoordinateReport = {
@@ -76,6 +81,26 @@ const DEV_URL = `http://${DEV_HOST}:${DEV_PORT}`
 const CHORD_LABEL_LEFT_INSET_PX = 8
 const SCORE_STAGE_BORDER_PX = 1
 const THREE_PART_MUSIC_XML_PATH = 'C:\\Users\\76743\\Desktop\\三个声部.musicxml'
+const THREE_PART_D_MAJOR_MUSIC_XML_PATH = 'C:\\Users\\76743\\Desktop\\三个声部（D调）.musicxml'
+
+function assertChordDegreeConversionExamples(): void {
+  const cases = [
+    { chord: 'G', fifths: 1, mode: 'major', expected: '1' },
+    { chord: 'D', fifths: 1, mode: 'major', expected: '5' },
+    { chord: 'Am', fifths: 0, mode: 'major', expected: '6m' },
+    { chord: 'D/F#', fifths: 1, mode: 'major', expected: '5/7' },
+    { chord: 'Bb', fifths: 0, mode: 'major', expected: 'b7' },
+    { chord: 'Unknown', fifths: 0, mode: 'major', expected: 'Unknown' },
+    { chord: 'Rest', fifths: 0, mode: 'major', expected: 'Rest' },
+  ] as const
+
+  cases.forEach(({ chord, fifths, mode, expected }) => {
+    const actual = chordNameToDegree(chord, fifths, mode)
+    if (actual !== expected) {
+      throw new Error(`Chord-degree helper mismatch for ${chord} in ${fifths}/${mode}: expected=${expected} actual=${actual}.`)
+    }
+  })
+}
 
 function buildTwoHalfNoteImportXml(): string {
   const measurePairs: MeasurePair[] = Array.from({ length: DEFAULT_DEMO_MEASURE_COUNT }, (_, measureIndex) => ({
@@ -223,6 +248,44 @@ async function clickButton(page: Page, label: string): Promise<void> {
   await button.waitFor()
   await button.evaluate((element) => {
     ;(element as HTMLButtonElement).click()
+  })
+}
+
+async function getChordDegreeButtonLabel(page: Page): Promise<string> {
+  const button = page.getByRole('button', { name: /^和弦级数：(开|关)$/ }).first()
+  await button.waitFor()
+  return (await button.textContent())?.trim() ?? ''
+}
+
+async function setChordDegreeDisplay(page: Page, enabled: boolean): Promise<void> {
+  const currentLabel = await getChordDegreeButtonLabel(page)
+  const expectedLabel = enabled ? '和弦级数：开' : '和弦级数：关'
+  if (currentLabel === expectedLabel) return
+  await clickButton(page, currentLabel)
+  const nextLabel = await getChordDegreeButtonLabel(page)
+  if (nextLabel !== expectedLabel) {
+    throw new Error(`Failed to toggle chord-degree display: expected=${expectedLabel} actual=${nextLabel}.`)
+  }
+}
+
+async function getFirstChordMarkerRenderedMetrics(page: Page): Promise<{
+  buttonHeight: number
+  fontSize: number
+  paddingLeft: number
+}> {
+  return page.evaluate(() => {
+    const marker = document.querySelector('.chord-ruler-marker') as HTMLElement | null
+    const label = document.querySelector('.chord-ruler-label') as HTMLElement | null
+    if (!marker || !label) {
+      throw new Error('Missing chord ruler marker DOM for rendered metrics.')
+    }
+    const markerStyle = window.getComputedStyle(marker)
+    const labelStyle = window.getComputedStyle(label)
+    return {
+      buttonHeight: marker.getBoundingClientRect().height,
+      fontSize: Number.parseFloat(labelStyle.fontSize),
+      paddingLeft: Number.parseFloat(markerStyle.paddingLeft),
+    }
   })
 }
 
@@ -720,7 +783,9 @@ function getRequiredTrailingGap(row: MeasureCoordinateReport['rows'][number], la
 
 async function main() {
   const outputPath = process.argv[2] ?? path.resolve('debug', 'chord-marker-browser-report.json')
+  assertChordDegreeConversionExamples()
   const importedChordPartXml = await readFile(THREE_PART_MUSIC_XML_PATH, 'utf8')
+  const importedChordPartDMajorXml = await readFile(THREE_PART_D_MAJOR_MUSIC_XML_PATH, 'utf8')
   const devServer = startDevServer()
   let browser: Browser | null = null
   devServer.stdout?.on('data', (chunk) => {
@@ -749,6 +814,9 @@ async function main() {
     if (await isButtonActive(page, '加载二分音符示例')) {
       throw new Error('Half-note demo button should be inactive in the default demo.')
     }
+    if ((await getChordDegreeButtonLabel(page)) !== '和弦级数：关') {
+      throw new Error('Chord-degree display should default to off.')
+    }
 
     const defaultMarkers = await getChordMarkers(page)
     const defaultBeat1Marker = findMarker(defaultMarkers, 0, 1)
@@ -764,6 +832,54 @@ async function main() {
         `Default demo beat 3 marker did not move right of beat 1 marker: beat1=${defaultBeat1Marker.xPx} beat3=${defaultBeat3Marker.xPx}.`,
       )
     }
+    if (defaultBeat1Marker.label !== 'C' || defaultBeat1Marker.sourceLabel !== 'C' || defaultBeat1Marker.displayLabel !== 'C') {
+      throw new Error(`Default demo should start with chord-name display, got ${JSON.stringify(defaultBeat1Marker)}.`)
+    }
+    if (defaultBeat3Marker.label !== 'Am' || defaultBeat3Marker.displayLabel !== 'Am') {
+      throw new Error(`Default demo third-beat marker should start as Am, got ${JSON.stringify(defaultBeat3Marker)}.`)
+    }
+
+    await setChordDegreeDisplay(page, true)
+    await page.waitForFunction(() => {
+      const api = (window as unknown as {
+        __scoreDebug: {
+          getChordRulerMarkers: () => ChordRulerMarkerDebugRow[]
+        }
+      }).__scoreDebug
+      const markers = api.getChordRulerMarkers()
+      return markers[0]?.displayLabel === '1' && markers[1]?.displayLabel === '6m'
+    })
+    const degreeMarkers = await getChordMarkers(page)
+    const degreeBeat1Marker = findMarker(degreeMarkers, 0, 1)
+    const degreeBeat3Marker = findMarker(degreeMarkers, 0, 3)
+    if (degreeBeat1Marker.label !== '1' || degreeBeat1Marker.sourceLabel !== 'C' || degreeBeat1Marker.keyFifths !== 0 || degreeBeat1Marker.keyMode !== 'major') {
+      throw new Error(`Default demo beat 1 degree display is wrong: ${JSON.stringify(degreeBeat1Marker)}.`)
+    }
+    if (degreeBeat3Marker.label !== '6m' || degreeBeat3Marker.sourceLabel !== 'Am') {
+      throw new Error(`Default demo beat 3 degree display is wrong: ${JSON.stringify(degreeBeat3Marker)}.`)
+    }
+
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await waitForDebugApi(page)
+    await waitForDefaultDemo(page)
+    if ((await getChordDegreeButtonLabel(page)) !== '和弦级数：开') {
+      throw new Error('Chord-degree display should persist after reload.')
+    }
+    const persistedDegreeMarkers = await getChordMarkers(page)
+    if (findMarker(persistedDegreeMarkers, 0, 1).label !== '1' || findMarker(persistedDegreeMarkers, 0, 3).label !== '6m') {
+      throw new Error(`Chord-degree display did not persist after reload: ${JSON.stringify(persistedDegreeMarkers.slice(0, 2))}.`)
+    }
+
+    await setChordDegreeDisplay(page, false)
+    await page.waitForFunction(() => {
+      const api = (window as unknown as {
+        __scoreDebug: {
+          getChordRulerMarkers: () => ChordRulerMarkerDebugRow[]
+        }
+      }).__scoreDebug
+      const markers = api.getChordRulerMarkers()
+      return markers[0]?.displayLabel === 'C' && markers[1]?.displayLabel === 'Am'
+    })
 
     await clickButton(page, '加载全音符示例')
     await waitForWholeNoteDemo(page)
@@ -855,15 +971,44 @@ async function main() {
     await ensureSpacingPanelOpen(page)
     const spacingControlPresence = await page.evaluate(() => ({
       hasLeadingGap: document.querySelector('#leading-barline-gap-range') !== null,
+      hasChordMarkerSize: document.querySelector('#chord-marker-ui-scale-range') !== null,
       hasOldMaxGap: document.querySelector('#barline-edge-max-gap') !== null,
       hasOldMinGap: document.querySelector('#barline-edge-min-gap') !== null,
     }))
     if (!spacingControlPresence.hasLeadingGap) {
       throw new Error('Missing the new #leading-barline-gap-range control.')
     }
+    if (!spacingControlPresence.hasChordMarkerSize) {
+      throw new Error('Missing the new #chord-marker-ui-scale-range control.')
+    }
     if (spacingControlPresence.hasOldMaxGap || spacingControlPresence.hasOldMinGap) {
       throw new Error('Old barline edge-gap controls should be removed from the spacing panel.')
     }
+    const defaultChordMarkerSize = await getInputValue(page, '#chord-marker-ui-scale-input')
+    if (defaultChordMarkerSize !== 100) {
+      throw new Error(`Expected default chord marker size to be 100, got ${defaultChordMarkerSize}.`)
+    }
+    const defaultChordMarkerMetrics = await getFirstChordMarkerRenderedMetrics(page)
+    await setInputValue(page, '#chord-marker-ui-scale-range', 160)
+    await page.waitForFunction(
+      ({ minHeight, minFontSize, minPaddingLeft }) => {
+        const marker = document.querySelector('.chord-ruler-marker') as HTMLElement | null
+        const label = document.querySelector('.chord-ruler-label') as HTMLElement | null
+        if (!marker || !label) return false
+        const markerStyle = window.getComputedStyle(marker)
+        const labelStyle = window.getComputedStyle(label)
+        return (
+          marker.getBoundingClientRect().height >= minHeight &&
+          Number.parseFloat(labelStyle.fontSize) >= minFontSize &&
+          Number.parseFloat(markerStyle.paddingLeft) >= minPaddingLeft
+        )
+      },
+      {
+        minHeight: defaultChordMarkerMetrics.buttonHeight + 6,
+        minFontSize: defaultChordMarkerMetrics.fontSize + 4,
+        minPaddingLeft: defaultChordMarkerMetrics.paddingLeft + 3,
+      },
+    )
     await ensureDurationRatioPanelOpen(page)
     const defaultWholeRatio = await getInputValue(page, '#duration-ratio-1')
     if (Math.abs(defaultWholeRatio - 1.4) > 0.01) {
@@ -1306,7 +1451,8 @@ async function main() {
       () => {
         const minWidthInput = document.querySelector('#min-measure-width-input') as HTMLInputElement | null
         const wholeRatioInput = document.querySelector('#duration-ratio-1') as HTMLInputElement | null
-        return minWidthInput?.value === '120' && wholeRatioInput?.value === '1.4'
+        const chordMarkerSizeInput = document.querySelector('#chord-marker-ui-scale-input') as HTMLInputElement | null
+        return minWidthInput?.value === '120' && wholeRatioInput?.value === '1.4' && chordMarkerSizeInput?.value === '100'
       },
     )
 
@@ -1373,6 +1519,61 @@ async function main() {
       const selectedRows = api.getSelectedSelections()
       return !!active && active.pairIndex === 4 && active.startTick === 32 && active.endTick === 64 && selectedRows.length > 0
     })
+
+    await importMusicXmlViaDebugApi(page, importedChordPartDMajorXml)
+    await page.waitForFunction(() => {
+      const api = (window as unknown as {
+        __scoreDebug: {
+          getChordRulerMarkers: () => ChordRulerMarkerDebugRow[]
+        }
+      }).__scoreDebug
+      const markers = api.getChordRulerMarkers()
+      return (
+        markers[0]?.sourceLabel === 'Dadd9' &&
+        markers[1]?.sourceLabel === 'Bmadd9' &&
+        markers[2]?.sourceLabel === 'Gadd9' &&
+        markers[3]?.sourceLabel === 'Aadd9'
+      )
+    })
+
+    const importedDMajorMarkersOff = await getChordMarkers(page)
+    const expectedDMajorChordNames = ['Dadd9', 'Bmadd9', 'Gadd9', 'Aadd9']
+    expectedDMajorChordNames.forEach((label, index) => {
+      const marker = importedDMajorMarkersOff[index]
+      if (!marker || marker.label !== label || marker.sourceLabel !== label || marker.displayLabel !== label) {
+        throw new Error(`D-major import should show source chord labels before toggle, got ${JSON.stringify(importedDMajorMarkersOff.slice(0, 4))}.`)
+      }
+    })
+    if (importedDMajorMarkersOff[0]?.keyFifths !== 2 || importedDMajorMarkersOff[0]?.keyMode !== 'major') {
+      throw new Error(`D-major import should expose key context {2, major}, got ${JSON.stringify(importedDMajorMarkersOff[0])}.`)
+    }
+
+    await setChordDegreeDisplay(page, true)
+    await page.waitForFunction(() => {
+      const api = (window as unknown as {
+        __scoreDebug: {
+          getChordRulerMarkers: () => ChordRulerMarkerDebugRow[]
+        }
+      }).__scoreDebug
+      const markers = api.getChordRulerMarkers()
+      return (
+        markers[0]?.displayLabel === '1add9' &&
+        markers[1]?.displayLabel === '6madd9' &&
+        markers[2]?.displayLabel === '4add9' &&
+        markers[3]?.displayLabel === '5add9'
+      )
+    })
+
+    const importedDMajorMarkersOn = await getChordMarkers(page)
+    const expectedDMajorDegrees = ['1add9', '6madd9', '4add9', '5add9']
+    expectedDMajorDegrees.forEach((label, index) => {
+      const marker = importedDMajorMarkersOn[index]
+      if (!marker || marker.label !== label || marker.displayLabel !== label) {
+        throw new Error(`D-major degree display mismatch at index=${index}: ${JSON.stringify(marker)}.`)
+      }
+    })
+
+    await setChordDegreeDisplay(page, false)
 
     const restSelectionImportXml = buildRestSelectionImportXml()
     await importMusicXmlViaDebugApi(page, restSelectionImportXml)
@@ -1515,6 +1716,10 @@ async function main() {
       },
       importedChordPartFirstRow,
       importedChordPartMarkers,
+      degreeMarkers,
+      persistedDegreeMarkers,
+      importedDMajorMarkersOff,
+      importedDMajorMarkersOn,
       importedChordPartMeasureFiveDomLeft: {
         beat1: measureFiveBeat1DomLeft,
         beat3: measureFiveBeat3DomLeft,

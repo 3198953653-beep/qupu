@@ -180,6 +180,8 @@ export function applyImportedScoreState(params: {
   measurePairsFromImportRef: MutableRefObject<MeasurePair[] | null>
   setMeasureKeyFifthsFromImport: StateSetter<number[] | null>
   measureKeyFifthsFromImportRef: MutableRefObject<number[] | null>
+  setMeasureKeyModesFromImport: StateSetter<string[] | null>
+  measureKeyModesFromImportRef: MutableRefObject<string[] | null>
   setMeasureDivisionsFromImport: StateSetter<number[] | null>
   measureDivisionsFromImportRef: MutableRefObject<number[] | null>
   setMeasureTimeSignaturesFromImport: StateSetter<TimeSignature[] | null>
@@ -201,6 +203,8 @@ export function applyImportedScoreState(params: {
     measurePairsFromImportRef,
     setMeasureKeyFifthsFromImport,
     measureKeyFifthsFromImportRef,
+    setMeasureKeyModesFromImport,
+    measureKeyModesFromImportRef,
     setMeasureDivisionsFromImport,
     measureDivisionsFromImportRef,
     setMeasureTimeSignaturesFromImport,
@@ -221,6 +225,8 @@ export function applyImportedScoreState(params: {
   measurePairsFromImportRef.current = result.measurePairs
   setMeasureKeyFifthsFromImport(result.measureKeyFifths)
   measureKeyFifthsFromImportRef.current = result.measureKeyFifths
+  setMeasureKeyModesFromImport(result.measureKeyModes)
+  measureKeyModesFromImportRef.current = result.measureKeyModes
   setMeasureDivisionsFromImport(result.measureDivisions)
   measureDivisionsFromImportRef.current = result.measureDivisions
   setMeasureTimeSignaturesFromImport(result.measureTimeSignatures)

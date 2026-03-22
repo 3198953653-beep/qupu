@@ -1,4 +1,4 @@
-import { useEffect, useRef, type PointerEvent, type RefObject } from 'react'
+import { useEffect, useRef, type CSSProperties, type PointerEvent, type RefObject } from 'react'
 import { SelectionInspector } from './SelectionInspector'
 
 export function ScoreBoard(props: {
@@ -7,6 +7,15 @@ export function ScoreBoard(props: {
   playheadRef: RefObject<HTMLDivElement | null>
   displayScoreWidth: number
   displayScoreHeight: number
+  chordMarkerStyleMetrics: {
+    buttonHeightPx: number
+    fontSizePx: number
+    paddingInlinePx: number
+    borderRadiusPx: number
+    inlineTopPx: number
+    inlineHeightPx: number
+    stripHeightPx: number
+  }
   scoreSurfaceLogicalWidthPx: number
   scoreSurfaceLogicalHeightPx: number
   scoreScaleX: number
@@ -21,7 +30,8 @@ export function ScoreBoard(props: {
   chordRulerMarkers: Array<{
     key: string
     xPx: number
-    label: string
+    sourceLabel: string
+    displayLabel: string
     isActive: boolean
     pairIndex: number
     positionText: string
@@ -52,6 +62,7 @@ export function ScoreBoard(props: {
     playheadRef,
     displayScoreWidth,
     displayScoreHeight,
+    chordMarkerStyleMetrics,
     scoreSurfaceLogicalWidthPx,
     scoreSurfaceLogicalHeightPx,
     scoreScaleX,
@@ -87,10 +98,21 @@ export function ScoreBoard(props: {
     logElement.scrollTop = logElement.scrollHeight
   }, [playheadDebugLogText])
 
+  const rulerStripStyle: CSSProperties = {
+    width: `${displayScoreWidth}px`,
+    ['--chord-ruler-strip-height' as string]: `${chordMarkerStyleMetrics.stripHeightPx}px`,
+    ['--chord-ruler-inline-top' as string]: `${chordMarkerStyleMetrics.inlineTopPx}px`,
+    ['--chord-ruler-inline-height' as string]: `${chordMarkerStyleMetrics.inlineHeightPx}px`,
+    ['--chord-ruler-marker-height' as string]: `${chordMarkerStyleMetrics.buttonHeightPx}px`,
+    ['--chord-ruler-marker-padding-inline' as string]: `${chordMarkerStyleMetrics.paddingInlinePx}px`,
+    ['--chord-ruler-marker-radius' as string]: `${chordMarkerStyleMetrics.borderRadiusPx}px`,
+    ['--chord-ruler-label-font-size' as string]: `${chordMarkerStyleMetrics.fontSizePx}px`,
+  }
+
   return (
     <section className="board">
       <div className="score-scroll horizontal-view" ref={scoreScrollRef} tabIndex={0}>
-        <div className="score-ruler-strip" style={{ width: `${displayScoreWidth}px` }}>
+        <div className="score-ruler-strip" style={rulerStripStyle}>
           <div className="measure-ruler-inline" aria-hidden="true">
             {measureRulerTicks.map((tick) => (
               <div className="measure-ruler-tick" key={tick.key} style={{ left: `${tick.xPx}px` }}>
@@ -107,9 +129,9 @@ export function ScoreBoard(props: {
                 key={marker.key}
                 style={{ left: `${marker.xPx}px` }}
                 onClick={() => onChordRulerMarkerClick(marker.key)}
-                aria-label={`第${marker.pairIndex + 1}小节${marker.positionText}和弦 ${marker.label}`}
+                aria-label={`第${marker.pairIndex + 1}小节${marker.positionText}和弦 ${marker.displayLabel}`}
               >
-                <span className="chord-ruler-label">{marker.label}</span>
+                <span className="chord-ruler-label">{marker.displayLabel}</span>
               </button>
             ))}
           </div>

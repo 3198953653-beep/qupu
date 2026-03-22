@@ -62,6 +62,7 @@ export type ImportResult = {
   bassNotes: ScoreNote[]
   measurePairs: MeasurePair[]
   measureKeyFifths: number[]
+  measureKeyModes: string[]
   measureDivisions: number[]
   measureTimeSignatures: TimeSignature[]
   metadata: MusicXmlMetadata

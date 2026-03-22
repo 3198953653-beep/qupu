@@ -50,6 +50,8 @@ export function useEditorHandlers(params: {
   measurePairsFromImportRef: MutableRefObject<MeasurePair[] | null>
   setMeasureKeyFifthsFromImport: StateSetter<number[] | null>
   measureKeyFifthsFromImportRef: MutableRefObject<number[] | null>
+  setMeasureKeyModesFromImport: StateSetter<string[] | null>
+  measureKeyModesFromImportRef: MutableRefObject<string[] | null>
   setMeasureDivisionsFromImport: StateSetter<number[] | null>
   measureDivisionsFromImportRef: MutableRefObject<number[] | null>
   setMeasureTimeSignaturesFromImport: StateSetter<TimeSignature[] | null>
@@ -108,6 +110,8 @@ export function useEditorHandlers(params: {
     measurePairsFromImportRef,
     setMeasureKeyFifthsFromImport,
     measureKeyFifthsFromImportRef,
+    setMeasureKeyModesFromImport,
+    measureKeyModesFromImportRef,
     setMeasureDivisionsFromImport,
     measureDivisionsFromImportRef,
     setMeasureTimeSignaturesFromImport,
@@ -166,6 +170,8 @@ export function useEditorHandlers(params: {
       measurePairsFromImportRef,
       setMeasureKeyFifthsFromImport,
       measureKeyFifthsFromImportRef,
+      setMeasureKeyModesFromImport,
+      measureKeyModesFromImportRef,
       setMeasureDivisionsFromImport,
       measureDivisionsFromImportRef,
       setMeasureTimeSignaturesFromImport,
@@ -234,6 +240,8 @@ export function useEditorHandlers(params: {
     measurePairsFromImportRef,
     setMeasureKeyFifthsFromImport,
     measureKeyFifthsFromImportRef,
+    setMeasureKeyModesFromImport,
+    measureKeyModesFromImportRef,
     setMeasureDivisionsFromImport,
     measureDivisionsFromImportRef,
     setMeasureTimeSignaturesFromImport,

@@ -9,6 +9,8 @@ export function clearImportedSourceState(params: {
   measurePairsFromImportRef: MutableRefObject<MeasurePair[] | null>
   setMeasureKeyFifthsFromImport: StateSetter<number[] | null>
   measureKeyFifthsFromImportRef: MutableRefObject<number[] | null>
+  setMeasureKeyModesFromImport: StateSetter<string[] | null>
+  measureKeyModesFromImportRef: MutableRefObject<string[] | null>
   setMeasureDivisionsFromImport: StateSetter<number[] | null>
   measureDivisionsFromImportRef: MutableRefObject<number[] | null>
   setMeasureTimeSignaturesFromImport: StateSetter<TimeSignature[] | null>
@@ -26,6 +28,8 @@ export function clearImportedSourceState(params: {
     measurePairsFromImportRef,
     setMeasureKeyFifthsFromImport,
     measureKeyFifthsFromImportRef,
+    setMeasureKeyModesFromImport,
+    measureKeyModesFromImportRef,
     setMeasureDivisionsFromImport,
     measureDivisionsFromImportRef,
     setMeasureTimeSignaturesFromImport,
@@ -43,6 +47,8 @@ export function clearImportedSourceState(params: {
   measurePairsFromImportRef.current = null
   setMeasureKeyFifthsFromImport(null)
   measureKeyFifthsFromImportRef.current = null
+  setMeasureKeyModesFromImport(null)
+  measureKeyModesFromImportRef.current = null
   setMeasureDivisionsFromImport(null)
   measureDivisionsFromImportRef.current = null
   setMeasureTimeSignaturesFromImport(null)

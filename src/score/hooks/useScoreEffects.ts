@@ -67,6 +67,8 @@ export function useImportedRefsSync(params: {
   measurePairsFromImportRef: MutableRefObject<MeasurePair[] | null>
   measureKeyFifthsFromImport: number[] | null
   measureKeyFifthsFromImportRef: MutableRefObject<number[] | null>
+  measureKeyModesFromImport: string[] | null
+  measureKeyModesFromImportRef: MutableRefObject<string[] | null>
   measureDivisionsFromImport: number[] | null
   measureDivisionsFromImportRef: MutableRefObject<number[] | null>
   measureTimeSignaturesFromImport: TimeSignature[] | null
@@ -81,6 +83,8 @@ export function useImportedRefsSync(params: {
     measurePairsFromImportRef,
     measureKeyFifthsFromImport,
     measureKeyFifthsFromImportRef,
+    measureKeyModesFromImport,
+    measureKeyModesFromImportRef,
     measureDivisionsFromImport,
     measureDivisionsFromImportRef,
     measureTimeSignaturesFromImport,
@@ -98,6 +102,10 @@ export function useImportedRefsSync(params: {
   useEffect(() => {
     measureKeyFifthsFromImportRef.current = measureKeyFifthsFromImport
   }, [measureKeyFifthsFromImport, measureKeyFifthsFromImportRef])
+
+  useEffect(() => {
+    measureKeyModesFromImportRef.current = measureKeyModesFromImport
+  }, [measureKeyModesFromImport, measureKeyModesFromImportRef])
 
   useEffect(() => {
     measureDivisionsFromImportRef.current = measureDivisionsFromImport

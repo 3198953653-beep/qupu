@@ -9,6 +9,7 @@ import {
   TICKS_PER_BEAT,
 } from './constants'
 import type { ChordRulerEntry } from './chordRuler'
+import { normalizeKeyMode } from './chordDegree'
 import { getKeySignatureAlterForStep, getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './pitchMath'
 import {
   beatsToTicks,
@@ -250,6 +251,7 @@ type VisiblePartContext = {
 type ParsedVisibleMusicXmlData = {
   measureSlots: MeasureSlot[]
   measureKeyFifths: number[]
+  measureKeyModes: string[]
   measureDivisions: number[]
   measureTimeSignatures: TimeSignature[]
 }
@@ -428,6 +430,7 @@ function parseVisibleMusicXmlParts(params: {
   const { partContexts, measureLimit } = params
   const measureSlots: MeasureSlot[] = []
   const measureKeyFifths: number[] = []
+  const measureKeyModes: string[] = []
   const measureDivisions: number[] = []
   const measureTimeSignatures: TimeSignature[] = []
 
@@ -451,6 +454,7 @@ function parseVisibleMusicXmlParts(params: {
 
     let divisions = 1
     let currentFifths = 0
+    let currentKeyMode = 'major'
     let currentTime: TimeSignature = { beats: 4, beatType: 4 }
 
     for (let measureIndex = 0; measureIndex < measureEls.length; measureIndex += 1) {
@@ -484,8 +488,15 @@ function parseVisibleMusicXmlParts(params: {
       if (Number.isFinite(maybeFifths)) {
         currentFifths = Math.trunc(maybeFifths)
       }
+      const modeText = getFirstTagText(measureEl, 'mode')
+      if (modeText) {
+        currentKeyMode = normalizeKeyMode(modeText)
+      }
       if (measureKeyFifths[measureIndex] === undefined) {
         measureKeyFifths[measureIndex] = currentFifths
+      }
+      if (measureKeyModes[measureIndex] === undefined) {
+        measureKeyModes[measureIndex] = currentKeyMode
       }
 
       const measureAlterState: Record<StaffKind, Map<string, number>> = {
@@ -630,6 +641,7 @@ function parseVisibleMusicXmlParts(params: {
   return {
     measureSlots,
     measureKeyFifths,
+    measureKeyModes,
     measureDivisions,
     measureTimeSignatures,
   }
@@ -641,7 +653,7 @@ function finalizeImportResult(params: {
   importedChordRulerEntriesByMeasureIndex?: ChordRulerEntry[][] | null
 }): ImportResult {
   const { parsedData, metadata, importedChordRulerEntriesByMeasureIndex = null } = params
-  const { measureSlots, measureKeyFifths, measureDivisions, measureTimeSignatures } = parsedData
+  const { measureSlots, measureKeyFifths, measureKeyModes, measureDivisions, measureTimeSignatures } = parsedData
 
   const importedPairs: MeasurePair[] = []
   const importedTrebleNotes: ScoreNote[] = []
@@ -691,6 +703,7 @@ function finalizeImportResult(params: {
       bassNotes: fallbackPairs.flatMap((pair) => pair.bass),
       measurePairs: fallbackPairs,
       measureKeyFifths: new Array(fallbackPairs.length).fill(0),
+      measureKeyModes: new Array(fallbackPairs.length).fill('major'),
       measureDivisions: new Array(fallbackPairs.length).fill(16),
       measureTimeSignatures: new Array(fallbackPairs.length).fill(null).map(() => ({ beats: 4, beatType: 4 })),
       metadata,
@@ -702,6 +715,10 @@ function finalizeImportResult(params: {
     measureKeyFifths.length === importedPairs.length
       ? measureKeyFifths
       : importedPairs.map((_, index) => measureKeyFifths[index] ?? measureKeyFifths[index - 1] ?? 0)
+  const alignedKeyModes =
+    measureKeyModes.length === importedPairs.length
+      ? measureKeyModes.map((mode) => normalizeKeyMode(mode))
+      : importedPairs.map((_, index) => normalizeKeyMode(measureKeyModes[index] ?? measureKeyModes[index - 1] ?? 'major'))
   const alignedDivisions = importedPairs.map(
     (_, index) => measureDivisions[index] ?? measureDivisions[index - 1] ?? 16,
   )
@@ -714,6 +731,7 @@ function finalizeImportResult(params: {
     bassNotes: importedBassNotes,
     measurePairs: importedPairs,
     measureKeyFifths: alignedKeyFifths,
+    measureKeyModes: alignedKeyModes,
     measureDivisions: alignedDivisions,
     measureTimeSignatures: alignedTimes,
     metadata,

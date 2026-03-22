@@ -81,6 +81,7 @@ import { buildStaffOnsetTicks, compareTimelinePoint, resolveSelectionTimelinePoi
 import { resolveForwardTieTargets, resolvePreviousTieTarget } from './score/tieChain'
 import { buildSelectionGroupMoveTargets } from './score/selectionGroupTargets'
 import { buildChordRulerEntries, getMeasureTicksFromTimeSignature, type ChordRulerEntry } from './score/chordRuler'
+import { chordNameToDegree, normalizeKeyMode } from './score/chordDegree'
 import type { MeasureTimelineBundle } from './score/timeline/types'
 import type { NoteClipboardPayload } from './score/copyPasteTypes'
 import {
@@ -123,8 +124,11 @@ const INSPECTOR_SEQUENCE_PREVIEW_LIMIT = 64
 const MANUAL_SCALE_BASELINE = 1
 const DEFAULT_PAGE_HORIZONTAL_PADDING_PX = 86
 const DEFAULT_MIN_MEASURE_WIDTH_PX = 120
+const DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT = 100
 const MIN_MEASURE_WIDTH_PX_MIN = 1
 const MIN_MEASURE_WIDTH_PX_MAX = 320
+const CHORD_MARKER_UI_SCALE_PERCENT_MIN = 60
+const CHORD_MARKER_UI_SCALE_PERCENT_MAX = 240
 const SCORE_STAGE_BORDER_PX = 1
 const PLAYHEAD_OFFSET_PX = 2
 const PLAYHEAD_WIDTH_PX = 2
@@ -160,7 +164,7 @@ const UNDO_HISTORY_LIMIT = 120
 const LOCAL_STORAGE_MIDI_INPUT_KEY = 'score.midi.selectedInputId'
 const LOCAL_STORAGE_EDITOR_MEASURE_NUMBER_KEY = 'score.editor.showInScoreMeasureNumbers'
 const LOCAL_STORAGE_PLAYHEAD_FOLLOW_KEY = 'score.playhead.followEnabled'
-const CHORD_LABEL_LEFT_INSET_PX = 8
+const LOCAL_STORAGE_CHORD_DEGREE_DISPLAY_KEY = 'score.chordDegree.enabled'
 const CHORD_HIGHLIGHT_PAD_X_PX = 4
 const CHORD_HIGHLIGHT_PAD_Y_PX = 4
 
@@ -327,9 +331,50 @@ function clampCanvasHeightPercent(value: number): number {
   return Math.max(70, Math.min(260, Math.round(value)))
 }
 
+function clampChordMarkerUiScalePercent(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT
+  return Math.max(
+    CHORD_MARKER_UI_SCALE_PERCENT_MIN,
+    Math.min(CHORD_MARKER_UI_SCALE_PERCENT_MAX, Math.round(value)),
+  )
+}
+
 function clampNumber(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min
   return Math.max(min, Math.min(max, value))
+}
+
+function getChordMarkerStyleMetrics(scalePercent: number): {
+  scale: number
+  buttonHeightPx: number
+  fontSizePx: number
+  paddingInlinePx: number
+  borderRadiusPx: number
+  inlineTopPx: number
+  inlineHeightPx: number
+  stripHeightPx: number
+  labelLeftInsetPx: number
+} {
+  const safeScalePercent = clampChordMarkerUiScalePercent(scalePercent)
+  const scale = safeScalePercent / 100
+  const fontSizePx = Math.round(Math.max(8, 10 * scale) * 10) / 10
+  const paddingInlinePx = Math.round(Math.max(5, 8 * scale) * 10) / 10
+  const buttonHeightPx = Math.round(Math.max(18, 22 * scale) * 10) / 10
+  const borderRadiusPx = Math.round(Math.max(5, 7 * scale) * 10) / 10
+  const inlineTopPx = 22
+  const inlineHeightPx = Math.round(Math.max(24, buttonHeightPx + 2) * 10) / 10
+  const stripHeightPx = Math.round(Math.max(46, inlineTopPx + inlineHeightPx) * 10) / 10
+  return {
+    scale,
+    buttonHeightPx,
+    fontSizePx,
+    paddingInlinePx,
+    borderRadiusPx,
+    inlineTopPx,
+    inlineHeightPx,
+    stripHeightPx,
+    labelLeftInsetPx: paddingInlinePx,
+  }
 }
 
 function resolvePairKeyFifthsForKeyboard(pairIndex: number, keyFifthsByMeasure?: number[] | null): number {
@@ -339,6 +384,17 @@ function resolvePairKeyFifthsForKeyboard(pairIndex: number, keyFifthsByMeasure?:
     if (Number.isFinite(value)) return Math.trunc(value)
   }
   return 0
+}
+
+function resolvePairKeyMode(pairIndex: number, keyModesByMeasure?: string[] | null): 'major' | 'minor' {
+  if (!keyModesByMeasure || keyModesByMeasure.length === 0) return 'major'
+  for (let index = pairIndex; index >= 0; index -= 1) {
+    const value = keyModesByMeasure[index]
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return normalizeKeyMode(value)
+    }
+  }
+  return 'major'
 }
 
 function shiftPitchByStaffSteps(pitch: Pitch, direction: 'up' | 'down', staffSteps = 1): Pitch | null {
@@ -981,7 +1037,8 @@ type MeasureStaffOnsetEntry = {
 type ChordRulerMarker = {
   key: string
   xPx: number
-  label: string
+  sourceLabel: string
+  displayLabel: string
   isActive: boolean
   pairIndex: number
   positionText: string
@@ -991,13 +1048,16 @@ type ChordRulerMarker = {
 type ChordRulerMarkerMeta = {
   key: string
   pairIndex: number
-  label: string
+  sourceLabel: string
+  displayLabel: string
   startTick: number
   endTick: number
   positionText: string
   beatIndex?: number | null
   xPx: number
   anchorSource: 'note-head' | 'spacing-tick' | 'axis' | 'frame'
+  keyFifths: number
+  keyMode: 'major' | 'minor'
 }
 
 type ActiveChordSelection = {
@@ -1674,6 +1734,7 @@ function App() {
   const [isRhythmLinked, setIsRhythmLinked] = useState(false)
   const [measurePairsFromImport, setMeasurePairsFromImport] = useState<MeasurePair[] | null>(null)
   const [measureKeyFifthsFromImport, setMeasureKeyFifthsFromImport] = useState<number[] | null>(null)
+  const [measureKeyModesFromImport, setMeasureKeyModesFromImport] = useState<string[] | null>(null)
   const [measureDivisionsFromImport, setMeasureDivisionsFromImport] = useState<number[] | null>(null)
   const [measureTimeSignaturesFromImport, setMeasureTimeSignaturesFromImport] = useState<TimeSignature[] | null>(null)
   const [musicXmlMetadataFromImport, setMusicXmlMetadataFromImport] = useState<MusicXmlMetadata | null>(null)
@@ -1690,9 +1751,17 @@ function App() {
     if (storedValue === '0' || storedValue === 'false') return false
     return true
   })
+  const [showChordDegreeEnabled, setShowChordDegreeEnabled] = useState(() => {
+    if (typeof window === 'undefined') return false
+    const storedValue = window.localStorage.getItem(LOCAL_STORAGE_CHORD_DEGREE_DISPLAY_KEY)
+    if (storedValue === '1' || storedValue === 'true') return true
+    if (storedValue === '0' || storedValue === 'false') return false
+    return false
+  })
   const [showInScoreMeasureNumbers, setShowInScoreMeasureNumbers] = useState(false)
   const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
   const [minMeasureWidthPx, setMinMeasureWidthPx] = useState(DEFAULT_MIN_MEASURE_WIDTH_PX)
+  const [chordMarkerUiScalePercent, setChordMarkerUiScalePercent] = useState(DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT)
   const [timeAxisSpacingConfig, setTimeAxisSpacingConfig] = useState(DEFAULT_TIME_AXIS_SPACING_CONFIG)
   const [isOsmdPreviewOpen, setIsOsmdPreviewOpen] = useState(false)
   const [midiPermissionState, setMidiPermissionState] = useState<MidiPermissionState>('idle')
@@ -1744,6 +1813,7 @@ function App() {
   const osmdPreviewPageIndexRef = useRef<number>(0)
   const osmdPreviewLastRebalanceStatsRef = useRef<OsmdPreviewRebalanceStats | null>(null)
   const playheadFollowHydratedRef = useRef(false)
+  const chordDegreeDisplayHydratedRef = useRef(false)
   const showInScoreMeasureNumbersHydratedRef = useRef(false)
   const osmdPreviewZoomCommitTimerRef = useRef<number | null>(null)
   const osmdPreviewMarginApplyTimerRef = useRef<number | null>(null)
@@ -1789,6 +1859,7 @@ function App() {
   const lastAppliedPlaybackCursorResetVersionRef = useRef(0)
   const measurePairsFromImportRef = useRef<MeasurePair[] | null>(null)
   const measureKeyFifthsFromImportRef = useRef<number[] | null>(null)
+  const measureKeyModesFromImportRef = useRef<string[] | null>(null)
   const measureDivisionsFromImportRef = useRef<number[] | null>(null)
   const measureTimeSignaturesFromImportRef = useRef<TimeSignature[] | null>(null)
   const musicXmlMetadataFromImportRef = useRef<MusicXmlMetadata | null>(null)
@@ -1862,6 +1933,11 @@ function App() {
   const firstPlaybackPoint = playbackTimelineEvents[0]?.point ?? null
   const spacingLayoutMode: SpacingLayoutMode = 'custom'
   const safeMinMeasureWidthPx = clampMinMeasureWidthPx(minMeasureWidthPx)
+  const safeChordMarkerUiScalePercent = clampChordMarkerUiScalePercent(chordMarkerUiScalePercent)
+  const chordMarkerStyleMetrics = useMemo(
+    () => getChordMarkerStyleMetrics(safeChordMarkerUiScalePercent),
+    [safeChordMarkerUiScalePercent],
+  )
   const getWidthProbeContext = useCallback((): ReturnType<Renderer['getContext']> | null => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return null
     const probeWidth = 2048
@@ -2169,6 +2245,8 @@ function App() {
     measurePairsFromImportRef,
     measureKeyFifthsFromImport,
     measureKeyFifthsFromImportRef,
+    measureKeyModesFromImport,
+    measureKeyModesFromImportRef,
     measureDivisionsFromImport,
     measureDivisionsFromImportRef,
     measureTimeSignaturesFromImport,
@@ -2626,6 +2704,8 @@ function App() {
     measurePairsFromImportRef,
     setMeasureKeyFifthsFromImport,
     measureKeyFifthsFromImportRef,
+    setMeasureKeyModesFromImport,
+    measureKeyModesFromImportRef,
     setMeasureDivisionsFromImport,
     measureDivisionsFromImportRef,
     setMeasureTimeSignaturesFromImport,
@@ -3236,6 +3316,20 @@ function App() {
       playheadFollowEnabled ? '1' : '0',
     )
   }, [playheadFollowEnabled])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    chordDegreeDisplayHydratedRef.current = true
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!chordDegreeDisplayHydratedRef.current) return
+    window.localStorage.setItem(
+      LOCAL_STORAGE_CHORD_DEGREE_DISPLAY_KEY,
+      showChordDegreeEnabled ? '1' : '0',
+    )
+  }, [showChordDegreeEnabled])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -4848,6 +4942,12 @@ function App() {
       }
     })
   }, [horizontalMeasureFramesByPair, scoreScaleX])
+  const resolveChordMarkerKeyContext = useCallback((pairIndex: number) => {
+    return {
+      keyFifths: resolvePairKeyFifthsForKeyboard(pairIndex, measureKeyFifthsFromImport),
+      keyMode: resolvePairKeyMode(pairIndex, measureKeyModesFromImport),
+    }
+  }, [measureKeyFifthsFromImport, measureKeyModesFromImport])
   const chordRulerMarkerMetaByKey = useMemo(() => {
     void layoutStabilityKey
     void chordMarkerLayoutRevision
@@ -4931,21 +5031,29 @@ function App() {
           }
         }
         if (typeof anchorXInScore !== 'number' || !Number.isFinite(anchorXInScore)) return
+        const keyContext = resolveChordMarkerKeyContext(pairIndex)
+        const sourceLabel = entry.label
+        const displayLabel = showChordDegreeEnabled
+          ? chordNameToDegree(sourceLabel, keyContext.keyFifths, keyContext.keyMode)
+          : sourceLabel
         const textAnchorXPx =
           (anchorXInScore + horizontalRenderOffsetX) * scoreScaleX + SCORE_STAGE_BORDER_PX
-        const buttonLeftXPx = textAnchorXPx - CHORD_LABEL_LEFT_INSET_PX
+        const buttonLeftXPx = textAnchorXPx - chordMarkerStyleMetrics.labelLeftInsetPx
         if (!Number.isFinite(buttonLeftXPx)) return
         const key = `chord-ruler-${pairIndex + 1}-${safeStartTick}-${entryIndex}`
         markers.set(key, {
           key,
           pairIndex,
           beatIndex: entry.beatIndex,
-          label: entry.label,
+          sourceLabel,
+          displayLabel,
           startTick: safeStartTick,
           endTick: safeEndTick,
           positionText: entry.positionText,
           xPx: buttonLeftXPx,
           anchorSource,
+          keyFifths: keyContext.keyFifths,
+          keyMode: keyContext.keyMode,
         })
       })
     })
@@ -4956,10 +5064,13 @@ function App() {
     getMeasureFrameContentGeometry,
     horizontalMeasureFramesByPair,
     horizontalRenderOffsetX,
+    layoutStabilityKey,
     measurePairs,
     measureTimeSignaturesFromImport,
+    resolveChordMarkerKeyContext,
+    chordMarkerStyleMetrics.labelLeftInsetPx,
     scoreScaleX,
-    layoutStabilityKey,
+    showChordDegreeEnabled,
   ])
   useEffect(() => {
     if (!activeChordSelection) return
@@ -4972,7 +5083,8 @@ function App() {
     return [...chordRulerMarkerMetaByKey.values()].map((marker) => ({
       key: marker.key,
       xPx: marker.xPx,
-      label: marker.label,
+      sourceLabel: marker.sourceLabel,
+      displayLabel: marker.displayLabel,
       isActive: activeChordSelection?.markerKey === marker.key,
       pairIndex: marker.pairIndex,
       positionText: marker.positionText,
@@ -6081,12 +6193,16 @@ function App() {
           key: marker.key,
           pairIndex: marker.pairIndex,
           beatIndex: marker.beatIndex,
-          label: marker.label,
+          label: marker.displayLabel,
+          sourceLabel: marker.sourceLabel,
+          displayLabel: marker.displayLabel,
           startTick: marker.startTick,
           endTick: marker.endTick,
           positionText: marker.positionText,
           xPx: marker.xPx,
           anchorSource: marker.anchorSource,
+          keyFifths: marker.keyFifths,
+          keyMode: marker.keyMode,
         })),
       getPlaybackTimelinePoints: () =>
         playbackTimelineEvents.map((event) => ({
@@ -6238,14 +6354,6 @@ function App() {
 
   return (
     <main className="app-shell">
-      <section className="hero">
-        <p className="eyebrow">交互式乐谱原型版</p>
-        <h1>实时五线谱预览 + 拖拽编辑</h1>
-        <p className="subtitle">
-          A4 样式乐谱页面，自动跨小节换行。可导入乐谱文件，并在高音/低音谱表中拖拽音符。
-        </p>
-      </section>
-
       <ScoreControls
         isPlaying={isPlaying}
         onPlayScore={playScore}
@@ -6253,6 +6361,8 @@ function App() {
         onReset={resetScoreWithCollapseReset}
         playheadFollowEnabled={playheadFollowEnabled}
         onTogglePlayheadFollow={() => setPlayheadFollowEnabled((enabled) => !enabled)}
+        showChordDegreeEnabled={showChordDegreeEnabled}
+        onToggleChordDegreeDisplay={() => setShowChordDegreeEnabled((enabled) => !enabled)}
         showInScoreMeasureNumbers={showInScoreMeasureNumbers}
         onToggleInScoreMeasureNumbers={() => setShowInScoreMeasureNumbers((current) => !current)}
         autoScaleEnabled={autoScaleEnabled}
@@ -6264,6 +6374,7 @@ function App() {
         onCanvasHeightPercentChange={(nextPercent) => setCanvasHeightPercent(clampCanvasHeightPercent(nextPercent))}
         pageHorizontalPaddingPx={pageHorizontalPaddingPx}
         minMeasureWidthPx={safeMinMeasureWidthPx}
+        chordMarkerUiScalePercent={safeChordMarkerUiScalePercent}
         baseMinGap32Px={timeAxisSpacingConfig.baseMinGap32Px}
         leadingBarlineGapPx={timeAxisSpacingConfig.leadingBarlineGapPx}
         durationGapRatio32={timeAxisSpacingConfig.durationGapRatios.thirtySecond}
@@ -6276,6 +6387,9 @@ function App() {
           setPageHorizontalPaddingPx(clampPageHorizontalPaddingPx(nextValue))
         }
         onMinMeasureWidthPxChange={(nextValue) => setMinMeasureWidthPx(clampMinMeasureWidthPx(nextValue))}
+        onChordMarkerUiScalePercentChange={(nextValue) =>
+          setChordMarkerUiScalePercent(clampChordMarkerUiScalePercent(nextValue))
+        }
         onBaseMinGap32PxChange={(nextValue) =>
           setTimeAxisSpacingConfig((current) => ({
             ...current,
@@ -6349,6 +6463,7 @@ function App() {
           })
           setPageHorizontalPaddingPx(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
           setMinMeasureWidthPx(DEFAULT_MIN_MEASURE_WIDTH_PX)
+          setChordMarkerUiScalePercent(DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT)
         }}
         onOpenMusicXmlFilePicker={openMusicXmlFilePicker}
         onLoadSampleMusicXml={loadSampleMusicXmlWithCollapseReset}
@@ -6388,6 +6503,7 @@ function App() {
         playheadRef={playheadElementRef}
         displayScoreWidth={displayScoreWidth}
         displayScoreHeight={displayScoreHeight}
+        chordMarkerStyleMetrics={chordMarkerStyleMetrics}
         scoreSurfaceLogicalWidthPx={scoreWidth}
         scoreSurfaceLogicalHeightPx={scoreHeight}
         scoreScaleX={scoreScaleX}

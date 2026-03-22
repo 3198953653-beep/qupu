@@ -11,6 +11,8 @@ export function ScoreControls(props: {
   onReset: () => void
   playheadFollowEnabled: boolean
   onTogglePlayheadFollow: () => void
+  showChordDegreeEnabled: boolean
+  onToggleChordDegreeDisplay: () => void
   showInScoreMeasureNumbers: boolean
   onToggleInScoreMeasureNumbers: () => void
   onOpenMusicXmlFilePicker: () => void
@@ -56,6 +58,7 @@ export function ScoreControls(props: {
   onCanvasHeightPercentChange: (nextPercent: number) => void
   pageHorizontalPaddingPx: number
   minMeasureWidthPx: number
+  chordMarkerUiScalePercent: number
   baseMinGap32Px: number
   leadingBarlineGapPx: number
   durationGapRatio32: number
@@ -66,6 +69,7 @@ export function ScoreControls(props: {
   durationGapRatioWhole: number
   onPageHorizontalPaddingPxChange: (nextValue: number) => void
   onMinMeasureWidthPxChange: (nextValue: number) => void
+  onChordMarkerUiScalePercentChange: (nextValue: number) => void
   onBaseMinGap32PxChange: (nextValue: number) => void
   onLeadingBarlineGapPxChange: (nextValue: number) => void
   onDurationGapRatio32Change: (nextValue: number) => void
@@ -83,6 +87,8 @@ export function ScoreControls(props: {
     onReset,
     playheadFollowEnabled,
     onTogglePlayheadFollow,
+    showChordDegreeEnabled,
+    onToggleChordDegreeDisplay,
     showInScoreMeasureNumbers,
     onToggleInScoreMeasureNumbers,
     onOpenMusicXmlFilePicker,
@@ -124,6 +130,7 @@ export function ScoreControls(props: {
     onCanvasHeightPercentChange,
     pageHorizontalPaddingPx,
     minMeasureWidthPx,
+    chordMarkerUiScalePercent,
     baseMinGap32Px,
     leadingBarlineGapPx,
     durationGapRatio32,
@@ -134,6 +141,7 @@ export function ScoreControls(props: {
     durationGapRatioWhole,
     onPageHorizontalPaddingPxChange,
     onMinMeasureWidthPxChange,
+    onChordMarkerUiScalePercentChange,
     onBaseMinGap32PxChange,
     onLeadingBarlineGapPxChange,
     onDurationGapRatio32Change,
@@ -170,6 +178,9 @@ export function ScoreControls(props: {
         <button type="button" onClick={onReset}>重置</button>
         <button type="button" onClick={onTogglePlayheadFollow}>
           {playheadFollowEnabled ? '播放线跟踪：开' : '播放线跟踪：关'}
+        </button>
+        <button type="button" onClick={onToggleChordDegreeDisplay}>
+          {showChordDegreeEnabled ? '和弦级数：开' : '和弦级数：关'}
         </button>
         <button type="button" onClick={onToggleInScoreMeasureNumbers}>
           {showInScoreMeasureNumbers ? '谱面序号：开' : '谱面序号：关'}
@@ -281,6 +292,32 @@ export function ScoreControls(props: {
                 handleFloatValue((event.target as HTMLInputElement).value, onMinMeasureWidthPxChange)
               }
               onChange={(event) => handleFloatValue(event.target.value, onMinMeasureWidthPxChange)}
+            />
+
+            <label htmlFor="chord-marker-ui-scale-range">和弦标记大小</label>
+            <input
+              id="chord-marker-ui-scale-range"
+              type="range"
+              min={60}
+              max={240}
+              step={1}
+              value={chordMarkerUiScalePercent}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onChordMarkerUiScalePercentChange)
+              }
+              onChange={(event) => handleFloatValue(event.target.value, onChordMarkerUiScalePercentChange)}
+            />
+            <input
+              id="chord-marker-ui-scale-input"
+              type="number"
+              min={60}
+              max={240}
+              step={1}
+              value={chordMarkerUiScalePercent}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onChordMarkerUiScalePercentChange)
+              }
+              onChange={(event) => handleFloatValue(event.target.value, onChordMarkerUiScalePercentChange)}
             />
 
             <label htmlFor="duration-base-gap-32">全局间距大小</label>
