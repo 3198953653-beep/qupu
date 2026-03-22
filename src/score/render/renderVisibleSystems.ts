@@ -317,6 +317,7 @@ export function renderVisibleSystems(params: {
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
   spacingLayoutMode?: SpacingLayoutMode
   showInScoreMeasureNumbers?: boolean
+  showNoteHeadJianpu?: boolean
   dragPreview?: DragState | null
 }): {
   nextLayouts: NoteLayout[]
@@ -357,6 +358,7 @@ export function renderVisibleSystems(params: {
     timeAxisSpacingConfig,
     spacingLayoutMode = 'custom',
     showInScoreMeasureNumbers = false,
+    showNoteHeadJianpu = false,
     dragPreview = null,
   } = params
   const collapseScopeKeySet = new Set(fullMeasureRestCollapseScopeKeys)
@@ -843,6 +845,7 @@ export function renderVisibleSystems(params: {
           suppressedTieStartKeys: dragPreviewSuppressedTieStartKeys,
           suppressedTieStopKeys: dragPreviewSuppressedTieStopKeys,
           showMeasureNumberLabel: showInScoreMeasureNumbers,
+          showNoteHeadJianpu,
           allowTrebleFullMeasureRestCollapse: canCollapseFullMeasureRest(entry.pairIndex, 'treble'),
           allowBassFullMeasureRestCollapse: canCollapseFullMeasureRest(entry.pairIndex, 'bass'),
           preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
@@ -1069,6 +1072,7 @@ export function renderVisibleSystems(params: {
           suppressedTieStartKeys: dragPreviewSuppressedTieStartKeys,
           suppressedTieStopKeys: dragPreviewSuppressedTieStopKeys,
           showMeasureNumberLabel: showInScoreMeasureNumbers,
+          showNoteHeadJianpu,
           allowTrebleFullMeasureRestCollapse: canCollapseFullMeasureRest(entry.pairIndex, 'treble'),
           allowBassFullMeasureRestCollapse: canCollapseFullMeasureRest(entry.pairIndex, 'bass'),
           preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
@@ -1309,6 +1313,7 @@ export function renderVisibleSystems(params: {
         // and barline fit are computed from identical geometry.
         layoutDetail: 'full',
         showMeasureNumberLabel: showInScoreMeasureNumbers,
+        showNoteHeadJianpu,
         allowTrebleFullMeasureRestCollapse: canCollapseFullMeasureRest(entry.pairIndex, 'treble'),
         allowBassFullMeasureRestCollapse: canCollapseFullMeasureRest(entry.pairIndex, 'bass'),
         preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,
@@ -1435,6 +1440,7 @@ export function renderVisibleSystems(params: {
         suppressedTieStartKeys: dragPreviewSuppressedTieStartKeys,
         suppressedTieStopKeys: dragPreviewSuppressedTieStopKeys,
         showMeasureNumberLabel: showInScoreMeasureNumbers,
+        showNoteHeadJianpu,
         allowTrebleFullMeasureRestCollapse: canCollapseFullMeasureRest(entry.pairIndex, 'treble'),
         allowBassFullMeasureRestCollapse: canCollapseFullMeasureRest(entry.pairIndex, 'bass'),
         preferMeasureEndBarlineAxis: entry.preferMeasureEndBarlineAxis,

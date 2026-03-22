@@ -479,6 +479,7 @@ export type DrawMeasureParams = {
   layoutDetail?: 'full' | 'spacing-only'
   skipPainting?: boolean
   showMeasureNumberLabel?: boolean
+  showNoteHeadJianpu?: boolean
   allowTrebleFullMeasureRestCollapse?: boolean
   allowBassFullMeasureRestCollapse?: boolean
   staticNoteXById?: Map<string, number> | null
@@ -545,6 +546,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     layoutDetail = 'full',
     skipPainting = false,
     showMeasureNumberLabel = true,
+    showNoteHeadJianpu = false,
     allowTrebleFullMeasureRestCollapse = false,
     allowBassFullMeasureRestCollapse = false,
     staticNoteXById = null,
@@ -1720,7 +1722,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
 
   drawTiesForStaff(measure.treble, trebleRendered, 'treble')
   drawTiesForStaff(measure.bass, bassRendered, 'bass')
-  if (!skipPainting && !isSpacingOnlyLayout) {
+  if (!skipPainting && !isSpacingOnlyLayout && showNoteHeadJianpu) {
     const context2D = (context as unknown as { context2D?: CanvasRenderingContext2D }).context2D
     if (context2D) {
       drawRenderedNoteHeadNumerals({

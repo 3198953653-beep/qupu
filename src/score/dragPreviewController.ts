@@ -44,6 +44,7 @@ type OverlayRuntime = {
   renderOffsetX?: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
   spacingLayoutMode?: SpacingLayoutMode
+  showNoteHeadJianpu?: boolean
   measureTimelineBundles?: Map<number, MeasureTimelineBundle> | null
 }
 
@@ -137,6 +138,7 @@ export function drawSelectionOverlay(params: {
     renderOffsetX: overlayRuntime.renderOffsetX ?? 0,
     timeAxisSpacingConfig: overlayRuntime.timeAxisSpacingConfig,
     spacingLayoutMode: overlayRuntime.spacingLayoutMode,
+    showNoteHeadJianpu: overlayRuntime.showNoteHeadJianpu ?? false,
   })
 }
 
@@ -185,5 +187,6 @@ export function drawDragPreviewOverlay(params: {
     dragDebugFramesRef,
     timeAxisSpacingConfig: overlayRuntime.timeAxisSpacingConfig,
     spacingLayoutMode: overlayRuntime.spacingLayoutMode,
+    showNoteHeadJianpu: overlayRuntime.showNoteHeadJianpu ?? false,
   })
 }

@@ -223,6 +223,7 @@ export function useScoreRenderEffect(params: {
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
   spacingLayoutMode?: SpacingLayoutMode
   showInScoreMeasureNumbers?: boolean
+  showNoteHeadJianpuEnabled?: boolean
   renderScaleX?: number
   renderScaleY?: number
   renderQualityScaleX?: number
@@ -268,6 +269,7 @@ export function useScoreRenderEffect(params: {
     timeAxisSpacingConfig,
     spacingLayoutMode = 'custom',
     showInScoreMeasureNumbers = false,
+    showNoteHeadJianpuEnabled = false,
     renderScaleX = 1,
     renderScaleY = 1,
     renderQualityScaleX: forcedRenderQualityScaleX,
@@ -367,6 +369,7 @@ export function useScoreRenderEffect(params: {
         timeAxisSpacingConfig,
         spacingLayoutMode,
         showInScoreMeasureNumbers,
+        showNoteHeadJianpu: showNoteHeadJianpuEnabled,
         dragPreview,
       })
     noteLayoutsRef.current = nextLayouts
@@ -414,6 +417,7 @@ export function useScoreRenderEffect(params: {
     timeAxisSpacingConfig,
     spacingLayoutMode,
     showInScoreMeasureNumbers,
+    showNoteHeadJianpuEnabled,
     renderScaleX,
     renderScaleY,
     forcedRenderQualityScaleX,

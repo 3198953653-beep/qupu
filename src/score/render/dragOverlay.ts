@@ -194,6 +194,7 @@ function drawOverlayRange(params: {
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
   spacingLayoutMode?: SpacingLayoutMode
   activeSelection: Selection | null
+  showNoteHeadJianpu?: boolean
   previewPitchByTargetKey?: Map<string, Pitch> | null
   previewFrozenBoundaryCurve?: DragPreviewFrozenBoundaryCurve | null
   suppressedTieStartKeys?: Set<string> | null
@@ -225,6 +226,7 @@ function drawOverlayRange(params: {
     timeAxisSpacingConfig,
     spacingLayoutMode = 'custom',
     activeSelection,
+    showNoteHeadJianpu = false,
     previewPitchByTargetKey = null,
     previewFrozenBoundaryCurve = null,
     suppressedTieStartKeys = null,
@@ -290,6 +292,7 @@ function drawOverlayRange(params: {
       previewFrozenBoundaryCurve,
       suppressedTieStartKeys,
       suppressedTieStopKeys,
+      showNoteHeadJianpu,
       staticNoteXById: preview?.staticNoteXById ?? null,
       staticAccidentalRightXById: preview?.staticAccidentalRightXById ?? null,
       debugCapture:
@@ -336,6 +339,7 @@ export function drawSelectionMeasureOverlay(params: {
   clearDragOverlay: () => void
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
   spacingLayoutMode?: SpacingLayoutMode
+  showNoteHeadJianpu?: boolean
 }): void {
   const {
     selection,
@@ -350,6 +354,7 @@ export function drawSelectionMeasureOverlay(params: {
     clearDragOverlay,
     timeAxisSpacingConfig,
     spacingLayoutMode = 'custom',
+    showNoteHeadJianpu = false,
   } = params
 
   const selectedKey = getLayoutNoteKey(selection.staff, selection.noteId)
@@ -378,6 +383,7 @@ export function drawSelectionMeasureOverlay(params: {
     timeAxisSpacingConfig,
     spacingLayoutMode,
     activeSelection: selection,
+    showNoteHeadJianpu,
   })
 }
 
@@ -396,6 +402,7 @@ export function drawDragMeasurePreview(params: {
   dragDebugFramesRef: MutableRefObject<DragDebugSnapshot[]>
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
   spacingLayoutMode?: SpacingLayoutMode
+  showNoteHeadJianpu?: boolean
 }): void {
   const {
     drag,
@@ -412,6 +419,7 @@ export function drawDragMeasurePreview(params: {
     dragDebugFramesRef,
     timeAxisSpacingConfig,
     spacingLayoutMode = 'custom',
+    showNoteHeadJianpu = false,
   } = params
 
   const dragWithLayout = ensureDragLayoutCache(drag)
@@ -441,6 +449,7 @@ export function drawDragMeasurePreview(params: {
     clearDragOverlay,
     timeAxisSpacingConfig,
     spacingLayoutMode,
+    showNoteHeadJianpu,
     activeSelection: null,
     previewPitchByTargetKey,
     previewFrozenBoundaryCurve,

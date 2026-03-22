@@ -15,6 +15,8 @@ export function ScoreControls(props: {
   onToggleChordDegreeDisplay: () => void
   showInScoreMeasureNumbers: boolean
   onToggleInScoreMeasureNumbers: () => void
+  showNoteHeadJianpuEnabled: boolean
+  onToggleNoteHeadJianpuDisplay: () => void
   onOpenMusicXmlFilePicker: () => void
   onLoadSampleMusicXml: () => void
   onLoadWholeNoteDemo: () => void
@@ -93,6 +95,8 @@ export function ScoreControls(props: {
     onToggleChordDegreeDisplay,
     showInScoreMeasureNumbers,
     onToggleInScoreMeasureNumbers,
+    showNoteHeadJianpuEnabled,
+    onToggleNoteHeadJianpuDisplay,
     onOpenMusicXmlFilePicker,
     onLoadSampleMusicXml,
     onLoadWholeNoteDemo,
@@ -188,6 +192,9 @@ export function ScoreControls(props: {
         </button>
         <button type="button" onClick={onToggleInScoreMeasureNumbers}>
           {showInScoreMeasureNumbers ? '谱面序号：开' : '谱面序号：关'}
+        </button>
+        <button type="button" onClick={onToggleNoteHeadJianpuDisplay}>
+          {showNoteHeadJianpuEnabled ? '符头简谱：开' : '符头简谱：关'}
         </button>
         <button type="button" onClick={onToggleAutoScale}>
           {autoScaleEnabled ? `自动缩放：开（${autoScalePercent}%）` : '自动缩放：关'}

@@ -102,6 +102,7 @@ export function useDragHandlers(params: {
   renderOffsetX?: number
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
   spacingLayoutMode?: SpacingLayoutMode
+  showNoteHeadJianpu?: boolean
 }): {
   clearDragOverlay: () => void
   dumpDragDebugReport: () => void
@@ -169,6 +170,7 @@ export function useDragHandlers(params: {
     renderOffsetX = 0,
     timeAxisSpacingConfig,
     spacingLayoutMode = 'custom',
+    showNoteHeadJianpu = false,
   } = params
 
   const resolvePreviewNoteByTarget = (target: {
@@ -268,6 +270,7 @@ export function useDragHandlers(params: {
         renderOffsetX,
         timeAxisSpacingConfig,
         spacingLayoutMode,
+        showNoteHeadJianpu,
         measureTimelineBundles: measureTimelineBundlesRef.current,
       },
     })

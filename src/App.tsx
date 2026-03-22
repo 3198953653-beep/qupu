@@ -166,6 +166,7 @@ const PDF_CJK_FONT_URL = new URL('./assets/fonts/NotoSansSC-Regular.ttf', import
 const UNDO_HISTORY_LIMIT = 120
 const LOCAL_STORAGE_MIDI_INPUT_KEY = 'score.midi.selectedInputId'
 const LOCAL_STORAGE_EDITOR_MEASURE_NUMBER_KEY = 'score.editor.showInScoreMeasureNumbers'
+const LOCAL_STORAGE_NOTEHEAD_JIANPU_DISPLAY_KEY = 'score.editor.showNoteHeadJianpu'
 const LOCAL_STORAGE_PLAYHEAD_FOLLOW_KEY = 'score.playhead.followEnabled'
 const LOCAL_STORAGE_CHORD_DEGREE_DISPLAY_KEY = 'score.chordDegree.enabled'
 const CHORD_HIGHLIGHT_PAD_X_PX = 4
@@ -1771,6 +1772,7 @@ function App() {
     return false
   })
   const [showInScoreMeasureNumbers, setShowInScoreMeasureNumbers] = useState(false)
+  const [showNoteHeadJianpuEnabled, setShowNoteHeadJianpuEnabled] = useState(false)
   const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
   const [minMeasureWidthPx, setMinMeasureWidthPx] = useState(DEFAULT_MIN_MEASURE_WIDTH_PX)
   const [chordMarkerUiScalePercent, setChordMarkerUiScalePercent] = useState(DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT)
@@ -1828,6 +1830,7 @@ function App() {
   const playheadFollowHydratedRef = useRef(false)
   const chordDegreeDisplayHydratedRef = useRef(false)
   const showInScoreMeasureNumbersHydratedRef = useRef(false)
+  const showNoteHeadJianpuHydratedRef = useRef(false)
   const osmdPreviewZoomCommitTimerRef = useRef<number | null>(null)
   const osmdPreviewMarginApplyTimerRef = useRef<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -2318,6 +2321,7 @@ function App() {
     timeAxisSpacingConfig,
     spacingLayoutMode,
     showInScoreMeasureNumbers,
+    showNoteHeadJianpuEnabled,
     renderScaleX: scoreScaleX,
     renderScaleY: scoreScaleY,
     renderQualityScaleX: renderQualityScale.x,
@@ -2686,6 +2690,7 @@ function App() {
     renderOffsetX: horizontalRenderOffsetX,
     timeAxisSpacingConfig,
     spacingLayoutMode,
+    showNoteHeadJianpu: showNoteHeadJianpuEnabled,
   })
 
   const {
@@ -3367,6 +3372,29 @@ function App() {
       showInScoreMeasureNumbers ? '1' : '0',
     )
   }, [showInScoreMeasureNumbers])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      showNoteHeadJianpuHydratedRef.current = true
+      return
+    }
+    const storedValue = window.localStorage.getItem(LOCAL_STORAGE_NOTEHEAD_JIANPU_DISPLAY_KEY)
+    if (storedValue === '1' || storedValue === 'true') {
+      setShowNoteHeadJianpuEnabled(true)
+    } else if (storedValue === '0' || storedValue === 'false') {
+      setShowNoteHeadJianpuEnabled(false)
+    }
+    showNoteHeadJianpuHydratedRef.current = true
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!showNoteHeadJianpuHydratedRef.current) return
+    window.localStorage.setItem(
+      LOCAL_STORAGE_NOTEHEAD_JIANPU_DISPLAY_KEY,
+      showNoteHeadJianpuEnabled ? '1' : '0',
+    )
+  }, [showNoteHeadJianpuEnabled])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -6125,6 +6153,10 @@ function App() {
       setAutoScaleEnabled: (enabled: boolean) => {
         setAutoScaleEnabled(Boolean(enabled))
       },
+      getShowNoteHeadJianpuEnabled: () => showNoteHeadJianpuEnabled,
+      setShowNoteHeadJianpuEnabled: (enabled: boolean) => {
+        setShowNoteHeadJianpuEnabled(Boolean(enabled))
+      },
       setManualScalePercent: (nextPercent: number) => {
         setManualScalePercent(clampScalePercent(nextPercent))
       },
@@ -6346,6 +6378,7 @@ function App() {
     scoreScaleX,
     scoreScaleY,
     spacingLayoutMode,
+    showNoteHeadJianpuEnabled,
     dragDebugFramesRef,
     dragRef,
     scoreOverlayRef,
@@ -6379,6 +6412,8 @@ function App() {
         onToggleChordDegreeDisplay={() => setShowChordDegreeEnabled((enabled) => !enabled)}
         showInScoreMeasureNumbers={showInScoreMeasureNumbers}
         onToggleInScoreMeasureNumbers={() => setShowInScoreMeasureNumbers((current) => !current)}
+        showNoteHeadJianpuEnabled={showNoteHeadJianpuEnabled}
+        onToggleNoteHeadJianpuDisplay={() => setShowNoteHeadJianpuEnabled((current) => !current)}
         autoScaleEnabled={autoScaleEnabled}
         autoScalePercent={autoScalePercent}
         onToggleAutoScale={() => setAutoScaleEnabled((enabled) => !enabled)}
