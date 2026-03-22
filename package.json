@@ -11,6 +11,7 @@
     "test:coords:browser": "tsx scripts/measure-coordinate-browser-test.ts",
     "test:coords:browser:drag-m2": "tsx scripts/measure-2-drag-coordinate-browser-test.ts",
     "test:coords:browser:drag-local": "tsx scripts/drag-local-redraw-coordinate-browser-test.ts",
+    "test:notehead:jianpu:browser": "tsx scripts/notehead-jianpu-browser-test.ts",
     "test:preview:browser": "tsx scripts/note-preview-browser-test.ts",
     "test:playhead:browser": "tsx scripts/playhead-browser-test.ts",
     "test:chord-marker:browser": "tsx scripts/chord-marker-browser-test.ts",

@@ -24,6 +24,7 @@ import { buildPitchLineMap, createPianoPitches, getPitchLine, getStrictStemDirec
 import { getTieFrozenIncoming } from '../tieFrozen'
 import { isStaffFullMeasureRest } from '../measureRestUtils'
 import { getDragPreviewTargetKey } from './dragPreviewOverrides'
+import { getJianpuNumeralForPitch, hasFilledNoteHead } from './noteheadNumerals'
 import { buildTieLayout } from './tieLayoutGeometry'
 import type { RenderedNoteKey } from '../accidentals'
 import type { PublicAxisLayout } from '../timeline/types'
@@ -55,6 +56,12 @@ const MIN_FORMAT_WIDTH_PX = 8
 const DEFAULT_NOTE_HEAD_HIT_RADIUS_X = 5.5
 const DEFAULT_NOTE_HEAD_HIT_RADIUS_Y = 4.2
 const DEFAULT_ACCIDENTAL_HIT_RADIUS_Y = 7
+const NOTEHEAD_NUMERAL_DEFAULT_COLOR = '#111111'
+const NOTEHEAD_NUMERAL_LIGHT_COLOR = '#ffffff'
+const NOTEHEAD_NUMERAL_FONT_FAMILY = '"Arial", "Noto Sans", sans-serif'
+const NOTEHEAD_NUMERAL_FONT_WEIGHT = 600
+const NOTEHEAD_NUMERAL_MIN_FONT_PX = 3
+const NOTEHEAD_NUMERAL_MAX_FONT_PX = 16
 
 function getRestAnchorPitch(staff: StaffKind): Pitch {
   return staff === 'treble' ? 'b/4' : 'd/3'
@@ -82,12 +89,48 @@ type AccidentalHitGeometry = {
   hitMaxY: number
 }
 
-function buildNoteHeadHitGeometry(params: {
+type NoteHeadGeometry = {
+  centerX: number
+  centerY: number
+  radiusX: number
+  radiusY: number
+  boxX: number
+  boxY: number
+  boxWidth: number
+  boxHeight: number
+}
+
+type VexNoteHeadLike = {
+  getBoundingBox?: () =>
+    | {
+        getX: () => number
+        getY: () => number
+        getW: () => number
+        getH: () => number
+      }
+    | null
+  getStyle?: () => { fillStyle?: string; strokeStyle?: string }
+}
+
+type MeasuredNumeralMetrics = {
+  left: number
+  right: number
+  ascent: number
+  descent: number
+  height: number
+  baselineOffsetY: number
+}
+
+function getRenderedNoteHead(vexNote: StaveNote, renderedIndex: number): VexNoteHeadLike | null {
+  return (vexNote.noteHeads?.[renderedIndex] ?? null) as VexNoteHeadLike | null
+}
+
+function resolveNoteHeadGeometry(params: {
   vexNote: StaveNote
   renderedIndex: number
   headX: number
   headY: number
-}): NoteHeadHitGeometry {
+}): NoteHeadGeometry {
   const { vexNote, renderedIndex, headX, headY } = params
   const fallbackCenterX = headX + 6
   const fallbackCenterY = headY
@@ -95,20 +138,12 @@ function buildNoteHeadHitGeometry(params: {
   let centerY = fallbackCenterY
   let radiusX = DEFAULT_NOTE_HEAD_HIT_RADIUS_X
   let radiusY = DEFAULT_NOTE_HEAD_HIT_RADIUS_Y
+  let boxX = centerX - radiusX
+  let boxY = centerY - radiusY
+  let boxWidth = radiusX * 2
+  let boxHeight = radiusY * 2
 
-  const noteHead = (vexNote.noteHeads?.[renderedIndex] ?? null) as
-    | {
-        getBoundingBox?: () =>
-          | {
-              getX: () => number
-              getY: () => number
-              getW: () => number
-              getH: () => number
-            }
-          | null
-      }
-    | null
-  const bbox = noteHead?.getBoundingBox?.() ?? null
+  const bbox = getRenderedNoteHead(vexNote, renderedIndex)?.getBoundingBox?.() ?? null
   if (bbox) {
     const x = bbox.getX()
     const y = bbox.getY()
@@ -119,8 +154,172 @@ function buildNoteHeadHitGeometry(params: {
       centerY = y + h / 2
       radiusX = Math.max(2, w / 2)
       radiusY = Math.max(2, h / 2)
+      boxX = x
+      boxY = y
+      boxWidth = w
+      boxHeight = h
     }
   }
+
+  return {
+    centerX,
+    centerY,
+    radiusX,
+    radiusY,
+    boxX,
+    boxY,
+    boxWidth,
+    boxHeight,
+  }
+}
+
+function parseCssColorToRgb(color: string | undefined): { r: number; g: number; b: number } | null {
+  if (!color) return null
+  const trimmed = color.trim()
+  const shortHexMatch = /^#([\da-f]{3,4})$/i.exec(trimmed)
+  if (shortHexMatch) {
+    const [r, g, b] = shortHexMatch[1].split('').map((entry) => Number.parseInt(entry + entry, 16))
+    return { r, g, b }
+  }
+  const longHexMatch = /^#([\da-f]{6})(?:[\da-f]{2})?$/i.exec(trimmed)
+  if (longHexMatch) {
+    const value = longHexMatch[1]
+    return {
+      r: Number.parseInt(value.slice(0, 2), 16),
+      g: Number.parseInt(value.slice(2, 4), 16),
+      b: Number.parseInt(value.slice(4, 6), 16),
+    }
+  }
+  const rgbMatch = /^rgba?\(([^)]+)\)$/i.exec(trimmed)
+  if (!rgbMatch) return null
+  const channels = rgbMatch[1].split(',').map((entry) => Number.parseFloat(entry.trim()))
+  const [r, g, b] = channels
+  if (![r, g, b].every((entry) => Number.isFinite(entry))) return null
+  return {
+    r: Math.min(255, Math.max(0, r)),
+    g: Math.min(255, Math.max(0, g)),
+    b: Math.min(255, Math.max(0, b)),
+  }
+}
+
+function getRelativeLuminance(color: { r: number; g: number; b: number }): number {
+  const normalize = (channel: number) => {
+    const value = channel / 255
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * normalize(color.r) + 0.7152 * normalize(color.g) + 0.0722 * normalize(color.b)
+}
+
+function resolveNoteHeadNumeralColor(params: {
+  isFilled: boolean
+  noteHeadStyle: { fillStyle?: string; strokeStyle?: string } | null | undefined
+}): string {
+  const { isFilled, noteHeadStyle } = params
+  const primaryColor =
+    noteHeadStyle?.fillStyle ?? noteHeadStyle?.strokeStyle ?? NOTEHEAD_NUMERAL_DEFAULT_COLOR
+  if (!isFilled) {
+    return noteHeadStyle?.strokeStyle ?? primaryColor
+  }
+  const parsed = parseCssColorToRgb(primaryColor)
+  if (!parsed) return NOTEHEAD_NUMERAL_LIGHT_COLOR
+  return getRelativeLuminance(parsed) >= 0.58 ? NOTEHEAD_NUMERAL_DEFAULT_COLOR : NOTEHEAD_NUMERAL_LIGHT_COLOR
+}
+
+function toMeasuredNumeralMetrics(metrics: TextMetrics, fontSizePx: number): MeasuredNumeralMetrics {
+  const left =
+    Number.isFinite(metrics.actualBoundingBoxLeft) && metrics.actualBoundingBoxLeft >= 0
+      ? metrics.actualBoundingBoxLeft
+      : metrics.width / 2
+  const right =
+    Number.isFinite(metrics.actualBoundingBoxRight) && metrics.actualBoundingBoxRight >= 0
+      ? metrics.actualBoundingBoxRight
+      : Math.max(metrics.width - left, metrics.width / 2)
+  const ascent =
+    Number.isFinite(metrics.actualBoundingBoxAscent) && metrics.actualBoundingBoxAscent > 0
+      ? metrics.actualBoundingBoxAscent
+      : fontSizePx * 0.72
+  const descent =
+    Number.isFinite(metrics.actualBoundingBoxDescent) && metrics.actualBoundingBoxDescent >= 0
+      ? metrics.actualBoundingBoxDescent
+      : fontSizePx * 0.18
+  const height = ascent + descent
+  return {
+    left,
+    right,
+    ascent,
+    descent,
+    height,
+    baselineOffsetY: (ascent - descent) / 2,
+  }
+}
+
+function doesNumeralFitEllipse(params: {
+  metrics: MeasuredNumeralMetrics
+  radiusX: number
+  radiusY: number
+}): boolean {
+  const { metrics, radiusX, radiusY } = params
+  if (!Number.isFinite(radiusX) || !Number.isFinite(radiusY) || radiusX <= 0 || radiusY <= 0) return false
+  const top = -metrics.height / 2
+  const bottom = metrics.height / 2
+  const samples: Array<[number, number]> = [
+    [-metrics.left, 0],
+    [metrics.right, 0],
+    [0, top],
+    [0, bottom],
+    [-metrics.left, top],
+    [metrics.right, top],
+    [-metrics.left, bottom],
+    [metrics.right, bottom],
+  ]
+  return samples.every(([sampleX, sampleY]) => {
+    const ellipseRatio = (sampleX * sampleX) / (radiusX * radiusX) + (sampleY * sampleY) / (radiusY * radiusY)
+    return ellipseRatio <= 1
+  })
+}
+
+function resolveNoteHeadNumeralLayout(params: {
+  context2D: CanvasRenderingContext2D
+  numeral: string
+  radiusX: number
+  radiusY: number
+}): { fontSizePx: number; metrics: MeasuredNumeralMetrics; clipRadiusX: number; clipRadiusY: number } | null {
+  const { context2D, numeral, radiusX, radiusY } = params
+  const clipRadiusX = Math.max(1.35, radiusX - 1.15)
+  const clipRadiusY = Math.max(1.1, radiusY - 0.95)
+  if (clipRadiusX <= 0 || clipRadiusY <= 0) return null
+  const maxFontSizePx = Math.min(
+    NOTEHEAD_NUMERAL_MAX_FONT_PX,
+    Math.max(NOTEHEAD_NUMERAL_MIN_FONT_PX, Math.min(clipRadiusX * 2.25, clipRadiusY * 2.5)),
+  )
+  for (let fontSizePx = maxFontSizePx; fontSizePx >= NOTEHEAD_NUMERAL_MIN_FONT_PX; fontSizePx -= 0.25) {
+    context2D.font = `${NOTEHEAD_NUMERAL_FONT_WEIGHT} ${fontSizePx}px ${NOTEHEAD_NUMERAL_FONT_FAMILY}`
+    const measured = toMeasuredNumeralMetrics(context2D.measureText(numeral), fontSizePx)
+    if (
+      doesNumeralFitEllipse({
+        metrics: measured,
+        radiusX: clipRadiusX,
+        radiusY: clipRadiusY,
+      })
+    ) {
+      return {
+        fontSizePx,
+        metrics: measured,
+        clipRadiusX,
+        clipRadiusY,
+      }
+    }
+  }
+  return null
+}
+
+function buildNoteHeadHitGeometry(params: {
+  vexNote: StaveNote
+  renderedIndex: number
+  headX: number
+  headY: number
+}): NoteHeadHitGeometry {
+  const { centerX, centerY, radiusX, radiusY } = resolveNoteHeadGeometry(params)
 
   return {
     hitCenterX: centerX,
@@ -165,6 +364,68 @@ type RenderedMeasureNote = {
   vexNote: StaveNote
   renderedKeys: RenderedNoteKey[]
   sourceNoteIndex: number
+}
+
+function drawRenderedNoteHeadNumerals(params: {
+  context2D: CanvasRenderingContext2D
+  sourceNotes: ScoreNote[]
+  rendered: RenderedMeasureNote[]
+}): void {
+  const { context2D, sourceNotes, rendered } = params
+  rendered.forEach((renderedEntry) => {
+    const sourceNote = sourceNotes[renderedEntry.sourceNoteIndex]
+    if (!sourceNote || sourceNote.isRest) return
+    const isFilled = hasFilledNoteHead(sourceNote.duration)
+    const ys = renderedEntry.vexNote.getYs()
+    renderedEntry.renderedKeys.forEach((entry, renderedIndex) => {
+      const numeral = getJianpuNumeralForPitch(entry.pitch)
+      if (!numeral) return
+      const headX = renderedEntry.vexNote.noteHeads[renderedIndex]?.getAbsoluteX() ?? getRenderedNoteVisualX(renderedEntry.vexNote)
+      const headY = ys[renderedIndex] ?? ys[0]
+      if (!Number.isFinite(headX) || !Number.isFinite(headY)) return
+      const geometry = resolveNoteHeadGeometry({
+        vexNote: renderedEntry.vexNote,
+        renderedIndex,
+        headX,
+        headY,
+      })
+      const numeralLayout = resolveNoteHeadNumeralLayout({
+        context2D,
+        numeral,
+        radiusX: geometry.radiusX,
+        radiusY: geometry.radiusY,
+      })
+      if (!numeralLayout) return
+      const noteHeadStyle = getRenderedNoteHead(renderedEntry.vexNote, renderedIndex)?.getStyle?.() ?? null
+      const fillStyle = resolveNoteHeadNumeralColor({
+        isFilled,
+        noteHeadStyle,
+      })
+
+      context2D.save()
+      context2D.beginPath()
+      context2D.ellipse(
+        geometry.centerX,
+        geometry.centerY,
+        numeralLayout.clipRadiusX,
+        numeralLayout.clipRadiusY,
+        0,
+        0,
+        Math.PI * 2,
+      )
+      context2D.clip()
+      context2D.fillStyle = fillStyle
+      context2D.font = `${NOTEHEAD_NUMERAL_FONT_WEIGHT} ${numeralLayout.fontSizePx}px ${NOTEHEAD_NUMERAL_FONT_FAMILY}`
+      context2D.textAlign = 'center'
+      context2D.textBaseline = 'alphabetic'
+      context2D.fillText(
+        numeral,
+        geometry.centerX,
+        geometry.centerY + numeralLayout.metrics.baselineOffsetY,
+      )
+      context2D.restore()
+    })
+  })
 }
 
 export type DrawMeasureParams = {
@@ -1073,6 +1334,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   }
 
   const tieHighlightFill = '#2437E8'
+  const createTieAnchorNote = (y: number): StaveNote => ({ getYs: () => [y] }) as unknown as StaveNote
 
   const drawTieCurveByAnchors = (
     startX: number,
@@ -1085,8 +1347,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     const safeStartX = Math.min(startX, endX - 0.5)
     const safeEndX = Math.max(endX, startX + 0.5)
     const tie = new StaveTie({
-      firstNote: { getYs: () => [startY] } as any,
-      lastNote: { getYs: () => [endY] } as any,
+      firstNote: createTieAnchorNote(startY),
+      lastNote: createTieAnchorNote(endY),
       firstIndexes: [0],
       lastIndexes: [0],
     })
@@ -1458,6 +1720,21 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
 
   drawTiesForStaff(measure.treble, trebleRendered, 'treble')
   drawTiesForStaff(measure.bass, bassRendered, 'bass')
+  if (!skipPainting && !isSpacingOnlyLayout) {
+    const context2D = (context as unknown as { context2D?: CanvasRenderingContext2D }).context2D
+    if (context2D) {
+      drawRenderedNoteHeadNumerals({
+        context2D,
+        sourceNotes: measure.treble,
+        rendered: trebleRendered,
+      })
+      drawRenderedNoteHeadNumerals({
+        context2D,
+        sourceNotes: measure.bass,
+        rendered: bassRendered,
+      })
+    }
+  }
 
   if (!collectLayouts) return noteLayouts
 
