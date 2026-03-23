@@ -61,7 +61,9 @@ const NOTEHEAD_NUMERAL_LIGHT_COLOR = '#ffffff'
 const NOTEHEAD_NUMERAL_FONT_FAMILY = '"Arial", "Noto Sans", sans-serif'
 const NOTEHEAD_NUMERAL_FONT_WEIGHT = 600
 const NOTEHEAD_NUMERAL_MIN_FONT_PX = 3
-const NOTEHEAD_NUMERAL_MAX_FONT_PX = 16
+const NOTEHEAD_NUMERAL_MAX_FONT_PX = 18
+const NOTEHEAD_NUMERAL_CLIP_INSET_X_PX = 0.8
+const NOTEHEAD_NUMERAL_CLIP_INSET_Y_PX = 0.65
 
 function getRestAnchorPitch(staff: StaffKind): Pitch {
   return staff === 'treble' ? 'b/4' : 'd/3'
@@ -267,10 +269,10 @@ function doesNumeralFitEllipse(params: {
     [metrics.right, 0],
     [0, top],
     [0, bottom],
-    [-metrics.left, top],
-    [metrics.right, top],
-    [-metrics.left, bottom],
-    [metrics.right, bottom],
+    [-metrics.left * 0.82, top * 0.72],
+    [metrics.right * 0.82, top * 0.72],
+    [-metrics.left * 0.82, bottom * 0.72],
+    [metrics.right * 0.82, bottom * 0.72],
   ]
   return samples.every(([sampleX, sampleY]) => {
     const ellipseRatio = (sampleX * sampleX) / (radiusX * radiusX) + (sampleY * sampleY) / (radiusY * radiusY)
@@ -285,14 +287,14 @@ function resolveNoteHeadNumeralLayout(params: {
   radiusY: number
 }): { fontSizePx: number; metrics: MeasuredNumeralMetrics; clipRadiusX: number; clipRadiusY: number } | null {
   const { context2D, numeral, radiusX, radiusY } = params
-  const clipRadiusX = Math.max(1.35, radiusX - 1.15)
-  const clipRadiusY = Math.max(1.1, radiusY - 0.95)
+  const clipRadiusX = Math.max(1.35, radiusX - NOTEHEAD_NUMERAL_CLIP_INSET_X_PX)
+  const clipRadiusY = Math.max(1.1, radiusY - NOTEHEAD_NUMERAL_CLIP_INSET_Y_PX)
   if (clipRadiusX <= 0 || clipRadiusY <= 0) return null
   const maxFontSizePx = Math.min(
     NOTEHEAD_NUMERAL_MAX_FONT_PX,
     Math.max(NOTEHEAD_NUMERAL_MIN_FONT_PX, Math.min(clipRadiusX * 2.25, clipRadiusY * 2.5)),
   )
-  for (let fontSizePx = maxFontSizePx; fontSizePx >= NOTEHEAD_NUMERAL_MIN_FONT_PX; fontSizePx -= 0.25) {
+  for (let fontSizePx = maxFontSizePx; fontSizePx >= NOTEHEAD_NUMERAL_MIN_FONT_PX; fontSizePx -= 0.1) {
     context2D.font = `${NOTEHEAD_NUMERAL_FONT_WEIGHT} ${fontSizePx}px ${NOTEHEAD_NUMERAL_FONT_FAMILY}`
     const measured = toMeasuredNumeralMetrics(context2D.measureText(numeral), fontSizePx)
     if (
