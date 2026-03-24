@@ -59,7 +59,6 @@ export function ScoreControls(props: {
   canvasHeightPercent: number
   onCanvasHeightPercentChange: (nextPercent: number) => void
   pageHorizontalPaddingPx: number
-  minMeasureWidthPx: number
   chordMarkerUiScalePercent: number
   chordMarkerPaddingPx: number
   baseMinGap32Px: number
@@ -71,7 +70,6 @@ export function ScoreControls(props: {
   durationGapRatio2: number
   durationGapRatioWhole: number
   onPageHorizontalPaddingPxChange: (nextValue: number) => void
-  onMinMeasureWidthPxChange: (nextValue: number) => void
   onChordMarkerUiScalePercentChange: (nextValue: number) => void
   onChordMarkerPaddingPxChange: (nextValue: number) => void
   onBaseMinGap32PxChange: (nextValue: number) => void
@@ -135,7 +133,6 @@ export function ScoreControls(props: {
     canvasHeightPercent,
     onCanvasHeightPercentChange,
     pageHorizontalPaddingPx,
-    minMeasureWidthPx,
     chordMarkerUiScalePercent,
     chordMarkerPaddingPx,
     baseMinGap32Px,
@@ -147,7 +144,6 @@ export function ScoreControls(props: {
     durationGapRatio2,
     durationGapRatioWhole,
     onPageHorizontalPaddingPxChange,
-    onMinMeasureWidthPxChange,
     onChordMarkerUiScalePercentChange,
     onChordMarkerPaddingPxChange,
     onBaseMinGap32PxChange,
@@ -279,32 +275,6 @@ export function ScoreControls(props: {
         </div>
         {showGlobalGapPanel && (
           <div className="duration-base-grid">
-            <label htmlFor="min-measure-width-range">最小小节宽度（px）</label>
-            <input
-              id="min-measure-width-range"
-              type="range"
-              min={1}
-              max={320}
-              step={1}
-              value={minMeasureWidthPx}
-              onInput={(event) =>
-                handleFloatValue((event.target as HTMLInputElement).value, onMinMeasureWidthPxChange)
-              }
-              onChange={(event) => handleFloatValue(event.target.value, onMinMeasureWidthPxChange)}
-            />
-            <input
-              id="min-measure-width-input"
-              type="number"
-              min={1}
-              max={320}
-              step={1}
-              value={minMeasureWidthPx}
-              onInput={(event) =>
-                handleFloatValue((event.target as HTMLInputElement).value, onMinMeasureWidthPxChange)
-              }
-              onChange={(event) => handleFloatValue(event.target.value, onMinMeasureWidthPxChange)}
-            />
-
             <label htmlFor="chord-marker-ui-scale-range">和弦标记大小</label>
             <input
               id="chord-marker-ui-scale-range"

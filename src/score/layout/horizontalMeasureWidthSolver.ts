@@ -45,7 +45,6 @@ export type SolveHorizontalMeasureWidthsParams = {
   measureTimeSignaturesByPair: TimeSignature[] | null
   supplementalSpacingTicksByPair?: number[][] | null
   spacingConfig: TimeAxisSpacingConfig
-  minMeasureWidthPx: number
   maxIterations?: number
   eagerProbeMeasureLimit?: number
   widthCache?: Map<string, number>
@@ -76,7 +75,7 @@ type MeasureSpacingProbe = {
 const MIN_FORMAT_WIDTH_PX = 8
 const EPS = 0.05
 const PROBE_MEASURE_X = 1024
-const SOLVER_CACHE_VERSION = 'v7'
+const SOLVER_CACHE_VERSION = 'v8'
 const SOLVER_CACHE_MAX_ENTRIES = 12000
 
 function resolveMeasureMeta(params: {
@@ -154,10 +153,9 @@ function serializeStaffNotesForWidthCache(notes: ScoreNote[]): string {
 function buildMeasureWidthCacheKey(params: {
   meta: SolverMeasureMeta
   spacingConfig: TimeAxisSpacingConfig
-  minMeasureWidthPx: number
   supplementalSpacingTicksSignature: string
 }): string {
-  const { meta, spacingConfig, minMeasureWidthPx, supplementalSpacingTicksSignature } = params
+  const { meta, spacingConfig, supplementalSpacingTicksSignature } = params
   const ratios = spacingConfig.durationGapRatios
   return [
     SOLVER_CACHE_VERSION,
@@ -171,7 +169,6 @@ function buildMeasureWidthCacheKey(params: {
     `startDecor=${meta.showStartDecorations ? 1 : 0}`,
     `actualStart=${meta.actualStartDecorationWidthPx.toFixed(3)}`,
     `endDecor=${meta.showEndDecorations ? 1 : 0}`,
-    `minW=${minMeasureWidthPx.toFixed(3)}`,
     `lead=${spacingConfig.leadingBarlineGapPx}`,
     `g32=${spacingConfig.baseMinGap32Px}`,
     `inter=${spacingConfig.interOnsetPaddingPx}`,
@@ -415,7 +412,6 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
     measureTimeSignaturesByPair,
     supplementalSpacingTicksByPair = null,
     spacingConfig,
-    minMeasureWidthPx,
     maxIterations = 20,
     eagerProbeMeasureLimit = Number.POSITIVE_INFINITY,
     widthCache,
@@ -437,20 +433,18 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
     const supplementalSpacingTicks = supplementalSpacingTicksByPair?.[meta.pairIndex] ?? null
     const supplementalSpacingTicksSignature =
       supplementalSpacingTicks && supplementalSpacingTicks.length > 0 ? supplementalSpacingTicks.join(',') : '-'
-    const minSolvedMeasureWidthPx = Number(minMeasureWidthPx.toFixed(3))
     const cacheKey =
       shouldProbePrecisely && widthCache !== undefined
         ? buildMeasureWidthCacheKey({
             meta,
             spacingConfig,
-            minMeasureWidthPx,
             supplementalSpacingTicksSignature,
           })
         : null
     if (cacheKey && widthCache) {
       const cachedWidth = widthCache.get(cacheKey)
       if (Number.isFinite(cachedWidth)) {
-        return Math.max(minSolvedMeasureWidthPx, cachedWidth as number)
+        return cachedWidth as number
       }
     }
 
@@ -478,10 +472,7 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
       spacingConfig,
       timelineBundle,
     )
-    let width = Math.max(
-      minSolvedMeasureWidthPx,
-      Number(timelineSpan.toFixed(3)),
-    )
+    let width = Number(timelineSpan.toFixed(3))
 
     if (!shouldProbePrecisely) {
       if (cacheKey && widthCache) {
@@ -518,7 +509,7 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
           trailingWidthDemandPx +
           leadingGapDeficit +
           timelineCompressionDeficit
-        width = Number((Math.max(minSolvedMeasureWidthPx, width + growBy)).toFixed(3))
+        width = Number((width + growBy).toFixed(3))
         continue
       }
       break

@@ -123,11 +123,8 @@ const SCORE_RENDER_BACKEND = Renderer.Backends.CANVAS
 const INSPECTOR_SEQUENCE_PREVIEW_LIMIT = 64
 const MANUAL_SCALE_BASELINE = 1
 const DEFAULT_PAGE_HORIZONTAL_PADDING_PX = 86
-const DEFAULT_MIN_MEASURE_WIDTH_PX = 120
 const DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT = 134
 const DEFAULT_CHORD_MARKER_PADDING_PX = 6
-const MIN_MEASURE_WIDTH_PX_MIN = 1
-const MIN_MEASURE_WIDTH_PX_MAX = 320
 const CHORD_MARKER_UI_SCALE_PERCENT_MIN = 60
 const CHORD_MARKER_UI_SCALE_PERCENT_MAX = 240
 const CHORD_MARKER_PADDING_PX_MIN = 0
@@ -482,10 +479,6 @@ function clampLeadingBarlineGapPx(value: number): number {
 
 function clampPageHorizontalPaddingPx(value: number): number {
   return Math.round(clampNumber(value, 8, 120))
-}
-
-function clampMinMeasureWidthPx(value: number): number {
-  return Math.round(clampNumber(value, MIN_MEASURE_WIDTH_PX_MIN, MIN_MEASURE_WIDTH_PX_MAX))
 }
 
 function clampOsmdPreviewZoomPercent(value: number): number {
@@ -1807,7 +1800,6 @@ function App() {
   const [showInScoreMeasureNumbers, setShowInScoreMeasureNumbers] = useState(false)
   const [showNoteHeadJianpuEnabled, setShowNoteHeadJianpuEnabled] = useState(false)
   const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
-  const [minMeasureWidthPx, setMinMeasureWidthPx] = useState(DEFAULT_MIN_MEASURE_WIDTH_PX)
   const [chordMarkerUiScalePercent, setChordMarkerUiScalePercent] = useState(DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT)
   const [chordMarkerPaddingPx, setChordMarkerPaddingPx] = useState(DEFAULT_CHORD_MARKER_PADDING_PX)
   const [timeAxisSpacingConfig, setTimeAxisSpacingConfig] = useState(DEFAULT_TIME_AXIS_SPACING_CONFIG)
@@ -1981,8 +1973,6 @@ function App() {
   )
   const firstPlaybackPoint = playbackTimelineEvents[0]?.point ?? null
   const spacingLayoutMode: SpacingLayoutMode = 'custom'
-  const safeMinMeasureWidthPx = clampMinMeasureWidthPx(minMeasureWidthPx)
-  const effectiveContentMinMeasureWidthPx = spacingLayoutMode === 'custom' ? 0 : safeMinMeasureWidthPx
   const safeChordMarkerUiScalePercent = clampChordMarkerUiScalePercent(chordMarkerUiScalePercent)
   const safeChordMarkerPaddingPx = clampChordMarkerPaddingPx(chordMarkerPaddingPx)
   const chordMarkerBaseStyleMetrics = useMemo(
@@ -2032,13 +2022,11 @@ function App() {
       measureTimeSignaturesByPair: measureTimeSignaturesFromImport,
       supplementalSpacingTicksByPair,
       spacingConfig: timeAxisSpacingConfig,
-      minMeasureWidthPx: effectiveContentMinMeasureWidthPx,
       maxIterations: solverMaxIterations,
       eagerProbeMeasureLimit,
       widthCache: horizontalMeasureWidthCacheRef.current,
     })
   }, [
-    effectiveContentMinMeasureWidthPx,
     getWidthProbeContext,
     measurePairs,
     measureKeyFifthsFromImport,
@@ -6489,7 +6477,6 @@ function App() {
         canvasHeightPercent={safeCanvasHeightPercent}
         onCanvasHeightPercentChange={(nextPercent) => setCanvasHeightPercent(clampCanvasHeightPercent(nextPercent))}
         pageHorizontalPaddingPx={pageHorizontalPaddingPx}
-        minMeasureWidthPx={safeMinMeasureWidthPx}
         chordMarkerUiScalePercent={safeChordMarkerUiScalePercent}
         chordMarkerPaddingPx={safeChordMarkerPaddingPx}
         baseMinGap32Px={timeAxisSpacingConfig.baseMinGap32Px}
@@ -6503,7 +6490,6 @@ function App() {
         onPageHorizontalPaddingPxChange={(nextValue) =>
           setPageHorizontalPaddingPx(clampPageHorizontalPaddingPx(nextValue))
         }
-        onMinMeasureWidthPxChange={(nextValue) => setMinMeasureWidthPx(clampMinMeasureWidthPx(nextValue))}
         onChordMarkerUiScalePercentChange={(nextValue) =>
           setChordMarkerUiScalePercent(clampChordMarkerUiScalePercent(nextValue))
         }
@@ -6582,7 +6568,6 @@ function App() {
             durationGapRatios: { ...DEFAULT_TIME_AXIS_SPACING_CONFIG.durationGapRatios },
           })
           setPageHorizontalPaddingPx(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
-          setMinMeasureWidthPx(DEFAULT_MIN_MEASURE_WIDTH_PX)
           setChordMarkerUiScalePercent(DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT)
           setChordMarkerPaddingPx(DEFAULT_CHORD_MARKER_PADDING_PX)
         }}

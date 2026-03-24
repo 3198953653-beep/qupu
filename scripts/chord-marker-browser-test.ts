@@ -78,7 +78,7 @@ type DebugHighlightRect = {
 const DEV_HOST = '127.0.0.1'
 const DEV_PORT = 4175
 const DEV_URL = `http://${DEV_HOST}:${DEV_PORT}`
-const CHORD_LABEL_LEFT_INSET_PX = 8
+const CHORD_LABEL_LEFT_INSET_PX = 6
 const SCORE_STAGE_BORDER_PX = 1
 const THREE_PART_MUSIC_XML_PATH = 'C:\\Users\\76743\\Desktop\\三个声部.musicxml'
 const THREE_PART_D_MAJOR_MUSIC_XML_PATH = 'C:\\Users\\76743\\Desktop\\三个声部（D调）.musicxml'
@@ -290,7 +290,7 @@ async function getFirstChordMarkerRenderedMetrics(page: Page): Promise<{
 }
 
 async function ensureSpacingPanelOpen(page: Page): Promise<void> {
-  const slider = page.locator('#min-measure-width-range')
+  const slider = page.locator('#duration-base-gap-32')
   if (await slider.isVisible().catch(() => false)) {
     return
   }
@@ -985,28 +985,31 @@ async function main() {
       throw new Error('Old barline edge-gap controls should be removed from the spacing panel.')
     }
     const defaultChordMarkerSize = await getInputValue(page, '#chord-marker-ui-scale-input')
-    if (defaultChordMarkerSize !== 100) {
-      throw new Error(`Expected default chord marker size to be 100, got ${defaultChordMarkerSize}.`)
+    if (defaultChordMarkerSize !== 134) {
+      throw new Error(`Expected default chord marker size to be 134, got ${defaultChordMarkerSize}.`)
     }
     const defaultChordMarkerMetrics = await getFirstChordMarkerRenderedMetrics(page)
     await setInputValue(page, '#chord-marker-ui-scale-range', 160)
     await page.waitForFunction(
-      ({ minHeight, minFontSize, minPaddingLeft }) => {
+      ({ expectedScale, minHeight, minFontSize, minPaddingLeft }) => {
+        const sizeInput = document.querySelector('#chord-marker-ui-scale-input') as HTMLInputElement | null
         const marker = document.querySelector('.chord-ruler-marker') as HTMLElement | null
         const label = document.querySelector('.chord-ruler-label') as HTMLElement | null
-        if (!marker || !label) return false
+        if (!sizeInput || !marker || !label) return false
         const markerStyle = window.getComputedStyle(marker)
         const labelStyle = window.getComputedStyle(label)
         return (
+          sizeInput.value === expectedScale &&
           marker.getBoundingClientRect().height >= minHeight &&
           Number.parseFloat(labelStyle.fontSize) >= minFontSize &&
           Number.parseFloat(markerStyle.paddingLeft) >= minPaddingLeft
         )
       },
       {
-        minHeight: defaultChordMarkerMetrics.buttonHeight + 6,
-        minFontSize: defaultChordMarkerMetrics.fontSize + 4,
-        minPaddingLeft: defaultChordMarkerMetrics.paddingLeft + 3,
+        expectedScale: '160',
+        minHeight: defaultChordMarkerMetrics.buttonHeight + 1.5,
+        minFontSize: defaultChordMarkerMetrics.fontSize + 1.5,
+        minPaddingLeft: defaultChordMarkerMetrics.paddingLeft,
       },
     )
     await ensureDurationRatioPanelOpen(page)
@@ -1015,20 +1018,12 @@ async function main() {
       throw new Error(`Expected default whole-note duration ratio to be 1.4, got ${defaultWholeRatio}.`)
     }
 
-    const defaultMinMeasureWidthPx = await getInputValue(page, '#min-measure-width-input')
-    if (defaultMinMeasureWidthPx !== 120) {
-      throw new Error(`Expected default min measure width to be 120, got ${defaultMinMeasureWidthPx}.`)
-    }
-
     const wholeDefaultWidth = getRequiredMeasureWidth(wholeDefaultFirstRow, 'Whole-note default first')
     const wholeDefaultRenderedWidth = getRequiredRenderedMeasureWidth(wholeDefaultFirstRow, 'Whole-note default first')
     const wholeDefaultGap = getSpacingGap(wholeDefaultFirstRow, 0, 32)
     const wholeDefaultLeadingGap = getRequiredLeadingGap(wholeDefaultFirstRow, 'Whole-note default first')
     const wholeDefaultTrailingTailTicks = getRequiredTrailingTailTicks(wholeDefaultFirstRow, 'Whole-note default first')
     const wholeDefaultTrailingGap = getRequiredTrailingGap(wholeDefaultFirstRow, 'Whole-note default first')
-    if (wholeDefaultWidth < 120) {
-      throw new Error(`Whole-note default first measure should respect the 120px floor, got ${wholeDefaultWidth}.`)
-    }
     if (wholeDefaultRenderedWidth < wholeDefaultWidth + 8) {
       throw new Error(
         `Whole-note first measure should render wider than its content width when start decorations exist: content=${wholeDefaultWidth.toFixed(3)} rendered=${wholeDefaultRenderedWidth.toFixed(3)}.`,
@@ -1055,54 +1050,7 @@ async function main() {
       return !!row && typeof row.leadingGapPx === 'number' && Math.abs(row.leadingGapPx - expectedLeadingGap) <= 0.8
     }, 22.5)
 
-    await setInputValue(page, '#min-measure-width-input', 200)
-    await page.waitForFunction(
-      ({ previousWidth, previousGap, expectedLeadingGap }) => {
-        const api = (window as unknown as {
-          __scoreDebug: {
-            dumpAllMeasureCoordinates: () => MeasureCoordinateReport
-          }
-        }).__scoreDebug
-        const row = api.dumpAllMeasureCoordinates().rows[0]
-        if (!row || typeof row.measureWidth !== 'number' || !Number.isFinite(row.measureWidth)) return false
-        const spacing = row.spacingTickToX ?? {}
-        const fallbackGap = Number(spacing['32']) - Number(spacing['0'])
-        const gap =
-          typeof row.spacingAnchorGapFirstToLastPx === 'number' && Number.isFinite(row.spacingAnchorGapFirstToLastPx)
-            ? row.spacingAnchorGapFirstToLastPx
-            : fallbackGap
-        return (
-          row.measureWidth >= 199.5 &&
-          row.measureWidth > previousWidth + 8 &&
-          gap > previousGap + 8 &&
-          typeof row.leadingGapPx === 'number' &&
-          Math.abs(row.leadingGapPx - expectedLeadingGap) <= 0.8
-        )
-      },
-      { previousWidth: wholeDefaultWidth, previousGap: wholeDefaultGap, expectedLeadingGap: 22.5 },
-    )
-
-    const wholeExpandedReport = await getMeasureCoordinates(page)
-    const wholeExpandedFirstRow = wholeExpandedReport.rows[0]
-    if (!wholeExpandedFirstRow) {
-      throw new Error('Expanded whole-note report is missing the first row.')
-    }
-    const wholeExpandedWidth = getRequiredMeasureWidth(wholeExpandedFirstRow, 'Whole-note expanded first')
-    const wholeExpandedGap = getSpacingGap(wholeExpandedFirstRow, 0, 32)
-    if (wholeExpandedWidth < 199.5) {
-      throw new Error(`Whole-note first measure should expand to the 200px floor, got ${wholeExpandedWidth}.`)
-    }
-    if (wholeExpandedGap <= wholeDefaultGap + 8) {
-      throw new Error(
-        `Whole-note spacing gap should grow with the wider measure: default=${wholeDefaultGap.toFixed(3)} expanded=${wholeExpandedGap.toFixed(3)}.`,
-      )
-    }
-
     await clickSpacingReset(page)
-    await page.waitForFunction(() => {
-      const input = document.querySelector('#min-measure-width-input') as HTMLInputElement | null
-      return input?.value === '120'
-    })
     await page.waitForFunction(
       ({ baselineWidth, baselineGap, baselineLeadingGap }) => {
         const api = (window as unknown as {
@@ -1343,25 +1291,12 @@ async function main() {
         `Whole-note measure width is still too narrow: whole=${wholeWidth.toFixed(3)} twoHalf=${twoHalfWidth.toFixed(3)}.`,
       )
     }
-    if (twoHalfWidth < 120) {
-      throw new Error(`Two-half first measure should not shrink below the 120px floor, got ${twoHalfWidth}.`)
-    }
 
     const wholeNoteImportXml = buildWholeNoteImportXml()
     await importMusicXmlViaDebugApi(page, wholeNoteImportXml)
     await waitForWholeNoteImport(page)
     await ensureSpacingPanelOpen(page)
     await ensureDurationRatioPanelOpen(page)
-    await setInputValue(page, '#min-measure-width-input', 1)
-    await page.waitForFunction(() => {
-      const api = (window as unknown as {
-        __scoreDebug: {
-          dumpAllMeasureCoordinates: () => MeasureCoordinateReport
-        }
-      }).__scoreDebug
-      const row = api.dumpAllMeasureCoordinates().rows[0]
-      return !!row && row.trailingTailTicks === 64 && typeof row.measureWidth === 'number' && row.measureWidth < 110
-    })
 
     const importedWholeDefaultReport = await getMeasureCoordinates(page)
     const importedWholeDefaultFirstRow = importedWholeDefaultReport.rows[0]
@@ -1449,10 +1384,9 @@ async function main() {
     await clickSpacingReset(page)
     await page.waitForFunction(
       () => {
-        const minWidthInput = document.querySelector('#min-measure-width-input') as HTMLInputElement | null
         const wholeRatioInput = document.querySelector('#duration-ratio-1') as HTMLInputElement | null
         const chordMarkerSizeInput = document.querySelector('#chord-marker-ui-scale-input') as HTMLInputElement | null
-        return minWidthInput?.value === '120' && wholeRatioInput?.value === '1.4' && chordMarkerSizeInput?.value === '100'
+        return wholeRatioInput?.value === '1.4' && chordMarkerSizeInput?.value === '134'
       },
     )
 
@@ -1668,7 +1602,6 @@ async function main() {
     const report = {
       generatedAt: new Date().toISOString(),
       wholeDefaultFirstRow,
-      wholeExpandedFirstRow,
       wholeResetSpacingFirstRow,
       halfDemoFirstRow,
       halfDemoComparableRows,
@@ -1697,12 +1630,9 @@ async function main() {
         decorationPlainGap: plainGap,
         decorationChangedGap: changedGap,
       },
-      wholeMinWidthComparison: {
-        defaultMinMeasureWidthPx,
+      wholeSpacingBaseline: {
         wholeDefaultWidth,
-        wholeExpandedWidth,
         wholeDefaultGap,
-        wholeExpandedGap,
         wholeDefaultLeadingGap,
         wholeDefaultTrailingTailTicks,
         wholeDefaultTrailingGap,
