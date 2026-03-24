@@ -26,6 +26,7 @@ type OnsetReserveExtents = {
 }
 
 type VexBoundingBoxLike = {
+  getX?: () => number
   getW?: () => number
 }
 
@@ -148,25 +149,36 @@ function getRenderedNoteHeadAbsoluteX(params: {
   stemDirection: number
 }): number | null {
   const { noteHead, anchorX, stemDirection } = params
+  const isDisplaced = noteHead?.isDisplaced?.() === true
   const absoluteX = noteHead?.getAbsoluteX?.()
-  const isPreFormatted = noteHead?.preFormatted === true
   if (
-    isPreFormatted &&
     typeof absoluteX === 'number' &&
     Number.isFinite(absoluteX) &&
     Math.abs(absoluteX - anchorX) <= MAX_NOTE_HEAD_COLUMN_OFFSET_PX
   ) {
     return absoluteX
   }
+  const bboxX = noteHead?.getBoundingBox?.()?.getX?.()
+  if (
+    typeof bboxX === 'number' &&
+    Number.isFinite(bboxX) &&
+    Math.abs(bboxX - anchorX) <= MAX_NOTE_HEAD_COLUMN_OFFSET_PX
+  ) {
+    return bboxX
+  }
+  if (!isDisplaced) {
+    return anchorX
+  }
 
+  const isPreFormatted = noteHead?.preFormatted === true
   const headWidth = getRenderedNoteHeadWidth(noteHead)
-  const isDisplaced = noteHead?.isDisplaced?.() === true
   const displacementPx = isDisplaced ? (headWidth - Stem.WIDTH / 2) * stemDirection : 0
   const displacementMultiplier = isPreFormatted ? 1 : 2
   return anchorX + displacementPx * displacementMultiplier
 }
 
 function getRenderedNoteHeadColumnReserves(vexNote: StaveNote, anchorX: number): {
+  resolvedAnchorX: number
   hasMultipleColumns: boolean
   leftColumnReservePx: number
   rightColumnReservePx: number
@@ -175,15 +187,13 @@ function getRenderedNoteHeadColumnReserves(vexNote: StaveNote, anchorX: number):
   const stemDirection = vexNote.getStemDirection()
   if (noteHeads.length === 0) {
     return {
+      resolvedAnchorX: anchorX,
       hasMultipleColumns: false,
       leftColumnReservePx: 0,
       rightColumnReservePx: 0,
     }
   }
 
-  let minHeadX = Number.POSITIVE_INFINITY
-  let maxHeadX = Number.NEGATIVE_INFINITY
-  const acceptedHeadXs: number[] = []
   const acceptedHeads: Array<{ x: number; isDisplaced: boolean }> = []
 
   noteHeads.forEach((noteHead) => {
@@ -194,58 +204,70 @@ function getRenderedNoteHeadColumnReserves(vexNote: StaveNote, anchorX: number):
     })
     if (typeof headX !== 'number' || !Number.isFinite(headX)) return
     if (Math.abs(headX - anchorX) > MAX_NOTE_HEAD_COLUMN_OFFSET_PX) return
-    minHeadX = Math.min(minHeadX, headX)
-    maxHeadX = Math.max(maxHeadX, headX)
-    acceptedHeadXs.push(headX)
     acceptedHeads.push({
       x: headX,
       isDisplaced: noteHead?.isDisplaced?.() === true,
     })
   })
 
-  if (!Number.isFinite(minHeadX) || !Number.isFinite(maxHeadX) || acceptedHeadXs.length === 0) {
+  if (acceptedHeads.length === 0) {
     return {
+      resolvedAnchorX: anchorX,
       hasMultipleColumns: false,
       leftColumnReservePx: 0,
       rightColumnReservePx: 0,
     }
   }
 
-  const distinctColumns = acceptedHeadXs
-    .map((headX) => Number(headX.toFixed(3)))
-    .sort((left, right) => left - right)
-    .filter((headX, index, list) => index === 0 || Math.abs(headX - list[index - 1]) > NOTE_HEAD_COLUMN_COMPARE_EPSILON_PX)
-  const hasMultipleColumns = distinctColumns.length > 1
-
-  const nonDisplacedHeadXs = acceptedHeads
-    .filter((head) => head.isDisplaced !== true)
-    .map((head) => head.x)
-  const displacedHeadXs = acceptedHeads
-    .filter((head) => head.isDisplaced === true)
-    .map((head) => head.x)
-  if (hasMultipleColumns && nonDisplacedHeadXs.length > 0 && displacedHeadXs.length > 0) {
-    const primaryColumnMinX = nonDisplacedHeadXs.reduce((min, headX) => Math.min(min, headX), Number.POSITIVE_INFINITY)
-    const primaryColumnMaxX = nonDisplacedHeadXs.reduce((max, headX) => Math.max(max, headX), Number.NEGATIVE_INFINITY)
-    const displacedColumnMinX = displacedHeadXs.reduce((min, headX) => Math.min(min, headX), Number.POSITIVE_INFINITY)
-    const displacedColumnMaxX = displacedHeadXs.reduce((max, headX) => Math.max(max, headX), Number.NEGATIVE_INFINITY)
-    return {
-      hasMultipleColumns,
-      leftColumnReservePx: Math.max(0, primaryColumnMinX - displacedColumnMinX),
-      rightColumnReservePx: Math.max(0, displacedColumnMaxX - primaryColumnMaxX),
+  const columnBuckets = acceptedHeads.reduce<
+    Array<{
+      x: number
+      totalCount: number
+      nonDisplacedCount: number
+    }>
+  >((buckets, head) => {
+    const existingBucket = buckets.find((entry) => Math.abs(entry.x - head.x) <= NOTE_HEAD_COLUMN_COMPARE_EPSILON_PX)
+    if (existingBucket) {
+      existingBucket.totalCount += 1
+      if (!head.isDisplaced) {
+        existingBucket.nonDisplacedCount += 1
+      }
+      return buckets
     }
-  }
-
-  const columnShiftPx = Math.max(0, maxHeadX - minHeadX)
+    return [
+      ...buckets,
+      {
+        x: head.x,
+        totalCount: 1,
+        nonDisplacedCount: head.isDisplaced ? 0 : 1,
+      },
+    ]
+  }, [])
+  columnBuckets.sort((left, right) => left.x - right.x)
+  const primaryColumn =
+    columnBuckets.slice().sort((left, right) => {
+      if (right.totalCount !== left.totalCount) {
+        return right.totalCount - left.totalCount
+      }
+      if (right.nonDisplacedCount !== left.nonDisplacedCount) {
+        return right.nonDisplacedCount - left.nonDisplacedCount
+      }
+      const leftDistance = Math.abs(left.x - anchorX)
+      const rightDistance = Math.abs(right.x - anchorX)
+      if (leftDistance !== rightDistance) {
+        return leftDistance - rightDistance
+      }
+      return left.x - right.x
+    })[0] ?? null
+  const resolvedAnchorX = primaryColumn?.x ?? anchorX
+  const minHeadX = acceptedHeads.reduce((minValue, head) => Math.min(minValue, head.x), Number.POSITIVE_INFINITY)
+  const maxHeadX = acceptedHeads.reduce((maxValue, head) => Math.max(maxValue, head.x), Number.NEGATIVE_INFINITY)
+  const hasMultipleColumns = columnBuckets.length > 1
   return {
+    resolvedAnchorX,
     hasMultipleColumns,
-    leftColumnReservePx:
-      hasMultipleColumns && columnShiftPx > NOTE_HEAD_COLUMN_COMPARE_EPSILON_PX && stemDirection === Stem.UP
-        ? columnShiftPx
-        : 0,
-    rightColumnReservePx:
-      hasMultipleColumns && columnShiftPx > NOTE_HEAD_COLUMN_COMPARE_EPSILON_PX && stemDirection === Stem.DOWN
-        ? columnShiftPx
-        : 0,
+    leftColumnReservePx: hasMultipleColumns ? Math.max(0, resolvedAnchorX - minHeadX) : 0,
+    rightColumnReservePx: hasMultipleColumns ? Math.max(0, maxHeadX - resolvedAnchorX) : 0,
   }
 }
 
@@ -302,40 +324,17 @@ function getSpacingOccupiedBounds(refs: TimeAxisNoteRef[]): { leftX: number; rig
   return { leftX, rightX }
 }
 
-function getSpacingOccupiedBoundsForTargetXs(params: {
-  refs: TimeAxisNoteRef[]
-  targetXByOnset: Map<number, number>
-}): { leftX: number; rightX: number } | null {
-  const { refs, targetXByOnset } = params
-  let leftX = Number.POSITIVE_INFINITY
-  let rightX = Number.NEGATIVE_INFINITY
-
-  refs.forEach((ref) => {
-    const noteBounds = getRenderedNoteOccupiedBounds(ref.vexNote)
-    if (!noteBounds) return
-    const currentX = getRenderedNoteVisualX(ref.vexNote)
-    if (!Number.isFinite(currentX)) return
-    const targetX = targetXByOnset.get(ref.onsetTicks)
-    if (typeof targetX !== 'number' || !Number.isFinite(targetX)) return
-    const deltaX = targetX - currentX
-    leftX = Math.min(leftX, noteBounds.leftX + deltaX)
-    rightX = Math.max(rightX, noteBounds.rightX + deltaX)
-  })
-
-  if (!Number.isFinite(leftX) || !Number.isFinite(rightX)) return null
-  return { leftX, rightX }
-}
-
 function getNoteReserveExtents(vexNote: StaveNote): { leftReservePx: number; rightReservePx: number } {
   let leftReservePx = 0
   let rightReservePx = 0
-  const noteHeadX = getRenderedNoteVisualX(vexNote)
-  if (Number.isFinite(noteHeadX)) {
+  const fallbackAnchorX = getRenderedNoteVisualX(vexNote)
+  if (Number.isFinite(fallbackAnchorX)) {
     const {
+      resolvedAnchorX,
       hasMultipleColumns,
       leftColumnReservePx,
       rightColumnReservePx,
-    } = getRenderedNoteHeadColumnReserves(vexNote, noteHeadX)
+    } = getRenderedNoteHeadColumnReserves(vexNote, fallbackAnchorX)
     if (hasMultipleColumns) {
       leftReservePx = Math.max(leftReservePx, leftColumnReservePx)
       rightReservePx = Math.max(rightReservePx, rightColumnReservePx)
@@ -354,11 +353,10 @@ function getNoteReserveExtents(vexNote: StaveNote): { leftReservePx: number; rig
     if (Number.isFinite(accidentalMinX)) {
       leftReservePx = Math.max(
         leftReservePx,
-        noteHeadX - accidentalMinX + ACCIDENTAL_PREALLOCATED_CLEARANCE_PX,
+        resolvedAnchorX - accidentalMinX + ACCIDENTAL_PREALLOCATED_CLEARANCE_PX,
       )
     }
   }
-
   return { leftReservePx, rightReservePx }
 }
 
@@ -909,6 +907,19 @@ function getOnsetReserveExtents(noteRefs: TimeAxisNoteRef[] | undefined): OnsetR
   }
 }
 
+function getTotalReserveWidthPx(onsetReservesByTick: OnsetReserveExtents[]): number {
+  if (onsetReservesByTick.length === 0) return 0
+
+  let totalReserveWidthPx = Math.max(0, onsetReservesByTick[0]?.leftReservePx ?? 0)
+  onsetReservesByTick.forEach((entry, index) => {
+    totalReserveWidthPx += Math.max(0, entry.rightReservePx)
+    if (index > 0) {
+      totalReserveWidthPx += Math.max(0, entry.leftReservePx)
+    }
+  })
+  return totalReserveWidthPx
+}
+
 function buildBaseTargetXByOnset(params: {
   onsetTicks: number[]
   axisStart: number
@@ -1158,6 +1169,7 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
   const firstSpacingTick = onsetTicks[0]
   const lastSpacingTick = onsetTicks[onsetTicks.length - 1]
   const onsetReservesByTick = onsetTicks.map((onset) => getOnsetReserveExtents(refsByOnset.get(onset)))
+  const totalReserveWidthPx = getTotalReserveWidthPx(onsetReservesByTick)
 
   const usableFormatWidth = Math.max(MIN_RENDER_WIDTH_PX, formatWidth)
   const defaultAxisBoundaryStart = noteStartX
@@ -1189,7 +1201,9 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     axisBoundaryEnd,
     axisBoundaryStart + Math.max(0, spacingWeights.leadingGapPx),
   )
-  const axisEnd = Math.max(axisStart, axisBoundaryEnd)
+  // Keep the base timeline on the pre-reserve width so ordinary gaps stay stable,
+  // then let the reserve overlay consume the withheld width afterward.
+  const axisEnd = Math.max(axisStart, axisBoundaryEnd - totalReserveWidthPx)
   const baseTargetXByOnset = buildBaseTargetXByOnset({
     onsetTicks,
     axisStart,
@@ -1198,69 +1212,11 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     uniformSpacingByTicks,
     publicAxisLayout,
   })
-  const appliedLeftReservePxByIndex = onsetReservesByTick.map((entry) => entry.leftReservePx)
-  const appliedRightReservePxByIndex = onsetReservesByTick.map((entry) => entry.rightReservePx)
-  let overlay = applyLocalReserveOverlay({
+  const overlay = applyLocalReserveOverlay({
     onsetTicks,
     baseTargetXByOnset,
     onsetReservesByTick,
-    appliedLeftReservePxByIndex,
-    appliedRightReservePxByIndex,
   })
-  let occupiedBounds = getSpacingOccupiedBoundsForTargetXs({
-    refs,
-    targetXByOnset: overlay.finalTargetXByOnset,
-  })
-  if (typeof barlineAxisBoundaryEnd === 'number' && Number.isFinite(barlineAxisBoundaryEnd)) {
-    const maxClampIterations = Math.max(1, onsetTicks.length * 2)
-    for (let iteration = 0; iteration < maxClampIterations; iteration += 1) {
-      const barlineOverflowPx =
-        occupiedBounds && Number.isFinite(occupiedBounds.rightX)
-          ? Math.max(0, occupiedBounds.rightX - barlineAxisBoundaryEnd)
-          : 0
-      if (barlineOverflowPx <= 0.001) break
-
-      let reducibleKind: 'left' | 'right' | null = null
-      let reducibleIndex = -1
-      let reducibleStartIndex = -1
-      for (let index = onsetTicks.length - 1; index >= 0; index -= 1) {
-        const leftReservePx = appliedLeftReservePxByIndex[index] ?? 0
-        if (leftReservePx > 0.001 && index >= reducibleStartIndex) {
-          reducibleKind = 'left'
-          reducibleIndex = index
-          reducibleStartIndex = index
-        }
-        const rightReservePx = appliedRightReservePxByIndex[index] ?? 0
-        const rightReserveStartIndex = index + 1
-        if (rightReservePx > 0.001 && rightReserveStartIndex >= reducibleStartIndex && rightReserveStartIndex < onsetTicks.length) {
-          reducibleKind = 'right'
-          reducibleIndex = index
-          reducibleStartIndex = rightReserveStartIndex
-        }
-      }
-      if (reducibleKind === null || reducibleIndex < 0) break
-
-      if (reducibleKind === 'left') {
-        const currentValue = appliedLeftReservePxByIndex[reducibleIndex] ?? 0
-        appliedLeftReservePxByIndex[reducibleIndex] = Math.max(0, currentValue - Math.min(barlineOverflowPx, currentValue))
-      } else {
-        const currentValue = appliedRightReservePxByIndex[reducibleIndex] ?? 0
-        appliedRightReservePxByIndex[reducibleIndex] = Math.max(0, currentValue - Math.min(barlineOverflowPx, currentValue))
-      }
-
-      overlay = applyLocalReserveOverlay({
-        onsetTicks,
-        baseTargetXByOnset,
-        onsetReservesByTick,
-        appliedLeftReservePxByIndex,
-        appliedRightReservePxByIndex,
-      })
-      occupiedBounds = getSpacingOccupiedBoundsForTargetXs({
-        refs,
-        targetXByOnset: overlay.finalTargetXByOnset,
-      })
-    }
-  }
   const { finalTargetXByOnset, onsetReserves, spacingSegments } = overlay
 
   refs.forEach((ref) => {
@@ -1288,8 +1244,8 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
   const spacingOccupiedLeftX = resolvedOccupiedBounds?.leftX ?? resolvedFirstX
   const spacingOccupiedRightX = resolvedOccupiedBounds?.rightX ?? resolvedLastX
   const spacingAnchorGapFirstToLastPx = Math.max(0, resolvedLastX - resolvedFirstX)
-  const leadingGapPx = spacingOccupiedLeftX - axisBoundaryStart
-  const trailingGapPx = axisBoundaryEnd - spacingOccupiedRightX
+  const leadingGapPx = Math.max(0, resolvedFirstX - axisBoundaryStart)
+  const trailingGapPx = Math.max(0, axisBoundaryEnd - resolvedLastX)
   const effectiveLeftGapPx = spacingOccupiedLeftX - axisBoundaryStart
   const effectiveRightGapPx = axisBoundaryEnd - spacingOccupiedRightX
 

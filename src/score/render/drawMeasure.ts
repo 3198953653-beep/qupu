@@ -1019,6 +1019,15 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       : Math.max(MIN_FORMAT_WIDTH_PX, trebleStave.getNoteEndX() - trebleStave.getNoteStartX() - 8)
 
   new Formatter().joinVoices([trebleVoice]).joinVoices([bassVoice]).format([trebleVoice, bassVoice], formatWidth)
+  // Beam generation can flip stem direction, which rebuilds noteheads and changes
+  // the displaced column side for second-interval chords. Build beams before custom
+  // spacing so reserve detection sees the same geometry that will actually render.
+  const trebleBeams: Beam[] = isSpacingOnlyLayout
+    ? []
+    : Beam.generateBeams(trebleVexNotes, { groups: [new Fraction(1, 4)] })
+  const bassBeams: Beam[] = isSpacingOnlyLayout
+    ? []
+    : Beam.generateBeams(bassVexNotes, { groups: [new Fraction(1, 4)] })
 
   let appliedSpacingMetrics: AppliedTimeAxisSpacingMetrics | null = null
   if (spacingLayoutMode === 'custom') {
@@ -1254,12 +1263,6 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   }
 
 
-  const trebleBeams: Beam[] = isSpacingOnlyLayout
-    ? []
-    : Beam.generateBeams(trebleVexNotes, { groups: [new Fraction(1, 4)] })
-  const bassBeams: Beam[] = isSpacingOnlyLayout
-    ? []
-    : Beam.generateBeams(bassVexNotes, { groups: [new Fraction(1, 4)] })
   if (!skipPainting) {
     trebleVoice.draw(context, trebleStave)
     bassVoice.draw(context, bassStave)

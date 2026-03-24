@@ -36,6 +36,10 @@ type DumpNoteRow = {
   onsetTicksInMeasure: number | null
   x: number
   noteHeads: DumpNoteHead[]
+  accidentalCoords?: Array<{
+    keyIndex: number
+    rightX: number
+  }>
 }
 
 type DumpSpacingOnsetReserve = {
@@ -57,12 +61,16 @@ type DumpSpacingSegment = {
 type MeasureDumpRow = {
   pairIndex: number
   rendered: boolean
+  measureWidth?: number | null
   measureStartBarX?: number | null
   measureEndBarX?: number | null
   effectiveBoundaryStartX?: number | null
   effectiveBoundaryEndX?: number | null
   effectiveLeftGapPx?: number | null
   effectiveRightGapPx?: number | null
+  leadingGapPx?: number | null
+  trailingGapPx?: number | null
+  trailingTailTicks?: number | null
   spacingOccupiedLeftX?: number | null
   spacingOccupiedRightX?: number | null
   spacingOnsetReserves?: DumpSpacingOnsetReserve[]
@@ -92,6 +100,9 @@ type TargetMeasureAnalysis = {
   pairIndex: number
   renderedPageIndex: number | null
   noteIndex: number | null
+  measureWidth: number | null
+  totalReserveWidthPx: number | null
+  baseMeasureWidthPx: number | null
   anchorX: number | null
   headXs: number[]
   candidateNotes: Array<{
@@ -137,7 +148,17 @@ const DEV_URL = `http://${DEV_HOST}:${DEV_PORT}`
 const TARGET_PAIR_COUNT = 8
 const GAP_EPSILON_PX = 0.01
 const HEAD_X_EPSILON_PX = 0.01
-const MIN_VISIBLE_GAP_PX = 0.5
+const MIN_VISIBLE_GAP_PX = 2
+const BASE_GAP_UNIT_PX = 3.5
+const DEFAULT_BASE_MIN_GAP_32_PX = 6.9
+const DEFAULT_DURATION_GAP_RATIOS = {
+  thirtySecond: 0.7,
+  sixteenth: 0.78,
+  eighth: 0.93,
+  quarter: 1.02,
+  half: 1.22,
+  whole: 1.4,
+} as const
 
 const SCALE_CASES: ScaleCase[] = [
   { key: 'manual-100', autoScaleEnabled: false, manualScalePercent: 100 },
@@ -442,6 +463,37 @@ function approximatelyEqual(left: number | null, right: number | null, epsilon =
   return Math.abs(left - right) <= epsilon
 }
 
+function getDurationGapRatioByDeltaTicks(deltaTicks: number): number {
+  const anchors: Array<{ ticks: number; ratio: number }> = [
+    { ticks: 2, ratio: DEFAULT_DURATION_GAP_RATIOS.thirtySecond },
+    { ticks: 4, ratio: DEFAULT_DURATION_GAP_RATIOS.sixteenth },
+    { ticks: 8, ratio: DEFAULT_DURATION_GAP_RATIOS.eighth },
+    { ticks: 16, ratio: DEFAULT_DURATION_GAP_RATIOS.quarter },
+    { ticks: 32, ratio: DEFAULT_DURATION_GAP_RATIOS.half },
+    { ticks: 64, ratio: DEFAULT_DURATION_GAP_RATIOS.whole },
+  ]
+  const safeTicks = Math.max(1, deltaTicks)
+  if (safeTicks <= anchors[0].ticks) return anchors[0].ratio
+  if (safeTicks >= anchors[anchors.length - 1].ticks) return anchors[anchors.length - 1].ratio
+  for (let index = 1; index < anchors.length; index += 1) {
+    const left = anchors[index - 1]
+    const right = anchors[index]
+    if (safeTicks === right.ticks) return right.ratio
+    if (safeTicks < right.ticks) {
+      const leftLog = Math.log2(left.ticks)
+      const rightLog = Math.log2(right.ticks)
+      const tickLog = Math.log2(safeTicks)
+      const blend = (tickLog - leftLog) / Math.max(0.0001, rightLog - leftLog)
+      return left.ratio + (right.ratio - left.ratio) * blend
+    }
+  }
+  return anchors[anchors.length - 1]?.ratio ?? 1
+}
+
+function mapTickGapToWeight(deltaTicks: number): number {
+  return DEFAULT_BASE_MIN_GAP_32_PX * Math.max(0.0001, getDurationGapRatioByDeltaTicks(deltaTicks)) * BASE_GAP_UNIT_PX
+}
+
 function sanitizeSpacingOnsetReserve(
   entry: DumpSpacingOnsetReserve | null | undefined,
 ): DumpSpacingOnsetReserve | null {
@@ -501,6 +553,8 @@ function analyzeTargetRow(row: MergedMeasureDumpRow, pairIndex: number): TargetM
 
   const headXs = targetNote ? dedupeSortedNumbers(targetNote.noteHeads.map((head) => head.x), HEAD_X_EPSILON_PX) : []
   const anchorX = targetNote && Number.isFinite(targetNote.x) ? Number(targetNote.x.toFixed(3)) : null
+  const targetHasRenderedAccidentals =
+    targetNote && Array.isArray(targetNote.accidentalCoords) ? targetNote.accidentalCoords.length > 0 : false
   const hasDisplacedColumns = headXs.length > 1
   if (targetNote && !hasDisplacedColumns) {
     failureReasons.push('displaced-head-columns-not-detected')
@@ -517,6 +571,22 @@ function analyzeTargetRow(row: MergedMeasureDumpRow, pairIndex: number): TargetM
   const spacingSegments = (row.spacingSegments ?? [])
     .map((entry) => sanitizeSpacingSegment(entry))
     .filter((entry): entry is DumpSpacingSegment => entry !== null)
+  const measureWidth =
+    typeof row.measureWidth === 'number' && Number.isFinite(row.measureWidth)
+      ? Number(row.measureWidth.toFixed(3))
+      : null
+  const leadingGapPx =
+    typeof row.leadingGapPx === 'number' && Number.isFinite(row.leadingGapPx)
+      ? Number(row.leadingGapPx.toFixed(3))
+      : null
+  const trailingGapPx =
+    typeof row.trailingGapPx === 'number' && Number.isFinite(row.trailingGapPx)
+      ? Number(row.trailingGapPx.toFixed(3))
+      : null
+  const trailingTailTicks =
+    typeof row.trailingTailTicks === 'number' && Number.isFinite(row.trailingTailTicks)
+      ? Math.max(0, Math.round(row.trailingTailTicks))
+      : null
   const onsetReserveByTick = new Map<number, DumpSpacingOnsetReserve>()
   spacingOnsetReserves.forEach((entry) => {
     onsetReserveByTick.set(entry.onsetTicks, entry)
@@ -533,6 +603,23 @@ function analyzeTargetRow(row: MergedMeasureDumpRow, pairIndex: number): TargetM
 
   if (targetNote && !onsetReserve) {
     failureReasons.push('target-onset-reserve-missing')
+  }
+  if (targetNote && onsetReserve && !targetHasRenderedAccidentals) {
+    if (direction === 'forward') {
+      if ((onsetReserve.leftReservePx ?? 0) > GAP_EPSILON_PX) {
+        failureReasons.push(`forward-without-accidentals-left-reserve:${onsetReserve.leftReservePx ?? 'null'}`)
+      }
+      if ((onsetReserve.rightReservePx ?? 0) <= GAP_EPSILON_PX) {
+        failureReasons.push(`forward-without-accidentals-missing-right-reserve:${onsetReserve.rightReservePx ?? 'null'}`)
+      }
+    } else if (direction === 'backward') {
+      if ((onsetReserve.rightReservePx ?? 0) > GAP_EPSILON_PX) {
+        failureReasons.push(`backward-without-accidentals-right-reserve:${onsetReserve.rightReservePx ?? 'null'}`)
+      }
+      if ((onsetReserve.leftReservePx ?? 0) <= GAP_EPSILON_PX) {
+        failureReasons.push(`backward-without-accidentals-missing-left-reserve:${onsetReserve.leftReservePx ?? 'null'}`)
+      }
+    }
   }
 
   spacingSegments.forEach((segment) => {
@@ -557,6 +644,60 @@ function analyzeTargetRow(row: MergedMeasureDumpRow, pairIndex: number): TargetM
       )
     }
   })
+
+  const sortedOnsetReserves = spacingOnsetReserves
+    .slice()
+    .sort((left, right) => left.onsetTicks - right.onsetTicks)
+  const firstOnsetReserve = sortedOnsetReserves[0] ?? null
+  const lastOnsetReserve = sortedOnsetReserves[sortedOnsetReserves.length - 1] ?? null
+  const firstLeftReservePx = Math.max(0, firstOnsetReserve?.leftReservePx ?? 0)
+  const lastRightReservePx = Math.max(0, lastOnsetReserve?.rightReservePx ?? 0)
+  const totalSegmentReservePx = Number(
+    spacingSegments.reduce((sum, segment) => sum + Math.max(0, segment.extraReservePx ?? 0), 0).toFixed(3),
+  )
+  const totalReserveWidthPx = Number((firstLeftReservePx + totalSegmentReservePx + lastRightReservePx).toFixed(3))
+  const baseMeasureWidthPx =
+    measureWidth !== null ? Number((measureWidth - totalReserveWidthPx).toFixed(3)) : null
+
+  if (
+    measureWidth !== null &&
+    leadingGapPx !== null &&
+    trailingGapPx !== null &&
+    trailingTailTicks !== null &&
+    baseMeasureWidthPx !== null
+  ) {
+    const baseLeadingGapPx = Number((leadingGapPx - firstLeftReservePx).toFixed(3))
+    const rawTrailingGapPx = Number(mapTickGapToWeight(trailingTailTicks).toFixed(3))
+    const rawAnchorWeightPx = Number(
+      spacingSegments.reduce(
+        (sum, segment) => sum + mapTickGapToWeight(Math.max(1, segment.toOnsetTicks - segment.fromOnsetTicks)),
+        0,
+      ).toFixed(3),
+    )
+    const rawTotalWeightPx = Number((rawAnchorWeightPx + rawTrailingGapPx).toFixed(3))
+
+    if (baseLeadingGapPx < -GAP_EPSILON_PX) {
+      failureReasons.push('base-leading-gap-negative')
+    } else if (rawTotalWeightPx > GAP_EPSILON_PX) {
+      const baseDistributableWidthPx = Number((baseMeasureWidthPx - baseLeadingGapPx).toFixed(3))
+      const baseTimelineScale = baseDistributableWidthPx / rawTotalWeightPx
+
+      spacingSegments.forEach((segment) => {
+        const rawGapPx = mapTickGapToWeight(Math.max(1, segment.toOnsetTicks - segment.fromOnsetTicks))
+        const expectedBaseGapPx = Number((rawGapPx * baseTimelineScale).toFixed(3))
+        if (!approximatelyEqual(segment.baseGapPx ?? null, expectedBaseGapPx)) {
+          failureReasons.push(
+            `segment-base-gap-scaled:${segment.fromOnsetTicks}->${segment.toOnsetTicks}:${segment.baseGapPx ?? 'null'}!=${expectedBaseGapPx}`,
+          )
+        }
+      })
+
+      const expectedTrailingGapPx = Number((rawTrailingGapPx * baseTimelineScale).toFixed(3))
+      if (!approximatelyEqual(trailingGapPx, expectedTrailingGapPx)) {
+        failureReasons.push(`trailing-gap-scaled:${trailingGapPx ?? 'null'}!=${expectedTrailingGapPx}`)
+      }
+    }
+  }
 
   const effectiveLeftGapPx =
     typeof row.effectiveLeftGapPx === 'number' && Number.isFinite(row.effectiveLeftGapPx)
@@ -600,10 +741,35 @@ function analyzeTargetRow(row: MergedMeasureDumpRow, pairIndex: number): TargetM
       : null
 
   if (
+    visibleLeftGapPx !== null &&
+    effectiveLeftGapPx !== null &&
+    !approximatelyEqual(visibleLeftGapPx, effectiveLeftGapPx)
+  ) {
+    failureReasons.push('effective-left-gap-mismatch')
+  }
+  if (
+    visibleRightGapPx !== null &&
+    effectiveRightGapPx !== null &&
+    !approximatelyEqual(visibleRightGapPx, effectiveRightGapPx)
+  ) {
+    failureReasons.push('effective-right-gap-mismatch')
+  }
+
+  if (
     direction === 'backward' &&
     (visibleLeftGapPx === null || visibleLeftGapPx < MIN_VISIBLE_GAP_PX - GAP_EPSILON_PX)
   ) {
     failureReasons.push('visible-left-gap-too-small')
+  }
+  if (direction === 'backward') {
+    if (Math.max(onsetReserve?.leftReservePx ?? 0, onsetReserve?.rightReservePx ?? 0) <= GAP_EPSILON_PX) {
+      failureReasons.push('backward-reserve-missing')
+    }
+  }
+  if (direction === 'forward') {
+    if (Math.max(onsetReserve?.leftReservePx ?? 0, onsetReserve?.rightReservePx ?? 0) <= GAP_EPSILON_PX) {
+      failureReasons.push('forward-reserve-missing')
+    }
   }
   if (overflowVsMeasureEndBarX !== null && overflowVsMeasureEndBarX > GAP_EPSILON_PX) {
     failureReasons.push('overflow-vs-measure-end-barline')
@@ -617,6 +783,9 @@ function analyzeTargetRow(row: MergedMeasureDumpRow, pairIndex: number): TargetM
     pairIndex,
     renderedPageIndex: row.renderedPageIndex,
     noteIndex: targetNote?.noteIndex ?? null,
+    measureWidth,
+    totalReserveWidthPx,
+    baseMeasureWidthPx,
     anchorX,
     headXs,
     candidateNotes,
@@ -714,6 +883,8 @@ async function main(): Promise<void> {
       scenario.targets.forEach((target) => {
         console.log(
           `  pair=${target.pairIndex} page=${target.renderedPageIndex ?? 'n/a'} direction=${target.direction} ` +
+            `measureWidth=${target.measureWidth ?? 'null'} baseMeasureWidth=${target.baseMeasureWidthPx ?? 'null'} ` +
+            `reserveWidth=${target.totalReserveWidthPx ?? 'null'} ` +
             `headXs=${JSON.stringify(target.headXs)} visibleLeftGap=${target.visibleLeftGapPx} ` +
             `visibleRightGap=${target.visibleRightGapPx} reportedLeftGap=${target.effectiveLeftGapPx} ` +
             `reportedRightGap=${target.effectiveRightGapPx} occupiedLeft=${target.spacingOccupiedLeftX} ` +

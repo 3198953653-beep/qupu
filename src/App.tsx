@@ -2021,7 +2021,7 @@ function App() {
       return measurePairs.map(() => HORIZONTAL_VIEW_MEASURE_WIDTH_PX)
     }
     const solverMaxIterations =
-      measurePairs.length > 120 ? 4 : measurePairs.length > 48 ? 6 : 10
+      measurePairs.length > 120 ? 8 : measurePairs.length > 48 ? 16 : 60
     const eagerProbeMeasureLimit =
       measurePairs.length > 120 ? 16 : measurePairs.length > 60 ? 24 : Number.POSITIVE_INFINITY
     return solveHorizontalMeasureWidths({

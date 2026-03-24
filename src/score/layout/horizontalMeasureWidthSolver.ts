@@ -58,17 +58,27 @@ type MeasureProbeGeometry = {
   formatWidth: number
 }
 
+type ProbeLayoutLike = {
+  x?: number
+  rightX?: number
+  spacingRightX?: number
+}
+
 type MeasureSpacingProbe = {
   leadingGapPx: number
   trailingGapPx: number
   rightOverflowPx: number
   spacingAnchorGapFirstToLastPx: number
+  leadingOccupiedInsetPx: number
+  trailingOccupiedTailPx: number
 }
 
 const MIN_FORMAT_WIDTH_PX = 8
+const MIN_VISIBLE_GAP_PX = 2
 const EPS = 0.05
 const STEP_PAD_PX = 0.5
-const SOLVER_CACHE_VERSION = 'v4'
+const PROBE_MEASURE_X = 1024
+const SOLVER_CACHE_VERSION = 'v7'
 const SOLVER_CACHE_MAX_ENTRIES = 12000
 
 function resolveMeasureMeta(params: {
@@ -118,6 +128,11 @@ function resolveMeasureMeta(params: {
 
 function serializeScoreNoteForWidthCache(note: ScoreNote): string {
   const chordPitchCount = note.chordPitches?.length ?? 0
+  const pitchSignature = note.pitch ?? '.'
+  const chordPitchSignature =
+    note.chordPitches && note.chordPitches.length > 0
+      ? note.chordPitches.join(',')
+      : '-'
   const chordAccidentals =
     note.chordAccidentals && note.chordAccidentals.length > 0
       ? note.chordAccidentals.map((value) => value ?? '.').join(',')
@@ -125,8 +140,10 @@ function serializeScoreNoteForWidthCache(note: ScoreNote): string {
   return [
     note.duration,
     note.isRest ? '1' : '0',
+    pitchSignature,
     note.accidental ?? '.',
     String(chordPitchCount),
+    chordPitchSignature,
     chordAccidentals,
   ].join('|')
 }
@@ -175,7 +192,7 @@ function buildMeasureWidthCacheKey(params: {
 function buildMeasureProbeGeometry(meta: SolverMeasureMeta, contentMeasureWidth: number): MeasureProbeGeometry {
   const safeContentWidth = Math.max(1, Number(contentMeasureWidth.toFixed(3)))
   const renderedMeasureWidth = Math.max(1, Number((safeContentWidth + meta.actualStartDecorationWidthPx).toFixed(3)))
-  const probeStave = new Stave(0, SYSTEM_TREBLE_OFFSET_Y, renderedMeasureWidth)
+  const probeStave = new Stave(PROBE_MEASURE_X, SYSTEM_TREBLE_OFFSET_Y, renderedMeasureWidth)
   applyMeasureStartDecorationsToStave(probeStave, 'treble', meta)
   if (meta.showEndTimeSignature) {
     probeStave.setEndTimeSignature(toTimeSignatureKey(meta.timeSignature))
@@ -183,12 +200,13 @@ function buildMeasureProbeGeometry(meta: SolverMeasureMeta, contentMeasureWidth:
 
   const rawNoteEndOffset = probeStave.getNoteEndX()
   const noteStartOffset = meta.preferMeasureStartBarlineAxis ? 0 : meta.actualStartDecorationWidthPx
-  const noteEndOffset = rawNoteEndOffset
+  const noteStartX = PROBE_MEASURE_X + noteStartOffset
+  const noteEndX = rawNoteEndOffset
   return {
     renderedMeasureWidth,
-    noteStartX: noteStartOffset,
-    noteEndX: noteEndOffset,
-    formatWidth: Math.max(MIN_FORMAT_WIDTH_PX, noteEndOffset - noteStartOffset - 8),
+    noteStartX,
+    noteEndX,
+    formatWidth: Math.max(MIN_FORMAT_WIDTH_PX, noteEndX - noteStartX - 8),
   }
 }
 
@@ -231,7 +249,7 @@ function probeMeasureSpacing(
     context,
     measure: meta.measure,
     pairIndex: meta.pairIndex,
-    measureX: 0,
+    measureX: PROBE_MEASURE_X,
     measureWidth: geometry.renderedMeasureWidth,
     trebleY: SYSTEM_TREBLE_OFFSET_Y,
     bassY: SYSTEM_BASS_OFFSET_Y,
@@ -260,17 +278,75 @@ function probeMeasureSpacing(
       spacingMetricsRef.current = metrics
     },
   })
+  let layoutOccupiedLeftX = Number.POSITIVE_INFINITY
+  let layoutOccupiedRightX = Number.NEGATIVE_INFINITY
+  ;(measureNoteLayouts as ProbeLayoutLike[]).forEach((layout) => {
+    if (typeof layout.x === 'number' && Number.isFinite(layout.x)) {
+      layoutOccupiedLeftX = Math.min(layoutOccupiedLeftX, layout.x)
+    }
+    const spacingRightX =
+      typeof layout.spacingRightX === 'number' && Number.isFinite(layout.spacingRightX)
+        ? layout.spacingRightX
+        : Number.NEGATIVE_INFINITY
+    const visualRightX =
+      typeof layout.rightX === 'number' && Number.isFinite(layout.rightX) ? layout.rightX : Number.NEGATIVE_INFINITY
+    const occupiedRightX = Math.max(spacingRightX, visualRightX)
+    if (Number.isFinite(occupiedRightX)) {
+      layoutOccupiedRightX = Math.max(layoutOccupiedRightX, occupiedRightX)
+    }
+  })
   const appliedMetrics = spacingMetricsRef.current
   if (
     appliedMetrics &&
     Number.isFinite(appliedMetrics.leadingGapPx) &&
     Number.isFinite(appliedMetrics.trailingGapPx)
   ) {
+    const firstSpacingTick = appliedMetrics.spacingAnchorTicks[0]
+    const lastSpacingTick = appliedMetrics.spacingAnchorTicks[appliedMetrics.spacingAnchorTicks.length - 1]
+    const firstAnchorX =
+      typeof firstSpacingTick === 'number' ? appliedMetrics.spacingTickToX.get(firstSpacingTick) ?? Number.NaN : Number.NaN
+    const lastAnchorX =
+      typeof lastSpacingTick === 'number' ? appliedMetrics.spacingTickToX.get(lastSpacingTick) ?? Number.NaN : Number.NaN
+    const leadingOccupiedInsetPx =
+      Number.isFinite(firstAnchorX) && Number.isFinite(appliedMetrics.spacingOccupiedLeftX)
+        ? Math.max(0, firstAnchorX - appliedMetrics.spacingOccupiedLeftX)
+        : 0
+    const trailingOccupiedTailPx =
+      Number.isFinite(lastAnchorX) &&
+      Number.isFinite(
+        Number.isFinite(layoutOccupiedRightX)
+          ? Math.max(layoutOccupiedRightX, appliedMetrics.spacingOccupiedRightX)
+          : appliedMetrics.spacingOccupiedRightX,
+      )
+        ? Math.max(
+            0,
+            (Number.isFinite(layoutOccupiedRightX)
+              ? Math.max(layoutOccupiedRightX, appliedMetrics.spacingOccupiedRightX)
+              : appliedMetrics.spacingOccupiedRightX) - lastAnchorX,
+          )
+        : 0
+    const occupiedLeftX =
+      Number.isFinite(layoutOccupiedLeftX)
+        ? Number.isFinite(appliedMetrics.spacingOccupiedLeftX)
+          ? Math.min(layoutOccupiedLeftX, appliedMetrics.spacingOccupiedLeftX)
+          : layoutOccupiedLeftX
+        : appliedMetrics.spacingOccupiedLeftX
+    const occupiedRightX =
+      Number.isFinite(layoutOccupiedRightX)
+        ? Number.isFinite(appliedMetrics.spacingOccupiedRightX)
+          ? Math.max(layoutOccupiedRightX, appliedMetrics.spacingOccupiedRightX)
+          : layoutOccupiedRightX
+        : appliedMetrics.spacingOccupiedRightX
     return {
       leadingGapPx: appliedMetrics.leadingGapPx,
       trailingGapPx: appliedMetrics.trailingGapPx,
-      rightOverflowPx: Math.max(0, -appliedMetrics.effectiveRightGapPx),
+      rightOverflowPx: Math.max(0, occupiedRightX - appliedMetrics.effectiveBoundaryEndX),
       spacingAnchorGapFirstToLastPx: Math.max(0, appliedMetrics.spacingAnchorGapFirstToLastPx),
+      leadingOccupiedInsetPx:
+        Number.isFinite(firstAnchorX) && Number.isFinite(occupiedLeftX)
+          ? Math.max(0, firstAnchorX - occupiedLeftX)
+          : leadingOccupiedInsetPx,
+      trailingOccupiedTailPx,
     }
   }
   if (measureNoteLayouts.length === 0) {
@@ -279,6 +355,8 @@ function probeMeasureSpacing(
       trailingGapPx: 0,
       rightOverflowPx: 0,
       spacingAnchorGapFirstToLastPx: 0,
+      leadingOccupiedInsetPx: 0,
+      trailingOccupiedTailPx: 0,
     }
   }
 
@@ -319,7 +397,7 @@ function probeMeasureSpacing(
   if (!Number.isFinite(occupiedLeftX) || !Number.isFinite(occupiedRightX)) return null
 
   const boundary = resolveEffectiveBoundary({
-    measureX: 0,
+    measureX: PROBE_MEASURE_X,
     measureWidth: geometry.renderedMeasureWidth,
     noteStartX: geometry.noteStartX,
     noteEndX: geometry.noteEndX,
@@ -328,14 +406,26 @@ function probeMeasureSpacing(
   })
   const effectiveLeftGapPx = occupiedLeftX - boundary.effectiveStartX
   const effectiveRightGapPx = boundary.effectiveEndX - occupiedRightX
+  const leadingGapPx =
+    Number.isFinite(anchorLeftX) && Number.isFinite(boundary.effectiveStartX)
+      ? Math.max(0, anchorLeftX - boundary.effectiveStartX)
+      : effectiveLeftGapPx
+  const trailingGapPx =
+    Number.isFinite(anchorRightX) && Number.isFinite(boundary.effectiveEndX)
+      ? Math.max(0, boundary.effectiveEndX - anchorRightX)
+      : effectiveRightGapPx
   return {
-    leadingGapPx: effectiveLeftGapPx,
-    trailingGapPx: effectiveRightGapPx,
+    leadingGapPx,
+    trailingGapPx,
     rightOverflowPx: Math.max(0, occupiedRightX - boundary.effectiveEndX),
     spacingAnchorGapFirstToLastPx:
       Number.isFinite(anchorLeftX) && Number.isFinite(anchorRightX)
         ? Math.max(0, anchorRightX - anchorLeftX)
         : 0,
+    leadingOccupiedInsetPx:
+      Number.isFinite(anchorLeftX) ? Math.max(0, anchorLeftX - occupiedLeftX) : 0,
+    trailingOccupiedTailPx:
+      Number.isFinite(anchorRightX) ? Math.max(0, occupiedRightX - anchorRightX) : 0,
   }
 }
 
@@ -425,8 +515,10 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
     for (let iteration = 0; iteration < maxIterations; iteration += 1) {
       const probe = probeMeasureSpacing(context, meta, width, spacingConfig, supplementalSpacingTicks)
       if (!probe) break
-      const leadingGapDeficit = Math.max(0, timelineMetrics.leadingGapPx - probe.leadingGapPx)
-      const trailingGapDeficit = Math.max(0, timelineMetrics.trailingGapPx - probe.trailingGapPx)
+      const requiredLeadingAnchorGap = probe.leadingOccupiedInsetPx + MIN_VISIBLE_GAP_PX
+      const requiredTrailingAnchorGap = probe.trailingOccupiedTailPx + MIN_VISIBLE_GAP_PX
+      const leadingGapDeficit = Math.max(0, requiredLeadingAnchorGap - probe.leadingGapPx)
+      const trailingGapDeficit = Math.max(0, requiredTrailingAnchorGap - probe.trailingGapPx)
       const timelineCompressionDeficit = Math.max(0, timelineMetrics.anchorSpanPx - probe.spacingAnchorGapFirstToLastPx)
 
       if (
