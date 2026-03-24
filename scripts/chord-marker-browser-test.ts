@@ -17,6 +17,8 @@ type ChordRulerMarkerDebugRow = {
   startTick: number
   endTick: number
   positionText: string
+  anchorGlobalX: number
+  anchorXPx: number
   xPx: number
   anchorSource: 'note-head' | 'spacing-tick' | 'axis' | 'frame'
   keyFifths: number
@@ -73,6 +75,20 @@ type DebugHighlightRect = {
   y: number
   width: number
   height: number
+}
+
+type DebugScaleConfig = {
+  autoScaleEnabled: boolean
+  manualScalePercent: number
+}
+
+type ChordMarkerScrollSample = {
+  label: string
+  scrollLeft: number
+  clientWidth: number
+  rulerTickXs: number[]
+  markers: ChordRulerMarkerDebugRow[]
+  visibleMarkers: ChordRulerMarkerDebugRow[]
 }
 
 const DEV_HOST = '127.0.0.1'
@@ -238,8 +254,145 @@ async function waitForDebugApi(page: Page): Promise<void> {
       typeof api.applyChordSelectionRange === 'function' &&
       typeof api.getSelectedSelections === 'function' &&
       typeof api.getActiveChordSelection === 'function' &&
-      typeof api.getSelectedMeasureHighlightRect === 'function'
+      typeof api.getSelectedMeasureHighlightRect === 'function' &&
+      typeof api.getScaleConfig === 'function' &&
+      typeof api.setAutoScaleEnabled === 'function' &&
+      typeof api.setManualScalePercent === 'function'
     )
+  })
+}
+
+async function setScoreScale(page: Page, autoScaleEnabled: boolean, manualScalePercent: number): Promise<DebugScaleConfig> {
+  await page.evaluate(({ enabled, percent }) => {
+    const api = (window as unknown as {
+      __scoreDebug: {
+        setAutoScaleEnabled: (next: boolean) => void
+        setManualScalePercent: (next: number) => void
+      }
+    }).__scoreDebug
+    api.setAutoScaleEnabled(enabled)
+    api.setManualScalePercent(percent)
+  }, { enabled: autoScaleEnabled, percent: manualScalePercent })
+
+  await page.waitForFunction(
+    ({ enabled, percent }) => {
+      const api = (window as unknown as {
+        __scoreDebug: {
+          getScaleConfig: () => { autoScaleEnabled: boolean; manualScalePercent: number }
+        }
+      }).__scoreDebug
+      const config = api.getScaleConfig()
+      return config.autoScaleEnabled === enabled && Math.abs(config.manualScalePercent - percent) < 0.001
+    },
+    { enabled: autoScaleEnabled, percent: manualScalePercent },
+  )
+
+  return page.evaluate(() => {
+    const api = (window as unknown as {
+      __scoreDebug: { getScaleConfig: () => DebugScaleConfig }
+    }).__scoreDebug
+    return api.getScaleConfig()
+  })
+}
+
+async function setHorizontalScroll(page: Page, leftPx: number): Promise<void> {
+  await page.evaluate((left) => {
+    const host = document.querySelector('.score-scroll.horizontal-view') as HTMLDivElement | null
+    if (!host) {
+      throw new Error('Missing .score-scroll.horizontal-view element.')
+    }
+    host.scrollLeft = left
+    host.dispatchEvent(new Event('scroll'))
+  }, leftPx)
+}
+
+async function captureChordMarkerScrollSample(page: Page, label: string): Promise<ChordMarkerScrollSample> {
+  return page.evaluate((sampleLabel) => {
+    const host = document.querySelector('.score-scroll.horizontal-view') as HTMLDivElement | null
+    if (!host) {
+      throw new Error('Missing .score-scroll.horizontal-view element.')
+    }
+    const api = (window as unknown as {
+      __scoreDebug: {
+        getChordRulerMarkers: () => ChordRulerMarkerDebugRow[]
+      }
+    }).__scoreDebug
+    const rulerTickXs = [...document.querySelectorAll('.measure-ruler-tick')]
+      .map((element) => Number.parseFloat((element as HTMLElement).style.left || 'NaN'))
+      .filter((value) => Number.isFinite(value))
+    const markers = api.getChordRulerMarkers()
+    const viewportLeft = host.scrollLeft
+    const viewportRight = viewportLeft + host.clientWidth
+    const visibleMarkers = markers.filter((marker) => marker.xPx >= viewportLeft - 80 && marker.xPx <= viewportRight + 80)
+    return {
+      label: sampleLabel,
+      scrollLeft: viewportLeft,
+      clientWidth: host.clientWidth,
+      rulerTickXs,
+      markers,
+      visibleMarkers,
+    }
+  }, label)
+}
+
+function getMeasureRulerInterval(sample: ChordMarkerScrollSample, pairIndex: number): { startX: number; endX: number } {
+  const startX = sample.rulerTickXs[pairIndex]
+  if (!Number.isFinite(startX)) {
+    throw new Error(`Missing measure ruler tick for pairIndex=${pairIndex} in sample=${sample.label}.`)
+  }
+  const nextStartX = sample.rulerTickXs[pairIndex + 1]
+  if (Number.isFinite(nextStartX)) {
+    return { startX, endX: nextStartX }
+  }
+  const fallbackWidth =
+    pairIndex > 0 && Number.isFinite(sample.rulerTickXs[pairIndex - 1])
+      ? startX - sample.rulerTickXs[pairIndex - 1]
+      : sample.clientWidth
+  return { startX, endX: startX + Math.max(1, fallbackWidth) }
+}
+
+function assertFrameMarkersStayInOwnMeasure(sample: ChordMarkerScrollSample): void {
+  sample.markers
+    .filter((marker) => marker.anchorSource === 'frame')
+    .forEach((marker) => {
+      const interval = getMeasureRulerInterval(sample, marker.pairIndex)
+      if (marker.anchorXPx < interval.startX - 1.5 || marker.anchorXPx > interval.endX + 1.5) {
+        throw new Error(
+          `Frame marker escaped its own measure in sample=${sample.label}: pairIndex=${marker.pairIndex} label=${marker.label} anchorX=${marker.anchorXPx.toFixed(3)} interval=[${interval.startX.toFixed(3)}, ${interval.endX.toFixed(3)}].`,
+        )
+      }
+    })
+}
+
+function getVisibleMeasurePairRange(sample: ChordMarkerScrollSample): { startPairIndex: number; endPairIndex: number } {
+  const viewportLeft = sample.scrollLeft
+  const viewportRight = sample.scrollLeft + sample.clientWidth
+  let startPairIndex = Number.POSITIVE_INFINITY
+  let endPairIndex = Number.NEGATIVE_INFINITY
+
+  for (let pairIndex = 0; pairIndex < sample.rulerTickXs.length; pairIndex += 1) {
+    const interval = getMeasureRulerInterval(sample, pairIndex)
+    if (interval.endX >= viewportLeft && interval.startX <= viewportRight) {
+      startPairIndex = Math.min(startPairIndex, pairIndex)
+      endPairIndex = Math.max(endPairIndex, pairIndex)
+    }
+  }
+
+  if (!Number.isFinite(startPairIndex) || !Number.isFinite(endPairIndex)) {
+    throw new Error(`Could not resolve visible measure range for sample=${sample.label}.`)
+  }
+
+  return { startPairIndex, endPairIndex }
+}
+
+function assertVisibleMarkersStayNearVisibleMeasures(sample: ChordMarkerScrollSample): void {
+  const visibleRange = getVisibleMeasurePairRange(sample)
+  sample.visibleMarkers.forEach((marker) => {
+    if (marker.pairIndex < visibleRange.startPairIndex - 1 || marker.pairIndex > visibleRange.endPairIndex + 1) {
+      throw new Error(
+        `Visible marker escaped the viewport measure range in sample=${sample.label}: pairIndex=${marker.pairIndex} label=${marker.label} visibleRange=[${visibleRange.startPairIndex}, ${visibleRange.endPairIndex}] scrollLeft=${sample.scrollLeft.toFixed(3)}.`,
+      )
+    }
   })
 }
 
@@ -838,6 +991,29 @@ async function main() {
     if (defaultBeat3Marker.label !== 'Am' || defaultBeat3Marker.displayLabel !== 'Am') {
       throw new Error(`Default demo third-beat marker should start as Am, got ${JSON.stringify(defaultBeat3Marker)}.`)
     }
+
+    await setScoreScale(page, false, 300)
+    await page.waitForTimeout(200)
+    const highZoomScrollLeft = await page.evaluate(() => {
+      const host = document.querySelector('.score-scroll.horizontal-view') as HTMLDivElement | null
+      if (!host) {
+        throw new Error('Missing .score-scroll.horizontal-view element.')
+      }
+      return Math.max(0, Math.min(host.scrollWidth - host.clientWidth, Math.round(host.scrollWidth * 0.5)))
+    })
+    await setHorizontalScroll(page, highZoomScrollLeft)
+    const highZoomImmediateSample = await captureChordMarkerScrollSample(page, 'immediate')
+    await page.evaluate(() => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())))
+    const highZoomRafSample = await captureChordMarkerScrollSample(page, 'raf1')
+    await page.waitForTimeout(120)
+    const highZoomSettledSample = await captureChordMarkerScrollSample(page, 'settled')
+    ;[highZoomImmediateSample, highZoomRafSample, highZoomSettledSample].forEach((sample) => {
+      assertFrameMarkersStayInOwnMeasure(sample)
+      assertVisibleMarkersStayNearVisibleMeasures(sample)
+    })
+    await setScoreScale(page, true, 100)
+    await setHorizontalScroll(page, 0)
+    await waitForDefaultDemo(page)
 
     await setChordDegreeDisplay(page, true)
     await page.waitForFunction(() => {
@@ -1657,6 +1833,11 @@ async function main() {
       restSelectionRows,
       restActiveChordSelection,
       restHighlightRect,
+      highZoomScrollSamples: [
+        highZoomImmediateSample,
+        highZoomRafSample,
+        highZoomSettledSample,
+      ],
       defaultMarkers,
       wholeMarkers,
       halfMarkers,

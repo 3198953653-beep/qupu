@@ -1084,6 +1084,22 @@ type ChordRulerMarker = {
   beatIndex?: number | null
 }
 
+type ChordRulerMarkerAnchorSource = 'note-head' | 'spacing-tick' | 'axis' | 'frame'
+
+type ChordRulerMarkerGeometry = {
+  key: string
+  pairIndex: number
+  sourceLabel: string
+  startTick: number
+  endTick: number
+  positionText: string
+  beatIndex?: number | null
+  anchorSource: ChordRulerMarkerAnchorSource
+  anchorGlobalX: number
+  keyFifths: number
+  keyMode: 'major' | 'minor'
+}
+
 type ChordRulerMarkerMeta = {
   key: string
   pairIndex: number
@@ -1093,8 +1109,10 @@ type ChordRulerMarkerMeta = {
   endTick: number
   positionText: string
   beatIndex?: number | null
+  anchorGlobalX: number
+  anchorXPx: number
   xPx: number
-  anchorSource: 'note-head' | 'spacing-tick' | 'axis' | 'frame'
+  anchorSource: ChordRulerMarkerAnchorSource
   keyFifths: number
   keyMode: 'major' | 'minor'
 }
@@ -2237,6 +2255,8 @@ function App() {
     spacingLayoutMode,
   ])
   const [chordMarkerLayoutRevision, setChordMarkerLayoutRevision] = useState(0)
+  const [chordRulerMarkerGeometryByKey, setChordRulerMarkerGeometryByKey] =
+    useState<Map<string, ChordRulerMarkerGeometry>>(new Map())
   useLayoutEffect(() => {
     chordMarkerLayoutRequestRef.current += 1
   }, [
@@ -2248,12 +2268,122 @@ function App() {
     scoreScaleX,
     layoutStabilityKey,
   ])
+  const buildChordRulerMarkerGeometrySnapshot = useCallback(() => {
+    const appliedRenderOffsetX = horizontalRenderOffsetXRef.current
+    const markers = new Map<string, ChordRulerMarkerGeometry>()
+    const resolveTickHeadGlobalX = (params: {
+      pairIndex: number
+      startTick: number
+    }): number | null => {
+      const { pairIndex, startTick } = params
+      const pair = measurePairs[pairIndex]
+      if (!pair) return null
+      const pairLayouts = noteLayoutsByPairRef.current.get(pairIndex) ?? []
+      if (pairLayouts.length === 0) return null
+
+      const trebleOnsetTicksByIndex = buildStaffOnsetTicks(pair.treble)
+      const bassOnsetTicksByIndex = buildStaffOnsetTicks(pair.bass)
+      let bestCandidate: { headGlobalX: number; staffPriority: number; noteIndex: number } | null = null
+
+      for (const layout of pairLayouts) {
+        const sourceNote = layout.staff === 'treble' ? pair.treble[layout.noteIndex] : pair.bass[layout.noteIndex]
+        if (!sourceNote || sourceNote.isRest) continue
+        const onsetTicksByIndex = layout.staff === 'treble' ? trebleOnsetTicksByIndex : bassOnsetTicksByIndex
+        const onsetTick = onsetTicksByIndex[layout.noteIndex]
+        if (onsetTick !== startTick) continue
+        const rootHead = layout.noteHeads.find((head) => head.keyIndex === 0) ?? layout.noteHeads[0] ?? null
+        if (!rootHead) continue
+        const localHeadLeftX = Number.isFinite(rootHead.hitMinX) ? (rootHead.hitMinX as number) : rootHead.x
+        if (!Number.isFinite(localHeadLeftX)) continue
+        const candidate = {
+          headGlobalX: localHeadLeftX + appliedRenderOffsetX,
+          staffPriority: layout.staff === 'treble' ? 0 : 1,
+          noteIndex: layout.noteIndex,
+        }
+        if (
+          bestCandidate === null ||
+          candidate.headGlobalX < bestCandidate.headGlobalX - 0.001 ||
+          (Math.abs(candidate.headGlobalX - bestCandidate.headGlobalX) <= 0.001 &&
+            (candidate.staffPriority < bestCandidate.staffPriority ||
+              (candidate.staffPriority === bestCandidate.staffPriority && candidate.noteIndex < bestCandidate.noteIndex)))
+        ) {
+          bestCandidate = candidate
+        }
+      }
+
+      return bestCandidate?.headGlobalX ?? null
+    }
+
+    horizontalMeasureFramesByPair.forEach((frame, pairIndex) => {
+      const timelineBundle = measureTimelineBundlesRef.current.get(pairIndex) ?? null
+      const timeSignature = resolvePairTimeSignature(pairIndex, measureTimeSignaturesFromImport)
+      const measureTicks = Math.max(1, timelineBundle?.measureTicks ?? getMeasureTicksFromTimeSignature(timeSignature))
+      const chordEntries = chordRulerEntriesByPair?.[pairIndex] ?? []
+      chordEntries.forEach((entry, entryIndex) => {
+        const safeStartTick = Math.max(0, Math.min(measureTicks, Math.round(entry.startTick)))
+        const safeEndTick = Math.max(safeStartTick, Math.min(measureTicks, Math.round(entry.endTick)))
+        if (safeEndTick <= safeStartTick) return
+
+        let anchorSource: ChordRulerMarkerAnchorSource = 'frame'
+        let anchorGlobalX = resolveTickHeadGlobalX({ pairIndex, startTick: safeStartTick })
+        if (anchorGlobalX !== null) {
+          anchorSource = 'note-head'
+        } else {
+          const spacingTickX = timelineBundle?.spacingTickToX.get(safeStartTick)
+          if (typeof spacingTickX === 'number' && Number.isFinite(spacingTickX)) {
+            anchorSource = 'spacing-tick'
+            anchorGlobalX = spacingTickX + appliedRenderOffsetX
+          } else {
+            const axisX = timelineBundle?.publicAxisLayout?.tickToX.get(safeStartTick)
+            if (typeof axisX === 'number' && Number.isFinite(axisX)) {
+              anchorSource = 'axis'
+              anchorGlobalX = axisX + appliedRenderOffsetX
+            } else {
+              const frameContentGeometry = getMeasureFrameContentGeometry(frame)
+              anchorSource = 'frame'
+              anchorGlobalX = frameContentGeometry
+                ? frameContentGeometry.contentStartX +
+                  frameContentGeometry.contentMeasureWidth * (safeStartTick / Math.max(1, measureTicks))
+                : frame.measureX + frame.measureWidth * (safeStartTick / Math.max(1, measureTicks))
+            }
+          }
+        }
+
+        if (typeof anchorGlobalX !== 'number' || !Number.isFinite(anchorGlobalX)) return
+        const key = `chord-ruler-${pairIndex + 1}-${safeStartTick}-${entryIndex}`
+        markers.set(key, {
+          key,
+          pairIndex,
+          beatIndex: entry.beatIndex,
+          sourceLabel: entry.label,
+          startTick: safeStartTick,
+          endTick: safeEndTick,
+          positionText: entry.positionText,
+          anchorSource,
+          anchorGlobalX,
+          keyFifths: resolvePairKeyFifthsForKeyboard(pairIndex, measureKeyFifthsFromImport),
+          keyMode: resolvePairKeyMode(pairIndex, measureKeyModesFromImport),
+        })
+      })
+    })
+
+    return markers
+  }, [
+    chordRulerEntriesByPair,
+    getMeasureFrameContentGeometry,
+    horizontalMeasureFramesByPair,
+    measureKeyFifthsFromImport,
+    measureKeyModesFromImport,
+    measurePairs,
+    measureTimeSignaturesFromImport,
+  ])
   const onAfterScoreRender = useCallback(() => {
     const request = chordMarkerLayoutRequestRef.current
     if (request <= chordMarkerLayoutAppliedRef.current) return
     chordMarkerLayoutAppliedRef.current = request
+    setChordRulerMarkerGeometryByKey(buildChordRulerMarkerGeometrySnapshot())
     setChordMarkerLayoutRevision((current) => (current === request ? current : request))
-  }, [])
+  }, [buildChordRulerMarkerGeometrySnapshot])
 
   useEffect(() => {
     const scrollHost = scoreScrollRef.current
@@ -5010,133 +5140,36 @@ function App() {
       }
     })
   }, [horizontalMeasureFramesByPair, scoreScaleX])
-  const resolveChordMarkerKeyContext = useCallback((pairIndex: number) => {
-    return {
-      keyFifths: resolvePairKeyFifthsForKeyboard(pairIndex, measureKeyFifthsFromImport),
-      keyMode: resolvePairKeyMode(pairIndex, measureKeyModesFromImport),
-    }
-  }, [measureKeyFifthsFromImport, measureKeyModesFromImport])
   const chordRulerMarkerMetaByKey = useMemo(() => {
-    void layoutStabilityKey
-    void chordMarkerLayoutRevision
     const markers = new Map<string, ChordRulerMarkerMeta>()
-    const resolveTickHeadLeftX = (params: {
-      pairIndex: number
-      startTick: number
-    }): number | null => {
-      const { pairIndex, startTick } = params
-      const pair = measurePairs[pairIndex]
-      if (!pair) return null
-      const pairLayouts = noteLayoutsByPairRef.current.get(pairIndex) ?? []
-      if (pairLayouts.length === 0) return null
-
-      const trebleOnsetTicksByIndex = buildStaffOnsetTicks(pair.treble)
-      const bassOnsetTicksByIndex = buildStaffOnsetTicks(pair.bass)
-      let bestCandidate: { headLeftX: number; staffPriority: number; noteIndex: number } | null = null
-
-      for (const layout of pairLayouts) {
-        const sourceNote = layout.staff === 'treble' ? pair.treble[layout.noteIndex] : pair.bass[layout.noteIndex]
-        if (!sourceNote || sourceNote.isRest) continue
-        const onsetTicksByIndex = layout.staff === 'treble' ? trebleOnsetTicksByIndex : bassOnsetTicksByIndex
-        const onsetTick = onsetTicksByIndex[layout.noteIndex]
-        if (onsetTick !== startTick) continue
-        const rootHead = layout.noteHeads.find((head) => head.keyIndex === 0) ?? layout.noteHeads[0] ?? null
-        if (!rootHead) continue
-        const headLeftX = Number.isFinite(rootHead.hitMinX) ? (rootHead.hitMinX as number) : rootHead.x
-        if (!Number.isFinite(headLeftX)) continue
-        const candidate = {
-          headLeftX,
-          staffPriority: layout.staff === 'treble' ? 0 : 1,
-          noteIndex: layout.noteIndex,
-        }
-        if (
-          bestCandidate === null ||
-          candidate.headLeftX < bestCandidate.headLeftX - 0.001 ||
-          (Math.abs(candidate.headLeftX - bestCandidate.headLeftX) <= 0.001 &&
-            (candidate.staffPriority < bestCandidate.staffPriority ||
-              (candidate.staffPriority === bestCandidate.staffPriority && candidate.noteIndex < bestCandidate.noteIndex)))
-        ) {
-          bestCandidate = candidate
-        }
-      }
-
-      if (bestCandidate === null) return null
-      return bestCandidate.headLeftX
-    }
-    horizontalMeasureFramesByPair.forEach((frame, pairIndex) => {
-      const timelineBundle = measureTimelineBundlesRef.current.get(pairIndex) ?? null
-      const timeSignature = resolvePairTimeSignature(pairIndex, measureTimeSignaturesFromImport)
-      const measureTicks = Math.max(1, timelineBundle?.measureTicks ?? getMeasureTicksFromTimeSignature(timeSignature))
-      const chordEntries = chordRulerEntriesByPair?.[pairIndex] ?? []
-      chordEntries.forEach((entry, entryIndex) => {
-        const safeStartTick = Math.max(0, Math.min(measureTicks, Math.round(entry.startTick)))
-        const safeEndTick = Math.max(safeStartTick, Math.min(measureTicks, Math.round(entry.endTick)))
-        if (safeEndTick <= safeStartTick) return
-        const exactHeadLeftX = resolveTickHeadLeftX({ pairIndex, startTick: safeStartTick })
-        let anchorSource: ChordRulerMarkerMeta['anchorSource'] = 'frame'
-        let anchorXInScore: number | null = null
-        if (exactHeadLeftX !== null) {
-          anchorSource = 'note-head'
-          anchorXInScore = exactHeadLeftX
-        } else {
-          const spacingTickX = timelineBundle?.spacingTickToX.get(safeStartTick)
-          if (typeof spacingTickX === 'number' && Number.isFinite(spacingTickX)) {
-            anchorSource = 'spacing-tick'
-            anchorXInScore = spacingTickX
-          } else {
-            const axisX = timelineBundle?.publicAxisLayout?.tickToX.get(safeStartTick)
-            if (typeof axisX === 'number' && Number.isFinite(axisX)) {
-              anchorSource = 'axis'
-              anchorXInScore = axisX
-            } else {
-              const frameContentGeometry = getMeasureFrameContentGeometry(frame)
-              anchorSource = 'frame'
-              anchorXInScore = frameContentGeometry
-                ? frameContentGeometry.contentStartX +
-                  frameContentGeometry.contentMeasureWidth * (safeStartTick / Math.max(1, measureTicks))
-                : frame.measureX + frame.measureWidth * (safeStartTick / Math.max(1, measureTicks))
-            }
-          }
-        }
-        if (typeof anchorXInScore !== 'number' || !Number.isFinite(anchorXInScore)) return
-        const keyContext = resolveChordMarkerKeyContext(pairIndex)
-        const sourceLabel = entry.label
-        const displayLabel = showChordDegreeEnabled
-          ? chordNameToDegree(sourceLabel, keyContext.keyFifths, keyContext.keyMode)
-          : sourceLabel
-        const textAnchorXPx =
-          (anchorXInScore + horizontalRenderOffsetX) * scoreScaleX + SCORE_STAGE_BORDER_PX
-        const buttonLeftXPx = textAnchorXPx - chordMarkerStyleMetrics.labelLeftInsetPx
-        if (!Number.isFinite(buttonLeftXPx)) return
-        const key = `chord-ruler-${pairIndex + 1}-${safeStartTick}-${entryIndex}`
-        markers.set(key, {
-          key,
-          pairIndex,
-          beatIndex: entry.beatIndex,
-          sourceLabel,
-          displayLabel,
-          startTick: safeStartTick,
-          endTick: safeEndTick,
-          positionText: entry.positionText,
-          xPx: buttonLeftXPx,
-          anchorSource,
-          keyFifths: keyContext.keyFifths,
-          keyMode: keyContext.keyMode,
-        })
+    chordRulerMarkerGeometryByKey.forEach((geometry, key) => {
+      const displayLabel = showChordDegreeEnabled
+        ? chordNameToDegree(geometry.sourceLabel, geometry.keyFifths, geometry.keyMode)
+        : geometry.sourceLabel
+      const textAnchorXPx = geometry.anchorGlobalX * scoreScaleX + SCORE_STAGE_BORDER_PX
+      const buttonLeftXPx = textAnchorXPx - chordMarkerStyleMetrics.labelLeftInsetPx
+      if (!Number.isFinite(buttonLeftXPx)) return
+      markers.set(key, {
+        key: geometry.key,
+        pairIndex: geometry.pairIndex,
+        beatIndex: geometry.beatIndex,
+        sourceLabel: geometry.sourceLabel,
+        displayLabel,
+        startTick: geometry.startTick,
+        endTick: geometry.endTick,
+        positionText: geometry.positionText,
+        anchorGlobalX: geometry.anchorGlobalX,
+        anchorXPx: textAnchorXPx,
+        xPx: buttonLeftXPx,
+        anchorSource: geometry.anchorSource,
+        keyFifths: geometry.keyFifths,
+        keyMode: geometry.keyMode,
       })
     })
     return markers
   }, [
-    chordMarkerLayoutRevision,
-    chordRulerEntriesByPair,
-    getMeasureFrameContentGeometry,
-    horizontalMeasureFramesByPair,
-    horizontalRenderOffsetX,
-    layoutStabilityKey,
-    measurePairs,
-    measureTimeSignaturesFromImport,
-    resolveChordMarkerKeyContext,
     chordMarkerStyleMetrics.labelLeftInsetPx,
+    chordRulerMarkerGeometryByKey,
     scoreScaleX,
     showChordDegreeEnabled,
   ])
@@ -6300,6 +6333,8 @@ function App() {
           startTick: marker.startTick,
           endTick: marker.endTick,
           positionText: marker.positionText,
+          anchorGlobalX: marker.anchorGlobalX,
+          anchorXPx: marker.anchorXPx,
           xPx: marker.xPx,
           anchorSource: marker.anchorSource,
           keyFifths: marker.keyFifths,
