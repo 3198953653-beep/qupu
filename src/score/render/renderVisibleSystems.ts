@@ -934,6 +934,8 @@ export function renderVisibleSystems(params: {
           spacingOccupiedLeftX: currentSpacingMetrics?.spacingOccupiedLeftX,
           spacingOccupiedRightX: currentSpacingMetrics?.spacingOccupiedRightX,
           spacingAnchorGapFirstToLastPx: currentSpacingMetrics?.spacingAnchorGapFirstToLastPx,
+          spacingOnsetReserves: currentSpacingMetrics?.spacingOnsetReserves,
+          spacingSegments: currentSpacingMetrics?.spacingSegments,
           overlayRect,
         })
         attachTimelineBundleForMeasure({
@@ -1161,6 +1163,8 @@ export function renderVisibleSystems(params: {
           spacingOccupiedLeftX: currentSpacingMetrics?.spacingOccupiedLeftX,
           spacingOccupiedRightX: currentSpacingMetrics?.spacingOccupiedRightX,
           spacingAnchorGapFirstToLastPx: currentSpacingMetrics?.spacingAnchorGapFirstToLastPx,
+          spacingOnsetReserves: currentSpacingMetrics?.spacingOnsetReserves,
+          spacingSegments: currentSpacingMetrics?.spacingSegments,
           overlayRect,
         })
         attachTimelineBundleForMeasure({
@@ -1529,6 +1533,8 @@ export function renderVisibleSystems(params: {
         spacingOccupiedLeftX: currentSpacingMetrics?.spacingOccupiedLeftX,
         spacingOccupiedRightX: currentSpacingMetrics?.spacingOccupiedRightX,
         spacingAnchorGapFirstToLastPx: currentSpacingMetrics?.spacingAnchorGapFirstToLastPx,
+        spacingOnsetReserves: currentSpacingMetrics?.spacingOnsetReserves,
+        spacingSegments: currentSpacingMetrics?.spacingSegments,
         overlayRect,
       })
       attachTimelineBundleForMeasure({

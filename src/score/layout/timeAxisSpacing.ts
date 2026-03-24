@@ -1,4 +1,4 @@
-import { Accidental, type StaveNote } from 'vexflow'
+import { Accidental, Stem, type StaveNote } from 'vexflow'
 import { DURATION_TICKS } from '../constants'
 import { getAccidentalVisualX, getRenderedNoteVisualX } from './renderPosition'
 import type { MeasurePair, ScoreNote } from '../types'
@@ -16,8 +16,25 @@ type RenderedStaffNote = {
 type TimeAxisNoteRef = {
   onsetTicks: number
   vexNote: StaveNote
-  leftExtent: number
-  rightExtent: number
+  leftReservePx: number
+  rightReservePx: number
+}
+
+type OnsetReserveExtents = {
+  leftReservePx: number
+  rightReservePx: number
+}
+
+type VexBoundingBoxLike = {
+  getW?: () => number
+}
+
+type VexNoteHeadLike = {
+  getAbsoluteX?: () => number
+  getBoundingBox?: () => VexBoundingBoxLike | null
+  getWidth?: () => number
+  isDisplaced?: () => boolean
+  preFormatted?: boolean
 }
 
 type ApplyUnifiedTimeAxisSpacingParams = {
@@ -49,6 +66,9 @@ const UNIFORM_TICK_SPACING_END_GUARD_PX = 0
 const UNIFORM_TIMELINE_EDGE_TICK_RATIO = 0
 const ACCIDENTAL_PREALLOCATED_CLEARANCE_PX = 0
 const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
+const MAX_RENDERED_NOTE_HEAD_WIDTH_PX = DEFAULT_NOTE_HEAD_WIDTH_PX * 2.5
+const MAX_NOTE_HEAD_COLUMN_OFFSET_PX = DEFAULT_NOTE_HEAD_WIDTH_PX * 5
+const NOTE_HEAD_COLUMN_COMPARE_EPSILON_PX = 0.01
 const BASE_GAP_UNIT_PX = 3.5
 const MIN_GAP_BEATS = 1 / 32
 const GAP_GAMMA = 0.7
@@ -110,36 +130,217 @@ function getStaffTotalTicks(notes: ScoreNote[]): number {
   return Math.max(1, cursorTicks)
 }
 
-function getNoteHorizontalExtents(vexNote: StaveNote): { leftExtent: number; rightExtent: number } {
-  let leftExtent = 0
-  const stemInvariantPadding = vexNote.hasStem() ? STEM_INVARIANT_RIGHT_PADDING_PX : 0
-  let rightExtent = DEFAULT_NOTE_HEAD_WIDTH_PX + stemInvariantPadding
+function getRenderedNoteHeadWidth(noteHead: VexNoteHeadLike | null | undefined): number {
+  const bboxWidth = noteHead?.getBoundingBox?.()?.getW?.()
+  if (typeof bboxWidth === 'number' && Number.isFinite(bboxWidth) && bboxWidth > 0) {
+    return Math.min(MAX_RENDERED_NOTE_HEAD_WIDTH_PX, bboxWidth)
+  }
+  const rawWidth = noteHead?.getWidth?.()
+  if (typeof rawWidth === 'number' && Number.isFinite(rawWidth) && rawWidth > 0) {
+    return Math.min(MAX_RENDERED_NOTE_HEAD_WIDTH_PX, rawWidth)
+  }
+  return DEFAULT_NOTE_HEAD_WIDTH_PX
+}
 
-  const metrics = (vexNote as unknown as {
-    getMetrics?: () => {
-      notePx?: number
-      modLeftPx?: number
-      modRightPx?: number
-      leftDisplacedHeadPx?: number
-      rightDisplacedHeadPx?: number
-    }
-  }).getMetrics?.()
-
-  if (metrics) {
-    const rightDisplacedHeadPx = Number.isFinite(metrics.rightDisplacedHeadPx)
-      ? (metrics.rightDisplacedHeadPx as number)
-      : 0
-
-    // Keep right extent anchored to note-head geometry with pitch-invariant
-    // stem padding. Left extent is derived from rendered glyph edges below.
-    rightExtent = Math.max(
-      DEFAULT_NOTE_HEAD_WIDTH_PX + stemInvariantPadding,
-      DEFAULT_NOTE_HEAD_WIDTH_PX + rightDisplacedHeadPx + stemInvariantPadding,
-    )
+function getRenderedNoteHeadAbsoluteX(params: {
+  noteHead: VexNoteHeadLike | null | undefined
+  anchorX: number
+  stemDirection: number
+}): number | null {
+  const { noteHead, anchorX, stemDirection } = params
+  const absoluteX = noteHead?.getAbsoluteX?.()
+  const isPreFormatted = noteHead?.preFormatted === true
+  if (
+    isPreFormatted &&
+    typeof absoluteX === 'number' &&
+    Number.isFinite(absoluteX) &&
+    Math.abs(absoluteX - anchorX) <= MAX_NOTE_HEAD_COLUMN_OFFSET_PX
+  ) {
+    return absoluteX
   }
 
+  const headWidth = getRenderedNoteHeadWidth(noteHead)
+  const isDisplaced = noteHead?.isDisplaced?.() === true
+  const displacementPx = isDisplaced ? (headWidth - Stem.WIDTH / 2) * stemDirection : 0
+  const displacementMultiplier = isPreFormatted ? 1 : 2
+  return anchorX + displacementPx * displacementMultiplier
+}
+
+function getRenderedNoteHeadColumnReserves(vexNote: StaveNote, anchorX: number): {
+  hasMultipleColumns: boolean
+  leftColumnReservePx: number
+  rightColumnReservePx: number
+} {
+  const noteHeads = (vexNote.noteHeads ?? []) as VexNoteHeadLike[]
+  const stemDirection = vexNote.getStemDirection()
+  if (noteHeads.length === 0) {
+    return {
+      hasMultipleColumns: false,
+      leftColumnReservePx: 0,
+      rightColumnReservePx: 0,
+    }
+  }
+
+  let minHeadX = Number.POSITIVE_INFINITY
+  let maxHeadX = Number.NEGATIVE_INFINITY
+  const acceptedHeadXs: number[] = []
+  const acceptedHeads: Array<{ x: number; isDisplaced: boolean }> = []
+
+  noteHeads.forEach((noteHead) => {
+    const headX = getRenderedNoteHeadAbsoluteX({
+      noteHead,
+      anchorX,
+      stemDirection,
+    })
+    if (typeof headX !== 'number' || !Number.isFinite(headX)) return
+    if (Math.abs(headX - anchorX) > MAX_NOTE_HEAD_COLUMN_OFFSET_PX) return
+    minHeadX = Math.min(minHeadX, headX)
+    maxHeadX = Math.max(maxHeadX, headX)
+    acceptedHeadXs.push(headX)
+    acceptedHeads.push({
+      x: headX,
+      isDisplaced: noteHead?.isDisplaced?.() === true,
+    })
+  })
+
+  if (!Number.isFinite(minHeadX) || !Number.isFinite(maxHeadX) || acceptedHeadXs.length === 0) {
+    return {
+      hasMultipleColumns: false,
+      leftColumnReservePx: 0,
+      rightColumnReservePx: 0,
+    }
+  }
+
+  const distinctColumns = acceptedHeadXs
+    .map((headX) => Number(headX.toFixed(3)))
+    .sort((left, right) => left - right)
+    .filter((headX, index, list) => index === 0 || Math.abs(headX - list[index - 1]) > NOTE_HEAD_COLUMN_COMPARE_EPSILON_PX)
+  const hasMultipleColumns = distinctColumns.length > 1
+
+  const nonDisplacedHeadXs = acceptedHeads
+    .filter((head) => head.isDisplaced !== true)
+    .map((head) => head.x)
+  const displacedHeadXs = acceptedHeads
+    .filter((head) => head.isDisplaced === true)
+    .map((head) => head.x)
+  if (hasMultipleColumns && nonDisplacedHeadXs.length > 0 && displacedHeadXs.length > 0) {
+    const primaryColumnMinX = nonDisplacedHeadXs.reduce((min, headX) => Math.min(min, headX), Number.POSITIVE_INFINITY)
+    const primaryColumnMaxX = nonDisplacedHeadXs.reduce((max, headX) => Math.max(max, headX), Number.NEGATIVE_INFINITY)
+    const displacedColumnMinX = displacedHeadXs.reduce((min, headX) => Math.min(min, headX), Number.POSITIVE_INFINITY)
+    const displacedColumnMaxX = displacedHeadXs.reduce((max, headX) => Math.max(max, headX), Number.NEGATIVE_INFINITY)
+    return {
+      hasMultipleColumns,
+      leftColumnReservePx: Math.max(0, primaryColumnMinX - displacedColumnMinX),
+      rightColumnReservePx: Math.max(0, displacedColumnMaxX - primaryColumnMaxX),
+    }
+  }
+
+  const columnShiftPx = Math.max(0, maxHeadX - minHeadX)
+  return {
+    hasMultipleColumns,
+    leftColumnReservePx:
+      hasMultipleColumns && columnShiftPx > NOTE_HEAD_COLUMN_COMPARE_EPSILON_PX && stemDirection === Stem.UP
+        ? columnShiftPx
+        : 0,
+    rightColumnReservePx:
+      hasMultipleColumns && columnShiftPx > NOTE_HEAD_COLUMN_COMPARE_EPSILON_PX && stemDirection === Stem.DOWN
+        ? columnShiftPx
+        : 0,
+  }
+}
+
+function getRenderedNoteOccupiedBounds(vexNote: StaveNote): { leftX: number; rightX: number } | null {
+  const noteHeads = (vexNote.noteHeads ?? []) as VexNoteHeadLike[]
+  const anchorX = getRenderedNoteVisualX(vexNote)
+  const stemDirection = vexNote.getStemDirection()
+
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+
+  noteHeads.forEach((noteHead) => {
+    const headX = getRenderedNoteHeadAbsoluteX({
+      noteHead,
+      anchorX,
+      stemDirection,
+    })
+    if (typeof headX !== 'number' || !Number.isFinite(headX)) return
+    const headWidth = getRenderedNoteHeadWidth(noteHead)
+    minX = Math.min(minX, headX)
+    maxX = Math.max(maxX, headX + headWidth)
+  })
+
+  vexNote.getModifiersByType(Accidental.CATEGORY).forEach((modifier) => {
+    const accidental = modifier as Accidental
+    const renderedIndex = accidental.getIndex()
+    if (typeof renderedIndex !== 'number' || !Number.isFinite(renderedIndex)) return
+    const accidentalX = getAccidentalVisualX(vexNote, accidental, renderedIndex)
+    if (typeof accidentalX !== 'number' || !Number.isFinite(accidentalX)) return
+    const accidentalWidth = accidental.getWidth()
+    minX = Math.min(minX, accidentalX)
+    maxX = Math.max(maxX, accidentalX + (Number.isFinite(accidentalWidth) ? accidentalWidth : 0))
+  })
+
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return null
+  return {
+    leftX: minX,
+    rightX: maxX + (vexNote.hasStem() ? STEM_INVARIANT_RIGHT_PADDING_PX : 0),
+  }
+}
+
+function getSpacingOccupiedBounds(refs: TimeAxisNoteRef[]): { leftX: number; rightX: number } | null {
+  let leftX = Number.POSITIVE_INFINITY
+  let rightX = Number.NEGATIVE_INFINITY
+
+  refs.forEach((ref) => {
+    const noteBounds = getRenderedNoteOccupiedBounds(ref.vexNote)
+    if (!noteBounds) return
+    leftX = Math.min(leftX, noteBounds.leftX)
+    rightX = Math.max(rightX, noteBounds.rightX)
+  })
+
+  if (!Number.isFinite(leftX) || !Number.isFinite(rightX)) return null
+  return { leftX, rightX }
+}
+
+function getSpacingOccupiedBoundsForTargetXs(params: {
+  refs: TimeAxisNoteRef[]
+  targetXByOnset: Map<number, number>
+}): { leftX: number; rightX: number } | null {
+  const { refs, targetXByOnset } = params
+  let leftX = Number.POSITIVE_INFINITY
+  let rightX = Number.NEGATIVE_INFINITY
+
+  refs.forEach((ref) => {
+    const noteBounds = getRenderedNoteOccupiedBounds(ref.vexNote)
+    if (!noteBounds) return
+    const currentX = getRenderedNoteVisualX(ref.vexNote)
+    if (!Number.isFinite(currentX)) return
+    const targetX = targetXByOnset.get(ref.onsetTicks)
+    if (typeof targetX !== 'number' || !Number.isFinite(targetX)) return
+    const deltaX = targetX - currentX
+    leftX = Math.min(leftX, noteBounds.leftX + deltaX)
+    rightX = Math.max(rightX, noteBounds.rightX + deltaX)
+  })
+
+  if (!Number.isFinite(leftX) || !Number.isFinite(rightX)) return null
+  return { leftX, rightX }
+}
+
+function getNoteReserveExtents(vexNote: StaveNote): { leftReservePx: number; rightReservePx: number } {
+  let leftReservePx = 0
+  let rightReservePx = 0
   const noteHeadX = getRenderedNoteVisualX(vexNote)
   if (Number.isFinite(noteHeadX)) {
+    const {
+      hasMultipleColumns,
+      leftColumnReservePx,
+      rightColumnReservePx,
+    } = getRenderedNoteHeadColumnReserves(vexNote, noteHeadX)
+    if (hasMultipleColumns) {
+      leftReservePx = Math.max(leftReservePx, leftColumnReservePx)
+      rightReservePx = Math.max(rightReservePx, rightColumnReservePx)
+    }
+
     let accidentalMinX = Number.POSITIVE_INFINITY
     vexNote.getModifiersByType(Accidental.CATEGORY).forEach((modifier) => {
       const accidental = modifier as Accidental
@@ -151,14 +352,14 @@ function getNoteHorizontalExtents(vexNote: StaveNote): { leftExtent: number; rig
       }
     })
     if (Number.isFinite(accidentalMinX)) {
-      // Accidental columns in VexFlow metrics are intentionally conservative.
-      // Use the actual rendered accidental edge so edge-gap=0 can visually
-      // reach the boundary instead of leaving hidden reserved whitespace.
-      leftExtent = Math.max(0, noteHeadX - accidentalMinX + ACCIDENTAL_PREALLOCATED_CLEARANCE_PX)
+      leftReservePx = Math.max(
+        leftReservePx,
+        noteHeadX - accidentalMinX + ACCIDENTAL_PREALLOCATED_CLEARANCE_PX,
+      )
     }
   }
 
-  return { leftExtent, rightExtent }
+  return { leftReservePx, rightReservePx }
 }
 
 function buildTimeAxisRefs(notes: ScoreNote[], rendered: RenderedStaffNote[]): TimeAxisNoteRef[] {
@@ -171,12 +372,12 @@ function buildTimeAxisRefs(notes: ScoreNote[], rendered: RenderedStaffNote[]): T
     if (renderedEntry) {
       const headX = getRenderedNoteVisualX(renderedEntry.vexNote)
       if (Number.isFinite(headX)) {
-        const extents = getNoteHorizontalExtents(renderedEntry.vexNote)
+        const extents = getNoteReserveExtents(renderedEntry.vexNote)
         refs.push({
           onsetTicks: cursorTicks,
           vexNote: renderedEntry.vexNote,
-          leftExtent: extents.leftExtent,
-          rightExtent: extents.rightExtent,
+          leftReservePx: extents.leftReservePx,
+          rightReservePx: extents.rightReservePx,
         })
       }
     }
@@ -259,6 +460,22 @@ export type MeasureTimelineWeightMetrics = {
   trailingTailTicks: number
   trailingGapPx: number
   totalWidthPx: number
+}
+
+export type TimeAxisSpacingOnsetReserve = {
+  onsetTicks: number
+  baseX: number
+  finalX: number
+  leftReservePx: number
+  rightReservePx: number
+}
+
+export type TimeAxisSpacingSegmentReserve = {
+  fromOnsetTicks: number
+  toOnsetTicks: number
+  baseGapPx: number
+  extraReservePx: number
+  appliedGapPx: number
 }
 
 export function getLeadingBarlineGapPx(
@@ -587,6 +804,8 @@ export type AppliedTimeAxisSpacingMetrics = {
   spacingAnchorGapFirstToLastPx: number
   spacingAnchorTicks: number[]
   spacingTickToX: Map<number, number>
+  spacingOnsetReserves: TimeAxisSpacingOnsetReserve[]
+  spacingSegments: TimeAxisSpacingSegmentReserve[]
 }
 
 export function getUniformTickTimeline(noteOnsets: number[], measureTicks: number): UniformTickTimeline {
@@ -677,10 +896,176 @@ export function resolvePublicAxisLayoutForConsumption(
   return timelineBundle?.publicAxisLayout ?? null
 }
 
-function getDurationAddedMinGapPx(deltaTicks: number, spacingConfig: TimeAxisSpacingConfig): number {
-  void deltaTicks
-  void spacingConfig
-  return 0
+function getOnsetReserveExtents(noteRefs: TimeAxisNoteRef[] | undefined): OnsetReserveExtents {
+  if (!noteRefs || noteRefs.length === 0) {
+    return {
+      leftReservePx: 0,
+      rightReservePx: 0,
+    }
+  }
+  return {
+    leftReservePx: noteRefs.reduce((max, ref) => Math.max(max, ref.leftReservePx), 0),
+    rightReservePx: noteRefs.reduce((max, ref) => Math.max(max, ref.rightReservePx), 0),
+  }
+}
+
+function buildBaseTargetXByOnset(params: {
+  onsetTicks: number[]
+  axisStart: number
+  axisEnd: number
+  spacingWeights: MeasureSpacingWeights
+  uniformSpacingByTicks: boolean
+  publicAxisLayout: PublicAxisLayout | null
+}): Map<number, number> {
+  const { onsetTicks, axisStart, axisEnd, spacingWeights, uniformSpacingByTicks, publicAxisLayout } = params
+  const targetXByOnset = new Map<number, number>()
+  if (onsetTicks.length === 0) return targetXByOnset
+
+  if (publicAxisLayout?.tickToX && publicAxisLayout.tickToX.size > 0) {
+    onsetTicks.forEach((onset) => {
+      const axisX = publicAxisLayout.tickToX.get(onset)
+      if (Number.isFinite(axisX)) {
+        targetXByOnset.set(onset, axisX as number)
+      }
+    })
+    if (targetXByOnset.size === onsetTicks.length) {
+      return targetXByOnset
+    }
+    targetXByOnset.clear()
+  }
+
+  const distributableWidth = Math.max(0, axisEnd - axisStart)
+
+  if (uniformSpacingByTicks) {
+    if (onsetTicks.length === 1 || spacingWeights.totalWeight <= 0.0001) {
+      onsetTicks.forEach((onset) => {
+        targetXByOnset.set(onset, axisStart)
+      })
+      return targetXByOnset
+    }
+    targetXByOnset.set(onsetTicks[0] as number, axisStart)
+    let cumulativeWeight = 0
+    for (let index = 1; index < onsetTicks.length; index += 1) {
+      cumulativeWeight += spacingWeights.segmentWeights[index - 1] ?? 0
+      targetXByOnset.set(
+        onsetTicks[index] as number,
+        axisStart + distributableWidth * (cumulativeWeight / Math.max(0.0001, spacingWeights.totalWeight)),
+      )
+    }
+    return targetXByOnset
+  }
+
+  if (axisEnd <= axisStart) {
+    onsetTicks.forEach((onset) => {
+      targetXByOnset.set(onset, axisStart)
+    })
+    return targetXByOnset
+  }
+
+  if (onsetTicks.length === 1) {
+    targetXByOnset.set(onsetTicks[0] as number, axisStart)
+    return targetXByOnset
+  }
+
+  const totalWeight = Math.max(0, spacingWeights.totalWeight)
+  if (totalWeight <= 0.0001) {
+    const step = distributableWidth / (onsetTicks.length - 1)
+    onsetTicks.forEach((onset, index) => {
+      targetXByOnset.set(onset, axisStart + step * index)
+    })
+    return targetXByOnset
+  }
+
+  targetXByOnset.set(onsetTicks[0] as number, axisStart)
+  let cumulative = 0
+  for (let index = 1; index < onsetTicks.length; index += 1) {
+    cumulative += spacingWeights.segmentWeights[index - 1] ?? 0
+    targetXByOnset.set(onsetTicks[index] as number, axisStart + distributableWidth * (cumulative / totalWeight))
+  }
+  return targetXByOnset
+}
+
+function applyLocalReserveOverlay(params: {
+  onsetTicks: number[]
+  baseTargetXByOnset: Map<number, number>
+  onsetReservesByTick: OnsetReserveExtents[]
+  appliedLeftReservePxByIndex?: number[]
+  appliedRightReservePxByIndex?: number[]
+}): {
+  finalTargetXByOnset: Map<number, number>
+  onsetReserves: TimeAxisSpacingOnsetReserve[]
+  spacingSegments: TimeAxisSpacingSegmentReserve[]
+} {
+  const {
+    onsetTicks,
+    baseTargetXByOnset,
+    onsetReservesByTick,
+    appliedLeftReservePxByIndex,
+    appliedRightReservePxByIndex,
+  } = params
+  const finalTargetXByOnset = new Map<number, number>()
+  const onsetReserves: TimeAxisSpacingOnsetReserve[] = []
+  const spacingSegments: TimeAxisSpacingSegmentReserve[] = []
+  if (onsetTicks.length === 0) {
+    return {
+      finalTargetXByOnset,
+      onsetReserves,
+      spacingSegments,
+    }
+  }
+
+  const safeLeftReserves = onsetTicks.map((_, index) =>
+    Math.max(0, appliedLeftReservePxByIndex?.[index] ?? onsetReservesByTick[index]?.leftReservePx ?? 0),
+  )
+  const safeRightReserves = onsetTicks.map((_, index) =>
+    Math.max(0, appliedRightReservePxByIndex?.[index] ?? onsetReservesByTick[index]?.rightReservePx ?? 0),
+  )
+  const baseXs = onsetTicks.map((onset, index) => {
+    const baseX = baseTargetXByOnset.get(onset)
+    if (typeof baseX === 'number' && Number.isFinite(baseX)) {
+      return baseX
+    }
+    const previousBaseX = index > 0 ? finalTargetXByOnset.get(onsetTicks[index - 1] as number) : null
+    return typeof previousBaseX === 'number' && Number.isFinite(previousBaseX) ? previousBaseX : 0
+  })
+
+  const firstFinalX = baseXs[0] + safeLeftReserves[0]
+  finalTargetXByOnset.set(onsetTicks[0] as number, firstFinalX)
+  onsetReserves.push({
+    onsetTicks: onsetTicks[0] as number,
+    baseX: baseXs[0],
+    finalX: firstFinalX,
+    leftReservePx: safeLeftReserves[0],
+    rightReservePx: safeRightReserves[0],
+  })
+
+  for (let index = 1; index < onsetTicks.length; index += 1) {
+    const previousFinalX = finalTargetXByOnset.get(onsetTicks[index - 1] as number) ?? firstFinalX
+    const baseGapPx = Math.max(0, baseXs[index] - baseXs[index - 1])
+    const extraReservePx = safeRightReserves[index - 1] + safeLeftReserves[index]
+    const finalX = previousFinalX + baseGapPx + extraReservePx
+    finalTargetXByOnset.set(onsetTicks[index] as number, finalX)
+    onsetReserves.push({
+      onsetTicks: onsetTicks[index] as number,
+      baseX: baseXs[index],
+      finalX,
+      leftReservePx: safeLeftReserves[index],
+      rightReservePx: safeRightReserves[index],
+    })
+    spacingSegments.push({
+      fromOnsetTicks: onsetTicks[index - 1] as number,
+      toOnsetTicks: onsetTicks[index] as number,
+      baseGapPx,
+      extraReservePx,
+      appliedGapPx: baseGapPx + extraReservePx,
+    })
+  }
+
+  return {
+    finalTargetXByOnset,
+    onsetReserves,
+    spacingSegments,
+  }
 }
 
 export function getMeasureUniformTimelineWeightSpan(
@@ -772,6 +1157,7 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
 
   const firstSpacingTick = onsetTicks[0]
   const lastSpacingTick = onsetTicks[onsetTicks.length - 1]
+  const onsetReservesByTick = onsetTicks.map((onset) => getOnsetReserveExtents(refsByOnset.get(onset)))
 
   const usableFormatWidth = Math.max(MIN_RENDER_WIDTH_PX, formatWidth)
   const defaultAxisBoundaryStart = noteStartX
@@ -804,144 +1190,81 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     axisBoundaryStart + Math.max(0, spacingWeights.leadingGapPx),
   )
   const axisEnd = Math.max(axisStart, axisBoundaryEnd)
-  const distributableWidth = Math.max(0, axisEnd - axisStart)
+  const baseTargetXByOnset = buildBaseTargetXByOnset({
+    onsetTicks,
+    axisStart,
+    axisEnd,
+    spacingWeights,
+    uniformSpacingByTicks,
+    publicAxisLayout,
+  })
+  const appliedLeftReservePxByIndex = onsetReservesByTick.map((entry) => entry.leftReservePx)
+  const appliedRightReservePxByIndex = onsetReservesByTick.map((entry) => entry.rightReservePx)
+  let overlay = applyLocalReserveOverlay({
+    onsetTicks,
+    baseTargetXByOnset,
+    onsetReservesByTick,
+    appliedLeftReservePxByIndex,
+    appliedRightReservePxByIndex,
+  })
+  let occupiedBounds = getSpacingOccupiedBoundsForTargetXs({
+    refs,
+    targetXByOnset: overlay.finalTargetXByOnset,
+  })
+  if (typeof barlineAxisBoundaryEnd === 'number' && Number.isFinite(barlineAxisBoundaryEnd)) {
+    const maxClampIterations = Math.max(1, onsetTicks.length * 2)
+    for (let iteration = 0; iteration < maxClampIterations; iteration += 1) {
+      const barlineOverflowPx =
+        occupiedBounds && Number.isFinite(occupiedBounds.rightX)
+          ? Math.max(0, occupiedBounds.rightX - barlineAxisBoundaryEnd)
+          : 0
+      if (barlineOverflowPx <= 0.001) break
 
-  const targetXByOnset = new Map<number, number>()
-
-  if (publicAxisLayout?.tickToX && publicAxisLayout.tickToX.size > 0) {
-    onsetTicks.forEach((onset) => {
-      const axisX = publicAxisLayout.tickToX.get(onset)
-      if (Number.isFinite(axisX)) {
-        targetXByOnset.set(onset, axisX as number)
-      }
-    })
-    if (targetXByOnset.size !== onsetTicks.length) {
-      targetXByOnset.clear()
-    }
-  }
-
-  if (targetXByOnset.size === 0 && uniformSpacingByTicks) {
-    if (onsetTicks.length === 1 || spacingWeights.totalWeight <= 0.0001) {
-      onsetTicks.forEach((onset) => {
-        targetXByOnset.set(onset, axisStart)
-      })
-    } else {
-      targetXByOnset.set(onsetTicks[0], axisStart)
-      let cumulativeWeight = 0
-      for (let index = 1; index < onsetTicks.length; index += 1) {
-        cumulativeWeight += spacingWeights.segmentWeights[index - 1] ?? 0
-        targetXByOnset.set(
-          onsetTicks[index],
-          axisStart + distributableWidth * (cumulativeWeight / Math.max(0.0001, spacingWeights.totalWeight)),
-        )
-      }
-    }
-
-    if (onsetTicks.length > 1) {
-      const onsetSequence = onsetTicks
-      const basePositions = onsetSequence.map((onset) => targetXByOnset.get(onset) ?? axisStart)
-      const leftExtents = onsetSequence.map((onset) =>
-        (refsByOnset.get(onset) ?? []).reduce((max, ref) => Math.max(max, ref.leftExtent), 0),
-      )
-      const rightExtents = onsetSequence.map((onset) => {
-        const list = refsByOnset.get(onset) ?? []
-        if (list.length === 0) return 0
-        return list.reduce((max, ref) => Math.max(max, ref.rightExtent), 0)
-      })
-      const baseGapByDeltaTicks = new Map<number, number>()
-      const requiredMinGapBySegment = new Map<number, number>()
-      for (let i = 1; i < onsetSequence.length; i += 1) {
-        const deltaTicks = Math.max(1, onsetSequence[i] - onsetSequence[i - 1])
-        const baseGap = Math.max(0.001, basePositions[i] - basePositions[i - 1])
-        const minGap =
-          rightExtents[i - 1] +
-          leftExtents[i] +
-          spacingConfig.interOnsetPaddingPx +
-          getDurationAddedMinGapPx(deltaTicks, spacingConfig)
-
-        const currentBaseGap = baseGapByDeltaTicks.get(deltaTicks) ?? 0
-        if (baseGap > currentBaseGap) {
-          baseGapByDeltaTicks.set(deltaTicks, baseGap)
+      let reducibleKind: 'left' | 'right' | null = null
+      let reducibleIndex = -1
+      let reducibleStartIndex = -1
+      for (let index = onsetTicks.length - 1; index >= 0; index -= 1) {
+        const leftReservePx = appliedLeftReservePxByIndex[index] ?? 0
+        if (leftReservePx > 0.001 && index >= reducibleStartIndex) {
+          reducibleKind = 'left'
+          reducibleIndex = index
+          reducibleStartIndex = index
         }
-        requiredMinGapBySegment.set(i, minGap)
-      }
-      const adjustedPositions = [...basePositions]
-      for (let i = 1; i < onsetSequence.length; i += 1) {
-        const deltaTicks = Math.max(1, onsetSequence[i] - onsetSequence[i - 1])
-        const floorGap = baseGapByDeltaTicks.get(deltaTicks) ?? 0
-        const segmentMinGap = requiredMinGapBySegment.get(i) ?? 0
-        const targetMinGap = Math.max(floorGap, segmentMinGap)
-        const minAllowed = adjustedPositions[i - 1] + targetMinGap
-        if (adjustedPositions[i] < minAllowed) {
-          adjustedPositions[i] = minAllowed
+        const rightReservePx = appliedRightReservePxByIndex[index] ?? 0
+        const rightReserveStartIndex = index + 1
+        if (rightReservePx > 0.001 && rightReserveStartIndex >= reducibleStartIndex && rightReserveStartIndex < onsetTicks.length) {
+          reducibleKind = 'right'
+          reducibleIndex = index
+          reducibleStartIndex = rightReserveStartIndex
         }
       }
-      onsetSequence.forEach((onset, index) => {
-        targetXByOnset.set(onset, adjustedPositions[index])
-      })
-    }
-  } else if (targetXByOnset.size === 0) {
+      if (reducibleKind === null || reducibleIndex < 0) break
 
-    if (axisEnd <= axisStart) {
-      const fallbackX = axisStart
-      onsetTicks.forEach((onset) => {
-        targetXByOnset.set(onset, fallbackX)
-      })
-    } else if (onsetTicks.length === 1) {
-      targetXByOnset.set(onsetTicks[0], axisStart)
-    } else {
-      const totalWeight = Math.max(0, spacingWeights.totalWeight)
-      if (totalWeight <= 0.0001) {
-        const step = distributableWidth / (onsetTicks.length - 1)
-        onsetTicks.forEach((onset, index) => {
-          targetXByOnset.set(onset, axisStart + step * index)
-        })
+      if (reducibleKind === 'left') {
+        const currentValue = appliedLeftReservePxByIndex[reducibleIndex] ?? 0
+        appliedLeftReservePxByIndex[reducibleIndex] = Math.max(0, currentValue - Math.min(barlineOverflowPx, currentValue))
       } else {
-        targetXByOnset.set(onsetTicks[0], axisStart)
-        let cumulative = 0
-        for (let i = 1; i < onsetTicks.length; i += 1) {
-          cumulative += spacingWeights.segmentWeights[i - 1] ?? 0
-          const ratio = cumulative / totalWeight
-          targetXByOnset.set(onsetTicks[i], axisStart + distributableWidth * ratio)
-        }
-      }
-    }
-
-    if (onsetTicks.length > 1) {
-      const basePositions = onsetTicks.map((onset) => targetXByOnset.get(onset) ?? axisStart)
-      const leftExtents = onsetTicks.map((onset) =>
-        (refsByOnset.get(onset) ?? []).reduce((max, ref) => Math.max(max, ref.leftExtent), 0),
-      )
-      const rightExtents = onsetTicks.map((onset) => {
-        const list = refsByOnset.get(onset) ?? []
-        if (list.length === 0) return 0
-        return list.reduce((max, ref) => Math.max(max, ref.rightExtent), 0)
-      })
-      const minGaps = onsetTicks.slice(1).map((_, index) => {
-        const deltaTicks = Math.max(1, onsetTicks[index + 1] - onsetTicks[index])
-        const glyphGap = rightExtents[index] + leftExtents[index + 1] + spacingConfig.interOnsetPaddingPx
-        return Math.max(1, glyphGap + getDurationAddedMinGapPx(deltaTicks, spacingConfig))
-      })
-      const minGapTotal = minGaps.reduce((sum, value) => sum + value, 0)
-      const gapScale = minGapTotal > Math.max(1, distributableWidth) ? Math.max(1, distributableWidth) / minGapTotal : 1
-      const scaledMinGaps = minGaps.map((value) => value * gapScale)
-      const constrained = [...basePositions]
-
-      for (let i = 1; i < constrained.length; i += 1) {
-        const minAllowed = constrained[i - 1] + scaledMinGaps[i - 1]
-        if (constrained[i] < minAllowed) {
-          constrained[i] = minAllowed
-        }
+        const currentValue = appliedRightReservePxByIndex[reducibleIndex] ?? 0
+        appliedRightReservePxByIndex[reducibleIndex] = Math.max(0, currentValue - Math.min(barlineOverflowPx, currentValue))
       }
 
-      onsetTicks.forEach((onset, index) => {
-        targetXByOnset.set(onset, constrained[index])
+      overlay = applyLocalReserveOverlay({
+        onsetTicks,
+        baseTargetXByOnset,
+        onsetReservesByTick,
+        appliedLeftReservePxByIndex,
+        appliedRightReservePxByIndex,
+      })
+      occupiedBounds = getSpacingOccupiedBoundsForTargetXs({
+        refs,
+        targetXByOnset: overlay.finalTargetXByOnset,
       })
     }
   }
+  const { finalTargetXByOnset, onsetReserves, spacingSegments } = overlay
 
   refs.forEach((ref) => {
-    const targetX = targetXByOnset.get(ref.onsetTicks)
+    const targetX = finalTargetXByOnset.get(ref.onsetTicks)
     if (targetX === undefined) return
     const currentX = getRenderedNoteVisualX(ref.vexNote)
     if (!Number.isFinite(currentX)) return
@@ -950,8 +1273,8 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     ref.vexNote.setXShift(ref.vexNote.getXShift() + delta)
   })
 
-  const resolvedFirstX = targetXByOnset.get(firstSpacingTick)
-  const resolvedLastX = targetXByOnset.get(lastSpacingTick)
+  const resolvedFirstX = finalTargetXByOnset.get(firstSpacingTick)
+  const resolvedLastX = finalTargetXByOnset.get(lastSpacingTick)
   if (
     typeof resolvedFirstX !== 'number' ||
     !Number.isFinite(resolvedFirstX) ||
@@ -961,26 +1284,14 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     return null
   }
 
-  let leftMostGlyphX = Number.POSITIVE_INFINITY
-  let rightMostGlyphX = Number.NEGATIVE_INFINITY
-  refs.forEach((ref) => {
-    const targetX = targetXByOnset.get(ref.onsetTicks)
-    if (typeof targetX !== 'number' || !Number.isFinite(targetX)) return
-    leftMostGlyphX = Math.min(leftMostGlyphX, targetX - ref.leftExtent)
-    rightMostGlyphX = Math.max(rightMostGlyphX, targetX + ref.rightExtent)
-  })
-
-  const spacingOccupiedLeftX = Number.isFinite(leftMostGlyphX)
-    ? Math.min(leftMostGlyphX, resolvedFirstX)
-    : resolvedFirstX
-  const spacingOccupiedRightX = Number.isFinite(rightMostGlyphX)
-    ? Math.max(rightMostGlyphX, resolvedLastX)
-    : resolvedLastX
+  const resolvedOccupiedBounds = getSpacingOccupiedBounds(refs)
+  const spacingOccupiedLeftX = resolvedOccupiedBounds?.leftX ?? resolvedFirstX
+  const spacingOccupiedRightX = resolvedOccupiedBounds?.rightX ?? resolvedLastX
   const spacingAnchorGapFirstToLastPx = Math.max(0, resolvedLastX - resolvedFirstX)
-  const leadingGapPx = Math.max(0, resolvedFirstX - axisBoundaryStart)
-  const trailingGapPx = Math.max(0, axisBoundaryEnd - resolvedLastX)
-  const effectiveLeftGapPx = leadingGapPx
-  const effectiveRightGapPx = trailingGapPx
+  const leadingGapPx = spacingOccupiedLeftX - axisBoundaryStart
+  const trailingGapPx = axisBoundaryEnd - spacingOccupiedRightX
+  const effectiveLeftGapPx = spacingOccupiedLeftX - axisBoundaryStart
+  const effectiveRightGapPx = axisBoundaryEnd - spacingOccupiedRightX
 
   return {
     effectiveBoundaryStartX: axisBoundaryStart,
@@ -994,6 +1305,8 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     spacingOccupiedRightX,
     spacingAnchorGapFirstToLastPx,
     spacingAnchorTicks: [...onsetTicks],
-    spacingTickToX: new Map(targetXByOnset),
+    spacingTickToX: new Map(finalTargetXByOnset),
+    spacingOnsetReserves: onsetReserves,
+    spacingSegments,
   }
 }

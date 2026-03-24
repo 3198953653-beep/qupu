@@ -68,7 +68,7 @@ type MeasureSpacingProbe = {
 const MIN_FORMAT_WIDTH_PX = 8
 const EPS = 0.05
 const STEP_PAD_PX = 0.5
-const SOLVER_CACHE_VERSION = 'v3'
+const SOLVER_CACHE_VERSION = 'v4'
 const SOLVER_CACHE_MAX_ENTRIES = 12000
 
 function resolveMeasureMeta(params: {
@@ -244,7 +244,7 @@ function probeMeasureSpacing(
     activeSelection: null,
     draggingSelection: null,
     collectLayouts: true,
-    skipPainting: true,
+    skipPainting: false,
     noteStartXOverride: geometry.noteStartX,
     formatWidthOverride: geometry.formatWidth,
     timeAxisSpacingConfig: spacingConfig,

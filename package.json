@@ -15,6 +15,7 @@
     "test:preview:browser": "tsx scripts/note-preview-browser-test.ts",
     "test:playhead:browser": "tsx scripts/playhead-browser-test.ts",
     "test:chord-marker:browser": "tsx scripts/chord-marker-browser-test.ts",
+    "test:second-chord:spacing:browser": "tsx scripts/second-chord-spacing-browser-test.ts",
     "test:spacing:suite": "tsx scripts/spacing-suite-browser-test.ts",
     "test:beam:grouping": "tsx scripts/beam-grouping-algorithm-test.ts"
   },

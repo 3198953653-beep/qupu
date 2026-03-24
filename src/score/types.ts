@@ -309,6 +309,20 @@ export type MeasureLayout = {
   spacingOccupiedLeftX?: number
   spacingOccupiedRightX?: number
   spacingAnchorGapFirstToLastPx?: number
+  spacingOnsetReserves?: Array<{
+    onsetTicks: number
+    baseX: number
+    finalX: number
+    leftReservePx: number
+    rightReservePx: number
+  }>
+  spacingSegments?: Array<{
+    fromOnsetTicks: number
+    toOnsetTicks: number
+    baseGapPx: number
+    extraReservePx: number
+    appliedGapPx: number
+  }>
   overlayRect: {
     x: number
     y: number

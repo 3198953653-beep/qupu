@@ -6019,6 +6019,22 @@ function App() {
                 ]),
               )
             : {},
+        spacingOnsetReserves:
+          measureLayout?.spacingOnsetReserves?.map((entry) => ({
+            onsetTicks: entry.onsetTicks,
+            baseX: toRoundedNumber(entry.baseX, 3),
+            finalX: toRoundedNumber(entry.finalX, 3),
+            leftReservePx: toRoundedNumber(entry.leftReservePx, 3),
+            rightReservePx: toRoundedNumber(entry.rightReservePx, 3),
+          })) ?? [],
+        spacingSegments:
+          measureLayout?.spacingSegments?.map((entry) => ({
+            fromOnsetTicks: entry.fromOnsetTicks,
+            toOnsetTicks: entry.toOnsetTicks,
+            baseGapPx: toRoundedNumber(entry.baseGapPx, 3),
+            extraReservePx: toRoundedNumber(entry.extraReservePx, 3),
+            appliedGapPx: toRoundedNumber(entry.appliedGapPx, 3),
+          })) ?? [],
         trebleTimelineEvents:
           timelineBundle?.trebleTimeline.events.map((event) => ({
             noteId: event.noteId,
