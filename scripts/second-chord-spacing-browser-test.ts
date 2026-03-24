@@ -191,7 +191,7 @@ const DEV_URL = `http://${DEV_HOST}:${DEV_PORT}`
 const TARGET_PAIR_COUNT = 8
 const GAP_EPSILON_PX = 0.15
 const HEAD_X_EPSILON_PX = 0.01
-const MIN_VISIBLE_GAP_PX = 3
+const MIN_NON_OVERLAP_GAP_PX = 0
 const DEFAULT_NOTE_HEAD_WIDTH_PX = 9
 const APPROX_ACCIDENTAL_WIDTH_PX = 8
 
@@ -856,11 +856,11 @@ function computeExpectedLeftRequestPx(
   boundaryStartX: number | null,
 ): number {
   if (metrics.rawLeftReservePx <= HEAD_X_EPSILON_PX) return 0
-  if (metrics.baseOccupiedLeftX === null) return 0
+  if (metrics.baseX === null) return 0
   const blockerRightX = previousMetrics?.baseOccupiedRightX ?? boundaryStartX
   if (blockerRightX === null) return 0
-  const gapPx = metrics.baseOccupiedLeftX - blockerRightX
-  return gapPx < 0 ? Number((Math.abs(gapPx) + MIN_VISIBLE_GAP_PX).toFixed(3)) : 0
+  const availableLeftClearancePx = Math.max(0, metrics.baseX - blockerRightX)
+  return Number(Math.max(0, metrics.rawLeftReservePx - availableLeftClearancePx).toFixed(3))
 }
 
 function computeExpectedRightRequestPx(
@@ -869,11 +869,13 @@ function computeExpectedRightRequestPx(
   boundaryEndX: number | null,
 ): number {
   if (metrics.rawRightReservePx <= HEAD_X_EPSILON_PX) return 0
-  if (metrics.baseOccupiedRightX === null) return 0
+  if (metrics.baseX === null || metrics.baseOccupiedRightX === null) return 0
   const blockerLeftX = nextMetrics?.baseOccupiedLeftX ?? boundaryEndX
   if (blockerLeftX === null) return 0
-  const gapPx = blockerLeftX - metrics.baseOccupiedRightX
-  return gapPx < 0 ? Number((Math.abs(gapPx) + MIN_VISIBLE_GAP_PX).toFixed(3)) : 0
+  const baseRightTailPx = Math.max(0, metrics.baseOccupiedRightX - metrics.baseX)
+  const baseRightBodyPx = Math.max(0, baseRightTailPx - metrics.rawRightReservePx)
+  const availableRightProtrusionClearancePx = Math.max(0, blockerLeftX - metrics.baseX - baseRightBodyPx)
+  return Number(Math.max(0, metrics.rawRightReservePx - availableRightProtrusionClearancePx).toFixed(3))
 }
 
 function resolveSlotRequestSummary(params: {
@@ -1443,7 +1445,7 @@ function analyzeLocalCollisionFixture(row: MergedMeasureDumpRow, scale: DebugSca
     typeof row.effectiveLeftGapPx === 'number' && Number.isFinite(row.effectiveLeftGapPx)
       ? Number(row.effectiveLeftGapPx.toFixed(3))
       : null
-  if (visibleLeftGapPx === null || visibleLeftGapPx < MIN_VISIBLE_GAP_PX - GAP_EPSILON_PX) {
+  if (visibleLeftGapPx === null || visibleLeftGapPx < MIN_NON_OVERLAP_GAP_PX - GAP_EPSILON_PX) {
     pushFailure(failures, 'leading-visible-gap-too-small', visibleLeftGapPx)
   }
 

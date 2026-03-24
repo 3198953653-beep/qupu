@@ -106,15 +106,11 @@ export function buildPublicAxisLayout(params: {
   const anchorTicks = getPublicTimelineAnchorTicks(publicTimeline, firstContentTick, lastContentTick)
   const tickToX = new Map<number, number>()
   const widthPx = Math.max(0, effectiveBoundaryEndX - effectiveBoundaryStartX)
-  const contentStartX = Math.min(
-    effectiveBoundaryEndX,
-    effectiveBoundaryStartX + Math.max(0, spacingConfig.startPadPx),
-  )
+  const contentStartX = effectiveBoundaryStartX + Math.max(0, spacingConfig.startPadPx)
   const contentEndX = Math.max(
     contentStartX,
     effectiveBoundaryEndX - Math.max(0, spacingConfig.endPadPx),
   )
-  const contentWidthPx = Math.max(0, contentEndX - contentStartX)
   if (orderedTicks.length === 0) {
     return {
       measureIndex,
@@ -148,7 +144,7 @@ export function buildPublicAxisLayout(params: {
       ? 0
       : typeof timelineScaleOverride === 'number' && Number.isFinite(timelineScaleOverride)
         ? Math.max(0, timelineScaleOverride)
-        : Math.min(1, contentWidthPx / Math.max(0.0001, totalWeight))
+        : 1
   if (resolvedTimelineScale <= 0 || totalWeight <= 0.0001 || safeAnchorTicks.length <= 1) {
     safeAnchorTicks.forEach((tick) => anchorXByTick.set(tick, contentStartX))
     orderedTicks.forEach((tick) => tickToX.set(tick, contentStartX))

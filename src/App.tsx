@@ -1982,6 +1982,7 @@ function App() {
   const firstPlaybackPoint = playbackTimelineEvents[0]?.point ?? null
   const spacingLayoutMode: SpacingLayoutMode = 'custom'
   const safeMinMeasureWidthPx = clampMinMeasureWidthPx(minMeasureWidthPx)
+  const effectiveContentMinMeasureWidthPx = spacingLayoutMode === 'custom' ? 0 : safeMinMeasureWidthPx
   const safeChordMarkerUiScalePercent = clampChordMarkerUiScalePercent(chordMarkerUiScalePercent)
   const safeChordMarkerPaddingPx = clampChordMarkerPaddingPx(chordMarkerPaddingPx)
   const chordMarkerBaseStyleMetrics = useMemo(
@@ -2031,18 +2032,18 @@ function App() {
       measureTimeSignaturesByPair: measureTimeSignaturesFromImport,
       supplementalSpacingTicksByPair,
       spacingConfig: timeAxisSpacingConfig,
-      minMeasureWidthPx: safeMinMeasureWidthPx,
+      minMeasureWidthPx: effectiveContentMinMeasureWidthPx,
       maxIterations: solverMaxIterations,
       eagerProbeMeasureLimit,
       widthCache: horizontalMeasureWidthCacheRef.current,
     })
   }, [
+    effectiveContentMinMeasureWidthPx,
     getWidthProbeContext,
     measurePairs,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
     supplementalSpacingTicksByPair,
-    safeMinMeasureWidthPx,
     timeAxisSpacingConfig,
   ])
   const horizontalRenderedMeasureWidths = useMemo(

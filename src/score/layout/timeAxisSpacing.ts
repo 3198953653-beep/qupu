@@ -102,7 +102,6 @@ const UNIFORM_TICK_SPACING_END_GUARD_PX = 0
 const UNIFORM_TIMELINE_EDGE_TICK_RATIO = 0
 const ACCIDENTAL_PREALLOCATED_CLEARANCE_PX = 0
 const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
-const MIN_COLLISION_CLEARANCE_PX = 3
 const MAX_RENDERED_NOTE_HEAD_WIDTH_PX = DEFAULT_NOTE_HEAD_WIDTH_PX * 2.5
 const MAX_NOTE_HEAD_COLUMN_OFFSET_PX = DEFAULT_NOTE_HEAD_WIDTH_PX * 5
 const NOTE_HEAD_COLUMN_COMPARE_EPSILON_PX = 0.01
@@ -701,7 +700,7 @@ export function buildSpacingTickToX(params: {
     spacingTicks,
     measureTicks,
     effectiveBoundaryStartX,
-    effectiveBoundaryEndX,
+    effectiveBoundaryEndX: _effectiveBoundaryEndX,
     spacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
   } = params
   const tickToX = new Map<number, number>()
@@ -713,30 +712,12 @@ export function buildSpacingTickToX(params: {
   const orderedTicks = weights.orderedTicks
   if (orderedTicks.length === 0) return tickToX
 
-  const contentStartX = Math.min(
-    effectiveBoundaryEndX,
-    effectiveBoundaryStartX + Math.max(0, weights.leadingGapPx),
-  )
-  const distributableWidth = Math.max(0, effectiveBoundaryEndX - contentStartX)
-
-  if (orderedTicks.length === 1) {
-    tickToX.set(orderedTicks[0], contentStartX)
-    return tickToX
-  }
-
-  if (weights.totalWeight <= 0) {
-    const step = distributableWidth / Math.max(1, orderedTicks.length - 1)
-    orderedTicks.forEach((tick, index) => {
-      tickToX.set(tick, contentStartX + step * index)
-    })
-    return tickToX
-  }
-
+  const contentStartX = effectiveBoundaryStartX + Math.max(0, weights.leadingGapPx)
   tickToX.set(orderedTicks[0], contentStartX)
   let cumulative = 0
   for (let index = 1; index < orderedTicks.length; index += 1) {
     cumulative += weights.segmentWeights[index - 1] ?? 0
-    tickToX.set(orderedTicks[index], contentStartX + distributableWidth * (cumulative / weights.totalWeight))
+    tickToX.set(orderedTicks[index], contentStartX + cumulative)
   }
 
   return tickToX
@@ -1083,12 +1064,11 @@ function createStaffSlotRequestRecord(): Record<StaffKind, StaffSlotRequest | nu
 function buildBaseTargetXByOnset(params: {
   onsetTicks: number[]
   axisStart: number
-  axisEnd: number
   spacingWeights: MeasureSpacingWeights
   uniformSpacingByTicks: boolean
   publicAxisLayout: PublicAxisLayout | null
 }): Map<number, number> {
-  const { onsetTicks, axisStart, axisEnd, spacingWeights, uniformSpacingByTicks, publicAxisLayout } = params
+  const { onsetTicks, axisStart, spacingWeights, publicAxisLayout } = params
   const targetXByOnset = new Map<number, number>()
   if (onsetTicks.length === 0) return targetXByOnset
 
@@ -1105,53 +1085,11 @@ function buildBaseTargetXByOnset(params: {
     targetXByOnset.clear()
   }
 
-  const distributableWidth = Math.max(0, axisEnd - axisStart)
-
-  if (uniformSpacingByTicks) {
-    if (onsetTicks.length === 1 || spacingWeights.totalWeight <= 0.0001) {
-      onsetTicks.forEach((onset) => {
-        targetXByOnset.set(onset, axisStart)
-      })
-      return targetXByOnset
-    }
-    targetXByOnset.set(onsetTicks[0] as number, axisStart)
-    let cumulativeWeight = 0
-    for (let index = 1; index < onsetTicks.length; index += 1) {
-      cumulativeWeight += spacingWeights.segmentWeights[index - 1] ?? 0
-      targetXByOnset.set(
-        onsetTicks[index] as number,
-        axisStart + distributableWidth * (cumulativeWeight / Math.max(0.0001, spacingWeights.totalWeight)),
-      )
-    }
-    return targetXByOnset
-  }
-
-  if (axisEnd <= axisStart) {
-    onsetTicks.forEach((onset) => {
-      targetXByOnset.set(onset, axisStart)
-    })
-    return targetXByOnset
-  }
-
-  if (onsetTicks.length === 1) {
-    targetXByOnset.set(onsetTicks[0] as number, axisStart)
-    return targetXByOnset
-  }
-
-  const totalWeight = Math.max(0, spacingWeights.totalWeight)
-  if (totalWeight <= 0.0001) {
-    const step = distributableWidth / (onsetTicks.length - 1)
-    onsetTicks.forEach((onset, index) => {
-      targetXByOnset.set(onset, axisStart + step * index)
-    })
-    return targetXByOnset
-  }
-
   targetXByOnset.set(onsetTicks[0] as number, axisStart)
   let cumulative = 0
   for (let index = 1; index < onsetTicks.length; index += 1) {
     cumulative += spacingWeights.segmentWeights[index - 1] ?? 0
-    targetXByOnset.set(onsetTicks[index] as number, axisStart + distributableWidth * (cumulative / totalWeight))
+    targetXByOnset.set(onsetTicks[index] as number, axisStart + cumulative)
   }
   return targetXByOnset
 }
@@ -1216,18 +1154,17 @@ function resolveCollisionDrivenOverlay(params: {
       if (typeof baseAnchorX !== 'number' || !Number.isFinite(baseAnchorX)) return
       const previousMetrics = index > 0 ? staffCollisionMetrics[index - 1] ?? null : null
       const nextMetrics = index < staffCollisionMetrics.length - 1 ? staffCollisionMetrics[index + 1] ?? null : null
-      const baseOccupiedLeftX = baseAnchorX - Math.max(0, metrics.leftOccupiedInsetPx)
-      const baseOccupiedRightX = baseAnchorX + Math.max(0, metrics.rightOccupiedTailPx)
 
       if (Math.max(0, metrics.rawLeftReservePx) > 0) {
         const blockerRightX =
           previousMetrics === null
             ? effectiveBoundaryStartX
             : (baseXByOnset.get(previousMetrics.onsetTicks) ?? 0) + Math.max(0, previousMetrics.rightOccupiedTailPx)
-        const leftGapPx = baseOccupiedLeftX - blockerRightX
-        if (leftGapPx < 0) {
+        const availableLeftClearancePx = Math.max(0, baseAnchorX - blockerRightX)
+        const leftRequestPx = Math.max(0, Math.max(0, metrics.rawLeftReservePx) - availableLeftClearancePx)
+        if (leftRequestPx > 0) {
           const request = {
-            extraPx: Math.abs(leftGapPx) + MIN_COLLISION_CLEARANCE_PX,
+            extraPx: leftRequestPx,
             onsetTicks: metrics.onsetTicks,
             side: 'left' as const,
           }
@@ -1245,10 +1182,21 @@ function resolveCollisionDrivenOverlay(params: {
           nextMetrics === null
             ? effectiveBoundaryEndX
             : (baseXByOnset.get(nextMetrics.onsetTicks) ?? 0) - Math.max(0, nextMetrics.leftOccupiedInsetPx)
-        const rightGapPx = blockerLeftX - baseOccupiedRightX
-        if (rightGapPx < 0) {
+        const baseRightBodyPx = Math.max(
+          0,
+          Math.max(0, metrics.rightOccupiedTailPx) - Math.max(0, metrics.rawRightReservePx),
+        )
+        const availableRightProtrusionClearancePx = Math.max(
+          0,
+          blockerLeftX - baseAnchorX - baseRightBodyPx,
+        )
+        const rightRequestPx = Math.max(
+          0,
+          Math.max(0, metrics.rawRightReservePx) - availableRightProtrusionClearancePx,
+        )
+        if (rightRequestPx > 0) {
           const request = {
-            extraPx: Math.abs(rightGapPx) + MIN_COLLISION_CLEARANCE_PX,
+            extraPx: rightRequestPx,
             onsetTicks: metrics.onsetTicks,
             side: 'right' as const,
           }
@@ -1500,43 +1448,24 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     measureTicks: measureTotalTicks,
     spacingConfig,
   })
-  const axisStart = Math.min(
-    axisBoundaryEnd,
-    axisBoundaryStart + Math.max(0, spacingWeights.leadingGapPx),
-  )
-  let totalAppliedExtraPx = 0
-  let finalTargetXByOnset = new Map<number, number>()
-  let onsetReserves: TimeAxisSpacingOnsetReserve[] = []
-  let spacingSegments: TimeAxisSpacingSegmentReserve[] = []
-
-  for (let iteration = 0; iteration < 8; iteration += 1) {
-    const axisEnd = Math.max(axisStart, axisBoundaryEnd - totalAppliedExtraPx)
-    const baseTargetXByOnset = buildBaseTargetXByOnset({
-      onsetTicks,
-      axisStart,
-      axisEnd,
-      spacingWeights,
-      uniformSpacingByTicks,
-      publicAxisLayout,
-    })
-    const overlay = resolveCollisionDrivenOverlay({
-      onsetTicks,
-      baseTargetXByOnset,
-      refsByOnset,
-      effectiveBoundaryStartX: axisBoundaryStart,
-      effectiveBoundaryEndX: axisBoundaryEnd,
-    })
-    finalTargetXByOnset = overlay.finalTargetXByOnset
-    onsetReserves = overlay.onsetReserves
-    spacingSegments = overlay.spacingSegments
-
-    if (Math.abs(overlay.totalAppliedExtraPx - totalAppliedExtraPx) <= 0.001) {
-      totalAppliedExtraPx = overlay.totalAppliedExtraPx
-      break
-    }
-
-    totalAppliedExtraPx = overlay.totalAppliedExtraPx
-  }
+  const axisStart = axisBoundaryStart + Math.max(0, spacingWeights.leadingGapPx)
+  const baseTargetXByOnset = buildBaseTargetXByOnset({
+    onsetTicks,
+    axisStart,
+    spacingWeights,
+    uniformSpacingByTicks,
+    publicAxisLayout,
+  })
+  const overlay = resolveCollisionDrivenOverlay({
+    onsetTicks,
+    baseTargetXByOnset,
+    refsByOnset,
+    effectiveBoundaryStartX: axisBoundaryStart,
+    effectiveBoundaryEndX: axisBoundaryEnd,
+  })
+  const finalTargetXByOnset = overlay.finalTargetXByOnset
+  const onsetReserves = overlay.onsetReserves
+  const spacingSegments = overlay.spacingSegments
 
   refs.forEach((ref) => {
     const targetX = finalTargetXByOnset.get(ref.onsetTicks)

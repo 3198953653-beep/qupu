@@ -1220,11 +1220,7 @@ export function renderVisibleSystems(params: {
     }
 
     const solveMeasureWidths = (): number[] => {
-      const safeWeights = adaptiveTimelineWeights.map((weight) => Math.max(MIN_TIMELINE_WEIGHT, weight))
-      const safeTotalTimelineWeight = Math.max(
-        MIN_TIMELINE_WEIGHT,
-        safeWeights.reduce((sum, weight) => sum + weight, 0),
-      )
+      const preserveIntrinsicMeasureWidths = spacingLayoutMode === 'custom'
       let widths = systemMeta.map(() => measureProbeWidthSeed)
       for (let pass = 0; pass < 8; pass += 1) {
         const fixed = systemMeta.map((entry, indexInSystem) =>
@@ -1234,7 +1230,14 @@ export function renderVisibleSystems(params: {
         const nextWidths =
           fixedTotal >= systemUsableWidth
             ? fixed.map((width) => (systemUsableWidth * width) / Math.max(1, fixedTotal))
-            : (() => {
+            : preserveIntrinsicMeasureWidths
+              ? fixed
+              : (() => {
+              const safeWeights = adaptiveTimelineWeights.map((weight) => Math.max(MIN_TIMELINE_WEIGHT, weight))
+              const safeTotalTimelineWeight = Math.max(
+                MIN_TIMELINE_WEIGHT,
+                safeWeights.reduce((sum, weight) => sum + weight, 0),
+              )
               const flexWidth = systemUsableWidth - fixedTotal
               return fixed.map(
                 (fixedWidth, index) =>
@@ -1316,8 +1319,8 @@ export function renderVisibleSystems(params: {
         // Do not feed previous-frame frozen spacing into the probe solver.
         staticNoteXById: null,
         staticAccidentalRightXById: null,
-        // Probe with the same layout path used by final render so spacingRightX
-        // and barline fit are computed from identical geometry.
+        // Keep full layout geometry so beam/stem decisions match final render,
+        // but rely on spacing metrics for overflow bounds instead of visual bbox.
         layoutDetail: 'full',
         showMeasureNumberLabel: showInScoreMeasureNumbers,
         showNoteHeadJianpu,

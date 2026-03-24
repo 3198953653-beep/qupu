@@ -79,9 +79,9 @@ const DEV_HOST = '127.0.0.1'
 const DEV_PORT = 4178
 const DEV_URL = `http://${DEV_HOST}:${DEV_PORT}`
 const TARGET_ROW_COUNT = 6
-const EXPECTED_MEASURE_WIDTH_PX = 120
-const EXPECTED_ANCHOR_SPAN_PX = 82.725
-const EXPECTED_SEGMENT_GAP_PX = 27.575
+const EXPECTED_MEASURE_WIDTH_PX = 108.232
+const EXPECTED_ANCHOR_SPAN_PX = 73.899
+const EXPECTED_SEGMENT_GAP_PX = 24.633
 const EPSILON_PX = 0.15
 
 function sleep(ms: number): Promise<void> {

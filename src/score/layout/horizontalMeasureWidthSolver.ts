@@ -74,9 +74,7 @@ type MeasureSpacingProbe = {
 }
 
 const MIN_FORMAT_WIDTH_PX = 8
-const MIN_VISIBLE_GAP_PX = 2
 const EPS = 0.05
-const STEP_PAD_PX = 0.5
 const PROBE_MEASURE_X = 1024
 const SOLVER_CACHE_VERSION = 'v7'
 const SOLVER_CACHE_MAX_ENTRIES = 12000
@@ -262,7 +260,8 @@ function probeMeasureSpacing(
     activeSelection: null,
     draggingSelection: null,
     collectLayouts: true,
-    skipPainting: false,
+    layoutDetail: 'full',
+    skipPainting: true,
     noteStartXOverride: geometry.noteStartX,
     formatWidthOverride: geometry.formatWidth,
     timeAxisSpacingConfig: spacingConfig,
@@ -313,40 +312,18 @@ function probeMeasureSpacing(
         ? Math.max(0, firstAnchorX - appliedMetrics.spacingOccupiedLeftX)
         : 0
     const trailingOccupiedTailPx =
-      Number.isFinite(lastAnchorX) &&
-      Number.isFinite(
-        Number.isFinite(layoutOccupiedRightX)
-          ? Math.max(layoutOccupiedRightX, appliedMetrics.spacingOccupiedRightX)
-          : appliedMetrics.spacingOccupiedRightX,
-      )
+      Number.isFinite(lastAnchorX) && Number.isFinite(appliedMetrics.spacingOccupiedRightX)
         ? Math.max(
             0,
-            (Number.isFinite(layoutOccupiedRightX)
-              ? Math.max(layoutOccupiedRightX, appliedMetrics.spacingOccupiedRightX)
-              : appliedMetrics.spacingOccupiedRightX) - lastAnchorX,
+            appliedMetrics.spacingOccupiedRightX - lastAnchorX,
           )
         : 0
-    const occupiedLeftX =
-      Number.isFinite(layoutOccupiedLeftX)
-        ? Number.isFinite(appliedMetrics.spacingOccupiedLeftX)
-          ? Math.min(layoutOccupiedLeftX, appliedMetrics.spacingOccupiedLeftX)
-          : layoutOccupiedLeftX
-        : appliedMetrics.spacingOccupiedLeftX
-    const occupiedRightX =
-      Number.isFinite(layoutOccupiedRightX)
-        ? Number.isFinite(appliedMetrics.spacingOccupiedRightX)
-          ? Math.max(layoutOccupiedRightX, appliedMetrics.spacingOccupiedRightX)
-          : layoutOccupiedRightX
-        : appliedMetrics.spacingOccupiedRightX
     return {
       leadingGapPx: appliedMetrics.leadingGapPx,
       trailingGapPx: appliedMetrics.trailingGapPx,
-      rightOverflowPx: Math.max(0, occupiedRightX - appliedMetrics.effectiveBoundaryEndX),
+      rightOverflowPx: Math.max(0, appliedMetrics.spacingOccupiedRightX - appliedMetrics.effectiveBoundaryEndX),
       spacingAnchorGapFirstToLastPx: Math.max(0, appliedMetrics.spacingAnchorGapFirstToLastPx),
-      leadingOccupiedInsetPx:
-        Number.isFinite(firstAnchorX) && Number.isFinite(occupiedLeftX)
-          ? Math.max(0, firstAnchorX - occupiedLeftX)
-          : leadingOccupiedInsetPx,
+      leadingOccupiedInsetPx,
       trailingOccupiedTailPx,
     }
   }
@@ -516,33 +493,31 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
     for (let iteration = 0; iteration < maxIterations; iteration += 1) {
       const probe = probeMeasureSpacing(context, meta, width, spacingConfig, supplementalSpacingTicks)
       if (!probe) break
-      const requiredLeadingAnchorGap = probe.leadingOccupiedInsetPx + MIN_VISIBLE_GAP_PX
-      const requiredTrailingAnchorGap = probe.trailingOccupiedTailPx + MIN_VISIBLE_GAP_PX
-      const leadingGapDeficit = Math.max(0, requiredLeadingAnchorGap - probe.leadingGapPx)
-      const trailingGapDeficit = Math.max(0, requiredTrailingAnchorGap - probe.trailingGapPx)
+      // Growing the measure width only extends the trailing edge. It cannot
+      // increase the first-anchor gap, so leading-side deficits must be
+      // resolved by spacing/layout, not by the width solver.
+      const leadingGapDeficit = 0
+      const trailingGapDeficit = Math.max(0, timelineMetrics.trailingGapPx - probe.trailingGapPx)
+      const trailingWidthDemandPx = Math.max(probe.rightOverflowPx, trailingGapDeficit)
       const timelineCompressionDeficit = Math.max(0, timelineMetrics.anchorSpanPx - probe.spacingAnchorGapFirstToLastPx)
 
       if (
-        probe.rightOverflowPx <= EPS &&
+        trailingWidthDemandPx <= EPS &&
         leadingGapDeficit <= EPS &&
-        trailingGapDeficit <= EPS &&
         timelineCompressionDeficit <= EPS
       ) {
         break
       }
 
       if (
-        probe.rightOverflowPx > EPS ||
+        trailingWidthDemandPx > EPS ||
         leadingGapDeficit > EPS ||
-        trailingGapDeficit > EPS ||
         timelineCompressionDeficit > EPS
       ) {
         const growBy =
-          probe.rightOverflowPx +
+          trailingWidthDemandPx +
           leadingGapDeficit +
-          trailingGapDeficit +
-          timelineCompressionDeficit +
-          STEP_PAD_PX
+          timelineCompressionDeficit
         width = Number((Math.max(minSolvedMeasureWidthPx, width + growBy)).toFixed(3))
         continue
       }
