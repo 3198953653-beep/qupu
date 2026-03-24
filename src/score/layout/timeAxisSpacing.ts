@@ -1,28 +1,62 @@
 import { Accidental, Stem, type StaveNote } from 'vexflow'
 import { DURATION_TICKS } from '../constants'
 import { getAccidentalVisualX, getRenderedNoteVisualX } from './renderPosition'
-import type { MeasurePair, ScoreNote } from '../types'
+import type { MeasurePair, ScoreNote, StaffKind } from '../types'
 import { resolveEffectiveBoundary } from './effectiveBoundary'
 import { buildPublicAxisLayout } from '../timeline/axisLayout'
 import { compareLegacyAndMergedTimeline } from '../timeline/debug'
 import { mergeStaffTimelines } from '../timeline/mergedTimeline'
 import { buildStaffTimeline } from '../timeline/staffTimeline'
-import type { MeasureTimelineBundle, PublicAxisLayout } from '../timeline/types'
+import type { MeasureTimelineBundle, PublicAxisLayout, StaffTimeline } from '../timeline/types'
 
 type RenderedStaffNote = {
   vexNote: StaveNote
 }
 
 type TimeAxisNoteRef = {
+  staff: StaffKind
   onsetTicks: number
   vexNote: StaveNote
-  leftReservePx: number
-  rightReservePx: number
+  rawLeftReservePx: number
+  rawRightReservePx: number
+  leftOccupiedInsetPx: number
+  rightOccupiedTailPx: number
 }
 
-type OnsetReserveExtents = {
-  leftReservePx: number
-  rightReservePx: number
+type OnsetCollisionMetrics = {
+  rawLeftReservePx: number
+  rawRightReservePx: number
+  leftOccupiedInsetPx: number
+  rightOccupiedTailPx: number
+}
+
+type StaffOnsetCollisionMetrics = OnsetCollisionMetrics & {
+  staff: StaffKind
+  onsetTicks: number
+  sharedOnsetIndex: number
+}
+
+type StaffSlotWinner = StaffKind | 'tie' | 'none'
+
+type StaffSide = 'left' | 'right'
+
+type StaffSlotRequest = {
+  extraPx: number
+  onsetTicks: number
+  side: StaffSide
+}
+
+type LeadingTrailingDebug = {
+  trebleRequestedExtraPx: number
+  bassRequestedExtraPx: number
+  winningStaff: StaffSlotWinner
+}
+
+type NoteSpacingGeometry = {
+  rawLeftReservePx: number
+  rawRightReservePx: number
+  leftOccupiedInsetPx: number
+  rightOccupiedTailPx: number
 }
 
 type VexBoundingBoxLike = {
@@ -44,6 +78,7 @@ type ApplyUnifiedTimeAxisSpacingParams = {
   formatWidth: number
   trebleRendered: RenderedStaffNote[]
   bassRendered: RenderedStaffNote[]
+  timelineBundle?: MeasureTimelineBundle | null
   spacingConfig?: TimeAxisSpacingConfig
   measureTicks?: number
   sparseTailAnchorMode?: 'none' | 'measure-end' | 'compact-tail'
@@ -67,6 +102,7 @@ const UNIFORM_TICK_SPACING_END_GUARD_PX = 0
 const UNIFORM_TIMELINE_EDGE_TICK_RATIO = 0
 const ACCIDENTAL_PREALLOCATED_CLEARANCE_PX = 0
 const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
+const MIN_COLLISION_CLEARANCE_PX = 3
 const MAX_RENDERED_NOTE_HEAD_WIDTH_PX = DEFAULT_NOTE_HEAD_WIDTH_PX * 2.5
 const MAX_NOTE_HEAD_COLUMN_OFFSET_PX = DEFAULT_NOTE_HEAD_WIDTH_PX * 5
 const NOTE_HEAD_COLUMN_COMPARE_EPSILON_PX = 0.01
@@ -324,9 +360,9 @@ function getSpacingOccupiedBounds(refs: TimeAxisNoteRef[]): { leftX: number; rig
   return { leftX, rightX }
 }
 
-function getNoteReserveExtents(vexNote: StaveNote): { leftReservePx: number; rightReservePx: number } {
-  let leftReservePx = 0
-  let rightReservePx = 0
+function getNoteRawReserveExtents(vexNote: StaveNote): { rawLeftReservePx: number; rawRightReservePx: number } {
+  let rawLeftReservePx = 0
+  let rawRightReservePx = 0
   const fallbackAnchorX = getRenderedNoteVisualX(vexNote)
   if (Number.isFinite(fallbackAnchorX)) {
     const {
@@ -336,8 +372,8 @@ function getNoteReserveExtents(vexNote: StaveNote): { leftReservePx: number; rig
       rightColumnReservePx,
     } = getRenderedNoteHeadColumnReserves(vexNote, fallbackAnchorX)
     if (hasMultipleColumns) {
-      leftReservePx = Math.max(leftReservePx, leftColumnReservePx)
-      rightReservePx = Math.max(rightReservePx, rightColumnReservePx)
+      rawLeftReservePx = Math.max(rawLeftReservePx, leftColumnReservePx)
+      rawRightReservePx = Math.max(rawRightReservePx, rightColumnReservePx)
     }
 
     let accidentalMinX = Number.POSITIVE_INFINITY
@@ -351,34 +387,79 @@ function getNoteReserveExtents(vexNote: StaveNote): { leftReservePx: number; rig
       }
     })
     if (Number.isFinite(accidentalMinX)) {
-      leftReservePx = Math.max(
-        leftReservePx,
+      rawLeftReservePx = Math.max(
+        rawLeftReservePx,
         resolvedAnchorX - accidentalMinX + ACCIDENTAL_PREALLOCATED_CLEARANCE_PX,
       )
     }
   }
-  return { leftReservePx, rightReservePx }
+  return { rawLeftReservePx, rawRightReservePx }
 }
 
-function buildTimeAxisRefs(notes: ScoreNote[], rendered: RenderedStaffNote[]): TimeAxisNoteRef[] {
-  const refs: TimeAxisNoteRef[] = []
-  let cursorTicks = 0
+function getNoteOccupiedInsets(vexNote: StaveNote): { leftOccupiedInsetPx: number; rightOccupiedTailPx: number } {
+  const anchorX = getRenderedNoteVisualX(vexNote)
+  const occupiedBounds = getRenderedNoteOccupiedBounds(vexNote)
+  if (!Number.isFinite(anchorX) || !occupiedBounds) {
+    return {
+      leftOccupiedInsetPx: 0,
+      rightOccupiedTailPx: 0,
+    }
+  }
 
+  return {
+    leftOccupiedInsetPx: Math.max(0, anchorX - occupiedBounds.leftX),
+    rightOccupiedTailPx: Math.max(0, occupiedBounds.rightX - anchorX),
+  }
+}
+
+function getNoteSpacingGeometry(vexNote: StaveNote): NoteSpacingGeometry {
+  const { rawLeftReservePx, rawRightReservePx } = getNoteRawReserveExtents(vexNote)
+  const { leftOccupiedInsetPx, rightOccupiedTailPx } = getNoteOccupiedInsets(vexNote)
+  return {
+    rawLeftReservePx,
+    rawRightReservePx,
+    leftOccupiedInsetPx,
+    rightOccupiedTailPx,
+  }
+}
+
+function buildTimeAxisRefs(params: {
+  staff: StaffKind
+  notes: ScoreNote[]
+  rendered: RenderedStaffNote[]
+  timeline: StaffTimeline | null
+}): TimeAxisNoteRef[] {
+  const { staff, notes, rendered, timeline } = params
+  const refs: TimeAxisNoteRef[] = []
+  const pushRef = (noteIndex: number, onsetTicks: number) => {
+    const sourceNote = notes[noteIndex]
+    const renderedEntry = rendered[noteIndex]
+    if (!sourceNote || sourceNote.isRest === true || !renderedEntry) return
+    const headX = getRenderedNoteVisualX(renderedEntry.vexNote)
+    if (!Number.isFinite(headX)) return
+    const geometry = getNoteSpacingGeometry(renderedEntry.vexNote)
+    refs.push({
+      staff,
+      onsetTicks,
+      vexNote: renderedEntry.vexNote,
+      rawLeftReservePx: geometry.rawLeftReservePx,
+      rawRightReservePx: geometry.rawRightReservePx,
+      leftOccupiedInsetPx: geometry.leftOccupiedInsetPx,
+      rightOccupiedTailPx: geometry.rightOccupiedTailPx,
+    })
+  }
+
+  if (timeline?.events?.length) {
+    timeline.events.forEach((event) => {
+      pushRef(event.noteIndex, event.startTick)
+    })
+    return refs
+  }
+
+  let cursorTicks = 0
   notes.forEach((note, noteIndex) => {
     const durationTicks = getTickDuration(note)
-    const renderedEntry = rendered[noteIndex]
-    if (renderedEntry) {
-      const headX = getRenderedNoteVisualX(renderedEntry.vexNote)
-      if (Number.isFinite(headX)) {
-        const extents = getNoteReserveExtents(renderedEntry.vexNote)
-        refs.push({
-          onsetTicks: cursorTicks,
-          vexNote: renderedEntry.vexNote,
-          leftReservePx: extents.leftReservePx,
-          rightReservePx: extents.rightReservePx,
-        })
-      }
-    }
+    pushRef(noteIndex, cursorTicks)
     cursorTicks += durationTicks
   })
 
@@ -466,6 +547,16 @@ export type TimeAxisSpacingOnsetReserve = {
   finalX: number
   leftReservePx: number
   rightReservePx: number
+  rawLeftReservePx: number
+  rawRightReservePx: number
+  leftOccupiedInsetPx: number
+  rightOccupiedTailPx: number
+  leadingTrebleRequestedExtraPx: number
+  leadingBassRequestedExtraPx: number
+  leadingWinningStaff: StaffSlotWinner
+  trailingTrebleRequestedExtraPx: number
+  trailingBassRequestedExtraPx: number
+  trailingWinningStaff: StaffSlotWinner
 }
 
 export type TimeAxisSpacingSegmentReserve = {
@@ -474,6 +565,9 @@ export type TimeAxisSpacingSegmentReserve = {
   baseGapPx: number
   extraReservePx: number
   appliedGapPx: number
+  trebleRequestedExtraPx: number
+  bassRequestedExtraPx: number
+  winningStaff: StaffSlotWinner
 }
 
 export function getLeadingBarlineGapPx(
@@ -894,30 +988,96 @@ export function resolvePublicAxisLayoutForConsumption(
   return timelineBundle?.publicAxisLayout ?? null
 }
 
-function getOnsetReserveExtents(noteRefs: TimeAxisNoteRef[] | undefined): OnsetReserveExtents {
+function getOnsetCollisionMetrics(noteRefs: TimeAxisNoteRef[] | undefined): OnsetCollisionMetrics {
   if (!noteRefs || noteRefs.length === 0) {
     return {
-      leftReservePx: 0,
-      rightReservePx: 0,
+      rawLeftReservePx: 0,
+      rawRightReservePx: 0,
+      leftOccupiedInsetPx: 0,
+      rightOccupiedTailPx: 0,
     }
   }
   return {
-    leftReservePx: noteRefs.reduce((max, ref) => Math.max(max, ref.leftReservePx), 0),
-    rightReservePx: noteRefs.reduce((max, ref) => Math.max(max, ref.rightReservePx), 0),
+    rawLeftReservePx: noteRefs.reduce((max, ref) => Math.max(max, ref.rawLeftReservePx), 0),
+    rawRightReservePx: noteRefs.reduce((max, ref) => Math.max(max, ref.rawRightReservePx), 0),
+    leftOccupiedInsetPx: noteRefs.reduce((max, ref) => Math.max(max, ref.leftOccupiedInsetPx), 0),
+    rightOccupiedTailPx: noteRefs.reduce((max, ref) => Math.max(max, ref.rightOccupiedTailPx), 0),
   }
 }
 
-function getTotalReserveWidthPx(onsetReservesByTick: OnsetReserveExtents[]): number {
-  if (onsetReservesByTick.length === 0) return 0
+function buildStaffOnsetCollisionMetricsByStaff(params: {
+  onsetTicks: number[]
+  refsByOnset: Map<number, TimeAxisNoteRef[]>
+}): Record<StaffKind, StaffOnsetCollisionMetrics[]> {
+  const { onsetTicks, refsByOnset } = params
+  const refsByStaff: Record<StaffKind, StaffOnsetCollisionMetrics[]> = {
+    treble: [],
+    bass: [],
+  }
 
-  let totalReserveWidthPx = Math.max(0, onsetReservesByTick[0]?.leftReservePx ?? 0)
-  onsetReservesByTick.forEach((entry, index) => {
-    totalReserveWidthPx += Math.max(0, entry.rightReservePx)
-    if (index > 0) {
-      totalReserveWidthPx += Math.max(0, entry.leftReservePx)
-    }
+  onsetTicks.forEach((onsetTick, sharedOnsetIndex) => {
+    const refs = refsByOnset.get(onsetTick) ?? []
+    ;(['treble', 'bass'] as StaffKind[]).forEach((staff) => {
+      const staffRefs = refs.filter((ref) => ref.staff === staff)
+      if (staffRefs.length === 0) return
+      const metrics = getOnsetCollisionMetrics(staffRefs)
+      refsByStaff[staff].push({
+        staff,
+        onsetTicks: onsetTick,
+        sharedOnsetIndex,
+        rawLeftReservePx: metrics.rawLeftReservePx,
+        rawRightReservePx: metrics.rawRightReservePx,
+        leftOccupiedInsetPx: metrics.leftOccupiedInsetPx,
+        rightOccupiedTailPx: metrics.rightOccupiedTailPx,
+      })
+    })
   })
-  return totalReserveWidthPx
+
+  return refsByStaff
+}
+
+function resolveWinningStaff(params: {
+  trebleRequestedExtraPx: number
+  bassRequestedExtraPx: number
+}): StaffSlotWinner {
+  const safeTrebleRequestedExtraPx = Math.max(0, params.trebleRequestedExtraPx)
+  const safeBassRequestedExtraPx = Math.max(0, params.bassRequestedExtraPx)
+  if (safeTrebleRequestedExtraPx <= 0 && safeBassRequestedExtraPx <= 0) return 'none'
+  if (Math.abs(safeTrebleRequestedExtraPx - safeBassRequestedExtraPx) <= 0.001) return 'tie'
+  return safeTrebleRequestedExtraPx > safeBassRequestedExtraPx ? 'treble' : 'bass'
+}
+
+function selectPreferredStaffSlotRequest(
+  current: StaffSlotRequest | null,
+  candidate: StaffSlotRequest,
+): StaffSlotRequest {
+  if (!current) return candidate
+  if (candidate.extraPx > current.extraPx + 0.001) return candidate
+  if (Math.abs(candidate.extraPx - current.extraPx) > 0.001) return current
+  if (candidate.side === 'right' && current.side !== 'right') return candidate
+  if (candidate.side !== 'right' && current.side === 'right') return current
+  if (candidate.onsetTicks < current.onsetTicks) return candidate
+  return current
+}
+
+function pickWinningStaffSlotRequest(params: {
+  trebleRequest: StaffSlotRequest | null
+  bassRequest: StaffSlotRequest | null
+}): StaffSlotRequest | null {
+  const { trebleRequest, bassRequest } = params
+  if (trebleRequest && !bassRequest) return trebleRequest
+  if (!trebleRequest && bassRequest) return bassRequest
+  if (!trebleRequest && !bassRequest) return null
+  if ((trebleRequest?.extraPx ?? 0) > (bassRequest?.extraPx ?? 0) + 0.001) return trebleRequest
+  if ((bassRequest?.extraPx ?? 0) > (trebleRequest?.extraPx ?? 0) + 0.001) return bassRequest
+  return trebleRequest
+}
+
+function createStaffSlotRequestRecord(): Record<StaffKind, StaffSlotRequest | null> {
+  return {
+    treble: null,
+    bass: null,
+  }
 }
 
 function buildBaseTargetXByOnset(params: {
@@ -996,23 +1156,24 @@ function buildBaseTargetXByOnset(params: {
   return targetXByOnset
 }
 
-function applyLocalReserveOverlay(params: {
+function resolveCollisionDrivenOverlay(params: {
   onsetTicks: number[]
   baseTargetXByOnset: Map<number, number>
-  onsetReservesByTick: OnsetReserveExtents[]
-  appliedLeftReservePxByIndex?: number[]
-  appliedRightReservePxByIndex?: number[]
+  refsByOnset: Map<number, TimeAxisNoteRef[]>
+  effectiveBoundaryStartX: number
+  effectiveBoundaryEndX: number
 }): {
   finalTargetXByOnset: Map<number, number>
   onsetReserves: TimeAxisSpacingOnsetReserve[]
   spacingSegments: TimeAxisSpacingSegmentReserve[]
+  totalAppliedExtraPx: number
 } {
   const {
     onsetTicks,
     baseTargetXByOnset,
-    onsetReservesByTick,
-    appliedLeftReservePxByIndex,
-    appliedRightReservePxByIndex,
+    refsByOnset,
+    effectiveBoundaryStartX,
+    effectiveBoundaryEndX,
   } = params
   const finalTargetXByOnset = new Map<number, number>()
   const onsetReserves: TimeAxisSpacingOnsetReserve[] = []
@@ -1022,15 +1183,22 @@ function applyLocalReserveOverlay(params: {
       finalTargetXByOnset,
       onsetReserves,
       spacingSegments,
+      totalAppliedExtraPx: 0,
     }
   }
 
-  const safeLeftReserves = onsetTicks.map((_, index) =>
-    Math.max(0, appliedLeftReservePxByIndex?.[index] ?? onsetReservesByTick[index]?.leftReservePx ?? 0),
+  const sharedOnsetCollisionMetricsByTick = onsetTicks.map((onsetTick) =>
+    getOnsetCollisionMetrics(refsByOnset.get(onsetTick)),
   )
-  const safeRightReserves = onsetTicks.map((_, index) =>
-    Math.max(0, appliedRightReservePxByIndex?.[index] ?? onsetReservesByTick[index]?.rightReservePx ?? 0),
-  )
+  const staffOnsetCollisionMetricsByStaff = buildStaffOnsetCollisionMetricsByStaff({
+    onsetTicks,
+    refsByOnset,
+  })
+  const safeLeftReserves = onsetTicks.map(() => 0)
+  const safeRightReserves = onsetTicks.map(() => 0)
+  const leadingRequests = createStaffSlotRequestRecord()
+  const trailingRequests = createStaffSlotRequestRecord()
+  const segmentRequests = onsetTicks.slice(1).map(() => createStaffSlotRequestRecord())
   const baseXs = onsetTicks.map((onset, index) => {
     const baseX = baseTargetXByOnset.get(onset)
     if (typeof baseX === 'number' && Number.isFinite(baseX)) {
@@ -1039,43 +1207,170 @@ function applyLocalReserveOverlay(params: {
     const previousBaseX = index > 0 ? finalTargetXByOnset.get(onsetTicks[index - 1] as number) : null
     return typeof previousBaseX === 'number' && Number.isFinite(previousBaseX) ? previousBaseX : 0
   })
+  const baseXByOnset = new Map<number, number>(onsetTicks.map((onsetTick, index) => [onsetTick, baseXs[index] ?? 0]))
 
-  const firstFinalX = baseXs[0] + safeLeftReserves[0]
-  finalTargetXByOnset.set(onsetTicks[0] as number, firstFinalX)
-  onsetReserves.push({
-    onsetTicks: onsetTicks[0] as number,
-    baseX: baseXs[0],
-    finalX: firstFinalX,
-    leftReservePx: safeLeftReserves[0],
-    rightReservePx: safeRightReserves[0],
+  ;(['treble', 'bass'] as StaffKind[]).forEach((staff) => {
+    const staffCollisionMetrics = staffOnsetCollisionMetricsByStaff[staff]
+    staffCollisionMetrics.forEach((metrics, index) => {
+      const baseAnchorX = baseXByOnset.get(metrics.onsetTicks)
+      if (typeof baseAnchorX !== 'number' || !Number.isFinite(baseAnchorX)) return
+      const previousMetrics = index > 0 ? staffCollisionMetrics[index - 1] ?? null : null
+      const nextMetrics = index < staffCollisionMetrics.length - 1 ? staffCollisionMetrics[index + 1] ?? null : null
+      const baseOccupiedLeftX = baseAnchorX - Math.max(0, metrics.leftOccupiedInsetPx)
+      const baseOccupiedRightX = baseAnchorX + Math.max(0, metrics.rightOccupiedTailPx)
+
+      if (Math.max(0, metrics.rawLeftReservePx) > 0) {
+        const blockerRightX =
+          previousMetrics === null
+            ? effectiveBoundaryStartX
+            : (baseXByOnset.get(previousMetrics.onsetTicks) ?? 0) + Math.max(0, previousMetrics.rightOccupiedTailPx)
+        const leftGapPx = baseOccupiedLeftX - blockerRightX
+        if (leftGapPx < 0) {
+          const request = {
+            extraPx: Math.abs(leftGapPx) + MIN_COLLISION_CLEARANCE_PX,
+            onsetTicks: metrics.onsetTicks,
+            side: 'left' as const,
+          }
+          if (metrics.sharedOnsetIndex <= 0) {
+            leadingRequests[staff] = selectPreferredStaffSlotRequest(leadingRequests[staff], request)
+          } else {
+            const slotIndex = metrics.sharedOnsetIndex - 1
+            segmentRequests[slotIndex]![staff] = selectPreferredStaffSlotRequest(segmentRequests[slotIndex]![staff], request)
+          }
+        }
+      }
+
+      if (Math.max(0, metrics.rawRightReservePx) > 0) {
+        const blockerLeftX =
+          nextMetrics === null
+            ? effectiveBoundaryEndX
+            : (baseXByOnset.get(nextMetrics.onsetTicks) ?? 0) - Math.max(0, nextMetrics.leftOccupiedInsetPx)
+        const rightGapPx = blockerLeftX - baseOccupiedRightX
+        if (rightGapPx < 0) {
+          const request = {
+            extraPx: Math.abs(rightGapPx) + MIN_COLLISION_CLEARANCE_PX,
+            onsetTicks: metrics.onsetTicks,
+            side: 'right' as const,
+          }
+          if (metrics.sharedOnsetIndex >= onsetTicks.length - 1) {
+            trailingRequests[staff] = selectPreferredStaffSlotRequest(trailingRequests[staff], request)
+          } else {
+            const slotIndex = metrics.sharedOnsetIndex
+            segmentRequests[slotIndex]![staff] = selectPreferredStaffSlotRequest(segmentRequests[slotIndex]![staff], request)
+          }
+        }
+      }
+    })
   })
+
+  const leadingDebug: LeadingTrailingDebug = {
+    trebleRequestedExtraPx: Math.max(0, leadingRequests.treble?.extraPx ?? 0),
+    bassRequestedExtraPx: Math.max(0, leadingRequests.bass?.extraPx ?? 0),
+    winningStaff: resolveWinningStaff({
+      trebleRequestedExtraPx: Math.max(0, leadingRequests.treble?.extraPx ?? 0),
+      bassRequestedExtraPx: Math.max(0, leadingRequests.bass?.extraPx ?? 0),
+    }),
+  }
+  const leadingAppliedExtraPx = Math.max(
+    0,
+    leadingDebug.trebleRequestedExtraPx,
+    leadingDebug.bassRequestedExtraPx,
+  )
+  if (leadingAppliedExtraPx > 0) {
+    safeLeftReserves[0] += leadingAppliedExtraPx
+  }
+
+  const firstFinalX = baseXs[0] + leadingAppliedExtraPx
+  finalTargetXByOnset.set(onsetTicks[0] as number, firstFinalX)
 
   for (let index = 1; index < onsetTicks.length; index += 1) {
     const previousFinalX = finalTargetXByOnset.get(onsetTicks[index - 1] as number) ?? firstFinalX
     const baseGapPx = Math.max(0, baseXs[index] - baseXs[index - 1])
-    const extraReservePx = safeRightReserves[index - 1] + safeLeftReserves[index]
+    const currentSegmentRequests = segmentRequests[index - 1] ?? createStaffSlotRequestRecord()
+    const trebleRequestedExtraPx = Math.max(0, currentSegmentRequests.treble?.extraPx ?? 0)
+    const bassRequestedExtraPx = Math.max(0, currentSegmentRequests.bass?.extraPx ?? 0)
+    const extraReservePx = Math.max(0, trebleRequestedExtraPx, bassRequestedExtraPx)
+    const winningRequest = pickWinningStaffSlotRequest({
+      trebleRequest: currentSegmentRequests.treble,
+      bassRequest: currentSegmentRequests.bass,
+    })
+    if (extraReservePx > 0 && winningRequest) {
+      if (winningRequest.side === 'right') {
+        safeRightReserves[index - 1] += extraReservePx
+      } else {
+        safeLeftReserves[index] += extraReservePx
+      }
+    }
+
     const finalX = previousFinalX + baseGapPx + extraReservePx
     finalTargetXByOnset.set(onsetTicks[index] as number, finalX)
-    onsetReserves.push({
-      onsetTicks: onsetTicks[index] as number,
-      baseX: baseXs[index],
-      finalX,
-      leftReservePx: safeLeftReserves[index],
-      rightReservePx: safeRightReserves[index],
-    })
     spacingSegments.push({
       fromOnsetTicks: onsetTicks[index - 1] as number,
       toOnsetTicks: onsetTicks[index] as number,
       baseGapPx,
       extraReservePx,
       appliedGapPx: baseGapPx + extraReservePx,
+      trebleRequestedExtraPx,
+      bassRequestedExtraPx,
+      winningStaff: resolveWinningStaff({
+        trebleRequestedExtraPx,
+        bassRequestedExtraPx,
+      }),
     })
   }
+
+  const trailingDebug: LeadingTrailingDebug = {
+    trebleRequestedExtraPx: Math.max(0, trailingRequests.treble?.extraPx ?? 0),
+    bassRequestedExtraPx: Math.max(0, trailingRequests.bass?.extraPx ?? 0),
+    winningStaff: resolveWinningStaff({
+      trebleRequestedExtraPx: Math.max(0, trailingRequests.treble?.extraPx ?? 0),
+      bassRequestedExtraPx: Math.max(0, trailingRequests.bass?.extraPx ?? 0),
+    }),
+  }
+  const trailingAppliedExtraPx = Math.max(
+    0,
+    trailingDebug.trebleRequestedExtraPx,
+    trailingDebug.bassRequestedExtraPx,
+  )
+  const lastIndex = onsetTicks.length - 1
+  if (trailingAppliedExtraPx > 0) {
+    safeRightReserves[lastIndex] += trailingAppliedExtraPx
+  }
+
+  onsetTicks.forEach((onsetTick, index) => {
+    const collisionMetrics = sharedOnsetCollisionMetricsByTick[index]
+    onsetReserves.push({
+      onsetTicks: onsetTick,
+      baseX: baseXs[index],
+      finalX: finalTargetXByOnset.get(onsetTick) ?? baseXs[index],
+      leftReservePx: safeLeftReserves[index],
+      rightReservePx: safeRightReserves[index],
+      rawLeftReservePx: Math.max(0, collisionMetrics?.rawLeftReservePx ?? 0),
+      rawRightReservePx: Math.max(0, collisionMetrics?.rawRightReservePx ?? 0),
+      leftOccupiedInsetPx: Math.max(0, collisionMetrics?.leftOccupiedInsetPx ?? 0),
+      rightOccupiedTailPx: Math.max(0, collisionMetrics?.rightOccupiedTailPx ?? 0),
+      leadingTrebleRequestedExtraPx: index === 0 ? leadingDebug.trebleRequestedExtraPx : 0,
+      leadingBassRequestedExtraPx: index === 0 ? leadingDebug.bassRequestedExtraPx : 0,
+      leadingWinningStaff: index === 0 ? leadingDebug.winningStaff : 'none',
+      trailingTrebleRequestedExtraPx: index === lastIndex ? trailingDebug.trebleRequestedExtraPx : 0,
+      trailingBassRequestedExtraPx: index === lastIndex ? trailingDebug.bassRequestedExtraPx : 0,
+      trailingWinningStaff: index === lastIndex ? trailingDebug.winningStaff : 'none',
+    })
+  })
+
+  const totalAppliedExtraPx = Number(
+    (
+      Math.max(0, leadingAppliedExtraPx) +
+      spacingSegments.reduce((sum, segment) => sum + Math.max(0, segment.extraReservePx), 0) +
+      Math.max(0, trailingAppliedExtraPx)
+    ).toFixed(6),
+  )
 
   return {
     finalTargetXByOnset,
     onsetReserves,
     spacingSegments,
+    totalAppliedExtraPx,
   }
 }
 
@@ -1100,6 +1395,7 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     formatWidth,
     trebleRendered,
     bassRendered,
+    timelineBundle = null,
     spacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
     measureTicks,
     sparseTailAnchorMode = 'none',
@@ -1114,8 +1410,18 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
   } = params
 
   const refs = [
-    ...buildTimeAxisRefs(measure.treble, trebleRendered),
-    ...buildTimeAxisRefs(measure.bass, bassRendered),
+    ...buildTimeAxisRefs({
+      staff: 'treble',
+      notes: measure.treble,
+      rendered: trebleRendered,
+      timeline: timelineBundle?.trebleTimeline ?? null,
+    }),
+    ...buildTimeAxisRefs({
+      staff: 'bass',
+      notes: measure.bass,
+      rendered: bassRendered,
+      timeline: timelineBundle?.bassTimeline ?? null,
+    }),
   ]
   if (refs.length === 0) return null
 
@@ -1168,9 +1474,6 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
 
   const firstSpacingTick = onsetTicks[0]
   const lastSpacingTick = onsetTicks[onsetTicks.length - 1]
-  const onsetReservesByTick = onsetTicks.map((onset) => getOnsetReserveExtents(refsByOnset.get(onset)))
-  const totalReserveWidthPx = getTotalReserveWidthPx(onsetReservesByTick)
-
   const usableFormatWidth = Math.max(MIN_RENDER_WIDTH_PX, formatWidth)
   const defaultAxisBoundaryStart = noteStartX
   const defaultAxisBoundaryEnd = noteStartX + usableFormatWidth
@@ -1201,23 +1504,39 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     axisBoundaryEnd,
     axisBoundaryStart + Math.max(0, spacingWeights.leadingGapPx),
   )
-  // Keep the base timeline on the pre-reserve width so ordinary gaps stay stable,
-  // then let the reserve overlay consume the withheld width afterward.
-  const axisEnd = Math.max(axisStart, axisBoundaryEnd - totalReserveWidthPx)
-  const baseTargetXByOnset = buildBaseTargetXByOnset({
-    onsetTicks,
-    axisStart,
-    axisEnd,
-    spacingWeights,
-    uniformSpacingByTicks,
-    publicAxisLayout,
-  })
-  const overlay = applyLocalReserveOverlay({
-    onsetTicks,
-    baseTargetXByOnset,
-    onsetReservesByTick,
-  })
-  const { finalTargetXByOnset, onsetReserves, spacingSegments } = overlay
+  let totalAppliedExtraPx = 0
+  let finalTargetXByOnset = new Map<number, number>()
+  let onsetReserves: TimeAxisSpacingOnsetReserve[] = []
+  let spacingSegments: TimeAxisSpacingSegmentReserve[] = []
+
+  for (let iteration = 0; iteration < 8; iteration += 1) {
+    const axisEnd = Math.max(axisStart, axisBoundaryEnd - totalAppliedExtraPx)
+    const baseTargetXByOnset = buildBaseTargetXByOnset({
+      onsetTicks,
+      axisStart,
+      axisEnd,
+      spacingWeights,
+      uniformSpacingByTicks,
+      publicAxisLayout,
+    })
+    const overlay = resolveCollisionDrivenOverlay({
+      onsetTicks,
+      baseTargetXByOnset,
+      refsByOnset,
+      effectiveBoundaryStartX: axisBoundaryStart,
+      effectiveBoundaryEndX: axisBoundaryEnd,
+    })
+    finalTargetXByOnset = overlay.finalTargetXByOnset
+    onsetReserves = overlay.onsetReserves
+    spacingSegments = overlay.spacingSegments
+
+    if (Math.abs(overlay.totalAppliedExtraPx - totalAppliedExtraPx) <= 0.001) {
+      totalAppliedExtraPx = overlay.totalAppliedExtraPx
+      break
+    }
+
+    totalAppliedExtraPx = overlay.totalAppliedExtraPx
+  }
 
   refs.forEach((ref) => {
     const targetX = finalTargetXByOnset.get(ref.onsetTicks)

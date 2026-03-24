@@ -267,6 +267,7 @@ function probeMeasureSpacing(
     formatWidthOverride: geometry.formatWidth,
     timeAxisSpacingConfig: spacingConfig,
     spacingLayoutMode: 'custom',
+    timelineBundle: probeTimelineBundle,
     publicAxisLayout: resolvePublicAxisLayoutForConsumption(probeTimelineBundle),
     spacingAnchorTicks: probeTimelineBundle?.spacingAnchorTicks ?? null,
     preferMeasureBarlineAxis: meta.preferMeasureStartBarlineAxis,

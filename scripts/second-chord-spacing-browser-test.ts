@@ -20,6 +20,9 @@ type DebugScaleConfig = {
   scoreScale?: number
 }
 
+type StaffKind = 'treble' | 'bass'
+type StaffSlotWinner = StaffKind | 'tie' | 'none'
+
 type DumpNoteHead = {
   keyIndex: number
   pitch: string | null
@@ -28,13 +31,15 @@ type DumpNoteHead = {
 }
 
 type DumpNoteRow = {
-  staff: 'treble' | 'bass'
+  staff: StaffKind
   noteId: string
   noteIndex: number
   pitch: string | null
   isRest?: boolean
   onsetTicksInMeasure: number | null
   x: number
+  rightX?: number | null
+  spacingRightX?: number | null
   noteHeads: DumpNoteHead[]
   accidentalCoords?: Array<{
     keyIndex: number
@@ -48,6 +53,16 @@ type DumpSpacingOnsetReserve = {
   finalX: number | null
   leftReservePx: number | null
   rightReservePx: number | null
+  rawLeftReservePx?: number | null
+  rawRightReservePx?: number | null
+  leftOccupiedInsetPx?: number | null
+  rightOccupiedTailPx?: number | null
+  leadingTrebleRequestedExtraPx?: number | null
+  leadingBassRequestedExtraPx?: number | null
+  leadingWinningStaff?: StaffSlotWinner
+  trailingTrebleRequestedExtraPx?: number | null
+  trailingBassRequestedExtraPx?: number | null
+  trailingWinningStaff?: StaffSlotWinner
 }
 
 type DumpSpacingSegment = {
@@ -56,6 +71,9 @@ type DumpSpacingSegment = {
   baseGapPx: number | null
   extraReservePx: number | null
   appliedGapPx: number | null
+  trebleRequestedExtraPx?: number | null
+  bassRequestedExtraPx?: number | null
+  winningStaff?: StaffSlotWinner
 }
 
 type MeasureDumpRow = {
@@ -70,7 +88,6 @@ type MeasureDumpRow = {
   effectiveRightGapPx?: number | null
   leadingGapPx?: number | null
   trailingGapPx?: number | null
-  trailingTailTicks?: number | null
   spacingOccupiedLeftX?: number | null
   spacingOccupiedRightX?: number | null
   spacingOnsetReserves?: DumpSpacingOnsetReserve[]
@@ -96,74 +113,243 @@ type ScaleCase = {
   manualScalePercent: number
 }
 
-type TargetMeasureAnalysis = {
+type StaffOnsetMetrics = {
+  onsetTicks: number
+  baseX: number | null
+  finalX: number | null
+  shiftDeltaPx: number
+  rawLeftReservePx: number
+  rawRightReservePx: number
+  baseOccupiedLeftX: number | null
+  baseOccupiedRightX: number | null
+  finalOccupiedLeftX: number | null
+  finalOccupiedRightX: number | null
+}
+
+type SlotRequestSummary = {
+  requestedExtraPx: number
+  winningStaff: StaffSlotWinner
+}
+
+type DesktopTargetResult = {
   pairIndex: number
   renderedPageIndex: number | null
   noteIndex: number | null
-  measureWidth: number | null
-  totalReserveWidthPx: number | null
-  baseMeasureWidthPx: number | null
-  anchorX: number | null
-  headXs: number[]
-  candidateNotes: Array<{
-    noteIndex: number
-    onsetTicksInMeasure: number | null
-    headXs: number[]
-  }>
+  onsetTicks: number | null
   direction: 'aligned' | 'backward' | 'forward' | 'both' | 'missing'
-  onsetReserve: DumpSpacingOnsetReserve | null
-  previousSegment: DumpSpacingSegment | null
-  nextSegment: DumpSpacingSegment | null
-  effectiveBoundaryStartX: number | null
-  effectiveBoundaryEndX: number | null
-  spacingOccupiedLeftX: number | null
-  spacingOccupiedRightX: number | null
+  headXs: number[]
+  rawLeftReservePx: number | null
+  rawRightReservePx: number | null
+  expectedLeftRequestPx: number | null
+  actualLeftRequestPx: number | null
+  leftWinningStaff: StaffSlotWinner
+  expectedRightRequestPx: number | null
+  actualRightRequestPx: number | null
+  rightWinningStaff: StaffSlotWinner
   visibleLeftGapPx: number | null
   visibleRightGapPx: number | null
-  effectiveLeftGapPx: number | null
-  effectiveRightGapPx: number | null
-  overflowVsNoteEndX: number | null
-  overflowVsMeasureEndBarX: number | null
-  hasDisplacedColumns: boolean
   passed: boolean
   failureReasons: string[]
 }
 
-type ScenarioReport = {
+type DesktopScenarioReport = {
   key: string
   scale: DebugScaleConfig
   passed: boolean
-  targets: TargetMeasureAnalysis[]
+  targets: DesktopTargetResult[]
+}
+
+type FixtureResult = {
+  key: string
+  scale: DebugScaleConfig
+  measureWidth: number | null
+  targetOnsetTicks: number | null
+  direction: 'aligned' | 'backward' | 'forward' | 'both' | 'missing'
+  headXs: number[]
+  expectedLeftRequestPx: number | null
+  actualLeftRequestPx: number | null
+  leftWinningStaff: StaffSlotWinner
+  expectedRightRequestPx: number | null
+  actualRightRequestPx: number | null
+  rightWinningStaff: StaffSlotWinner
+  visibleLeftGapPx: number | null
+  visibleRightGapPx: number | null
+  passed: boolean
+  failureReasons: string[]
 }
 
 type FinalReport = {
   generatedAt: string
   xmlPath: string
-  scenarios: ScenarioReport[]
+  desktopScenarios: DesktopScenarioReport[]
+  fixtureResults: FixtureResult[]
 }
 
 const DEV_HOST = '127.0.0.1'
 const DEV_PORT = 4176
 const DEV_URL = `http://${DEV_HOST}:${DEV_PORT}`
 const TARGET_PAIR_COUNT = 8
-const GAP_EPSILON_PX = 0.01
+const GAP_EPSILON_PX = 0.15
 const HEAD_X_EPSILON_PX = 0.01
-const MIN_VISIBLE_GAP_PX = 2
-const BASE_GAP_UNIT_PX = 3.5
-const DEFAULT_BASE_MIN_GAP_32_PX = 6.9
-const DEFAULT_DURATION_GAP_RATIOS = {
-  thirtySecond: 0.7,
-  sixteenth: 0.78,
-  eighth: 0.93,
-  quarter: 1.02,
-  half: 1.22,
-  whole: 1.4,
-} as const
+const MIN_VISIBLE_GAP_PX = 3
+const DEFAULT_NOTE_HEAD_WIDTH_PX = 9
+const APPROX_ACCIDENTAL_WIDTH_PX = 8
 
 const SCALE_CASES: ScaleCase[] = [
   { key: 'manual-100', autoScaleEnabled: false, manualScalePercent: 100 },
   { key: 'auto-scale', autoScaleEnabled: true, manualScalePercent: 100 },
 ]
+
+const FIXTURE_SCALE_CASE: ScaleCase = {
+  key: 'manual-100',
+  autoScaleEnabled: false,
+  manualScalePercent: 100,
+}
+
+const CROSS_STAFF_FALSE_POSITIVE_FIXTURE_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC
+  "-//Recordare//DTD MusicXML 3.1 Partwise//EN"
+  "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <part-list>
+    <score-part id="P1">
+      <part-name>Piano</part-name>
+    </score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <staves>2</staves>
+        <clef number="1"><sign>G</sign><line>2</line></clef>
+        <clef number="2"><sign>F</sign><line>4</line></clef>
+      </attributes>
+      <note>
+        <pitch><step>C</step><octave>5</octave></pitch>
+        <duration>3</duration>
+        <type>eighth</type>
+        <dot/>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>D</step><octave>5</octave></pitch>
+        <duration>1</duration>
+        <type>16th</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>E</step><octave>5</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>F</step><octave>5</octave></pitch>
+        <duration>8</duration>
+        <type>half</type>
+        <staff>1</staff>
+      </note>
+
+      <note>
+        <pitch><step>C</step><octave>3</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <pitch><step>D</step><octave>3</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <chord/>
+        <pitch><step>E</step><octave>3</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <pitch><step>F</step><octave>3</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <pitch><step>G</step><octave>2</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+    </measure>
+  </part>
+</score-partwise>
+`
+
+const LOCAL_BASS_BOUNDARY_COLLISION_FIXTURE_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC
+  "-//Recordare//DTD MusicXML 3.1 Partwise//EN"
+  "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <part-list>
+    <score-part id="P1">
+      <part-name>Piano</part-name>
+    </score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <staves>2</staves>
+        <clef number="1"><sign>G</sign><line>2</line></clef>
+        <clef number="2"><sign>F</sign><line>4</line></clef>
+      </attributes>
+      <note>
+        <pitch><step>C</step><octave>5</octave></pitch>
+        <duration>16</duration>
+        <type>whole</type>
+        <staff>1</staff>
+      </note>
+
+      <note>
+        <pitch><step>D</step><octave>3</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <chord/>
+        <pitch><step>E</step><octave>3</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <pitch><step>F</step><octave>3</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <pitch><step>G</step><octave>2</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <pitch><step>A</step><octave>2</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+    </measure>
+  </part>
+</score-partwise>
+`
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -215,14 +401,14 @@ async function waitForDebugApi(page: Page): Promise<void> {
     () => {
       const api = (window as unknown as { __scoreDebug?: Record<string, unknown> }).__scoreDebug
       return (
-      !!api &&
-      typeof api.importMusicXmlText === 'function' &&
-      typeof api.getImportFeedback === 'function' &&
-      typeof api.getPaging === 'function' &&
-      typeof api.dumpAllMeasureCoordinates === 'function' &&
-      typeof api.getScaleConfig === 'function' &&
-      typeof api.setAutoScaleEnabled === 'function' &&
-      typeof api.setManualScalePercent === 'function'
+        !!api &&
+        typeof api.importMusicXmlText === 'function' &&
+        typeof api.getImportFeedback === 'function' &&
+        typeof api.getPaging === 'function' &&
+        typeof api.dumpAllMeasureCoordinates === 'function' &&
+        typeof api.getScaleConfig === 'function' &&
+        typeof api.setAutoScaleEnabled === 'function' &&
+        typeof api.setManualScalePercent === 'function'
       )
     },
     undefined,
@@ -463,37 +649,6 @@ function approximatelyEqual(left: number | null, right: number | null, epsilon =
   return Math.abs(left - right) <= epsilon
 }
 
-function getDurationGapRatioByDeltaTicks(deltaTicks: number): number {
-  const anchors: Array<{ ticks: number; ratio: number }> = [
-    { ticks: 2, ratio: DEFAULT_DURATION_GAP_RATIOS.thirtySecond },
-    { ticks: 4, ratio: DEFAULT_DURATION_GAP_RATIOS.sixteenth },
-    { ticks: 8, ratio: DEFAULT_DURATION_GAP_RATIOS.eighth },
-    { ticks: 16, ratio: DEFAULT_DURATION_GAP_RATIOS.quarter },
-    { ticks: 32, ratio: DEFAULT_DURATION_GAP_RATIOS.half },
-    { ticks: 64, ratio: DEFAULT_DURATION_GAP_RATIOS.whole },
-  ]
-  const safeTicks = Math.max(1, deltaTicks)
-  if (safeTicks <= anchors[0].ticks) return anchors[0].ratio
-  if (safeTicks >= anchors[anchors.length - 1].ticks) return anchors[anchors.length - 1].ratio
-  for (let index = 1; index < anchors.length; index += 1) {
-    const left = anchors[index - 1]
-    const right = anchors[index]
-    if (safeTicks === right.ticks) return right.ratio
-    if (safeTicks < right.ticks) {
-      const leftLog = Math.log2(left.ticks)
-      const rightLog = Math.log2(right.ticks)
-      const tickLog = Math.log2(safeTicks)
-      const blend = (tickLog - leftLog) / Math.max(0.0001, rightLog - leftLog)
-      return left.ratio + (right.ratio - left.ratio) * blend
-    }
-  }
-  return anchors[anchors.length - 1]?.ratio ?? 1
-}
-
-function mapTickGapToWeight(deltaTicks: number): number {
-  return DEFAULT_BASE_MIN_GAP_32_PX * Math.max(0.0001, getDurationGapRatioByDeltaTicks(deltaTicks)) * BASE_GAP_UNIT_PX
-}
-
 function sanitizeSpacingOnsetReserve(
   entry: DumpSpacingOnsetReserve | null | undefined,
 ): DumpSpacingOnsetReserve | null {
@@ -504,6 +659,16 @@ function sanitizeSpacingOnsetReserve(
     finalX: toRoundedFiniteNumber(entry.finalX),
     leftReservePx: toRoundedFiniteNumber(entry.leftReservePx),
     rightReservePx: toRoundedFiniteNumber(entry.rightReservePx),
+    rawLeftReservePx: toRoundedFiniteNumber(entry.rawLeftReservePx),
+    rawRightReservePx: toRoundedFiniteNumber(entry.rawRightReservePx),
+    leftOccupiedInsetPx: toRoundedFiniteNumber(entry.leftOccupiedInsetPx),
+    rightOccupiedTailPx: toRoundedFiniteNumber(entry.rightOccupiedTailPx),
+    leadingTrebleRequestedExtraPx: toRoundedFiniteNumber(entry.leadingTrebleRequestedExtraPx),
+    leadingBassRequestedExtraPx: toRoundedFiniteNumber(entry.leadingBassRequestedExtraPx),
+    leadingWinningStaff: entry.leadingWinningStaff ?? 'none',
+    trailingTrebleRequestedExtraPx: toRoundedFiniteNumber(entry.trailingTrebleRequestedExtraPx),
+    trailingBassRequestedExtraPx: toRoundedFiniteNumber(entry.trailingBassRequestedExtraPx),
+    trailingWinningStaff: entry.trailingWinningStaff ?? 'none',
   }
 }
 
@@ -515,24 +680,391 @@ function sanitizeSpacingSegment(entry: DumpSpacingSegment | null | undefined): D
     baseGapPx: toRoundedFiniteNumber(entry.baseGapPx),
     extraReservePx: toRoundedFiniteNumber(entry.extraReservePx),
     appliedGapPx: toRoundedFiniteNumber(entry.appliedGapPx),
+    trebleRequestedExtraPx: toRoundedFiniteNumber(entry.trebleRequestedExtraPx),
+    bassRequestedExtraPx: toRoundedFiniteNumber(entry.bassRequestedExtraPx),
+    winningStaff: entry.winningStaff ?? 'none',
   }
 }
 
-function analyzeTargetRow(row: MergedMeasureDumpRow, pairIndex: number): TargetMeasureAnalysis {
-  const candidateNotes = row.notes
-    .filter((note) => note.staff === 'bass' && note.isRest !== true && Array.isArray(note.noteHeads) && note.noteHeads.length > 1)
-    .map((note) => ({
-      noteIndex: note.noteIndex,
-      onsetTicksInMeasure: note.onsetTicksInMeasure,
-      headXs: dedupeSortedNumbers(note.noteHeads.map((head) => head.x), HEAD_X_EPSILON_PX),
-    }))
-    .sort((left, right) => {
-      const leftOnset = left.onsetTicksInMeasure ?? Number.POSITIVE_INFINITY
-      const rightOnset = right.onsetTicksInMeasure ?? Number.POSITIVE_INFINITY
-      if (leftOnset !== rightOnset) return leftOnset - rightOnset
-      return left.noteIndex - right.noteIndex
-    })
+function getNoteOccupiedLeftX(note: DumpNoteRow): number | null {
+  let minX = Number.POSITIVE_INFINITY
+  note.noteHeads.forEach((head) => {
+    if (Number.isFinite(head.x)) {
+      minX = Math.min(minX, head.x)
+    }
+  })
+  note.accidentalCoords?.forEach((accidental) => {
+    if (Number.isFinite(accidental.rightX)) {
+      minX = Math.min(minX, accidental.rightX - APPROX_ACCIDENTAL_WIDTH_PX)
+    }
+  })
+  if (Number.isFinite(note.x)) {
+    minX = Math.min(minX, note.x)
+  }
+  return Number.isFinite(minX) ? Number(minX.toFixed(3)) : null
+}
 
+function getNoteOccupiedRightX(note: DumpNoteRow): number | null {
+  let maxX = Number.NEGATIVE_INFINITY
+  if (typeof note.rightX === 'number' && Number.isFinite(note.rightX)) {
+    maxX = Math.max(maxX, note.rightX)
+  }
+  if (typeof note.spacingRightX === 'number' && Number.isFinite(note.spacingRightX)) {
+    maxX = Math.max(maxX, note.spacingRightX)
+  }
+  note.noteHeads.forEach((head) => {
+    if (Number.isFinite(head.x)) {
+      maxX = Math.max(maxX, head.x + DEFAULT_NOTE_HEAD_WIDTH_PX)
+    }
+  })
+  if (Number.isFinite(note.x)) {
+    maxX = Math.max(maxX, note.x)
+  }
+  return Number.isFinite(maxX) ? Number(maxX.toFixed(3)) : null
+}
+
+function getNoteRawReserveExtents(note: DumpNoteRow): { rawLeftReservePx: number; rawRightReservePx: number } {
+  if (!Number.isFinite(note.x)) {
+    return {
+      rawLeftReservePx: 0,
+      rawRightReservePx: 0,
+    }
+  }
+
+  let rawLeftReservePx = 0
+  let rawRightReservePx = 0
+  note.noteHeads.forEach((head) => {
+    if (!Number.isFinite(head.x)) return
+    if (head.x < note.x - HEAD_X_EPSILON_PX) {
+      rawLeftReservePx = Math.max(rawLeftReservePx, note.x - head.x)
+    }
+    if (head.x > note.x + HEAD_X_EPSILON_PX) {
+      rawRightReservePx = Math.max(rawRightReservePx, head.x - note.x)
+    }
+  })
+  note.accidentalCoords?.forEach((accidental) => {
+    if (!Number.isFinite(accidental.rightX)) return
+    const accidentalLeftX = accidental.rightX - APPROX_ACCIDENTAL_WIDTH_PX
+    rawLeftReservePx = Math.max(rawLeftReservePx, note.x - accidentalLeftX)
+  })
+
+  return {
+    rawLeftReservePx: Number(rawLeftReservePx.toFixed(3)),
+    rawRightReservePx: Number(rawRightReservePx.toFixed(3)),
+  }
+}
+
+function resolveWinningStaff(trebleRequestedExtraPx: number, bassRequestedExtraPx: number): StaffSlotWinner {
+  const safeTrebleRequestedExtraPx = Math.max(0, trebleRequestedExtraPx)
+  const safeBassRequestedExtraPx = Math.max(0, bassRequestedExtraPx)
+  if (safeTrebleRequestedExtraPx <= 0 && safeBassRequestedExtraPx <= 0) return 'none'
+  if (Math.abs(safeTrebleRequestedExtraPx - safeBassRequestedExtraPx) <= 0.001) return 'tie'
+  return safeTrebleRequestedExtraPx > safeBassRequestedExtraPx ? 'treble' : 'bass'
+}
+
+function getSpacingOnsetReserves(row: MergedMeasureDumpRow): DumpSpacingOnsetReserve[] {
+  return (row.spacingOnsetReserves ?? [])
+    .map((entry) => sanitizeSpacingOnsetReserve(entry))
+    .filter((entry): entry is DumpSpacingOnsetReserve => entry !== null)
+    .sort((left, right) => left.onsetTicks - right.onsetTicks)
+}
+
+function getSpacingSegments(row: MergedMeasureDumpRow): DumpSpacingSegment[] {
+  return (row.spacingSegments ?? [])
+    .map((entry) => sanitizeSpacingSegment(entry))
+    .filter((entry): entry is DumpSpacingSegment => entry !== null)
+    .sort((left, right) => {
+      if (left.fromOnsetTicks !== right.fromOnsetTicks) return left.fromOnsetTicks - right.fromOnsetTicks
+      return left.toOnsetTicks - right.toOnsetTicks
+    })
+}
+
+function buildStaffOnsetMetrics(row: MergedMeasureDumpRow, staff: StaffKind): StaffOnsetMetrics[] {
+  const onsetReserveByTick = new Map<number, DumpSpacingOnsetReserve>()
+  getSpacingOnsetReserves(row).forEach((entry) => {
+    onsetReserveByTick.set(entry.onsetTicks, entry)
+  })
+
+  const notesByTick = new Map<number, DumpNoteRow[]>()
+  row.notes.forEach((note) => {
+    if (note.staff !== staff || note.isRest === true) return
+    if (typeof note.onsetTicksInMeasure !== 'number' || !Number.isFinite(note.onsetTicksInMeasure)) return
+    const onsetTicks = Math.round(note.onsetTicksInMeasure)
+    const bucket = notesByTick.get(onsetTicks)
+    if (bucket) {
+      bucket.push(note)
+      return
+    }
+    notesByTick.set(onsetTicks, [note])
+  })
+
+  return [...notesByTick.keys()]
+    .sort((left, right) => left - right)
+    .map((onsetTicks) => {
+      const onsetNotes = notesByTick.get(onsetTicks) ?? []
+      const onsetReserve = onsetReserveByTick.get(onsetTicks) ?? null
+      const finalXFromNote = onsetNotes.find((note) => Number.isFinite(note.x))?.x ?? null
+      const finalX = onsetReserve?.finalX ?? toRoundedFiniteNumber(finalXFromNote)
+      const baseX = onsetReserve?.baseX ?? finalX
+      const shiftDeltaPx =
+        finalX !== null && baseX !== null ? Number((finalX - baseX).toFixed(3)) : 0
+
+      let rawLeftReservePx = 0
+      let rawRightReservePx = 0
+      let finalOccupiedLeftX = Number.POSITIVE_INFINITY
+      let finalOccupiedRightX = Number.NEGATIVE_INFINITY
+
+      onsetNotes.forEach((note) => {
+        const rawReserve = getNoteRawReserveExtents(note)
+        rawLeftReservePx = Math.max(rawLeftReservePx, rawReserve.rawLeftReservePx)
+        rawRightReservePx = Math.max(rawRightReservePx, rawReserve.rawRightReservePx)
+        const occupiedLeftX = getNoteOccupiedLeftX(note)
+        const occupiedRightX = getNoteOccupiedRightX(note)
+        if (occupiedLeftX !== null) finalOccupiedLeftX = Math.min(finalOccupiedLeftX, occupiedLeftX)
+        if (occupiedRightX !== null) finalOccupiedRightX = Math.max(finalOccupiedRightX, occupiedRightX)
+      })
+
+      const safeFinalOccupiedLeftX =
+        Number.isFinite(finalOccupiedLeftX) ? Number(finalOccupiedLeftX.toFixed(3)) : finalX
+      const safeFinalOccupiedRightX =
+        Number.isFinite(finalOccupiedRightX) ? Number(finalOccupiedRightX.toFixed(3)) : finalX
+
+      return {
+        onsetTicks,
+        baseX,
+        finalX,
+        shiftDeltaPx,
+        rawLeftReservePx: Number(rawLeftReservePx.toFixed(3)),
+        rawRightReservePx: Number(rawRightReservePx.toFixed(3)),
+        finalOccupiedLeftX: safeFinalOccupiedLeftX,
+        finalOccupiedRightX: safeFinalOccupiedRightX,
+        baseOccupiedLeftX:
+          safeFinalOccupiedLeftX !== null
+            ? Number((safeFinalOccupiedLeftX - shiftDeltaPx).toFixed(3))
+            : null,
+        baseOccupiedRightX:
+          safeFinalOccupiedRightX !== null
+            ? Number((safeFinalOccupiedRightX - shiftDeltaPx).toFixed(3))
+            : null,
+      }
+    })
+}
+
+function computeExpectedLeftRequestPx(
+  metrics: StaffOnsetMetrics,
+  previousMetrics: StaffOnsetMetrics | null,
+  boundaryStartX: number | null,
+): number {
+  if (metrics.rawLeftReservePx <= HEAD_X_EPSILON_PX) return 0
+  if (metrics.baseOccupiedLeftX === null) return 0
+  const blockerRightX = previousMetrics?.baseOccupiedRightX ?? boundaryStartX
+  if (blockerRightX === null) return 0
+  const gapPx = metrics.baseOccupiedLeftX - blockerRightX
+  return gapPx < 0 ? Number((Math.abs(gapPx) + MIN_VISIBLE_GAP_PX).toFixed(3)) : 0
+}
+
+function computeExpectedRightRequestPx(
+  metrics: StaffOnsetMetrics,
+  nextMetrics: StaffOnsetMetrics | null,
+  boundaryEndX: number | null,
+): number {
+  if (metrics.rawRightReservePx <= HEAD_X_EPSILON_PX) return 0
+  if (metrics.baseOccupiedRightX === null) return 0
+  const blockerLeftX = nextMetrics?.baseOccupiedLeftX ?? boundaryEndX
+  if (blockerLeftX === null) return 0
+  const gapPx = blockerLeftX - metrics.baseOccupiedRightX
+  return gapPx < 0 ? Number((Math.abs(gapPx) + MIN_VISIBLE_GAP_PX).toFixed(3)) : 0
+}
+
+function resolveSlotRequestSummary(params: {
+  row: MergedMeasureDumpRow
+  staff: StaffKind
+  onsetTicks: number
+  side: 'left' | 'right'
+}): SlotRequestSummary {
+  const onsetReserves = getSpacingOnsetReserves(params.row)
+  const spacingSegments = getSpacingSegments(params.row)
+  const sharedIndex = onsetReserves.findIndex((entry) => entry.onsetTicks === params.onsetTicks)
+  if (sharedIndex < 0) {
+    return {
+      requestedExtraPx: 0,
+      winningStaff: 'none',
+    }
+  }
+
+  const onsetReserve = onsetReserves[sharedIndex] ?? null
+  const isFirst = sharedIndex === 0
+  const isLast = sharedIndex === onsetReserves.length - 1
+
+  if (params.side === 'left') {
+    if (isFirst) {
+      return {
+        requestedExtraPx:
+          params.staff === 'treble'
+            ? Math.max(0, onsetReserve?.leadingTrebleRequestedExtraPx ?? 0)
+            : Math.max(0, onsetReserve?.leadingBassRequestedExtraPx ?? 0),
+        winningStaff: onsetReserve?.leadingWinningStaff ?? 'none',
+      }
+    }
+    const previousSegment =
+      spacingSegments.find((segment) => segment.toOnsetTicks === params.onsetTicks) ?? null
+    return {
+      requestedExtraPx:
+        params.staff === 'treble'
+          ? Math.max(0, previousSegment?.trebleRequestedExtraPx ?? 0)
+          : Math.max(0, previousSegment?.bassRequestedExtraPx ?? 0),
+      winningStaff: previousSegment?.winningStaff ?? 'none',
+    }
+  }
+
+  if (isLast) {
+    return {
+      requestedExtraPx:
+        params.staff === 'treble'
+          ? Math.max(0, onsetReserve?.trailingTrebleRequestedExtraPx ?? 0)
+          : Math.max(0, onsetReserve?.trailingBassRequestedExtraPx ?? 0),
+      winningStaff: onsetReserve?.trailingWinningStaff ?? 'none',
+    }
+  }
+  const nextSegment =
+    spacingSegments.find((segment) => segment.fromOnsetTicks === params.onsetTicks) ?? null
+  return {
+    requestedExtraPx:
+      params.staff === 'treble'
+        ? Math.max(0, nextSegment?.trebleRequestedExtraPx ?? 0)
+        : Math.max(0, nextSegment?.bassRequestedExtraPx ?? 0),
+    winningStaff: nextSegment?.winningStaff ?? 'none',
+  }
+}
+
+function pushFailure(failures: string[], code: string, detail?: string | number | null): void {
+  if (detail === undefined) {
+    failures.push(code)
+    return
+  }
+  failures.push(`${code}:${detail}`)
+}
+
+function validateSharedSlotDebug(row: MergedMeasureDumpRow, failures: string[]): void {
+  const onsetReserves = getSpacingOnsetReserves(row)
+  const spacingSegments = getSpacingSegments(row)
+
+  spacingSegments.forEach((segment) => {
+    const trebleRequestedExtraPx = Math.max(0, segment.trebleRequestedExtraPx ?? 0)
+    const bassRequestedExtraPx = Math.max(0, segment.bassRequestedExtraPx ?? 0)
+    const expectedExtraReservePx = Number(Math.max(trebleRequestedExtraPx, bassRequestedExtraPx).toFixed(3))
+    if (!approximatelyEqual(segment.extraReservePx, expectedExtraReservePx)) {
+      pushFailure(
+        failures,
+        'segment-extra-not-max',
+        `${segment.fromOnsetTicks}->${segment.toOnsetTicks}:${segment.extraReservePx ?? 'null'}!=${expectedExtraReservePx}`,
+      )
+    }
+    const expectedAppliedGapPx =
+      segment.baseGapPx !== null ? Number((segment.baseGapPx + expectedExtraReservePx).toFixed(3)) : null
+    if (!approximatelyEqual(segment.appliedGapPx, expectedAppliedGapPx)) {
+      pushFailure(
+        failures,
+        'segment-applied-gap-mismatch',
+        `${segment.fromOnsetTicks}->${segment.toOnsetTicks}:${segment.appliedGapPx ?? 'null'}!=${expectedAppliedGapPx ?? 'null'}`,
+      )
+    }
+    const expectedWinningStaff = resolveWinningStaff(trebleRequestedExtraPx, bassRequestedExtraPx)
+    if ((segment.winningStaff ?? 'none') !== expectedWinningStaff) {
+      pushFailure(
+        failures,
+        'segment-winning-staff-mismatch',
+        `${segment.fromOnsetTicks}->${segment.toOnsetTicks}:${segment.winningStaff ?? 'none'}!=${expectedWinningStaff}`,
+      )
+    }
+  })
+
+  const firstOnsetReserve = onsetReserves[0] ?? null
+  if (firstOnsetReserve) {
+    const expectedLeadingExtraPx = Number(
+      Math.max(
+        Math.max(0, firstOnsetReserve.leadingTrebleRequestedExtraPx ?? 0),
+        Math.max(0, firstOnsetReserve.leadingBassRequestedExtraPx ?? 0),
+      ).toFixed(3),
+    )
+    if (!approximatelyEqual(firstOnsetReserve.leftReservePx, expectedLeadingExtraPx)) {
+      pushFailure(
+        failures,
+        'leading-slot-not-max',
+        `${firstOnsetReserve.leftReservePx ?? 'null'}!=${expectedLeadingExtraPx}`,
+      )
+    }
+    const expectedLeadingWinner = resolveWinningStaff(
+      Math.max(0, firstOnsetReserve.leadingTrebleRequestedExtraPx ?? 0),
+      Math.max(0, firstOnsetReserve.leadingBassRequestedExtraPx ?? 0),
+    )
+    if ((firstOnsetReserve.leadingWinningStaff ?? 'none') !== expectedLeadingWinner) {
+      pushFailure(
+        failures,
+        'leading-winning-staff-mismatch',
+        `${firstOnsetReserve.leadingWinningStaff ?? 'none'}!=${expectedLeadingWinner}`,
+      )
+    }
+  }
+
+  const lastOnsetReserve = onsetReserves[onsetReserves.length - 1] ?? null
+  if (lastOnsetReserve) {
+    const expectedTrailingExtraPx = Number(
+      Math.max(
+        Math.max(0, lastOnsetReserve.trailingTrebleRequestedExtraPx ?? 0),
+        Math.max(0, lastOnsetReserve.trailingBassRequestedExtraPx ?? 0),
+      ).toFixed(3),
+    )
+    if (!approximatelyEqual(lastOnsetReserve.rightReservePx, expectedTrailingExtraPx)) {
+      pushFailure(
+        failures,
+        'trailing-slot-not-max',
+        `${lastOnsetReserve.rightReservePx ?? 'null'}!=${expectedTrailingExtraPx}`,
+      )
+    }
+    const expectedTrailingWinner = resolveWinningStaff(
+      Math.max(0, lastOnsetReserve.trailingTrebleRequestedExtraPx ?? 0),
+      Math.max(0, lastOnsetReserve.trailingBassRequestedExtraPx ?? 0),
+    )
+    if ((lastOnsetReserve.trailingWinningStaff ?? 'none') !== expectedTrailingWinner) {
+      pushFailure(
+        failures,
+        'trailing-winning-staff-mismatch',
+        `${lastOnsetReserve.trailingWinningStaff ?? 'none'}!=${expectedTrailingWinner}`,
+      )
+    }
+  }
+}
+
+function validateNoBarlineOverflow(row: MergedMeasureDumpRow, failures: string[]): void {
+  const overflowVsMeasureEndBarX =
+    typeof row.overflowVsMeasureEndBarX === 'number' && Number.isFinite(row.overflowVsMeasureEndBarX)
+      ? Number(row.overflowVsMeasureEndBarX.toFixed(3))
+      : null
+  if (overflowVsMeasureEndBarX !== null && overflowVsMeasureEndBarX > GAP_EPSILON_PX) {
+    pushFailure(failures, 'overflow-vs-measure-end-barline', overflowVsMeasureEndBarX)
+  }
+}
+
+function analyzeDesktopTargetRow(row: MergedMeasureDumpRow, pairIndex: number): DesktopTargetResult {
+  const failures: string[] = []
+  validateSharedSlotDebug(row, failures)
+  validateNoBarlineOverflow(row, failures)
+
+  if (!row.rendered) {
+    pushFailure(failures, 'measure-not-rendered')
+  }
+
+  const boundaryStartX =
+    typeof row.effectiveBoundaryStartX === 'number' && Number.isFinite(row.effectiveBoundaryStartX)
+      ? Number(row.effectiveBoundaryStartX.toFixed(3))
+      : null
+  const boundaryEndX =
+    typeof row.effectiveBoundaryEndX === 'number' && Number.isFinite(row.effectiveBoundaryEndX)
+      ? Number(row.effectiveBoundaryEndX.toFixed(3))
+      : null
+
+  const bassMetrics = buildStaffOnsetMetrics(row, 'bass')
   const targetNote =
     row.notes
       .filter((note) => note.staff === 'bass' && note.isRest !== true && Array.isArray(note.noteHeads) && note.noteHeads.length > 1)
@@ -543,282 +1075,132 @@ function analyzeTargetRow(row: MergedMeasureDumpRow, pairIndex: number): TargetM
         return left.noteIndex - right.noteIndex
       })[0] ?? null
 
-  const failureReasons: string[] = []
-  if (!row.rendered) {
-    failureReasons.push('measure-not-rendered')
-  }
   if (!targetNote) {
-    failureReasons.push('target-bass-second-chord-missing')
+    pushFailure(failures, 'target-bass-displaced-chord-missing')
   }
 
-  const headXs = targetNote ? dedupeSortedNumbers(targetNote.noteHeads.map((head) => head.x), HEAD_X_EPSILON_PX) : []
-  const anchorX = targetNote && Number.isFinite(targetNote.x) ? Number(targetNote.x.toFixed(3)) : null
-  const targetHasRenderedAccidentals =
-    targetNote && Array.isArray(targetNote.accidentalCoords) ? targetNote.accidentalCoords.length > 0 : false
-  const hasDisplacedColumns = headXs.length > 1
-  if (targetNote && !hasDisplacedColumns) {
-    failureReasons.push('displaced-head-columns-not-detected')
-  }
   const targetOnsetTicks =
     targetNote && typeof targetNote.onsetTicksInMeasure === 'number' && Number.isFinite(targetNote.onsetTicksInMeasure)
       ? Math.round(targetNote.onsetTicksInMeasure)
       : null
+  const headXs = targetNote ? dedupeSortedNumbers(targetNote.noteHeads.map((head) => head.x), HEAD_X_EPSILON_PX) : []
+  const anchorX = targetNote && Number.isFinite(targetNote.x) ? Number(targetNote.x.toFixed(3)) : null
   const direction = classifyDirection(anchorX, headXs)
+  if (targetNote && (direction === 'aligned' || direction === 'missing')) {
+    pushFailure(failures, 'unexpected-direction', direction)
+  }
 
-  const spacingOnsetReserves = (row.spacingOnsetReserves ?? [])
-    .map((entry) => sanitizeSpacingOnsetReserve(entry))
-    .filter((entry): entry is DumpSpacingOnsetReserve => entry !== null)
-  const spacingSegments = (row.spacingSegments ?? [])
-    .map((entry) => sanitizeSpacingSegment(entry))
-    .filter((entry): entry is DumpSpacingSegment => entry !== null)
-  const measureWidth =
-    typeof row.measureWidth === 'number' && Number.isFinite(row.measureWidth)
-      ? Number(row.measureWidth.toFixed(3))
+  const targetMetricsIndex =
+    targetOnsetTicks !== null ? bassMetrics.findIndex((metrics) => metrics.onsetTicks === targetOnsetTicks) : -1
+  const targetMetrics = targetMetricsIndex >= 0 ? bassMetrics[targetMetricsIndex] ?? null : null
+  if (targetNote && !targetMetrics) {
+    pushFailure(failures, 'target-onset-metrics-missing')
+  }
+
+  const previousMetrics = targetMetricsIndex > 0 ? bassMetrics[targetMetricsIndex - 1] ?? null : null
+  const nextMetrics =
+    targetMetricsIndex >= 0 && targetMetricsIndex < bassMetrics.length - 1
+      ? bassMetrics[targetMetricsIndex + 1] ?? null
       : null
-  const leadingGapPx =
-    typeof row.leadingGapPx === 'number' && Number.isFinite(row.leadingGapPx)
-      ? Number(row.leadingGapPx.toFixed(3))
-      : null
-  const trailingGapPx =
-    typeof row.trailingGapPx === 'number' && Number.isFinite(row.trailingGapPx)
-      ? Number(row.trailingGapPx.toFixed(3))
-      : null
-  const trailingTailTicks =
-    typeof row.trailingTailTicks === 'number' && Number.isFinite(row.trailingTailTicks)
-      ? Math.max(0, Math.round(row.trailingTailTicks))
-      : null
-  const onsetReserveByTick = new Map<number, DumpSpacingOnsetReserve>()
-  spacingOnsetReserves.forEach((entry) => {
-    onsetReserveByTick.set(entry.onsetTicks, entry)
-  })
-  const onsetReserve = targetOnsetTicks !== null ? onsetReserveByTick.get(targetOnsetTicks) ?? null : null
-  const previousSegment =
+
+  const expectedLeftRequestPx =
+    targetMetrics && direction !== 'forward'
+      ? computeExpectedLeftRequestPx(targetMetrics, previousMetrics, boundaryStartX)
+      : targetMetrics
+        ? 0
+        : null
+  const expectedRightRequestPx =
+    targetMetrics && direction !== 'backward'
+      ? computeExpectedRightRequestPx(targetMetrics, nextMetrics, boundaryEndX)
+      : targetMetrics
+        ? 0
+        : null
+
+  const actualLeftSummary =
     targetOnsetTicks !== null
-      ? spacingSegments.find((entry) => entry.toOnsetTicks === targetOnsetTicks) ?? null
-      : null
-  const nextSegment =
+      ? resolveSlotRequestSummary({
+          row,
+          staff: 'bass',
+          onsetTicks: targetOnsetTicks,
+          side: 'left',
+        })
+      : { requestedExtraPx: 0, winningStaff: 'none' as StaffSlotWinner }
+  const actualRightSummary =
     targetOnsetTicks !== null
-      ? spacingSegments.find((entry) => entry.fromOnsetTicks === targetOnsetTicks) ?? null
-      : null
+      ? resolveSlotRequestSummary({
+          row,
+          staff: 'bass',
+          onsetTicks: targetOnsetTicks,
+          side: 'right',
+        })
+      : { requestedExtraPx: 0, winningStaff: 'none' as StaffSlotWinner }
 
-  if (targetNote && !onsetReserve) {
-    failureReasons.push('target-onset-reserve-missing')
-  }
-  if (targetNote && onsetReserve && !targetHasRenderedAccidentals) {
-    if (direction === 'forward') {
-      if ((onsetReserve.leftReservePx ?? 0) > GAP_EPSILON_PX) {
-        failureReasons.push(`forward-without-accidentals-left-reserve:${onsetReserve.leftReservePx ?? 'null'}`)
-      }
-      if ((onsetReserve.rightReservePx ?? 0) <= GAP_EPSILON_PX) {
-        failureReasons.push(`forward-without-accidentals-missing-right-reserve:${onsetReserve.rightReservePx ?? 'null'}`)
-      }
-    } else if (direction === 'backward') {
-      if ((onsetReserve.rightReservePx ?? 0) > GAP_EPSILON_PX) {
-        failureReasons.push(`backward-without-accidentals-right-reserve:${onsetReserve.rightReservePx ?? 'null'}`)
-      }
-      if ((onsetReserve.leftReservePx ?? 0) <= GAP_EPSILON_PX) {
-        failureReasons.push(`backward-without-accidentals-missing-left-reserve:${onsetReserve.leftReservePx ?? 'null'}`)
-      }
-    }
-  }
-
-  spacingSegments.forEach((segment) => {
-    const fromReserve = onsetReserveByTick.get(segment.fromOnsetTicks) ?? null
-    const toReserve = onsetReserveByTick.get(segment.toOnsetTicks) ?? null
-    const expectedExtraReservePx = Number(
-      (
-        (fromReserve?.rightReservePx ?? 0) +
-        (toReserve?.leftReservePx ?? 0)
-      ).toFixed(3),
+  if (expectedLeftRequestPx !== null && !approximatelyEqual(actualLeftSummary.requestedExtraPx, expectedLeftRequestPx)) {
+    pushFailure(
+      failures,
+      'left-request-mismatch',
+      `${actualLeftSummary.requestedExtraPx}!=${expectedLeftRequestPx}`,
     )
-    if (!approximatelyEqual(segment.extraReservePx, expectedExtraReservePx)) {
-      failureReasons.push(
-        `segment-extra-reserve-mismatch:${segment.fromOnsetTicks}->${segment.toOnsetTicks}:${segment.extraReservePx ?? 'null'}!=${expectedExtraReservePx}`,
-      )
-    }
-    const expectedAppliedGapPx =
-      segment.baseGapPx !== null ? Number((segment.baseGapPx + expectedExtraReservePx).toFixed(3)) : null
-    if (!approximatelyEqual(segment.appliedGapPx, expectedAppliedGapPx)) {
-      failureReasons.push(
-        `segment-applied-gap-mismatch:${segment.fromOnsetTicks}->${segment.toOnsetTicks}:${segment.appliedGapPx ?? 'null'}!=${expectedAppliedGapPx ?? 'null'}`,
-      )
-    }
-  })
-
-  const sortedOnsetReserves = spacingOnsetReserves
-    .slice()
-    .sort((left, right) => left.onsetTicks - right.onsetTicks)
-  const firstOnsetReserve = sortedOnsetReserves[0] ?? null
-  const lastOnsetReserve = sortedOnsetReserves[sortedOnsetReserves.length - 1] ?? null
-  const firstLeftReservePx = Math.max(0, firstOnsetReserve?.leftReservePx ?? 0)
-  const lastRightReservePx = Math.max(0, lastOnsetReserve?.rightReservePx ?? 0)
-  const totalSegmentReservePx = Number(
-    spacingSegments.reduce((sum, segment) => sum + Math.max(0, segment.extraReservePx ?? 0), 0).toFixed(3),
-  )
-  const totalReserveWidthPx = Number((firstLeftReservePx + totalSegmentReservePx + lastRightReservePx).toFixed(3))
-  const baseMeasureWidthPx =
-    measureWidth !== null ? Number((measureWidth - totalReserveWidthPx).toFixed(3)) : null
-
-  if (
-    measureWidth !== null &&
-    leadingGapPx !== null &&
-    trailingGapPx !== null &&
-    trailingTailTicks !== null &&
-    baseMeasureWidthPx !== null
-  ) {
-    const baseLeadingGapPx = Number((leadingGapPx - firstLeftReservePx).toFixed(3))
-    const rawTrailingGapPx = Number(mapTickGapToWeight(trailingTailTicks).toFixed(3))
-    const rawAnchorWeightPx = Number(
-      spacingSegments.reduce(
-        (sum, segment) => sum + mapTickGapToWeight(Math.max(1, segment.toOnsetTicks - segment.fromOnsetTicks)),
-        0,
-      ).toFixed(3),
+  }
+  if (expectedRightRequestPx !== null && !approximatelyEqual(actualRightSummary.requestedExtraPx, expectedRightRequestPx)) {
+    pushFailure(
+      failures,
+      'right-request-mismatch',
+      `${actualRightSummary.requestedExtraPx}!=${expectedRightRequestPx}`,
     )
-    const rawTotalWeightPx = Number((rawAnchorWeightPx + rawTrailingGapPx).toFixed(3))
-
-    if (baseLeadingGapPx < -GAP_EPSILON_PX) {
-      failureReasons.push('base-leading-gap-negative')
-    } else if (rawTotalWeightPx > GAP_EPSILON_PX) {
-      const baseDistributableWidthPx = Number((baseMeasureWidthPx - baseLeadingGapPx).toFixed(3))
-      const baseTimelineScale = baseDistributableWidthPx / rawTotalWeightPx
-
-      spacingSegments.forEach((segment) => {
-        const rawGapPx = mapTickGapToWeight(Math.max(1, segment.toOnsetTicks - segment.fromOnsetTicks))
-        const expectedBaseGapPx = Number((rawGapPx * baseTimelineScale).toFixed(3))
-        if (!approximatelyEqual(segment.baseGapPx ?? null, expectedBaseGapPx)) {
-          failureReasons.push(
-            `segment-base-gap-scaled:${segment.fromOnsetTicks}->${segment.toOnsetTicks}:${segment.baseGapPx ?? 'null'}!=${expectedBaseGapPx}`,
-          )
-        }
-      })
-
-      const expectedTrailingGapPx = Number((rawTrailingGapPx * baseTimelineScale).toFixed(3))
-      if (!approximatelyEqual(trailingGapPx, expectedTrailingGapPx)) {
-        failureReasons.push(`trailing-gap-scaled:${trailingGapPx ?? 'null'}!=${expectedTrailingGapPx}`)
-      }
-    }
   }
 
-  const effectiveLeftGapPx =
+  if (direction === 'backward' && actualRightSummary.requestedExtraPx > GAP_EPSILON_PX) {
+    pushFailure(failures, 'backward-request-leaked-right', actualRightSummary.requestedExtraPx)
+  }
+  if (direction === 'forward' && actualLeftSummary.requestedExtraPx > GAP_EPSILON_PX) {
+    pushFailure(failures, 'forward-request-leaked-left', actualLeftSummary.requestedExtraPx)
+  }
+
+  const visibleLeftGapPx =
     typeof row.effectiveLeftGapPx === 'number' && Number.isFinite(row.effectiveLeftGapPx)
       ? Number(row.effectiveLeftGapPx.toFixed(3))
       : null
-  const effectiveRightGapPx =
+  const visibleRightGapPx =
     typeof row.effectiveRightGapPx === 'number' && Number.isFinite(row.effectiveRightGapPx)
       ? Number(row.effectiveRightGapPx.toFixed(3))
       : null
-  const overflowVsNoteEndX =
-    typeof row.overflowVsNoteEndX === 'number' && Number.isFinite(row.overflowVsNoteEndX)
-      ? Number(row.overflowVsNoteEndX.toFixed(3))
-      : null
-  const overflowVsMeasureEndBarX =
-    typeof row.overflowVsMeasureEndBarX === 'number' && Number.isFinite(row.overflowVsMeasureEndBarX)
-      ? Number(row.overflowVsMeasureEndBarX.toFixed(3))
-      : null
-  const effectiveBoundaryStartX =
-    typeof row.effectiveBoundaryStartX === 'number' && Number.isFinite(row.effectiveBoundaryStartX)
-      ? Number(row.effectiveBoundaryStartX.toFixed(3))
-      : null
-  const effectiveBoundaryEndX =
-    typeof row.effectiveBoundaryEndX === 'number' && Number.isFinite(row.effectiveBoundaryEndX)
-      ? Number(row.effectiveBoundaryEndX.toFixed(3))
-      : null
-  const spacingOccupiedLeftX =
-    typeof row.spacingOccupiedLeftX === 'number' && Number.isFinite(row.spacingOccupiedLeftX)
-      ? Number(row.spacingOccupiedLeftX.toFixed(3))
-      : null
-  const spacingOccupiedRightX =
-    typeof row.spacingOccupiedRightX === 'number' && Number.isFinite(row.spacingOccupiedRightX)
-      ? Number(row.spacingOccupiedRightX.toFixed(3))
-      : null
-  const visibleLeftGapPx =
-    effectiveBoundaryStartX !== null && spacingOccupiedLeftX !== null
-      ? Number((spacingOccupiedLeftX - effectiveBoundaryStartX).toFixed(3))
-      : null
-  const visibleRightGapPx =
-    effectiveBoundaryEndX !== null && spacingOccupiedRightX !== null
-      ? Number((effectiveBoundaryEndX - spacingOccupiedRightX).toFixed(3))
-      : null
-
-  if (
-    visibleLeftGapPx !== null &&
-    effectiveLeftGapPx !== null &&
-    !approximatelyEqual(visibleLeftGapPx, effectiveLeftGapPx)
-  ) {
-    failureReasons.push('effective-left-gap-mismatch')
-  }
-  if (
-    visibleRightGapPx !== null &&
-    effectiveRightGapPx !== null &&
-    !approximatelyEqual(visibleRightGapPx, effectiveRightGapPx)
-  ) {
-    failureReasons.push('effective-right-gap-mismatch')
-  }
-
-  if (
-    direction === 'backward' &&
-    (visibleLeftGapPx === null || visibleLeftGapPx < MIN_VISIBLE_GAP_PX - GAP_EPSILON_PX)
-  ) {
-    failureReasons.push('visible-left-gap-too-small')
-  }
-  if (direction === 'backward') {
-    if (Math.max(onsetReserve?.leftReservePx ?? 0, onsetReserve?.rightReservePx ?? 0) <= GAP_EPSILON_PX) {
-      failureReasons.push('backward-reserve-missing')
-    }
-  }
-  if (direction === 'forward') {
-    if (Math.max(onsetReserve?.leftReservePx ?? 0, onsetReserve?.rightReservePx ?? 0) <= GAP_EPSILON_PX) {
-      failureReasons.push('forward-reserve-missing')
-    }
-  }
-  if (overflowVsMeasureEndBarX !== null && overflowVsMeasureEndBarX > GAP_EPSILON_PX) {
-    failureReasons.push('overflow-vs-measure-end-barline')
-  }
-
-  if (targetNote && onsetReserve && (direction === 'aligned' || direction === 'missing')) {
-    failureReasons.push(`unexpected-direction:${direction}`)
-  }
 
   return {
     pairIndex,
     renderedPageIndex: row.renderedPageIndex,
     noteIndex: targetNote?.noteIndex ?? null,
-    measureWidth,
-    totalReserveWidthPx,
-    baseMeasureWidthPx,
-    anchorX,
-    headXs,
-    candidateNotes,
+    onsetTicks: targetOnsetTicks,
     direction,
-    onsetReserve,
-    previousSegment,
-    nextSegment,
-    effectiveBoundaryStartX,
-    effectiveBoundaryEndX,
-    spacingOccupiedLeftX,
-    spacingOccupiedRightX,
+    headXs,
+    rawLeftReservePx: targetMetrics ? targetMetrics.rawLeftReservePx : null,
+    rawRightReservePx: targetMetrics ? targetMetrics.rawRightReservePx : null,
+    expectedLeftRequestPx,
+    actualLeftRequestPx: Number(actualLeftSummary.requestedExtraPx.toFixed(3)),
+    leftWinningStaff: actualLeftSummary.winningStaff,
+    expectedRightRequestPx,
+    actualRightRequestPx: Number(actualRightSummary.requestedExtraPx.toFixed(3)),
+    rightWinningStaff: actualRightSummary.winningStaff,
     visibleLeftGapPx,
     visibleRightGapPx,
-    effectiveLeftGapPx,
-    effectiveRightGapPx,
-    overflowVsNoteEndX,
-    overflowVsMeasureEndBarX,
-    hasDisplacedColumns,
-    passed: failureReasons.length === 0,
-    failureReasons,
+    passed: failures.length === 0,
+    failureReasons: failures,
   }
 }
 
-function analyzeScenario(rows: MergedMeasureDumpRow[], scale: DebugScaleConfig, key: string): ScenarioReport {
+function analyzeDesktopScenario(rows: MergedMeasureDumpRow[], scale: DebugScaleConfig, key: string): DesktopScenarioReport {
   const targets = Array.from({ length: TARGET_PAIR_COUNT }, (_, pairIndex) =>
-    analyzeTargetRow(rows[pairIndex] ?? {
+    analyzeDesktopTargetRow(
+      rows[pairIndex] ?? {
+        pairIndex,
+        rendered: false,
+        renderedPageIndex: null,
+        overflowVsNoteEndX: null,
+        overflowVsMeasureEndBarX: null,
+        notes: [],
+      },
       pairIndex,
-      rendered: false,
-      renderedPageIndex: null,
-      overflowVsNoteEndX: null,
-      overflowVsMeasureEndBarX: null,
-      notes: [],
-    }, pairIndex),
+    ),
   )
 
   return {
@@ -827,6 +1209,309 @@ function analyzeScenario(rows: MergedMeasureDumpRow[], scale: DebugScaleConfig, 
     passed: targets.every((target) => target.passed),
     targets,
   }
+}
+
+function analyzeCrossStaffFixture(row: MergedMeasureDumpRow, scale: DebugScaleConfig): FixtureResult {
+  const failures: string[] = []
+  validateSharedSlotDebug(row, failures)
+  validateNoBarlineOverflow(row, failures)
+
+  const bassMetrics = buildStaffOnsetMetrics(row, 'bass')
+  const trebleMetrics = buildStaffOnsetMetrics(row, 'treble')
+  const targetMetrics = bassMetrics.find((metrics) => metrics.rawLeftReservePx > HEAD_X_EPSILON_PX) ?? null
+  const targetNote =
+    row.notes.find(
+      (note) =>
+        note.staff === 'bass' &&
+        note.isRest !== true &&
+        typeof note.onsetTicksInMeasure === 'number' &&
+        targetMetrics &&
+        Math.round(note.onsetTicksInMeasure) === targetMetrics.onsetTicks &&
+        Array.isArray(note.noteHeads) &&
+        note.noteHeads.length > 1,
+    ) ?? null
+
+  if (!row.rendered) pushFailure(failures, 'fixture-not-rendered')
+  if (!targetMetrics || !targetNote) pushFailure(failures, 'target-bass-displaced-chord-missing')
+
+  const targetIndex = targetMetrics ? bassMetrics.findIndex((metrics) => metrics.onsetTicks === targetMetrics.onsetTicks) : -1
+  const previousMetrics = targetIndex > 0 ? bassMetrics[targetIndex - 1] ?? null : null
+  const nextMetrics =
+    targetIndex >= 0 && targetIndex < bassMetrics.length - 1 ? bassMetrics[targetIndex + 1] ?? null : null
+
+  const boundaryStartX =
+    typeof row.effectiveBoundaryStartX === 'number' && Number.isFinite(row.effectiveBoundaryStartX)
+      ? Number(row.effectiveBoundaryStartX.toFixed(3))
+      : null
+  const boundaryEndX =
+    typeof row.effectiveBoundaryEndX === 'number' && Number.isFinite(row.effectiveBoundaryEndX)
+      ? Number(row.effectiveBoundaryEndX.toFixed(3))
+      : null
+
+  const expectedLeftRequestPx = targetMetrics
+    ? computeExpectedLeftRequestPx(targetMetrics, previousMetrics, boundaryStartX)
+    : null
+  const expectedRightRequestPx = targetMetrics
+    ? computeExpectedRightRequestPx(targetMetrics, nextMetrics, boundaryEndX)
+    : null
+
+  if ((expectedLeftRequestPx ?? 0) > GAP_EPSILON_PX || (expectedRightRequestPx ?? 0) > GAP_EPSILON_PX) {
+    pushFailure(
+      failures,
+      'fixture-should-have-no-bass-local-collision',
+      `${expectedLeftRequestPx ?? 'null'}/${expectedRightRequestPx ?? 'null'}`,
+    )
+  }
+
+  const actualLeftSummary =
+    targetMetrics !== null
+      ? resolveSlotRequestSummary({
+          row,
+          staff: 'bass',
+          onsetTicks: targetMetrics.onsetTicks,
+          side: 'left',
+        })
+      : { requestedExtraPx: 0, winningStaff: 'none' as StaffSlotWinner }
+  const actualRightSummary =
+    targetMetrics !== null
+      ? resolveSlotRequestSummary({
+          row,
+          staff: 'bass',
+          onsetTicks: targetMetrics.onsetTicks,
+          side: 'right',
+        })
+      : { requestedExtraPx: 0, winningStaff: 'none' as StaffSlotWinner }
+
+  if (actualLeftSummary.requestedExtraPx > GAP_EPSILON_PX) {
+    pushFailure(failures, 'cross-staff-false-positive-left', actualLeftSummary.requestedExtraPx)
+  }
+  if (actualRightSummary.requestedExtraPx > GAP_EPSILON_PX) {
+    pushFailure(failures, 'cross-staff-false-positive-right', actualRightSummary.requestedExtraPx)
+  }
+
+  const spacingSegments = getSpacingSegments(row)
+  spacingSegments.forEach((segment) => {
+    if ((segment.extraReservePx ?? 0) > GAP_EPSILON_PX) {
+      pushFailure(
+        failures,
+        'unexpected-extra-segment',
+        `${segment.fromOnsetTicks}->${segment.toOnsetTicks}:${segment.extraReservePx ?? 'null'}`,
+      )
+    }
+  })
+
+  if (
+    targetMetrics &&
+    previousMetrics &&
+    !trebleMetrics.some(
+      (metrics) =>
+        metrics.onsetTicks > previousMetrics.onsetTicks &&
+        metrics.onsetTicks < targetMetrics.onsetTicks,
+    )
+  ) {
+    pushFailure(failures, 'fixture-missing-interleaved-treble-onset')
+  }
+
+  const headXs = targetNote ? dedupeSortedNumbers(targetNote.noteHeads.map((head) => head.x), HEAD_X_EPSILON_PX) : []
+  const direction = classifyDirection(
+    targetNote && Number.isFinite(targetNote.x) ? Number(targetNote.x.toFixed(3)) : null,
+    headXs,
+  )
+  const measureWidth =
+    typeof row.measureWidth === 'number' && Number.isFinite(row.measureWidth)
+      ? Number(row.measureWidth.toFixed(3))
+      : null
+  const visibleLeftGapPx =
+    typeof row.effectiveLeftGapPx === 'number' && Number.isFinite(row.effectiveLeftGapPx)
+      ? Number(row.effectiveLeftGapPx.toFixed(3))
+      : null
+  const visibleRightGapPx =
+    typeof row.effectiveRightGapPx === 'number' && Number.isFinite(row.effectiveRightGapPx)
+      ? Number(row.effectiveRightGapPx.toFixed(3))
+      : null
+
+  return {
+    key: 'fixture-cross-staff-no-false-positive',
+    scale,
+    measureWidth,
+    targetOnsetTicks: targetMetrics?.onsetTicks ?? null,
+    direction,
+    headXs,
+    expectedLeftRequestPx,
+    actualLeftRequestPx: Number(actualLeftSummary.requestedExtraPx.toFixed(3)),
+    leftWinningStaff: actualLeftSummary.winningStaff,
+    expectedRightRequestPx,
+    actualRightRequestPx: Number(actualRightSummary.requestedExtraPx.toFixed(3)),
+    rightWinningStaff: actualRightSummary.winningStaff,
+    visibleLeftGapPx,
+    visibleRightGapPx,
+    passed: failures.length === 0,
+    failureReasons: failures,
+  }
+}
+
+function analyzeLocalCollisionFixture(row: MergedMeasureDumpRow, scale: DebugScaleConfig): FixtureResult {
+  const failures: string[] = []
+  validateSharedSlotDebug(row, failures)
+  validateNoBarlineOverflow(row, failures)
+
+  const bassMetrics = buildStaffOnsetMetrics(row, 'bass')
+  const targetMetrics = bassMetrics.find((metrics) => metrics.rawLeftReservePx > HEAD_X_EPSILON_PX) ?? null
+  const targetNote =
+    row.notes.find(
+      (note) =>
+        note.staff === 'bass' &&
+        note.isRest !== true &&
+        typeof note.onsetTicksInMeasure === 'number' &&
+        targetMetrics &&
+        Math.round(note.onsetTicksInMeasure) === targetMetrics.onsetTicks &&
+        Array.isArray(note.noteHeads) &&
+        note.noteHeads.length > 1,
+    ) ?? null
+
+  if (!row.rendered) pushFailure(failures, 'fixture-not-rendered')
+  if (!targetMetrics || !targetNote) pushFailure(failures, 'target-bass-displaced-chord-missing')
+
+  const boundaryStartX =
+    typeof row.effectiveBoundaryStartX === 'number' && Number.isFinite(row.effectiveBoundaryStartX)
+      ? Number(row.effectiveBoundaryStartX.toFixed(3))
+      : null
+  const boundaryEndX =
+    typeof row.effectiveBoundaryEndX === 'number' && Number.isFinite(row.effectiveBoundaryEndX)
+      ? Number(row.effectiveBoundaryEndX.toFixed(3))
+      : null
+
+  const expectedLeftRequestPx = targetMetrics
+    ? computeExpectedLeftRequestPx(targetMetrics, null, boundaryStartX)
+    : null
+  const expectedRightRequestPx = targetMetrics
+    ? computeExpectedRightRequestPx(targetMetrics, bassMetrics[1] ?? null, boundaryEndX)
+    : null
+
+  if ((expectedLeftRequestPx ?? 0) <= GAP_EPSILON_PX) {
+    pushFailure(failures, 'fixture-expected-leading-collision-missing')
+  }
+  if ((expectedRightRequestPx ?? 0) > GAP_EPSILON_PX) {
+    pushFailure(failures, 'fixture-should-not-request-right', expectedRightRequestPx)
+  }
+
+  const actualLeftSummary =
+    targetMetrics !== null
+      ? resolveSlotRequestSummary({
+          row,
+          staff: 'bass',
+          onsetTicks: targetMetrics.onsetTicks,
+          side: 'left',
+        })
+      : { requestedExtraPx: 0, winningStaff: 'none' as StaffSlotWinner }
+  const actualRightSummary =
+    targetMetrics !== null
+      ? resolveSlotRequestSummary({
+          row,
+          staff: 'bass',
+          onsetTicks: targetMetrics.onsetTicks,
+          side: 'right',
+        })
+      : { requestedExtraPx: 0, winningStaff: 'none' as StaffSlotWinner }
+
+  if (expectedLeftRequestPx !== null && !approximatelyEqual(actualLeftSummary.requestedExtraPx, expectedLeftRequestPx)) {
+    pushFailure(
+      failures,
+      'leading-request-mismatch',
+      `${actualLeftSummary.requestedExtraPx}!=${expectedLeftRequestPx}`,
+    )
+  }
+  if (actualRightSummary.requestedExtraPx > GAP_EPSILON_PX) {
+    pushFailure(failures, 'unexpected-right-request', actualRightSummary.requestedExtraPx)
+  }
+  if (actualLeftSummary.winningStaff !== 'bass') {
+    pushFailure(failures, 'leading-winning-staff-not-bass', actualLeftSummary.winningStaff)
+  }
+
+  const spacingSegments = getSpacingSegments(row)
+  spacingSegments.forEach((segment) => {
+    if ((segment.extraReservePx ?? 0) > GAP_EPSILON_PX) {
+      pushFailure(
+        failures,
+        'unexpected-inner-segment-extra',
+        `${segment.fromOnsetTicks}->${segment.toOnsetTicks}:${segment.extraReservePx ?? 'null'}`,
+      )
+    }
+  })
+
+  const visibleLeftGapPx =
+    typeof row.effectiveLeftGapPx === 'number' && Number.isFinite(row.effectiveLeftGapPx)
+      ? Number(row.effectiveLeftGapPx.toFixed(3))
+      : null
+  if (visibleLeftGapPx === null || visibleLeftGapPx < MIN_VISIBLE_GAP_PX - GAP_EPSILON_PX) {
+    pushFailure(failures, 'leading-visible-gap-too-small', visibleLeftGapPx)
+  }
+
+  const headXs = targetNote ? dedupeSortedNumbers(targetNote.noteHeads.map((head) => head.x), HEAD_X_EPSILON_PX) : []
+  const direction = classifyDirection(
+    targetNote && Number.isFinite(targetNote.x) ? Number(targetNote.x.toFixed(3)) : null,
+    headXs,
+  )
+  if (direction !== 'backward') {
+    pushFailure(failures, 'fixture-direction-not-backward', direction)
+  }
+
+  const measureWidth =
+    typeof row.measureWidth === 'number' && Number.isFinite(row.measureWidth)
+      ? Number(row.measureWidth.toFixed(3))
+      : null
+  const visibleRightGapPx =
+    typeof row.effectiveRightGapPx === 'number' && Number.isFinite(row.effectiveRightGapPx)
+      ? Number(row.effectiveRightGapPx.toFixed(3))
+      : null
+
+  return {
+    key: 'fixture-local-leading-collision',
+    scale,
+    measureWidth,
+    targetOnsetTicks: targetMetrics?.onsetTicks ?? null,
+    direction,
+    headXs,
+    expectedLeftRequestPx,
+    actualLeftRequestPx: Number(actualLeftSummary.requestedExtraPx.toFixed(3)),
+    leftWinningStaff: actualLeftSummary.winningStaff,
+    expectedRightRequestPx,
+    actualRightRequestPx: Number(actualRightSummary.requestedExtraPx.toFixed(3)),
+    rightWinningStaff: actualRightSummary.winningStaff,
+    visibleLeftGapPx,
+    visibleRightGapPx,
+    passed: failures.length === 0,
+    failureReasons: failures,
+  }
+}
+
+async function runDesktopScenario(page: Page, xmlText: string, scaleCase: ScaleCase): Promise<DesktopScenarioReport> {
+  await importMusicXml(page, xmlText)
+  const appliedScale = await setScoreScale(page, scaleCase)
+  const mergedRows = await collectMergedRows(page)
+  return analyzeDesktopScenario(mergedRows, appliedScale, scaleCase.key)
+}
+
+async function runFixtureScenario(params: {
+  page: Page
+  xmlText: string
+  analyzer: (row: MergedMeasureDumpRow, scale: DebugScaleConfig) => FixtureResult
+}): Promise<FixtureResult> {
+  const { page, xmlText, analyzer } = params
+  await importMusicXml(page, xmlText)
+  const appliedScale = await setScoreScale(page, FIXTURE_SCALE_CASE)
+  const mergedRows = await collectMergedRows(page)
+  const row =
+    mergedRows[0] ??
+    ({
+      pairIndex: 0,
+      rendered: false,
+      renderedPageIndex: null,
+      overflowVsNoteEndX: null,
+      overflowVsMeasureEndBarX: null,
+      notes: [],
+    } satisfies MergedMeasureDumpRow)
+  return analyzer(row, appliedScale)
 }
 
 async function main(): Promise<void> {
@@ -850,56 +1535,81 @@ async function main(): Promise<void> {
     page.on('pageerror', (error) => {
       console.error(`[browser:pageerror] ${error.stack ?? error.message}`)
     })
+
     console.log('[second-chord-spacing] opening app')
     await page.goto(DEV_URL, { waitUntil: 'domcontentloaded', timeout: 120000 })
     console.log('[second-chord-spacing] waiting for debug API')
     await waitForDebugApi(page)
-    console.log('[second-chord-spacing] importing MusicXML')
-    await importMusicXml(page, xmlText)
 
-    const scenarios: ScenarioReport[] = []
+    const desktopScenarios: DesktopScenarioReport[] = []
     for (const scaleCase of SCALE_CASES) {
-      console.log(`[second-chord-spacing] applying scale ${scaleCase.key}`)
-      const appliedScale = await setScoreScale(page, scaleCase)
-      console.log(`[second-chord-spacing] collecting rows for ${scaleCase.key}`)
-      const mergedRows = await collectMergedRows(page)
-      scenarios.push(analyzeScenario(mergedRows, appliedScale, scaleCase.key))
+      console.log(`[second-chord-spacing] running desktop sample ${scaleCase.key}`)
+      desktopScenarios.push(await runDesktopScenario(page, xmlText, scaleCase))
     }
+
+    const fixtureResults: FixtureResult[] = []
+    console.log('[second-chord-spacing] running cross-staff false-positive fixture')
+    fixtureResults.push(
+      await runFixtureScenario({
+        page,
+        xmlText: CROSS_STAFF_FALSE_POSITIVE_FIXTURE_XML,
+        analyzer: analyzeCrossStaffFixture,
+      }),
+    )
+    console.log('[second-chord-spacing] running local overlap fixture')
+    fixtureResults.push(
+      await runFixtureScenario({
+        page,
+        xmlText: LOCAL_BASS_BOUNDARY_COLLISION_FIXTURE_XML,
+        analyzer: analyzeLocalCollisionFixture,
+      }),
+    )
 
     const report: FinalReport = {
       generatedAt: new Date().toISOString(),
       xmlPath,
-      scenarios,
+      desktopScenarios,
+      fixtureResults,
     }
 
     await mkdir(path.dirname(reportPath), { recursive: true })
     await writeFile(reportPath, JSON.stringify(report, null, 2), 'utf8')
 
-    scenarios.forEach((scenario) => {
+    desktopScenarios.forEach((scenario) => {
       console.log(
-        `[second-chord-spacing] ${scenario.key}: ${scenario.passed ? 'PASS' : 'FAIL'} ` +
+        `[second-chord-spacing] desktop ${scenario.key}: ${scenario.passed ? 'PASS' : 'FAIL'} ` +
           `(scale=${scenario.scale.scoreScale ?? 'n/a'})`,
       )
       scenario.targets.forEach((target) => {
         console.log(
-          `  pair=${target.pairIndex} page=${target.renderedPageIndex ?? 'n/a'} direction=${target.direction} ` +
-            `measureWidth=${target.measureWidth ?? 'null'} baseMeasureWidth=${target.baseMeasureWidthPx ?? 'null'} ` +
-            `reserveWidth=${target.totalReserveWidthPx ?? 'null'} ` +
-            `headXs=${JSON.stringify(target.headXs)} visibleLeftGap=${target.visibleLeftGapPx} ` +
-            `visibleRightGap=${target.visibleRightGapPx} reportedLeftGap=${target.effectiveLeftGapPx} ` +
-            `reportedRightGap=${target.effectiveRightGapPx} occupiedLeft=${target.spacingOccupiedLeftX} ` +
-            `occupiedRight=${target.spacingOccupiedRightX} boundaryStart=${target.effectiveBoundaryStartX} ` +
-            `boundaryEnd=${target.effectiveBoundaryEndX} overflowNoteEnd=${target.overflowVsNoteEndX} ` +
-          `overflowBar=${target.overflowVsMeasureEndBarX} onsetReserve=${JSON.stringify(target.onsetReserve)} ` +
-            `prevSegment=${JSON.stringify(target.previousSegment)} nextSegment=${JSON.stringify(target.nextSegment)} ` +
-            `candidates=${JSON.stringify(target.candidateNotes)} ` +
-            `${target.passed ? 'PASS' : 'FAIL'}`,
+          `  pair=${target.pairIndex} page=${target.renderedPageIndex ?? 'n/a'} onset=${target.onsetTicks ?? 'null'} ` +
+            `direction=${target.direction} left=${target.actualLeftRequestPx ?? 'null'}/${target.expectedLeftRequestPx ?? 'null'} ` +
+            `right=${target.actualRightRequestPx ?? 'null'}/${target.expectedRightRequestPx ?? 'null'} ` +
+            `winnerL=${target.leftWinningStaff} winnerR=${target.rightWinningStaff} ` +
+            `visibleLeftGap=${target.visibleLeftGapPx ?? 'null'} visibleRightGap=${target.visibleRightGapPx ?? 'null'} ` +
+            `${target.passed ? 'PASS' : 'FAIL'} ${target.failureReasons.length > 0 ? JSON.stringify(target.failureReasons) : ''}`,
         )
       })
     })
+
+    fixtureResults.forEach((fixture) => {
+      console.log(
+        `[second-chord-spacing] ${fixture.key}: ${fixture.passed ? 'PASS' : 'FAIL'} ` +
+          `left=${fixture.actualLeftRequestPx ?? 'null'}/${fixture.expectedLeftRequestPx ?? 'null'} ` +
+          `right=${fixture.actualRightRequestPx ?? 'null'}/${fixture.expectedRightRequestPx ?? 'null'} ` +
+          `winnerL=${fixture.leftWinningStaff} winnerR=${fixture.rightWinningStaff} ` +
+          `direction=${fixture.direction} visibleLeftGap=${fixture.visibleLeftGapPx ?? 'null'} ` +
+          `visibleRightGap=${fixture.visibleRightGapPx ?? 'null'} ` +
+          `${fixture.failureReasons.length > 0 ? JSON.stringify(fixture.failureReasons) : ''}`,
+      )
+    })
+
     console.log(`Generated: ${reportPath}`)
 
-    if (!scenarios.every((scenario) => scenario.passed)) {
+    if (
+      !desktopScenarios.every((scenario) => scenario.passed) ||
+      !fixtureResults.every((fixture) => fixture.passed)
+    ) {
       throw new Error('Second-chord spacing regression detected.')
     }
   } finally {

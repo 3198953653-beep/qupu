@@ -27,7 +27,7 @@ import { getDragPreviewTargetKey } from './dragPreviewOverrides'
 import { getJianpuNumeralForPitch, hasFilledNoteHead } from './noteheadNumerals'
 import { buildTieLayout } from './tieLayoutGeometry'
 import type { RenderedNoteKey } from '../accidentals'
-import type { PublicAxisLayout } from '../timeline/types'
+import type { MeasureTimelineBundle, PublicAxisLayout } from '../timeline/types'
 import type {
   DragDebugRow,
   DragDebugSnapshot,
@@ -487,6 +487,7 @@ export type DrawMeasureParams = {
   staticNoteXById?: Map<string, number> | null
   staticAccidentalRightXById?: Map<string, Map<number, number>> | null
   publicAxisLayout?: PublicAxisLayout | null
+  timelineBundle?: MeasureTimelineBundle | null
   spacingAnchorTicks?: number[] | null
   preferMeasureBarlineAxis?: boolean
   preferMeasureEndBarlineAxis?: boolean
@@ -554,6 +555,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     staticNoteXById = null,
     staticAccidentalRightXById = null,
     publicAxisLayout = null,
+    timelineBundle = null,
     spacingAnchorTicks = null,
     preferMeasureBarlineAxis = !isSystemStart && !showKeySignature && !showTimeSignature,
     preferMeasureEndBarlineAxis = !showEndTimeSignature,
@@ -1037,6 +1039,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       formatWidth,
       trebleRendered,
       bassRendered,
+      timelineBundle,
       spacingConfig: timeAxisSpacingConfig,
       measureTicks: Math.max(1, Math.round(timeSignature.beats * TICKS_PER_BEAT * (4 / timeSignature.beatType))),
       sparseTailAnchorMode: 'none',

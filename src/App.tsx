@@ -6026,6 +6026,16 @@ function App() {
             finalX: toRoundedNumber(entry.finalX, 3),
             leftReservePx: toRoundedNumber(entry.leftReservePx, 3),
             rightReservePx: toRoundedNumber(entry.rightReservePx, 3),
+            rawLeftReservePx: toRoundedNumber(entry.rawLeftReservePx, 3),
+            rawRightReservePx: toRoundedNumber(entry.rawRightReservePx, 3),
+            leftOccupiedInsetPx: toRoundedNumber(entry.leftOccupiedInsetPx, 3),
+            rightOccupiedTailPx: toRoundedNumber(entry.rightOccupiedTailPx, 3),
+            leadingTrebleRequestedExtraPx: toRoundedNumber(entry.leadingTrebleRequestedExtraPx, 3),
+            leadingBassRequestedExtraPx: toRoundedNumber(entry.leadingBassRequestedExtraPx, 3),
+            leadingWinningStaff: entry.leadingWinningStaff,
+            trailingTrebleRequestedExtraPx: toRoundedNumber(entry.trailingTrebleRequestedExtraPx, 3),
+            trailingBassRequestedExtraPx: toRoundedNumber(entry.trailingBassRequestedExtraPx, 3),
+            trailingWinningStaff: entry.trailingWinningStaff,
           })) ?? [],
         spacingSegments:
           measureLayout?.spacingSegments?.map((entry) => ({
@@ -6034,6 +6044,9 @@ function App() {
             baseGapPx: toRoundedNumber(entry.baseGapPx, 3),
             extraReservePx: toRoundedNumber(entry.extraReservePx, 3),
             appliedGapPx: toRoundedNumber(entry.appliedGapPx, 3),
+            trebleRequestedExtraPx: toRoundedNumber(entry.trebleRequestedExtraPx, 3),
+            bassRequestedExtraPx: toRoundedNumber(entry.bassRequestedExtraPx, 3),
+            winningStaff: entry.winningStaff,
           })) ?? [],
         trebleTimelineEvents:
           timelineBundle?.trebleTimeline.events.map((event) => ({

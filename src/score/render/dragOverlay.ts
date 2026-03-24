@@ -284,6 +284,7 @@ function drawOverlayRange(params: {
       formatWidthOverride: measureLayout.formatWidth,
       timeAxisSpacingConfig,
       spacingLayoutMode,
+      timelineBundle,
       publicAxisLayout: resolvePublicAxisLayoutForConsumption(timelineBundle),
       renderBoundaryPartialTies: false,
       forceLeadingConnector: pairOffset === 0,

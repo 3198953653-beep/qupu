@@ -315,6 +315,16 @@ export type MeasureLayout = {
     finalX: number
     leftReservePx: number
     rightReservePx: number
+    rawLeftReservePx: number
+    rawRightReservePx: number
+    leftOccupiedInsetPx: number
+    rightOccupiedTailPx: number
+    leadingTrebleRequestedExtraPx: number
+    leadingBassRequestedExtraPx: number
+    leadingWinningStaff: 'treble' | 'bass' | 'tie' | 'none'
+    trailingTrebleRequestedExtraPx: number
+    trailingBassRequestedExtraPx: number
+    trailingWinningStaff: 'treble' | 'bass' | 'tie' | 'none'
   }>
   spacingSegments?: Array<{
     fromOnsetTicks: number
@@ -322,6 +332,9 @@ export type MeasureLayout = {
     baseGapPx: number
     extraReservePx: number
     appliedGapPx: number
+    trebleRequestedExtraPx: number
+    bassRequestedExtraPx: number
+    winningStaff: 'treble' | 'bass' | 'tie' | 'none'
   }>
   overlayRect: {
     x: number
