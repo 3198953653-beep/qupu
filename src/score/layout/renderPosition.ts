@@ -9,6 +9,15 @@ export function getRenderedNoteVisualX(note: StaveNote): number {
   return note.getNoteHeadBeginX()
 }
 
+export function getRenderedNoteAnchorX(note: StaveNote): number {
+  const x = note.getX()
+  if (Number.isFinite(x)) return x
+  const absoluteX = note.getAbsoluteX()
+  const xShift = note.getXShift()
+  const fallbackX = absoluteX + xShift
+  return Number.isFinite(fallbackX) ? fallbackX : getRenderedNoteVisualX(note)
+}
+
 export function finiteOrNull(value: number | undefined | null): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }

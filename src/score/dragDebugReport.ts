@@ -14,6 +14,12 @@ export function buildDragDebugReport(frames: DragDebugSnapshot[]): string | null
       frame.rows.map((row) => Math.abs(row.noteXDelta ?? 0)),
     ),
   )
+  const maxAbsAnchorDelta = Math.max(
+    0,
+    ...frames.flatMap((frame) =>
+      frame.rows.map((row) => Math.abs(row.anchorXDelta ?? 0)),
+    ),
+  )
   const maxAbsHeadDelta = Math.max(
     0,
     ...frames.flatMap((frame) =>
@@ -58,6 +64,7 @@ export function buildDragDebugReport(frames: DragDebugSnapshot[]): string | null
     draggedNote: frames[0] ? { staff: frames[0].draggedStaff, noteId: frames[0].draggedNoteId } : null,
     maxAbsDelta: {
       noteX: roundNumber(maxAbsNoteDelta),
+      anchorX: roundNumber(maxAbsAnchorDelta),
       headX: roundNumber(maxAbsHeadDelta),
       accidentalRightX: roundNumber(maxAbsAccidentalDelta),
     },
@@ -79,6 +86,9 @@ export function buildDragDebugReport(frames: DragDebugSnapshot[]): string | null
         noteXStatic: row.noteXStatic === null ? null : roundNumber(row.noteXStatic),
         noteXPreview: row.noteXPreview === null ? null : roundNumber(row.noteXPreview),
         noteXDelta: row.noteXDelta === null ? null : roundNumber(row.noteXDelta),
+        anchorXStatic: row.anchorXStatic === null ? null : roundNumber(row.anchorXStatic),
+        anchorXPreview: row.anchorXPreview === null ? null : roundNumber(row.anchorXPreview),
+        anchorXDelta: row.anchorXDelta === null ? null : roundNumber(row.anchorXDelta),
         headXStatic: row.headXStatic === null ? null : roundNumber(row.headXStatic),
         headXPreview: row.headXPreview === null ? null : roundNumber(row.headXPreview),
         headXDelta: row.headXDelta === null ? null : roundNumber(row.headXDelta),

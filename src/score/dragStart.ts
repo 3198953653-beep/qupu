@@ -101,7 +101,7 @@ export function createDragStateFromHit(params: {
     keyFifths,
     accidentalStateBeforeNote,
     layoutCacheReady: false,
-    staticNoteXById: new Map(),
+    staticAnchorXById: new Map(),
     previewAccidentalRightXById: new Map(),
     debugStaticByNoteKey: new Map(),
   }

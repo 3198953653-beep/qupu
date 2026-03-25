@@ -144,6 +144,7 @@ export type NoteLayout = {
   pairIndex: number
   noteIndex: number
   x: number
+  anchorX: number
   rightX: number
   spacingRightX: number
   y: number
@@ -153,6 +154,7 @@ export type NoteLayout = {
   inMeasureTieLayouts: TieLayout[]
   crossMeasureTieLayouts: TieLayout[]
   accidentalRightXByKeyIndex: Record<number, number>
+  stemDirection: StemDirection | null
 }
 
 export type DragDebugStaticRecord = {
@@ -160,6 +162,8 @@ export type DragDebugStaticRecord = {
   noteId: string
   noteIndex: number
   noteX: number
+  anchorX: number
+  stemDirection: StemDirection | null
   headXByKeyIndex: Map<number, number>
   headYByKeyIndex: Map<number, number>
   accidentalRightXByKeyIndex: Map<number, number>
@@ -176,6 +180,9 @@ export type DragDebugRow = {
   noteXStatic: number | null
   noteXPreview: number | null
   noteXDelta: number | null
+  anchorXStatic: number | null
+  anchorXPreview: number | null
+  anchorXDelta: number | null
   headXStatic: number | null
   headXPreview: number | null
   headXDelta: number | null
@@ -257,7 +264,7 @@ export type DragState = {
   keyFifths: number
   accidentalStateBeforeNote: Map<string, number>
   layoutCacheReady: boolean
-  staticNoteXById: Map<string, number>
+  staticAnchorXById: Map<string, number>
   previewAccidentalRightXById: Map<string, Map<number, number>>
   debugStaticByNoteKey: Map<string, DragDebugStaticRecord>
 }

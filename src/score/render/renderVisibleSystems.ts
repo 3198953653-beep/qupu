@@ -55,7 +55,7 @@ const MIN_FORMAT_WIDTH_PX = 8
 
 type FrozenMeasureSpacing = {
   baselineMeasureX: number
-  staticNoteXById: Map<string, number>
+  staticAnchorXById: Map<string, number>
   staticAccidentalRightXById: Map<string, Map<number, number>>
 }
 
@@ -93,7 +93,7 @@ function tryBuildFrozenMeasureSpacing(params: {
     previousByNoteKey.set(getLayoutNoteKey(layout.staff, layout.id), layout)
   })
 
-  const staticNoteXById = new Map<string, number>()
+  const staticAnchorXById = new Map<string, number>()
   const staticAccidentalRightXById = new Map<string, Map<number, number>>()
 
   const collectStaff = (staff: StaffKind, notes: ScoreNote[]): boolean => {
@@ -102,7 +102,7 @@ function tryBuildFrozenMeasureSpacing(params: {
       const previousLayout = previousByNoteKey.get(noteKey)
       if (!previousLayout) return false
 
-      staticNoteXById.set(noteKey, previousLayout.x)
+      staticAnchorXById.set(noteKey, previousLayout.anchorX)
       const previousAccidentalMap = new Map<number, number>()
       Object.keys(previousLayout.accidentalRightXByKeyIndex).forEach((rawKeyIndex) => {
         const keyIndex = Number(rawKeyIndex)
@@ -122,11 +122,11 @@ function tryBuildFrozenMeasureSpacing(params: {
   if (!collectStaff('bass', measure.bass)) return null
 
   const expectedCount = measure.treble.length + measure.bass.length
-  if (staticNoteXById.size !== expectedCount) return null
+  if (staticAnchorXById.size !== expectedCount) return null
 
   return {
     baselineMeasureX: previousMeasureLayout.measureX,
-    staticNoteXById,
+    staticAnchorXById,
     staticAccidentalRightXById,
   }
 }
@@ -134,18 +134,21 @@ function tryBuildFrozenMeasureSpacing(params: {
 function translateFrozenSpacingToMeasureX(
   frozen: FrozenMeasureSpacing,
   targetMeasureX: number,
-): { staticNoteXById: Map<string, number>; staticAccidentalRightXById: Map<string, Map<number, number>> } {
+): {
+  staticAnchorXById: Map<string, number>
+  staticAccidentalRightXById: Map<string, Map<number, number>>
+} {
   const delta = targetMeasureX - frozen.baselineMeasureX
   if (!Number.isFinite(delta) || Math.abs(delta) < 0.0001) {
     return {
-      staticNoteXById: frozen.staticNoteXById,
+      staticAnchorXById: frozen.staticAnchorXById,
       staticAccidentalRightXById: frozen.staticAccidentalRightXById,
     }
   }
 
-  const staticNoteXById = new Map<string, number>()
-  frozen.staticNoteXById.forEach((x, noteKey) => {
-    staticNoteXById.set(noteKey, x + delta)
+  const staticAnchorXById = new Map<string, number>()
+  frozen.staticAnchorXById.forEach((x, noteKey) => {
+    staticAnchorXById.set(noteKey, x + delta)
   })
 
   const staticAccidentalRightXById = new Map<string, Map<number, number>>()
@@ -157,7 +160,10 @@ function translateFrozenSpacingToMeasureX(
     staticAccidentalRightXById.set(noteKey, shiftedByKeyIndex)
   })
 
-  return { staticNoteXById, staticAccidentalRightXById }
+  return {
+    staticAnchorXById,
+    staticAccidentalRightXById,
+  }
 }
 
 function findPairIndexForSelection(
@@ -741,7 +747,7 @@ export function renderVisibleSystems(params: {
         const previewAccidentalStateBeforeNote = hasAnyPreviewInPair
           ? (dragPreview?.accidentalStateBeforeNote ?? null)
           : null
-        const previewStaticNoteXById = isPrimaryDragPreviewPair ? dragPreview.staticNoteXById : null
+        const previewStaticAnchorXById = isPrimaryDragPreviewPair ? dragPreview.staticAnchorXById : null
         const previewStaticAccidentalRightXById = isPrimaryDragPreviewPair
           ? dragPreview.previewAccidentalRightXById
           : null
@@ -837,7 +843,7 @@ export function renderVisibleSystems(params: {
           timelineBundle,
           publicAxisLayout: resolvePublicAxisLayoutForConsumption(timelineBundle),
           spacingAnchorTicks: timelineBundle?.spacingAnchorTicks ?? null,
-          staticNoteXById: previewStaticNoteXById ?? translatedFrozenSpacing?.staticNoteXById ?? null,
+          staticAnchorXById: previewStaticAnchorXById ?? translatedFrozenSpacing?.staticAnchorXById ?? null,
           staticAccidentalRightXById:
             previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
           previewNotes,
@@ -968,7 +974,7 @@ export function renderVisibleSystems(params: {
         const previewAccidentalStateBeforeNote = hasAnyPreviewInPair
           ? (dragPreview?.accidentalStateBeforeNote ?? null)
           : null
-        const previewStaticNoteXById = isPrimaryDragPreviewPair ? dragPreview.staticNoteXById : null
+        const previewStaticAnchorXById = isPrimaryDragPreviewPair ? dragPreview.staticAnchorXById : null
         const previewStaticAccidentalRightXById = isPrimaryDragPreviewPair
           ? dragPreview.previewAccidentalRightXById
           : null
@@ -1067,7 +1073,7 @@ export function renderVisibleSystems(params: {
           timelineBundle,
           publicAxisLayout: resolvePublicAxisLayoutForConsumption(timelineBundle),
           spacingAnchorTicks: timelineBundle?.spacingAnchorTicks ?? null,
-          staticNoteXById: previewStaticNoteXById ?? translatedFrozenSpacing?.staticNoteXById ?? null,
+          staticAnchorXById: previewStaticAnchorXById ?? translatedFrozenSpacing?.staticAnchorXById ?? null,
           staticAccidentalRightXById:
             previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
           previewNotes,
@@ -1317,7 +1323,7 @@ export function renderVisibleSystems(params: {
         spacingAnchorTicks: timelineBundle?.spacingAnchorTicks ?? null,
         // Width probing must be fully deterministic by score content only.
         // Do not feed previous-frame frozen spacing into the probe solver.
-        staticNoteXById: null,
+        staticAnchorXById: null,
         staticAccidentalRightXById: null,
         // Keep full layout geometry so beam/stem decisions match final render,
         // but rely on spacing metrics for overflow bounds instead of visual bbox.
@@ -1384,7 +1390,7 @@ export function renderVisibleSystems(params: {
       const previewAccidentalStateBeforeNote = hasAnyPreviewInPair
         ? (dragPreview?.accidentalStateBeforeNote ?? null)
         : null
-      const previewStaticNoteXById = isPrimaryDragPreviewPair ? dragPreview.staticNoteXById : null
+      const previewStaticAnchorXById = isPrimaryDragPreviewPair ? dragPreview.staticAnchorXById : null
       const previewStaticAccidentalRightXById = isPrimaryDragPreviewPair
         ? dragPreview.previewAccidentalRightXById
         : null
@@ -1442,7 +1448,7 @@ export function renderVisibleSystems(params: {
         timelineBundle,
         publicAxisLayout: resolvePublicAxisLayoutForConsumption(timelineBundle),
         spacingAnchorTicks: timelineBundle?.spacingAnchorTicks ?? null,
-        staticNoteXById: previewStaticNoteXById ?? translatedFrozenSpacing?.staticNoteXById ?? null,
+        staticAnchorXById: previewStaticAnchorXById ?? translatedFrozenSpacing?.staticAnchorXById ?? null,
         staticAccidentalRightXById:
           previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
         previewNotes,

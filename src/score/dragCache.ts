@@ -1,12 +1,15 @@
 import { getLayoutNoteKey } from './layout/renderPosition'
 import type { DragDebugStaticRecord, NoteLayout } from './types'
 
-export function buildStaticNoteXById(noteLayoutsByPair: Map<number, NoteLayout[]>, pairIndex: number): Map<string, number> {
+export function buildStaticAnchorXById(
+  noteLayoutsByPair: Map<number, NoteLayout[]>,
+  pairIndex: number,
+): Map<string, number> {
   const byId = new Map<string, number>()
   const pairLayouts = noteLayoutsByPair.get(pairIndex) ?? []
   pairLayouts.forEach((layout) => {
     const layoutKey = getLayoutNoteKey(layout.staff, layout.id)
-    byId.set(layoutKey, layout.x)
+    byId.set(layoutKey, layout.anchorX)
   })
   return byId
 }
@@ -39,6 +42,8 @@ export function buildDragDebugStaticByNoteKey(
       noteId: layout.id,
       noteIndex: layout.noteIndex,
       noteX: layout.x,
+      anchorX: layout.anchorX,
+      stemDirection: layout.stemDirection,
       headXByKeyIndex,
       headYByKeyIndex,
       accidentalRightXByKeyIndex,

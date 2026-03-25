@@ -3,7 +3,7 @@ import type { Renderer } from 'vexflow'
 import {
   buildDragDebugStaticByNoteKey,
   buildPreviewAccidentalRightXFromStatic,
-  buildStaticNoteXById,
+  buildStaticAnchorXById,
 } from './dragCache'
 import { buildDragDebugReport } from './dragDebugReport'
 import {
@@ -103,7 +103,7 @@ export function ensureDragLayoutCache(params: {
   const nextDrag = {
     ...drag,
     layoutCacheReady: true,
-    staticNoteXById: buildStaticNoteXById(noteLayoutsByPair, drag.pairIndex),
+    staticAnchorXById: buildStaticAnchorXById(noteLayoutsByPair, drag.pairIndex),
     debugStaticByNoteKey,
     previewAccidentalRightXById: buildPreviewAccidentalRightXFromStatic(
       debugStaticByNoteKey,

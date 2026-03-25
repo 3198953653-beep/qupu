@@ -217,8 +217,7 @@ export function buildRenderedNoteKeys(
   renderedChordPitches: Pitch[] | undefined,
   keyFifths: number,
   accidentalStateBeforeNote: Map<string, number> | null,
-  forceRootAccidentalFromPitch: boolean,
-  forceChordAccidentalFromPitchIndex: number | null,
+  forceAccidentalFromPitchKeyIndices: Set<number> | null,
   accidentalOverridesByKeyIndex: Map<number, string | null> | null | undefined,
   getPitchLine: (staff: StaffKind, pitch: Pitch) => number,
 ): RenderedNoteKey[] {
@@ -238,7 +237,7 @@ export function buildRenderedNoteKeys(
               renderedPitch,
               keyFifths,
               accidentalStateBeforeNote,
-              forceRootAccidentalFromPitch,
+              Boolean(forceAccidentalFromPitchKeyIndices?.has(0)),
             ),
       keyIndex: 0,
     },
@@ -250,7 +249,7 @@ export function buildRenderedNoteKeys(
     const accidental =
       chordOverride !== undefined
         ? chordOverride
-        : forceChordAccidentalFromPitchIndex === index
+        : forceAccidentalFromPitchKeyIndices?.has(index + 1)
           ? getAccidentalFromPitchAgainstContext(pitch, keyFifths, accidentalStateBeforeNote)
           : chordAccidental !== undefined
             ? chordAccidental

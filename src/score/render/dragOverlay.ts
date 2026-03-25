@@ -204,7 +204,7 @@ function drawOverlayRange(params: {
   ) => {
     previewNotes?: DragPreviewNoteOverride[] | null
     previewAccidentalStateBeforeNote?: Map<string, number> | null
-    staticNoteXById?: Map<string, number> | null
+    staticAnchorXById?: Map<string, number> | null
     staticAccidentalRightXById?: Map<string, Map<number, number>> | null
     debugCapture?: {
       frame: number
@@ -294,7 +294,7 @@ function drawOverlayRange(params: {
       suppressedTieStartKeys,
       suppressedTieStopKeys,
       showNoteHeadJianpu,
-      staticNoteXById: preview?.staticNoteXById ?? null,
+      staticAnchorXById: preview?.staticAnchorXById ?? null,
       staticAccidentalRightXById: preview?.staticAccidentalRightXById ?? null,
       debugCapture:
         preview?.debugCapture
@@ -463,7 +463,7 @@ export function drawDragMeasurePreview(params: {
       return {
         previewNotes,
         previewAccidentalStateBeforeNote: dragWithLayout.accidentalStateBeforeNote,
-        staticNoteXById: isPrimaryDragPreviewPair ? dragWithLayout.staticNoteXById : null,
+        staticAnchorXById: isPrimaryDragPreviewPair ? dragWithLayout.staticAnchorXById : null,
         staticAccidentalRightXById: isPrimaryDragPreviewPair ? dragWithLayout.previewAccidentalRightXById : null,
         debugCapture: {
           frame: dragPreviewFrameRef.current,

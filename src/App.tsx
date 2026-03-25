@@ -3731,7 +3731,7 @@ function App() {
       keyFifths,
       accidentalStateBeforeNote,
       layoutCacheReady: false,
-      staticNoteXById: new Map(),
+      staticAnchorXById: new Map(),
       previewAccidentalRightXById: new Map(),
       debugStaticByNoteKey: new Map(),
     }
@@ -5853,6 +5853,7 @@ function App() {
                 ? (timeAxisPointXByOnset.get(onsetTicksInMeasure) ?? null)
                 : null,
             x: layout.x,
+            anchorX: layout.anchorX,
             rightX: layout.rightX,
             spacingRightX: layout.spacingRightX,
             noteHeads: layout.noteHeads.map((head) => ({

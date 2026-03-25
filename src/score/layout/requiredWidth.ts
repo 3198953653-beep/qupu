@@ -24,7 +24,6 @@ function buildVexNotesForStaff(notes: ScoreNote[], staff: StaffKind, keyFifths: 
       chordPitches,
       keyFifths,
       null,
-      false,
       null,
       null,
       getPitchLine,

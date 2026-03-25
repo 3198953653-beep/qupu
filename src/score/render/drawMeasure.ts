@@ -15,6 +15,7 @@ import {
   getAccidentalRightXByRenderedIndex,
   getAccidentalVisualX,
   getLayoutNoteKey,
+  getRenderedNoteAnchorX,
   getRenderedNoteVisualX,
 } from '../layout/renderPosition'
 import { applyUnifiedTimeAxisSpacing } from '../layout/timeAxisSpacing'
@@ -39,6 +40,7 @@ import type {
   Selection,
   SpacingLayoutMode,
   StaffKind,
+  StemDirection,
   TieEndpoint,
   TieLayout,
   TimeSignature,
@@ -67,6 +69,10 @@ const NOTEHEAD_NUMERAL_CLIP_INSET_Y_PX = 0.65
 
 function getRestAnchorPitch(staff: StaffKind): Pitch {
   return staff === 'treble' ? 'b/4' : 'd/3'
+}
+
+function toStemDirectionOrNull(value: number | null | undefined): StemDirection | null {
+  return value === 1 || value === -1 ? value : null
 }
 
 type NoteHeadHitGeometry = {
@@ -484,7 +490,7 @@ export type DrawMeasureParams = {
   showNoteHeadJianpu?: boolean
   allowTrebleFullMeasureRestCollapse?: boolean
   allowBassFullMeasureRestCollapse?: boolean
-  staticNoteXById?: Map<string, number> | null
+  staticAnchorXById?: Map<string, number> | null
   staticAccidentalRightXById?: Map<string, Map<number, number>> | null
   publicAxisLayout?: PublicAxisLayout | null
   timelineBundle?: MeasureTimelineBundle | null
@@ -552,7 +558,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     showNoteHeadJianpu = false,
     allowTrebleFullMeasureRestCollapse = false,
     allowBassFullMeasureRestCollapse = false,
-    staticNoteXById = null,
+    staticAnchorXById = null,
     staticAccidentalRightXById = null,
     publicAxisLayout = null,
     timelineBundle = null,
@@ -572,9 +578,15 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   const endTimeSignatureLabel =
     showEndTimeSignature && endTimeSignature ? `${endTimeSignature.beats}/${endTimeSignature.beatType}` : null
   const normalizedPreviewNotes = previewNotes ?? (previewNote ? [previewNote] : [])
-  const previewNoteByLayoutKey = new Map<string, PreviewNoteOverride>()
+  const previewNoteByLayoutKey = new Map<string, Map<number, PreviewNoteOverride>>()
   normalizedPreviewNotes.forEach((entry) => {
-    previewNoteByLayoutKey.set(getLayoutNoteKey(entry.staff, entry.noteId), entry)
+    const layoutKey = getLayoutNoteKey(entry.staff, entry.noteId)
+    const existing = previewNoteByLayoutKey.get(layoutKey)
+    if (existing) {
+      existing.set(entry.keyIndex, entry)
+      return
+    }
+    previewNoteByLayoutKey.set(layoutKey, new Map([[entry.keyIndex, entry]]))
   })
   const selectionEntries: Selection[] = selection ? [selection] : []
   const draggingEntries: Selection[] = dragging ? [dragging] : []
@@ -614,34 +626,50 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   const resolveRenderedNoteData = (
     note: ScoreNote,
     staff: StaffKind,
-  ): { rootPitch: Pitch; chordPitches?: Pitch[]; previewedKeyIndex: number | null; isRest: boolean } => {
+  ): { rootPitch: Pitch; chordPitches?: Pitch[]; previewedKeyIndices: Set<number>; isRest: boolean } => {
     if (note.isRest) {
       return {
         rootPitch: getRestAnchorPitch(staff),
         chordPitches: undefined,
-        previewedKeyIndex: null,
+        previewedKeyIndices: new Set(),
         isRest: true,
       }
     }
 
-    const previewEntry = previewNoteByLayoutKey.get(getLayoutNoteKey(staff, note.id))
-    if (!previewEntry) {
-      return { rootPitch: note.pitch, chordPitches: note.chordPitches, previewedKeyIndex: null, isRest: false }
+    const previewEntries = previewNoteByLayoutKey.get(getLayoutNoteKey(staff, note.id))
+    if (!previewEntries || previewEntries.size === 0) {
+      return {
+        rootPitch: note.pitch,
+        chordPitches: note.chordPitches,
+        previewedKeyIndices: new Set(),
+        isRest: false,
+      }
     }
 
-    if (previewEntry.keyIndex <= 0) {
-      return { rootPitch: previewEntry.pitch, chordPitches: note.chordPitches, previewedKeyIndex: 0, isRest: false }
-    }
+    let rootPitch = note.pitch
+    let chordPitches = note.chordPitches
+    const previewedKeyIndices = new Set<number>()
+    previewEntries.forEach((previewEntry, keyIndex) => {
+      if (keyIndex <= 0) {
+        rootPitch = previewEntry.pitch
+        previewedKeyIndices.add(0)
+        return
+      }
 
-    const chordIndex = previewEntry.keyIndex - 1
-    const sourceChordPitches = note.chordPitches
-    if (!sourceChordPitches || chordIndex < 0 || chordIndex >= sourceChordPitches.length) {
-      return { rootPitch: note.pitch, chordPitches: sourceChordPitches, previewedKeyIndex: null, isRest: false }
-    }
+      const chordIndex = keyIndex - 1
+      const sourceChordPitches = note.chordPitches
+      if (!sourceChordPitches || chordIndex < 0 || chordIndex >= sourceChordPitches.length) {
+        return
+      }
 
-    const chordPitches = sourceChordPitches.slice()
-    chordPitches[chordIndex] = previewEntry.pitch
-    return { rootPitch: note.pitch, chordPitches, previewedKeyIndex: previewEntry.keyIndex, isRest: false }
+      const nextChordPitches =
+        chordPitches === note.chordPitches || !chordPitches ? sourceChordPitches.slice() : chordPitches
+      nextChordPitches[chordIndex] = previewEntry.pitch
+      chordPitches = nextChordPitches
+      previewedKeyIndices.add(keyIndex)
+    })
+
+    return { rootPitch, chordPitches, previewedKeyIndices, isRest: false }
   }
 
   const buildPreviewAccidentalOverridesForStaff = (
@@ -825,9 +853,9 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     const renderedKeys: RenderedNoteKey[] = rendered.isRest
       ? [{ pitch: rendered.rootPitch, accidental: null, keyIndex: 0 }]
       : (() => {
-          const forceChordIndex =
-            !lockPreviewAccidentalLayout && rendered.previewedKeyIndex !== null && rendered.previewedKeyIndex > 0
-              ? rendered.previewedKeyIndex - 1
+          const forceAccidentalFromPitchKeyIndices =
+            !lockPreviewAccidentalLayout && rendered.previewedKeyIndices.size > 0
+              ? rendered.previewedKeyIndices
               : null
           return buildRenderedNoteKeys(
             note,
@@ -836,8 +864,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
             rendered.chordPitches,
             keyFifths,
             previewAccidentalStateBeforeNote,
-            !lockPreviewAccidentalLayout && rendered.previewedKeyIndex === 0,
-            forceChordIndex,
+            forceAccidentalFromPitchKeyIndices,
             previewAccidentalOverrides?.get(note.id) ?? null,
             getPitchLine,
           )
@@ -1026,10 +1053,14 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   // spacing so reserve detection sees the same geometry that will actually render.
   const trebleBeams: Beam[] = isSpacingOnlyLayout
     ? []
-    : Beam.generateBeams(trebleVexNotes, { groups: [new Fraction(1, 4)] })
+    : Beam.generateBeams(trebleVexNotes, {
+        groups: [new Fraction(1, 4)],
+      })
   const bassBeams: Beam[] = isSpacingOnlyLayout
     ? []
-    : Beam.generateBeams(bassVexNotes, { groups: [new Fraction(1, 4)] })
+    : Beam.generateBeams(bassVexNotes, {
+        groups: [new Fraction(1, 4)],
+      })
 
   let appliedSpacingMetrics: AppliedTimeAxisSpacingMetrics | null = null
   if (spacingLayoutMode === 'custom') {
@@ -1058,13 +1089,17 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     onSpacingMetrics(appliedSpacingMetrics)
   }
 
-  if (staticNoteXById && staticNoteXById.size > 0) {
-    const alignRenderedX = (staff: StaffKind, sourceNotes: ScoreNote[], rendered: { vexNote: StaveNote }[]) => {
+  if (staticAnchorXById && staticAnchorXById.size > 0) {
+    const alignRenderedAnchorX = (
+      staff: StaffKind,
+      sourceNotes: ScoreNote[],
+      rendered: { vexNote: StaveNote }[],
+    ) => {
       sourceNotes.forEach((sourceNote, noteIndex) => {
-        const targetX = staticNoteXById.get(getLayoutNoteKey(staff, sourceNote.id))
+        const targetX = staticAnchorXById.get(getLayoutNoteKey(staff, sourceNote.id))
         const vexNote = rendered[noteIndex]?.vexNote
         if (targetX === undefined || !vexNote) return
-        const currentX = getRenderedNoteVisualX(vexNote)
+        const currentX = getRenderedNoteAnchorX(vexNote)
         if (!Number.isFinite(currentX)) return
         const delta = targetX - currentX
         if (Math.abs(delta) < 0.001) return
@@ -1072,8 +1107,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       })
     }
 
-    alignRenderedX('treble', measure.treble, trebleRendered)
-    alignRenderedX('bass', measure.bass, bassRendered)
+    alignRenderedAnchorX('treble', measure.treble, trebleRendered)
+    alignRenderedAnchorX('bass', measure.bass, bassRendered)
   }
 
   const alignRenderedRestToMeasureCenter = (staff: StaffKind, entry: RenderedMeasureNote | undefined) => {
@@ -1115,7 +1150,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       if (!renderedEntry) return
       const layoutKey = getLayoutNoteKey(staff, sourceNote.id)
       const targetByKeyIndex = staticAccidentalRightXById?.get(layoutKey)
-      const noteBaseX = staticNoteXById?.get(layoutKey) ?? getRenderedNoteVisualX(renderedEntry.vexNote)
+      const noteBaseX = getRenderedNoteVisualX(renderedEntry.vexNote)
       const accidentalModifiers = renderedEntry.vexNote
         .getModifiersByType(Accidental.CATEGORY)
         .map((modifier) => modifier as Accidental)
@@ -1208,6 +1243,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         const staticRecord = debugCapture.staticByNoteKey.get(noteKey)
         const noteXPreview = finiteOrNull(getRenderedNoteVisualX(renderedEntry.vexNote))
         const noteXStatic = finiteOrNull(staticRecord?.noteX ?? null)
+        const anchorXPreview = finiteOrNull(getRenderedNoteAnchorX(renderedEntry.vexNote))
+        const anchorXStatic = finiteOrNull(staticRecord?.anchorX ?? null)
         const accidentalPreviewByRenderedIndex = getAccidentalRightXByRenderedIndex(renderedEntry.vexNote)
 
         renderedEntry.renderedKeys.forEach((renderedKey, renderedIndex) => {
@@ -1236,6 +1273,9 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
             noteXStatic,
             noteXPreview,
             noteXDelta: deltaOrNull(noteXPreview, noteXStatic),
+            anchorXStatic,
+            anchorXPreview,
+            anchorXDelta: deltaOrNull(anchorXPreview, anchorXStatic),
             headXStatic,
             headXPreview,
             headXDelta: deltaOrNull(headXPreview, headXStatic),
@@ -1759,6 +1799,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         if (!sourceNote) return []
         const vexNote = renderedEntry.vexNote
         const x = vexNote ? getRenderedNoteVisualX(vexNote) : 0
+        const anchorX = vexNote ? getRenderedNoteAnchorX(vexNote) : x
         let spacingRightX = vexNote ? getRenderedNoteVisualX(vexNote) + 9 : x
         if (vexNote) {
           if (vexNote.hasStem()) {
@@ -1774,6 +1815,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           pairIndex,
           noteIndex: renderedEntry.sourceNoteIndex,
           x,
+          anchorX,
           rightX: spacingRightX,
           spacingRightX,
           y: 0,
@@ -1783,6 +1825,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           inMeasureTieLayouts: [],
           crossMeasureTieLayouts: [],
           accidentalRightXByKeyIndex: {},
+          stemDirection: toStemDirectionOrNull(vexNote?.getStemDirection()),
         }
       })
 
@@ -1951,6 +1994,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         pairIndex,
         noteIndex: sourceNoteIndex,
         x: getRenderedNoteVisualX(vexNote),
+        anchorX: getRenderedNoteAnchorX(vexNote),
         rightX: noteRightX,
         spacingRightX: noteSpacingRightX,
         y: rootHead?.y ?? ys[0] ?? 0,
@@ -1960,6 +2004,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         inMeasureTieLayouts: inMeasureTieLayoutsByLayoutKey.get(layoutKey) ?? [],
         crossMeasureTieLayouts: [],
         accidentalRightXByKeyIndex,
+        stemDirection: toStemDirectionOrNull(vexNote.getStemDirection()),
       }
     }),
   )
@@ -2031,6 +2076,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         pairIndex,
         noteIndex: sourceNoteIndex,
         x: getRenderedNoteVisualX(vexNote),
+        anchorX: getRenderedNoteAnchorX(vexNote),
         rightX: noteRightX,
         spacingRightX: noteSpacingRightX,
         y: rootHead?.y ?? ys[0] ?? 0,
@@ -2040,6 +2086,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         inMeasureTieLayouts: inMeasureTieLayoutsByLayoutKey.get(layoutKey) ?? [],
         crossMeasureTieLayouts: [],
         accidentalRightXByKeyIndex,
+        stemDirection: toStemDirectionOrNull(vexNote.getStemDirection()),
       }
     }),
   )
