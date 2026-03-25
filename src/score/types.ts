@@ -143,8 +143,12 @@ export type NoteLayout = {
   staff: StaffKind
   pairIndex: number
   noteIndex: number
+  isRest?: boolean
+  hasFlag?: boolean
   x: number
   anchorX: number
+  visualLeftX: number
+  visualRightX: number
   rightX: number
   spacingRightX: number
   y: number
@@ -341,6 +345,8 @@ export type MeasureLayout = {
     appliedGapPx: number
     trebleRequestedExtraPx: number
     bassRequestedExtraPx: number
+    noteRestRequestedExtraPx?: number
+    noteRestVisibleGapPx?: number | null
     winningStaff: 'treble' | 'bass' | 'tie' | 'none'
   }>
   overlayRect: {

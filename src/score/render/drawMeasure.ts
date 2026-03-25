@@ -16,6 +16,7 @@ import {
   getAccidentalVisualX,
   getLayoutNoteKey,
   getRenderedNoteAnchorX,
+  getRenderedNoteGlyphBounds,
   getRenderedNoteVisualX,
 } from '../layout/renderPosition'
 import { applyUnifiedTimeAxisSpacing } from '../layout/timeAxisSpacing'
@@ -1051,16 +1052,12 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   // Beam generation can flip stem direction, which rebuilds noteheads and changes
   // the displaced column side for second-interval chords. Build beams before custom
   // spacing so reserve detection sees the same geometry that will actually render.
-  const trebleBeams: Beam[] = isSpacingOnlyLayout
-    ? []
-    : Beam.generateBeams(trebleVexNotes, {
-        groups: [new Fraction(1, 4)],
-      })
-  const bassBeams: Beam[] = isSpacingOnlyLayout
-    ? []
-    : Beam.generateBeams(bassVexNotes, {
-        groups: [new Fraction(1, 4)],
-      })
+  const trebleBeams: Beam[] = Beam.generateBeams(trebleVexNotes, {
+    groups: [new Fraction(1, 4)],
+  })
+  const bassBeams: Beam[] = Beam.generateBeams(bassVexNotes, {
+    groups: [new Fraction(1, 4)],
+  })
 
   let appliedSpacingMetrics: AppliedTimeAxisSpacingMetrics | null = null
   if (spacingLayoutMode === 'custom') {
@@ -1800,6 +1797,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         const vexNote = renderedEntry.vexNote
         const x = vexNote ? getRenderedNoteVisualX(vexNote) : 0
         const anchorX = vexNote ? getRenderedNoteAnchorX(vexNote) : x
+        const visualBounds = vexNote ? getRenderedNoteGlyphBounds(vexNote) : null
+        const hasStandaloneFlag = vexNote?.hasFlag() === true && !vexNote.getBeam()
         let spacingRightX = vexNote ? getRenderedNoteVisualX(vexNote) + 9 : x
         if (vexNote) {
           if (vexNote.hasStem()) {
@@ -1814,8 +1813,12 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           staff,
           pairIndex,
           noteIndex: renderedEntry.sourceNoteIndex,
+          isRest: sourceNote.isRest === true,
+          hasFlag: hasStandaloneFlag,
           x,
           anchorX,
+          visualLeftX: visualBounds?.leftX ?? x,
+          visualRightX: visualBounds?.rightX ?? spacingRightX,
           rightX: spacingRightX,
           spacingRightX,
           y: 0,
@@ -1987,14 +1990,19 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       const rootHead = noteHeads.find((head) => head.keyIndex === 0) ?? noteHeads[0]
       const noteSpacingRightX = getRenderedNoteSpacingRightX(vexNote, noteHeads)
       const noteRightX = isSpacingOnlyLayout ? noteSpacingRightX : getRenderedNoteRightX(vexNote, noteHeads)
+      const visualBounds = getRenderedNoteGlyphBounds(vexNote)
       const layoutKey = getLayoutNoteKey('treble', sourceNote.id)
       return {
         id: sourceNote.id,
         staff: 'treble' as const,
         pairIndex,
         noteIndex: sourceNoteIndex,
+        isRest: sourceNote.isRest === true,
+        hasFlag: vexNote.hasFlag() && !vexNote.getBeam(),
         x: getRenderedNoteVisualX(vexNote),
         anchorX: getRenderedNoteAnchorX(vexNote),
+        visualLeftX: visualBounds?.leftX ?? getRenderedNoteVisualX(vexNote),
+        visualRightX: visualBounds?.rightX ?? noteRightX,
         rightX: noteRightX,
         spacingRightX: noteSpacingRightX,
         y: rootHead?.y ?? ys[0] ?? 0,
@@ -2069,14 +2077,19 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       const rootHead = noteHeads.find((head) => head.keyIndex === 0) ?? noteHeads[0]
       const noteSpacingRightX = getRenderedNoteSpacingRightX(vexNote, noteHeads)
       const noteRightX = isSpacingOnlyLayout ? noteSpacingRightX : getRenderedNoteRightX(vexNote, noteHeads)
+      const visualBounds = getRenderedNoteGlyphBounds(vexNote)
       const layoutKey = getLayoutNoteKey('bass', sourceNote.id)
       return {
         id: sourceNote.id,
         staff: 'bass' as const,
         pairIndex,
         noteIndex: sourceNoteIndex,
+        isRest: sourceNote.isRest === true,
+        hasFlag: vexNote.hasFlag() && !vexNote.getBeam(),
         x: getRenderedNoteVisualX(vexNote),
         anchorX: getRenderedNoteAnchorX(vexNote),
+        visualLeftX: visualBounds?.leftX ?? getRenderedNoteVisualX(vexNote),
+        visualRightX: visualBounds?.rightX ?? noteRightX,
         rightX: noteRightX,
         spacingRightX: noteSpacingRightX,
         y: rootHead?.y ?? ys[0] ?? 0,

@@ -9,6 +9,16 @@ export function getRenderedNoteVisualX(note: StaveNote): number {
   return note.getNoteHeadBeginX()
 }
 
+export function getRenderedNoteGlobalAnchorX(note: StaveNote): number {
+  const absoluteX = note.getAbsoluteX()
+  const xShift = note.getXShift()
+  const shiftedAbsoluteX = absoluteX + xShift
+  if (Number.isFinite(shiftedAbsoluteX)) return shiftedAbsoluteX
+  const x = note.getX()
+  if (Number.isFinite(x)) return x
+  return getRenderedNoteVisualX(note)
+}
+
 export function getRenderedNoteAnchorX(note: StaveNote): number {
   const x = note.getX()
   if (Number.isFinite(x)) return x
@@ -16,6 +26,54 @@ export function getRenderedNoteAnchorX(note: StaveNote): number {
   const xShift = note.getXShift()
   const fallbackX = absoluteX + xShift
   return Number.isFinite(fallbackX) ? fallbackX : getRenderedNoteVisualX(note)
+}
+
+export function getRenderedNoteGlyphBounds(note: StaveNote): { leftX: number; rightX: number } | null {
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+
+  const headBeginX = note.getNoteHeadBeginX()
+  const headEndX = note.getNoteHeadEndX()
+  if (Number.isFinite(headBeginX) && Number.isFinite(headEndX) && headEndX >= headBeginX) {
+    minX = Math.min(minX, headBeginX)
+    maxX = Math.max(maxX, headEndX)
+  }
+
+  if (note.hasStem()) {
+    const stemX = note.getStemX()
+    if (Number.isFinite(stemX)) {
+      minX = Math.min(minX, stemX - 1)
+      maxX = Math.max(maxX, stemX + 1)
+    }
+    if (note.hasFlag()) {
+      const rawFlagWidth = (note as unknown as { flag?: { getWidth?: () => number } }).flag?.getWidth?.()
+      const flagWidth = Number.isFinite(rawFlagWidth) ? (rawFlagWidth as number) : null
+      if (flagWidth !== null && Number.isFinite(stemX)) {
+        if (note.getStemDirection() === 1) {
+          maxX = Math.max(maxX, stemX + flagWidth)
+        } else {
+          minX = Math.min(minX, stemX - flagWidth)
+        }
+      }
+    }
+  }
+
+  note.getModifiersByType(Accidental.CATEGORY).forEach((modifier) => {
+    const accidental = modifier as Accidental
+    const renderedIndex = accidental.getIndex()
+    if (typeof renderedIndex !== 'number' || !Number.isFinite(renderedIndex)) return
+    const accidentalX = getAccidentalVisualX(note, accidental, renderedIndex)
+    const accidentalWidth = accidental.getWidth()
+    if (typeof accidentalX !== 'number' || !Number.isFinite(accidentalX)) return
+    minX = Math.min(minX, accidentalX)
+    maxX = Math.max(maxX, accidentalX + (Number.isFinite(accidentalWidth) ? accidentalWidth : 0))
+  })
+
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return null
+  return {
+    leftX: minX,
+    rightX: maxX,
+  }
 }
 
 export function finiteOrNull(value: number | undefined | null): number | null {

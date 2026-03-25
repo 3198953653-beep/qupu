@@ -5862,6 +5862,8 @@ function App() {
                 : null,
             x: layout.x,
             anchorX: layout.anchorX,
+            visualLeftX: layout.visualLeftX,
+            visualRightX: layout.visualRightX,
             rightX: layout.rightX,
             spacingRightX: layout.spacingRightX,
             noteHeads: layout.noteHeads.map((head) => ({
@@ -6077,6 +6079,11 @@ function App() {
             appliedGapPx: toRoundedNumber(entry.appliedGapPx, 3),
             trebleRequestedExtraPx: toRoundedNumber(entry.trebleRequestedExtraPx, 3),
             bassRequestedExtraPx: toRoundedNumber(entry.bassRequestedExtraPx, 3),
+            noteRestRequestedExtraPx: toRoundedNumber(entry.noteRestRequestedExtraPx, 3),
+            noteRestVisibleGapPx:
+              typeof entry.noteRestVisibleGapPx === 'number'
+                ? toRoundedNumber(entry.noteRestVisibleGapPx, 3)
+                : null,
             winningStaff: entry.winningStaff,
           })) ?? [],
         trebleTimelineEvents:

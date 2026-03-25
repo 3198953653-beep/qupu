@@ -17,6 +17,8 @@
     "test:playhead:browser": "tsx scripts/playhead-browser-test.ts",
     "test:chord-marker:browser": "tsx scripts/chord-marker-browser-test.ts",
     "test:quarter-pulse:spacing:browser": "tsx scripts/quarter-pulse-spacing-browser-test.ts",
+    "test:note-rest-flag:spacing:browser": "tsx scripts/note-rest-flag-spacing-browser-test.ts",
+    "test:trailing-flag-boundary:browser": "tsx scripts/trailing-flag-boundary-browser-test.ts",
     "test:built-in-demo:spacing:browser": "tsx scripts/built-in-demo-spacing-browser-test.ts",
     "test:global-tick-gap:browser": "tsx scripts/global-tick-gap-browser-test.ts",
     "test:second-chord:spacing:browser": "tsx scripts/second-chord-spacing-browser-test.ts",

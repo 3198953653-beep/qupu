@@ -58,6 +58,10 @@ type MeasureProbeGeometry = {
 }
 
 type ProbeLayoutLike = {
+  anchorX?: number
+  visualRightX?: number
+  isRest?: boolean
+  hasFlag?: boolean
   x?: number
   rightX?: number
   spacingRightX?: number
@@ -67,6 +71,7 @@ type MeasureSpacingProbe = {
   leadingGapPx: number
   trailingGapPx: number
   rightOverflowPx: number
+  trailingFlagVisualOverflowPx: number
   spacingAnchorGapFirstToLastPx: number
   leadingOccupiedInsetPx: number
   trailingOccupiedTailPx: number
@@ -75,8 +80,59 @@ type MeasureSpacingProbe = {
 const MIN_FORMAT_WIDTH_PX = 8
 const EPS = 0.05
 const PROBE_MEASURE_X = 1024
-const SOLVER_CACHE_VERSION = 'v8'
+const SOLVER_CACHE_VERSION = 'v9'
 const SOLVER_CACHE_MAX_ENTRIES = 12000
+const TRAILING_FLAG_BARLINE_SAFE_GAP_PX = 1
+
+function pickTrailingLayout(layouts: ProbeLayoutLike[]): ProbeLayoutLike | null {
+  let trailingLayout: ProbeLayoutLike | null = null
+  let trailingAnchorX = Number.NEGATIVE_INFINITY
+  let trailingVisualRightX = Number.NEGATIVE_INFINITY
+
+  layouts.forEach((layout) => {
+    const anchorX = Number.isFinite(layout.anchorX)
+      ? (layout.anchorX as number)
+      : Number.isFinite(layout.x)
+        ? (layout.x as number)
+        : Number.NEGATIVE_INFINITY
+    const visualRightX = Number.isFinite(layout.visualRightX)
+      ? (layout.visualRightX as number)
+      : Number.isFinite(layout.spacingRightX)
+        ? (layout.spacingRightX as number)
+        : Number.NEGATIVE_INFINITY
+    if (!Number.isFinite(anchorX) || !Number.isFinite(visualRightX)) return
+    if (anchorX > trailingAnchorX + EPS) {
+      trailingLayout = layout
+      trailingAnchorX = anchorX
+      trailingVisualRightX = visualRightX
+      return
+    }
+    if (Math.abs(anchorX - trailingAnchorX) <= EPS && visualRightX > trailingVisualRightX + EPS) {
+      trailingLayout = layout
+      trailingAnchorX = anchorX
+      trailingVisualRightX = visualRightX
+    }
+  })
+
+  return trailingLayout
+}
+
+function resolveTrailingFlagVisualOverflowPx(
+  layouts: ProbeLayoutLike[],
+  effectiveBoundaryEndX: number,
+): number {
+  if (!Number.isFinite(effectiveBoundaryEndX)) return 0
+  const trailingLayout = pickTrailingLayout(layouts)
+  if (!trailingLayout || trailingLayout.isRest === true || trailingLayout.hasFlag !== true) return 0
+  const trailingVisualRightX = Number.isFinite(trailingLayout.visualRightX)
+    ? (trailingLayout.visualRightX as number)
+    : Number.isFinite(trailingLayout.spacingRightX)
+      ? (trailingLayout.spacingRightX as number)
+      : Number.NaN
+  if (!Number.isFinite(trailingVisualRightX)) return 0
+  const safeBoundaryRightX = effectiveBoundaryEndX - TRAILING_FLAG_BARLINE_SAFE_GAP_PX
+  return Math.max(0, trailingVisualRightX - safeBoundaryRightX)
+}
 
 function resolveMeasureMeta(params: {
   measurePairs: MeasurePair[]
@@ -258,7 +314,7 @@ function probeMeasureSpacing(
     activeSelection: null,
     draggingSelection: null,
     collectLayouts: true,
-    layoutDetail: 'full',
+    layoutDetail: 'spacing-only',
     skipPainting: true,
     noteStartXOverride: geometry.noteStartX,
     formatWidthOverride: geometry.formatWidth,
@@ -276,22 +332,14 @@ function probeMeasureSpacing(
       spacingMetricsRef.current = metrics
     },
   })
-  let layoutOccupiedLeftX = Number.POSITIVE_INFINITY
-  let layoutOccupiedRightX = Number.NEGATIVE_INFINITY
-  ;(measureNoteLayouts as ProbeLayoutLike[]).forEach((layout) => {
-    if (typeof layout.x === 'number' && Number.isFinite(layout.x)) {
-      layoutOccupiedLeftX = Math.min(layoutOccupiedLeftX, layout.x)
-    }
-    const spacingRightX =
-      typeof layout.spacingRightX === 'number' && Number.isFinite(layout.spacingRightX)
-        ? layout.spacingRightX
-        : Number.NEGATIVE_INFINITY
-    const visualRightX =
-      typeof layout.rightX === 'number' && Number.isFinite(layout.rightX) ? layout.rightX : Number.NEGATIVE_INFINITY
-    const occupiedRightX = Math.max(spacingRightX, visualRightX)
-    if (Number.isFinite(occupiedRightX)) {
-      layoutOccupiedRightX = Math.max(layoutOccupiedRightX, occupiedRightX)
-    }
+  const probeLayouts = measureNoteLayouts as ProbeLayoutLike[]
+  const boundary = resolveEffectiveBoundary({
+    measureX: PROBE_MEASURE_X,
+    measureWidth: geometry.renderedMeasureWidth,
+    noteStartX: geometry.noteStartX,
+    noteEndX: geometry.noteEndX,
+    showStartDecorations: meta.showStartBoundaryReserve,
+    showEndDecorations: meta.showEndDecorations,
   })
   const appliedMetrics = spacingMetricsRef.current
   if (
@@ -320,6 +368,10 @@ function probeMeasureSpacing(
       leadingGapPx: appliedMetrics.leadingGapPx,
       trailingGapPx: appliedMetrics.trailingGapPx,
       rightOverflowPx: Math.max(0, appliedMetrics.spacingOccupiedRightX - appliedMetrics.effectiveBoundaryEndX),
+      trailingFlagVisualOverflowPx: resolveTrailingFlagVisualOverflowPx(
+        probeLayouts,
+        appliedMetrics.effectiveBoundaryEndX,
+      ),
       spacingAnchorGapFirstToLastPx: Math.max(0, appliedMetrics.spacingAnchorGapFirstToLastPx),
       leadingOccupiedInsetPx,
       trailingOccupiedTailPx,
@@ -330,23 +382,22 @@ function probeMeasureSpacing(
       leadingGapPx: 0,
       trailingGapPx: 0,
       rightOverflowPx: 0,
+      trailingFlagVisualOverflowPx: 0,
       spacingAnchorGapFirstToLastPx: 0,
       leadingOccupiedInsetPx: 0,
       trailingOccupiedTailPx: 0,
     }
   }
 
-  let firstVisualLeftX = Number.POSITIVE_INFINITY
-  let lastVisualRightX = Number.NEGATIVE_INFINITY
-  measureNoteLayouts.forEach((layout) => {
-    if (Number.isFinite(layout.x)) {
-      firstVisualLeftX = Math.min(firstVisualLeftX, layout.x)
+  let firstOccupiedLeftX = Number.POSITIVE_INFINITY
+  let lastSpacingOccupiedRightX = Number.NEGATIVE_INFINITY
+  probeLayouts.forEach((layout) => {
+    const layoutX = layout.x
+    if (typeof layoutX === 'number' && Number.isFinite(layoutX)) {
+      firstOccupiedLeftX = Math.min(firstOccupiedLeftX, layoutX)
     }
-    const spacingRightX = Number.isFinite(layout.spacingRightX) ? layout.spacingRightX : Number.NEGATIVE_INFINITY
-    const visualRightX = Number.isFinite(layout.rightX) ? layout.rightX : Number.NEGATIVE_INFINITY
-    const rightX = Math.max(spacingRightX, visualRightX)
-    if (Number.isFinite(rightX)) {
-      lastVisualRightX = Math.max(lastVisualRightX, rightX)
+    if (Number.isFinite(layout.spacingRightX)) {
+      lastSpacingOccupiedRightX = Math.max(lastSpacingOccupiedRightX, layout.spacingRightX as number)
     }
   })
   const anchorTicks = probeTimelineBundle?.spacingAnchorTicks ?? []
@@ -359,27 +410,18 @@ function probeMeasureSpacing(
       ? probeTimelineBundle?.spacingTickToX.get(anchorTicks[anchorTicks.length - 1] as number) ?? Number.NaN
       : Number.NaN
   const occupiedLeftX =
-    Number.isFinite(anchorLeftX) && Number.isFinite(firstVisualLeftX)
-      ? Math.min(firstVisualLeftX, anchorLeftX)
+    Number.isFinite(anchorLeftX) && Number.isFinite(firstOccupiedLeftX)
+      ? Math.min(firstOccupiedLeftX, anchorLeftX)
       : Number.isFinite(anchorLeftX)
         ? anchorLeftX
-        : firstVisualLeftX
+        : firstOccupiedLeftX
   const occupiedRightX =
-    Number.isFinite(anchorRightX) && Number.isFinite(lastVisualRightX)
-      ? Math.max(lastVisualRightX, anchorRightX)
+    Number.isFinite(anchorRightX) && Number.isFinite(lastSpacingOccupiedRightX)
+      ? Math.max(lastSpacingOccupiedRightX, anchorRightX)
       : Number.isFinite(anchorRightX)
         ? anchorRightX
-        : lastVisualRightX
+        : lastSpacingOccupiedRightX
   if (!Number.isFinite(occupiedLeftX) || !Number.isFinite(occupiedRightX)) return null
-
-  const boundary = resolveEffectiveBoundary({
-    measureX: PROBE_MEASURE_X,
-    measureWidth: geometry.renderedMeasureWidth,
-    noteStartX: geometry.noteStartX,
-    noteEndX: geometry.noteEndX,
-    showStartDecorations: meta.showStartBoundaryReserve,
-    showEndDecorations: meta.showEndDecorations,
-  })
   const effectiveLeftGapPx = occupiedLeftX - boundary.effectiveStartX
   const effectiveRightGapPx = boundary.effectiveEndX - occupiedRightX
   const leadingGapPx =
@@ -394,6 +436,7 @@ function probeMeasureSpacing(
     leadingGapPx,
     trailingGapPx,
     rightOverflowPx: Math.max(0, occupiedRightX - boundary.effectiveEndX),
+    trailingFlagVisualOverflowPx: resolveTrailingFlagVisualOverflowPx(probeLayouts, boundary.effectiveEndX),
     spacingAnchorGapFirstToLastPx:
       Number.isFinite(anchorLeftX) && Number.isFinite(anchorRightX)
         ? Math.max(0, anchorRightX - anchorLeftX)
@@ -490,7 +533,11 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
       // resolved by spacing/layout, not by the width solver.
       const leadingGapDeficit = 0
       const trailingGapDeficit = Math.max(0, timelineMetrics.trailingGapPx - probe.trailingGapPx)
-      const trailingWidthDemandPx = Math.max(probe.rightOverflowPx, trailingGapDeficit)
+      const trailingWidthDemandPx = Math.max(
+        probe.rightOverflowPx,
+        trailingGapDeficit,
+        probe.trailingFlagVisualOverflowPx,
+      )
       const timelineCompressionDeficit = Math.max(0, timelineMetrics.anchorSpanPx - probe.spacingAnchorGapFirstToLastPx)
 
       if (

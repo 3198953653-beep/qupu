@@ -1,6 +1,10 @@
 import { Accidental, Stem, type StaveNote } from 'vexflow'
 import { DURATION_TICKS } from '../constants'
-import { getAccidentalVisualX, getRenderedNoteVisualX } from './renderPosition'
+import {
+  getAccidentalVisualX,
+  getRenderedNoteGlyphBounds,
+  getRenderedNoteVisualX,
+} from './renderPosition'
 import type { MeasurePair, ScoreNote, StaffKind } from '../types'
 import { resolveEffectiveBoundary } from './effectiveBoundary'
 import { buildPublicAxisLayout } from '../timeline/axisLayout'
@@ -24,6 +28,15 @@ type TimeAxisNoteRef = {
   collisionRightBodyTailPx: number
 }
 
+type TimeAxisRenderedRef = {
+  staff: StaffKind
+  noteIndex: number
+  onsetTicks: number
+  vexNote: StaveNote
+  isRest: boolean
+  duration: ScoreNote['duration']
+}
+
 type OnsetCollisionMetrics = {
   rawLeftReservePx: number
   rawRightReservePx: number
@@ -36,6 +49,42 @@ type StaffOnsetCollisionMetrics = OnsetCollisionMetrics & {
   staff: StaffKind
   onsetTicks: number
   sharedOnsetIndex: number
+}
+
+type StaffVisualBlockerRef = {
+  staff: StaffKind
+  noteIndex: number
+  onsetTicks: number
+  isRest: boolean
+  hasRest: boolean
+  hasNonRest: boolean
+  hasStandaloneFlaggedNote: boolean
+  anchorX: number
+  visualLeftX: number
+  visualRightX: number
+  projectedLeftExtraPx: number
+  projectedRightExtraPx: number
+}
+
+type ProjectedVisualBlockerBounds = {
+  visualLeftX: number
+  visualRightX: number
+}
+
+function getStandaloneFlagProjectionPx(duration: ScoreNote['duration']): number | null {
+  switch (duration) {
+    case '8':
+    case '8d':
+      return 7
+    case '16':
+    case '16d':
+      return 8
+    case '32':
+    case '32d':
+      return 9
+    default:
+      return null
+  }
 }
 
 type StaffSlotWinner = StaffKind | 'tie' | 'none'
@@ -362,21 +411,6 @@ function getRenderedNoteOccupiedBounds(
   }
 }
 
-function getSpacingOccupiedBounds(refs: TimeAxisNoteRef[]): { leftX: number; rightX: number } | null {
-  let leftX = Number.POSITIVE_INFINITY
-  let rightX = Number.NEGATIVE_INFINITY
-
-  refs.forEach((ref) => {
-    const noteBounds = getRenderedNoteOccupiedBounds(ref.vexNote)
-    if (!noteBounds) return
-    leftX = Math.min(leftX, noteBounds.leftX)
-    rightX = Math.max(rightX, noteBounds.rightX)
-  })
-
-  if (!Number.isFinite(leftX) || !Number.isFinite(rightX)) return null
-  return { leftX, rightX }
-}
-
 function getNoteRawReserveExtents(vexNote: StaveNote): { rawLeftReservePx: number; rawRightReservePx: number } {
   let rawLeftReservePx = 0
   let rawRightReservePx = 0
@@ -497,6 +531,107 @@ function buildTimeAxisRefs(params: {
   return refs
 }
 
+function buildTimeAxisRenderedRefs(params: {
+  staff: StaffKind
+  notes: ScoreNote[]
+  rendered: RenderedStaffNote[]
+  timeline: StaffTimeline | null
+}): TimeAxisRenderedRef[] {
+  const { staff, notes, rendered, timeline } = params
+  const refs: TimeAxisRenderedRef[] = []
+  const pushRef = (noteIndex: number, onsetTicks: number) => {
+    const sourceNote = notes[noteIndex]
+    const renderedEntry = rendered[noteIndex]
+    if (!sourceNote || !renderedEntry) return
+    refs.push({
+      staff,
+      noteIndex,
+      onsetTicks,
+      vexNote: renderedEntry.vexNote,
+      isRest: sourceNote.isRest === true,
+      duration: sourceNote.duration,
+    })
+  }
+
+  if (timeline?.events?.length) {
+    timeline.events.forEach((event) => {
+      pushRef(event.noteIndex, event.startTick)
+    })
+    return refs
+  }
+
+  let cursorTicks = 0
+  notes.forEach((note, noteIndex) => {
+    const durationTicks = getTickDuration(note)
+    pushRef(noteIndex, cursorTicks)
+    cursorTicks += durationTicks
+  })
+
+  return refs
+}
+
+function buildStaffVisualBlockerRefs(refs: TimeAxisRenderedRef[]): Record<StaffKind, StaffVisualBlockerRef[]> {
+  const blockers: Record<StaffKind, StaffVisualBlockerRef[]> = {
+    treble: [],
+    bass: [],
+  }
+
+  refs.forEach((ref) => {
+    const glyphBounds = getRenderedNoteGlyphBounds(ref.vexNote)
+    if (!glyphBounds) return
+    const anchorX = getRenderedNoteVisualX(ref.vexNote)
+    let visualLeftX = glyphBounds.leftX
+    let visualRightX = glyphBounds.rightX
+    const flagProjectionPx =
+      ref.isRest !== true && ref.vexNote.hasFlag() && !ref.vexNote.getBeam()
+        ? getStandaloneFlagProjectionPx(ref.duration)
+        : null
+    const projectedLeftExtraPx = flagProjectionPx !== null && ref.vexNote.getStemDirection() === Stem.DOWN ? flagProjectionPx : 0
+    const projectedRightExtraPx =
+      flagProjectionPx !== null && ref.vexNote.getStemDirection() === Stem.UP ? flagProjectionPx : 0
+    blockers[ref.staff].push({
+      staff: ref.staff,
+      noteIndex: ref.noteIndex,
+      onsetTicks: ref.onsetTicks,
+      isRest: ref.isRest,
+      hasRest: ref.isRest,
+      hasNonRest: !ref.isRest,
+      hasStandaloneFlaggedNote: flagProjectionPx !== null,
+      anchorX: Number.isFinite(anchorX) ? anchorX : glyphBounds.leftX,
+      visualLeftX,
+      visualRightX,
+      projectedLeftExtraPx,
+      projectedRightExtraPx,
+    })
+  })
+
+  ;(['treble', 'bass'] as StaffKind[]).forEach((staff) => {
+    blockers[staff].sort((left, right) => {
+      if (left.onsetTicks !== right.onsetTicks) return left.onsetTicks - right.onsetTicks
+      if (left.noteIndex !== right.noteIndex) return left.noteIndex - right.noteIndex
+      return left.anchorX - right.anchorX
+    })
+  })
+
+  return blockers
+}
+
+function getRenderedOccupiedBounds(refs: TimeAxisRenderedRef[]): { leftX: number; rightX: number } | null {
+  let leftX = Number.POSITIVE_INFINITY
+  let rightX = Number.NEGATIVE_INFINITY
+
+  refs.forEach((ref) => {
+    const occupiedBounds =
+      ref.isRest === true ? getRenderedNoteGlyphBounds(ref.vexNote) : getRenderedNoteOccupiedBounds(ref.vexNote)
+    if (!occupiedBounds) return
+    leftX = Math.min(leftX, occupiedBounds.leftX)
+    rightX = Math.max(rightX, occupiedBounds.rightX)
+  })
+
+  if (!Number.isFinite(leftX) || !Number.isFinite(rightX)) return null
+  return { leftX, rightX }
+}
+
 function buildStaffOnsetTicks(notes: ScoreNote[]): number[] {
   const onsetTicks: number[] = []
   let cursorTicks = 0
@@ -598,6 +733,8 @@ export type TimeAxisSpacingSegmentReserve = {
   appliedGapPx: number
   trebleRequestedExtraPx: number
   bassRequestedExtraPx: number
+  noteRestRequestedExtraPx: number
+  noteRestVisibleGapPx: number | null
   winningStaff: StaffSlotWinner
 }
 
@@ -1096,6 +1233,38 @@ function createStaffSlotRequestRecord(): Record<StaffKind, StaffSlotRequest | nu
   }
 }
 
+function createStaffExtraRecord(): Record<StaffKind, number> {
+  return {
+    treble: 0,
+    bass: 0,
+  }
+}
+
+function isNoteRestCollisionPair(left: StaffVisualBlockerRef, right: StaffVisualBlockerRef): boolean {
+  if (left.isRest === right.isRest) return false
+  const noteBlocker = left.isRest ? right : left
+  return noteBlocker.hasStandaloneFlaggedNote
+}
+
+function isBoundaryCollisionCandidate(blocker: StaffVisualBlockerRef): boolean {
+  return blocker.isRest
+}
+
+function resolveProjectedVisualBlockerBounds(
+  blocker: StaffVisualBlockerRef,
+  baseXByOnset: Map<number, number>,
+): ProjectedVisualBlockerBounds {
+  const projectedAnchorX = baseXByOnset.get(blocker.onsetTicks)
+  const deltaX =
+    typeof projectedAnchorX === 'number' && Number.isFinite(projectedAnchorX) && Number.isFinite(blocker.anchorX)
+      ? projectedAnchorX - blocker.anchorX
+      : 0
+  return {
+    visualLeftX: blocker.visualLeftX + deltaX,
+    visualRightX: blocker.visualRightX + deltaX,
+  }
+}
+
 function buildBaseTargetXByOnset(params: {
   onsetTicks: number[]
   axisStart: number
@@ -1133,6 +1302,7 @@ function resolveCollisionDrivenOverlay(params: {
   onsetTicks: number[]
   baseTargetXByOnset: Map<number, number>
   refsByOnset: Map<number, TimeAxisNoteRef[]>
+  visualBlockersByStaff: Record<StaffKind, StaffVisualBlockerRef[]>
   effectiveBoundaryStartX: number
   effectiveBoundaryEndX: number
   spacingConfig: TimeAxisSpacingConfig
@@ -1146,6 +1316,7 @@ function resolveCollisionDrivenOverlay(params: {
     onsetTicks,
     baseTargetXByOnset,
     refsByOnset,
+    visualBlockersByStaff,
     effectiveBoundaryStartX,
     effectiveBoundaryEndX,
     spacingConfig,
@@ -1177,6 +1348,12 @@ function resolveCollisionDrivenOverlay(params: {
   const leadingRequests = createStaffSlotRequestRecord()
   const trailingRequests = createStaffSlotRequestRecord()
   const segmentRequests = onsetTicks.slice(1).map(() => createStaffSlotRequestRecord())
+  const noteRestLeadingRequests = createStaffExtraRecord()
+  const noteRestTrailingRequests = createStaffExtraRecord()
+  const noteRestSegmentRequests = onsetTicks.slice(1).map(() => createStaffExtraRecord())
+  const noteRestSegmentVisibleGaps = onsetTicks
+    .slice(1)
+    .map(() => ({ treble: null as number | null, bass: null as number | null }))
   const baseXs = onsetTicks.map((onset, index) => {
     const baseX = baseTargetXByOnset.get(onset)
     if (typeof baseX === 'number' && Number.isFinite(baseX)) {
@@ -1186,6 +1363,7 @@ function resolveCollisionDrivenOverlay(params: {
     return typeof previousBaseX === 'number' && Number.isFinite(previousBaseX) ? previousBaseX : 0
   })
   const baseXByOnset = new Map<number, number>(onsetTicks.map((onsetTick, index) => [onsetTick, baseXs[index] ?? 0]))
+  const onsetIndexByTick = new Map<number, number>(onsetTicks.map((onsetTick, index) => [onsetTick, index]))
 
   ;(['treble', 'bass'] as StaffKind[]).forEach((staff) => {
     const staffCollisionMetrics = staffOnsetCollisionMetricsByStaff[staff]
@@ -1245,6 +1423,66 @@ function resolveCollisionDrivenOverlay(params: {
     })
   })
 
+  ;(['treble', 'bass'] as StaffKind[]).forEach((staff) => {
+    const staffBlockers = visualBlockersByStaff[staff] ?? []
+    if (staffBlockers.length === 0) return
+
+    const firstBlocker = staffBlockers[0]
+    if (firstBlocker && isBoundaryCollisionCandidate(firstBlocker)) {
+      const projectedFirstBounds = resolveProjectedVisualBlockerBounds(firstBlocker, baseXByOnset)
+      const visibleLeadingGapPx =
+        projectedFirstBounds.visualLeftX - firstBlocker.projectedLeftExtraPx - effectiveBoundaryStartX
+      const requestPx = Math.max(0, -visibleLeadingGapPx)
+      if (requestPx > 0) {
+        noteRestLeadingRequests[staff] = Math.max(noteRestLeadingRequests[staff], requestPx)
+      }
+    }
+
+    const lastBlocker = staffBlockers[staffBlockers.length - 1]
+    if (lastBlocker && isBoundaryCollisionCandidate(lastBlocker)) {
+      const projectedLastBounds = resolveProjectedVisualBlockerBounds(lastBlocker, baseXByOnset)
+      const visibleTrailingGapPx =
+        effectiveBoundaryEndX - (projectedLastBounds.visualRightX + lastBlocker.projectedRightExtraPx)
+      const requestPx = Math.max(0, -visibleTrailingGapPx)
+      if (requestPx > 0) {
+        noteRestTrailingRequests[staff] = Math.max(noteRestTrailingRequests[staff], requestPx)
+      }
+    }
+
+    for (let index = 1; index < staffBlockers.length; index += 1) {
+      const previousBlocker = staffBlockers[index - 1]!
+      const nextBlocker = staffBlockers[index]!
+      if (!isNoteRestCollisionPair(previousBlocker, nextBlocker)) continue
+      const previousSharedIndex = onsetIndexByTick.get(previousBlocker.onsetTicks)
+      const nextSharedIndex = onsetIndexByTick.get(nextBlocker.onsetTicks)
+      if (
+        typeof previousSharedIndex !== 'number' ||
+        !Number.isFinite(previousSharedIndex) ||
+        typeof nextSharedIndex !== 'number' ||
+        !Number.isFinite(nextSharedIndex) ||
+        nextSharedIndex <= previousSharedIndex
+      ) {
+        continue
+      }
+      const slotIndex = nextSharedIndex - 1
+      const projectedPreviousBounds = resolveProjectedVisualBlockerBounds(previousBlocker, baseXByOnset)
+      const projectedNextBounds = resolveProjectedVisualBlockerBounds(nextBlocker, baseXByOnset)
+      const visibleGapPx =
+        projectedNextBounds.visualLeftX -
+        projectedPreviousBounds.visualRightX -
+        previousBlocker.projectedRightExtraPx -
+        nextBlocker.projectedLeftExtraPx
+      const currentVisibleGapPx = noteRestSegmentVisibleGaps[slotIndex]?.[staff]
+      noteRestSegmentVisibleGaps[slotIndex]![staff] =
+        typeof currentVisibleGapPx === 'number' && Number.isFinite(currentVisibleGapPx)
+          ? Math.min(currentVisibleGapPx, visibleGapPx)
+          : visibleGapPx
+      const requestPx = Math.max(0, -visibleGapPx)
+      if (requestPx <= 0) continue
+      noteRestSegmentRequests[slotIndex]![staff] = Math.max(noteRestSegmentRequests[slotIndex]![staff], requestPx)
+    }
+  })
+
   const leadingDebug: LeadingTrailingDebug = {
     trebleRequestedExtraPx: Math.max(0, leadingRequests.treble?.extraPx ?? 0),
     bassRequestedExtraPx: Math.max(0, leadingRequests.bass?.extraPx ?? 0),
@@ -1253,10 +1491,16 @@ function resolveCollisionDrivenOverlay(params: {
       bassRequestedExtraPx: Math.max(0, leadingRequests.bass?.extraPx ?? 0),
     }),
   }
+  const leadingNoteRestRequestedExtraPx = Math.max(
+    0,
+    noteRestLeadingRequests.treble,
+    noteRestLeadingRequests.bass,
+  )
   const leadingAppliedExtraPx = Math.max(
     0,
     leadingDebug.trebleRequestedExtraPx,
     leadingDebug.bassRequestedExtraPx,
+    leadingNoteRestRequestedExtraPx,
   )
   if (leadingAppliedExtraPx > 0) {
     safeLeftReserves[0] += leadingAppliedExtraPx
@@ -1271,12 +1515,22 @@ function resolveCollisionDrivenOverlay(params: {
     const currentSegmentRequests = segmentRequests[index - 1] ?? createStaffSlotRequestRecord()
     const trebleRequestedExtraPx = Math.max(0, currentSegmentRequests.treble?.extraPx ?? 0)
     const bassRequestedExtraPx = Math.max(0, currentSegmentRequests.bass?.extraPx ?? 0)
-    const extraReservePx = Math.max(0, trebleRequestedExtraPx, bassRequestedExtraPx)
+    const currentNoteRestRequests = noteRestSegmentRequests[index - 1] ?? createStaffExtraRecord()
+    const noteRestRequestedExtraPx = Math.max(
+      0,
+      currentNoteRestRequests.treble,
+      currentNoteRestRequests.bass,
+    )
+    const currentNoteRestVisibleGap = noteRestSegmentVisibleGaps[index - 1] ?? { treble: null, bass: null }
+    const noteRestVisibleGapPx = [currentNoteRestVisibleGap.treble, currentNoteRestVisibleGap.bass]
+      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+      .reduce<number | null>((minValue, value) => (minValue === null ? value : Math.min(minValue, value)), null)
+    const extraReservePx = Math.max(0, trebleRequestedExtraPx, bassRequestedExtraPx, noteRestRequestedExtraPx)
     const winningRequest = pickWinningStaffSlotRequest({
       trebleRequest: currentSegmentRequests.treble,
       bassRequest: currentSegmentRequests.bass,
     })
-    if (extraReservePx > 0 && winningRequest) {
+    if (extraReservePx > 0 && winningRequest && extraReservePx <= Math.max(0, trebleRequestedExtraPx, bassRequestedExtraPx) + 0.001) {
       if (winningRequest.side === 'right') {
         safeRightReserves[index - 1] += extraReservePx
       } else {
@@ -1294,6 +1548,8 @@ function resolveCollisionDrivenOverlay(params: {
       appliedGapPx: baseGapPx + extraReservePx,
       trebleRequestedExtraPx,
       bassRequestedExtraPx,
+      noteRestRequestedExtraPx,
+      noteRestVisibleGapPx,
       winningStaff: resolveWinningStaff({
         trebleRequestedExtraPx,
         bassRequestedExtraPx,
@@ -1309,10 +1565,16 @@ function resolveCollisionDrivenOverlay(params: {
       bassRequestedExtraPx: Math.max(0, trailingRequests.bass?.extraPx ?? 0),
     }),
   }
+  const trailingNoteRestRequestedExtraPx = Math.max(
+    0,
+    noteRestTrailingRequests.treble,
+    noteRestTrailingRequests.bass,
+  )
   const trailingAppliedExtraPx = Math.max(
     0,
     trailingDebug.trebleRequestedExtraPx,
     trailingDebug.bassRequestedExtraPx,
+    trailingNoteRestRequestedExtraPx,
   )
   const lastIndex = onsetTicks.length - 1
   if (trailingAppliedExtraPx > 0) {
@@ -1405,7 +1667,21 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
       timeline: timelineBundle?.bassTimeline ?? null,
     }),
   ]
-  if (refs.length === 0) return null
+  const renderedRefs = [
+    ...buildTimeAxisRenderedRefs({
+      staff: 'treble',
+      notes: measure.treble,
+      rendered: trebleRendered,
+      timeline: timelineBundle?.trebleTimeline ?? null,
+    }),
+    ...buildTimeAxisRenderedRefs({
+      staff: 'bass',
+      notes: measure.bass,
+      rendered: bassRendered,
+      timeline: timelineBundle?.bassTimeline ?? null,
+    }),
+  ]
+  if (renderedRefs.length === 0) return null
 
   const refsByOnset = new Map<number, TimeAxisNoteRef[]>()
   refs.forEach((ref) => {
@@ -1416,8 +1692,9 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
       refsByOnset.set(ref.onsetTicks, [ref])
     }
   })
+  const visualBlockersByStaff = buildStaffVisualBlockerRefs(renderedRefs)
 
-  const noteOnsets = [...refsByOnset.keys()].sort((a, b) => a - b)
+  const noteOnsets = [...new Set(renderedRefs.map((ref) => ref.onsetTicks))].sort((a, b) => a - b)
   if (noteOnsets.length === 0) return null
 
   const measuredTotalTicks = Math.max(getStaffTotalTicks(measure.treble), getStaffTotalTicks(measure.bass))
@@ -1494,6 +1771,7 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     onsetTicks,
     baseTargetXByOnset,
     refsByOnset,
+    visualBlockersByStaff,
     effectiveBoundaryStartX: axisBoundaryStart,
     effectiveBoundaryEndX: axisBoundaryEnd,
     spacingConfig,
@@ -1502,7 +1780,7 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
   const onsetReserves = overlay.onsetReserves
   const spacingSegments = overlay.spacingSegments
 
-  refs.forEach((ref) => {
+  renderedRefs.forEach((ref) => {
     const targetX = finalTargetXByOnset.get(ref.onsetTicks)
     if (targetX === undefined) return
     const currentX = getRenderedNoteVisualX(ref.vexNote)
@@ -1523,7 +1801,7 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     return null
   }
 
-  const resolvedOccupiedBounds = getSpacingOccupiedBounds(refs)
+  const resolvedOccupiedBounds = getRenderedOccupiedBounds(renderedRefs)
   const spacingOccupiedLeftX = resolvedOccupiedBounds?.leftX ?? resolvedFirstX
   const spacingOccupiedRightX = resolvedOccupiedBounds?.rightX ?? resolvedLastX
   const spacingAnchorGapFirstToLastPx = Math.max(0, resolvedLastX - resolvedFirstX)
