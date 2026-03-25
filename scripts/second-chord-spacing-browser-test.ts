@@ -35,6 +35,7 @@ type DumpNoteRow = {
   noteId: string
   noteIndex: number
   pitch: string | null
+  duration?: string | null
   isRest?: boolean
   onsetTicksInMeasure: number | null
   x: number
@@ -194,6 +195,8 @@ const HEAD_X_EPSILON_PX = 0.01
 const MIN_NON_OVERLAP_GAP_PX = 0
 const DEFAULT_NOTE_HEAD_WIDTH_PX = 9
 const APPROX_ACCIDENTAL_WIDTH_PX = 8
+const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
+const COLLISION_RIGHT_BODY_PADDING_PX = 1.0
 
 const SCALE_CASES: ScaleCase[] = [
   { key: 'manual-100', autoScaleEnabled: false, manualScalePercent: 100 },
@@ -863,17 +866,28 @@ function computeExpectedLeftRequestPx(
   return Number(Math.max(0, metrics.rawLeftReservePx - availableLeftClearancePx).toFixed(3))
 }
 
+function hasStemForCollision(note: DumpNoteRow | null): boolean {
+  return Boolean(note && note.isRest !== true && note.duration !== 'w')
+}
+
 function computeExpectedRightRequestPx(
   metrics: StaffOnsetMetrics,
   nextMetrics: StaffOnsetMetrics | null,
   boundaryEndX: number | null,
+  sourceNote: DumpNoteRow | null,
 ): number {
   if (metrics.rawRightReservePx <= HEAD_X_EPSILON_PX) return 0
   if (metrics.baseX === null || metrics.baseOccupiedRightX === null) return 0
   const blockerLeftX = nextMetrics?.baseOccupiedLeftX ?? boundaryEndX
   if (blockerLeftX === null) return 0
   const baseRightTailPx = Math.max(0, metrics.baseOccupiedRightX - metrics.baseX)
-  const baseRightBodyPx = Math.max(0, baseRightTailPx - metrics.rawRightReservePx)
+  const collisionPaddingReductionPx = hasStemForCollision(sourceNote)
+    ? Math.max(0, STEM_INVARIANT_RIGHT_PADDING_PX - COLLISION_RIGHT_BODY_PADDING_PX)
+    : 0
+  const baseRightBodyPx = Math.max(
+    0,
+    baseRightTailPx - metrics.rawRightReservePx - collisionPaddingReductionPx,
+  )
   const availableRightProtrusionClearancePx = Math.max(0, blockerLeftX - metrics.baseX - baseRightBodyPx)
   return Number(Math.max(0, metrics.rawRightReservePx - availableRightProtrusionClearancePx).toFixed(3))
 }
@@ -1113,7 +1127,7 @@ function analyzeDesktopTargetRow(row: MergedMeasureDumpRow, pairIndex: number): 
         : null
   const expectedRightRequestPx =
     targetMetrics && direction !== 'backward'
-      ? computeExpectedRightRequestPx(targetMetrics, nextMetrics, boundaryEndX)
+      ? computeExpectedRightRequestPx(targetMetrics, nextMetrics, boundaryEndX, targetNote)
       : targetMetrics
         ? 0
         : null
@@ -1254,7 +1268,7 @@ function analyzeCrossStaffFixture(row: MergedMeasureDumpRow, scale: DebugScaleCo
     ? computeExpectedLeftRequestPx(targetMetrics, previousMetrics, boundaryStartX)
     : null
   const expectedRightRequestPx = targetMetrics
-    ? computeExpectedRightRequestPx(targetMetrics, nextMetrics, boundaryEndX)
+    ? computeExpectedRightRequestPx(targetMetrics, nextMetrics, boundaryEndX, targetNote)
     : null
 
   if ((expectedLeftRequestPx ?? 0) > GAP_EPSILON_PX || (expectedRightRequestPx ?? 0) > GAP_EPSILON_PX) {
@@ -1387,7 +1401,7 @@ function analyzeLocalCollisionFixture(row: MergedMeasureDumpRow, scale: DebugSca
     ? computeExpectedLeftRequestPx(targetMetrics, null, boundaryStartX)
     : null
   const expectedRightRequestPx = targetMetrics
-    ? computeExpectedRightRequestPx(targetMetrics, bassMetrics[1] ?? null, boundaryEndX)
+    ? computeExpectedRightRequestPx(targetMetrics, bassMetrics[1] ?? null, boundaryEndX, targetNote)
     : null
 
   if ((expectedLeftRequestPx ?? 0) <= GAP_EPSILON_PX) {

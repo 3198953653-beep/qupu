@@ -21,6 +21,7 @@ type TimeAxisNoteRef = {
   rawRightReservePx: number
   leftOccupiedInsetPx: number
   rightOccupiedTailPx: number
+  collisionRightBodyTailPx: number
 }
 
 type OnsetCollisionMetrics = {
@@ -28,6 +29,7 @@ type OnsetCollisionMetrics = {
   rawRightReservePx: number
   leftOccupiedInsetPx: number
   rightOccupiedTailPx: number
+  collisionRightBodyTailPx: number
 }
 
 type StaffOnsetCollisionMetrics = OnsetCollisionMetrics & {
@@ -57,6 +59,7 @@ type NoteSpacingGeometry = {
   rawRightReservePx: number
   leftOccupiedInsetPx: number
   rightOccupiedTailPx: number
+  collisionRightBodyTailPx: number
 }
 
 type VexBoundingBoxLike = {
@@ -102,6 +105,7 @@ const UNIFORM_TICK_SPACING_END_GUARD_PX = 0
 const UNIFORM_TIMELINE_EDGE_TICK_RATIO = 0
 const ACCIDENTAL_PREALLOCATED_CLEARANCE_PX = 0
 const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
+const COLLISION_RIGHT_BODY_PADDING_PX = 1.0
 const MAX_RENDERED_NOTE_HEAD_WIDTH_PX = DEFAULT_NOTE_HEAD_WIDTH_PX * 2.5
 const MAX_NOTE_HEAD_COLUMN_OFFSET_PX = DEFAULT_NOTE_HEAD_WIDTH_PX * 5
 const NOTE_HEAD_COLUMN_COMPARE_EPSILON_PX = 0.01
@@ -306,7 +310,12 @@ function getRenderedNoteHeadColumnReserves(vexNote: StaveNote, anchorX: number):
   }
 }
 
-function getRenderedNoteOccupiedBounds(vexNote: StaveNote): { leftX: number; rightX: number } | null {
+function getRenderedNoteOccupiedBounds(
+  vexNote: StaveNote,
+  params?: {
+    rightPaddingPx?: number
+  },
+): { leftX: number; rightX: number } | null {
   const noteHeads = (vexNote.noteHeads ?? []) as VexNoteHeadLike[]
   const anchorX = getRenderedNoteVisualX(vexNote)
   const stemDirection = vexNote.getStemDirection()
@@ -338,9 +347,16 @@ function getRenderedNoteOccupiedBounds(vexNote: StaveNote): { leftX: number; rig
   })
 
   if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return null
+  const rightPaddingPx =
+    vexNote.hasStem()
+      ? Math.max(
+          0,
+          Number.isFinite(params?.rightPaddingPx) ? (params?.rightPaddingPx as number) : STEM_INVARIANT_RIGHT_PADDING_PX,
+        )
+      : 0
   return {
     leftX: minX,
-    rightX: maxX + (vexNote.hasStem() ? STEM_INVARIANT_RIGHT_PADDING_PX : 0),
+    rightX: maxX + rightPaddingPx,
   }
 }
 
@@ -395,30 +411,43 @@ function getNoteRawReserveExtents(vexNote: StaveNote): { rawLeftReservePx: numbe
   return { rawLeftReservePx, rawRightReservePx }
 }
 
-function getNoteOccupiedInsets(vexNote: StaveNote): { leftOccupiedInsetPx: number; rightOccupiedTailPx: number } {
+function getNoteOccupiedInsets(vexNote: StaveNote): {
+  leftOccupiedInsetPx: number
+  rightOccupiedTailPx: number
+  collisionRightBodyTailPx: number
+} {
   const anchorX = getRenderedNoteVisualX(vexNote)
   const occupiedBounds = getRenderedNoteOccupiedBounds(vexNote)
+  const collisionOccupiedBounds = getRenderedNoteOccupiedBounds(vexNote, {
+    rightPaddingPx: COLLISION_RIGHT_BODY_PADDING_PX,
+  })
   if (!Number.isFinite(anchorX) || !occupiedBounds) {
     return {
       leftOccupiedInsetPx: 0,
       rightOccupiedTailPx: 0,
+      collisionRightBodyTailPx: 0,
     }
   }
 
   return {
     leftOccupiedInsetPx: Math.max(0, anchorX - occupiedBounds.leftX),
     rightOccupiedTailPx: Math.max(0, occupiedBounds.rightX - anchorX),
+    collisionRightBodyTailPx: Math.max(
+      0,
+      (collisionOccupiedBounds?.rightX ?? occupiedBounds.rightX) - anchorX,
+    ),
   }
 }
 
 function getNoteSpacingGeometry(vexNote: StaveNote): NoteSpacingGeometry {
   const { rawLeftReservePx, rawRightReservePx } = getNoteRawReserveExtents(vexNote)
-  const { leftOccupiedInsetPx, rightOccupiedTailPx } = getNoteOccupiedInsets(vexNote)
+  const { leftOccupiedInsetPx, rightOccupiedTailPx, collisionRightBodyTailPx } = getNoteOccupiedInsets(vexNote)
   return {
     rawLeftReservePx,
     rawRightReservePx,
     leftOccupiedInsetPx,
     rightOccupiedTailPx,
+    collisionRightBodyTailPx,
   }
 }
 
@@ -445,6 +474,7 @@ function buildTimeAxisRefs(params: {
       rawRightReservePx: geometry.rawRightReservePx,
       leftOccupiedInsetPx: geometry.leftOccupiedInsetPx,
       rightOccupiedTailPx: geometry.rightOccupiedTailPx,
+      collisionRightBodyTailPx: geometry.collisionRightBodyTailPx,
     })
   }
 
@@ -976,6 +1006,7 @@ function getOnsetCollisionMetrics(noteRefs: TimeAxisNoteRef[] | undefined): Onse
       rawRightReservePx: 0,
       leftOccupiedInsetPx: 0,
       rightOccupiedTailPx: 0,
+      collisionRightBodyTailPx: 0,
     }
   }
   return {
@@ -983,6 +1014,7 @@ function getOnsetCollisionMetrics(noteRefs: TimeAxisNoteRef[] | undefined): Onse
     rawRightReservePx: noteRefs.reduce((max, ref) => Math.max(max, ref.rawRightReservePx), 0),
     leftOccupiedInsetPx: noteRefs.reduce((max, ref) => Math.max(max, ref.leftOccupiedInsetPx), 0),
     rightOccupiedTailPx: noteRefs.reduce((max, ref) => Math.max(max, ref.rightOccupiedTailPx), 0),
+    collisionRightBodyTailPx: noteRefs.reduce((max, ref) => Math.max(max, ref.collisionRightBodyTailPx), 0),
   }
 }
 
@@ -1010,6 +1042,7 @@ function buildStaffOnsetCollisionMetricsByStaff(params: {
         rawRightReservePx: metrics.rawRightReservePx,
         leftOccupiedInsetPx: metrics.leftOccupiedInsetPx,
         rightOccupiedTailPx: metrics.rightOccupiedTailPx,
+        collisionRightBodyTailPx: metrics.collisionRightBodyTailPx,
       })
     })
   })
@@ -1184,7 +1217,7 @@ function resolveCollisionDrivenOverlay(params: {
             : (baseXByOnset.get(nextMetrics.onsetTicks) ?? 0) - Math.max(0, nextMetrics.leftOccupiedInsetPx)
         const baseRightBodyPx = Math.max(
           0,
-          Math.max(0, metrics.rightOccupiedTailPx) - Math.max(0, metrics.rawRightReservePx),
+          Math.max(0, metrics.collisionRightBodyTailPx) - Math.max(0, metrics.rawRightReservePx),
         )
         const availableRightProtrusionClearancePx = Math.max(
           0,
