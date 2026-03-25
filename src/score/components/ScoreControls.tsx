@@ -63,6 +63,7 @@ export function ScoreControls(props: {
   chordMarkerPaddingPx: number
   baseMinGap32Px: number
   leadingBarlineGapPx: number
+  secondChordSafeGapPx: number
   durationGapRatio32: number
   durationGapRatio16: number
   durationGapRatio8: number
@@ -74,6 +75,7 @@ export function ScoreControls(props: {
   onChordMarkerPaddingPxChange: (nextValue: number) => void
   onBaseMinGap32PxChange: (nextValue: number) => void
   onLeadingBarlineGapPxChange: (nextValue: number) => void
+  onSecondChordSafeGapPxChange: (nextValue: number) => void
   onDurationGapRatio32Change: (nextValue: number) => void
   onDurationGapRatio16Change: (nextValue: number) => void
   onDurationGapRatio8Change: (nextValue: number) => void
@@ -137,6 +139,7 @@ export function ScoreControls(props: {
     chordMarkerPaddingPx,
     baseMinGap32Px,
     leadingBarlineGapPx,
+    secondChordSafeGapPx,
     durationGapRatio32,
     durationGapRatio16,
     durationGapRatio8,
@@ -148,6 +151,7 @@ export function ScoreControls(props: {
     onChordMarkerPaddingPxChange,
     onBaseMinGap32PxChange,
     onLeadingBarlineGapPxChange,
+    onSecondChordSafeGapPxChange,
     onDurationGapRatio32Change,
     onDurationGapRatio16Change,
     onDurationGapRatio8Change,
@@ -371,6 +375,32 @@ export function ScoreControls(props: {
                 handleFloatValue((event.target as HTMLInputElement).value, onLeadingBarlineGapPxChange)
               }
               onChange={(event) => handleFloatValue(event.target.value, onLeadingBarlineGapPxChange)}
+            />
+
+            <label htmlFor="second-chord-safe-gap-range">二度和弦安全距</label>
+            <input
+              id="second-chord-safe-gap-range"
+              type="range"
+              min={0}
+              max={12}
+              step={0.1}
+              value={secondChordSafeGapPx}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onSecondChordSafeGapPxChange)
+              }
+              onChange={(event) => handleFloatValue(event.target.value, onSecondChordSafeGapPxChange)}
+            />
+            <input
+              id="second-chord-safe-gap-input"
+              type="number"
+              min={0}
+              max={12}
+              step={0.1}
+              value={secondChordSafeGapPx}
+              onInput={(event) =>
+                handleFloatValue((event.target as HTMLInputElement).value, onSecondChordSafeGapPxChange)
+              }
+              onChange={(event) => handleFloatValue(event.target.value, onSecondChordSafeGapPxChange)}
             />
           </div>
         )}

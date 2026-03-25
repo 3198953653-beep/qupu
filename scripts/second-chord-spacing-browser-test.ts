@@ -121,6 +121,8 @@ type StaffOnsetMetrics = {
   shiftDeltaPx: number
   rawLeftReservePx: number
   rawRightReservePx: number
+  leftOccupiedInsetPx: number
+  rightOccupiedTailPx: number
   baseOccupiedLeftX: number | null
   baseOccupiedRightX: number | null
   finalOccupiedLeftX: number | null
@@ -175,6 +177,20 @@ type FixtureResult = {
   rightWinningStaff: StaffSlotWinner
   visibleLeftGapPx: number | null
   visibleRightGapPx: number | null
+  requestedSafeGapPx?: number | null
+  expectedSegmentExtraPx?: number | null
+  actualSegmentExtraPx?: number | null
+  passed: boolean
+  failureReasons: string[]
+}
+
+type UiSafeGapScenarioResult = {
+  key: string
+  appliedSafeGapPx: number
+  expectedLeftRequestPx: number | null
+  actualLeftRequestPx: number | null
+  expectedRightRequestPx: number | null
+  actualRightRequestPx: number | null
   passed: boolean
   failureReasons: string[]
 }
@@ -184,6 +200,7 @@ type FinalReport = {
   xmlPath: string
   desktopScenarios: DesktopScenarioReport[]
   fixtureResults: FixtureResult[]
+  uiSafeGapScenarios: UiSafeGapScenarioResult[]
 }
 
 const DEV_HOST = '127.0.0.1'
@@ -192,7 +209,7 @@ const DEV_URL = `http://${DEV_HOST}:${DEV_PORT}`
 const TARGET_PAIR_COUNT = 8
 const GAP_EPSILON_PX = 0.15
 const HEAD_X_EPSILON_PX = 0.01
-const MIN_NON_OVERLAP_GAP_PX = 0
+const DEFAULT_SECOND_CHORD_SAFE_GAP_PX = 3
 const DEFAULT_NOTE_HEAD_WIDTH_PX = 9
 const APPROX_ACCIDENTAL_WIDTH_PX = 8
 const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
@@ -354,6 +371,246 @@ const LOCAL_BASS_BOUNDARY_COLLISION_FIXTURE_XML = `<?xml version="1.0" encoding=
 </score-partwise>
 `
 
+const INNER_SEGMENT_NO_EXTRA_FIXTURE_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC
+  "-//Recordare//DTD MusicXML 3.1 Partwise//EN"
+  "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <part-list>
+    <score-part id="P1">
+      <part-name>Piano</part-name>
+    </score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>8</beats><beat-type>4</beat-type></time>
+        <staves>2</staves>
+        <clef number="1"><sign>G</sign><line>2</line></clef>
+        <clef number="2"><sign>F</sign><line>4</line></clef>
+      </attributes>
+      <note>
+        <pitch><step>C</step><octave>5</octave></pitch>
+        <duration>16</duration>
+        <type>whole</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>D</step><octave>5</octave></pitch>
+        <duration>16</duration>
+        <type>whole</type>
+        <staff>1</staff>
+      </note>
+
+      <note>
+        <pitch><step>C</step><octave>2</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <chord/>
+        <pitch><step>D</step><octave>2</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <rest/>
+        <duration>16</duration>
+        <type>whole</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <pitch><step>D</step><octave>4</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <chord/>
+        <pitch><step>E</step><octave>4</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <pitch><step>G</step><octave>2</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <rest/>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+    </measure>
+  </part>
+</score-partwise>
+`
+
+const INNER_SEGMENT_SAFE_GAP_FIXTURE_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC
+  "-//Recordare//DTD MusicXML 3.1 Partwise//EN"
+  "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <part-list>
+    <score-part id="P1">
+      <part-name>Piano</part-name>
+    </score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <staves>2</staves>
+        <clef number="1"><sign>G</sign><line>2</line></clef>
+        <clef number="2"><sign>F</sign><line>4</line></clef>
+      </attributes>
+      <note>
+        <pitch><step>C</step><octave>5</octave></pitch>
+        <duration>16</duration>
+        <type>whole</type>
+        <staff>1</staff>
+      </note>
+
+      <note>
+        <pitch><step>C</step><octave>2</octave></pitch>
+        <duration>1</duration>
+        <type>16th</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <chord/>
+        <pitch><step>D</step><octave>2</octave></pitch>
+        <duration>1</duration>
+        <type>16th</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <pitch><step>D</step><octave>4</octave></pitch>
+        <duration>1</duration>
+        <type>16th</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <chord/>
+        <pitch><step>E</step><octave>4</octave></pitch>
+        <duration>1</duration>
+        <type>16th</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <rest/>
+        <duration>2</duration>
+        <type>eighth</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <rest/>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <rest/>
+        <duration>8</duration>
+        <type>half</type>
+        <staff>2</staff>
+      </note>
+    </measure>
+  </part>
+</score-partwise>
+`
+
+const TRAILING_BASS_BOUNDARY_COLLISION_FIXTURE_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC
+  "-//Recordare//DTD MusicXML 3.1 Partwise//EN"
+  "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <part-list>
+    <score-part id="P1">
+      <part-name>Piano</part-name>
+    </score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>8</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <staves>2</staves>
+        <clef number="1"><sign>G</sign><line>2</line></clef>
+        <clef number="2"><sign>F</sign><line>4</line></clef>
+      </attributes>
+      <note>
+        <pitch><step>C</step><octave>5</octave></pitch>
+        <duration>16</duration>
+        <type>whole</type>
+        <staff>1</staff>
+      </note>
+
+      <note>
+        <rest/>
+        <duration>8</duration>
+        <type>half</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <rest/>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <rest/>
+        <duration>2</duration>
+        <type>eighth</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <rest/>
+        <duration>2</duration>
+        <type>16th</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <rest/>
+        <duration>1</duration>
+        <type>32nd</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <pitch><step>C</step><octave>2</octave></pitch>
+        <duration>1</duration>
+        <type>32nd</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <chord/>
+        <pitch><step>D</step><octave>2</octave></pitch>
+        <duration>1</duration>
+        <type>32nd</type>
+        <staff>2</staff>
+      </note>
+      <note>
+        <chord/>
+        <pitch><step>E</step><octave>2</octave></pitch>
+        <duration>1</duration>
+        <type>32nd</type>
+        <staff>2</staff>
+      </note>
+    </measure>
+  </part>
+</score-partwise>
+`
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -484,6 +741,38 @@ async function setScoreScale(page: Page, params: ScaleCase): Promise<DebugScaleC
     }).__scoreDebug
     return api.getScaleConfig()
   })
+}
+
+async function ensureGlobalSpacingPanelOpen(page: Page): Promise<void> {
+  const safeGapSlider = page.locator('#second-chord-safe-gap-range')
+  if ((await safeGapSlider.count()) > 0 && await safeGapSlider.first().isVisible()) {
+    return
+  }
+  await page.getByRole('button', { name: '间距大小' }).click()
+  await safeGapSlider.first().waitFor({ state: 'visible', timeout: 120000 })
+}
+
+async function setSecondChordSafeGapPx(page: Page, nextValue: number): Promise<void> {
+  await ensureGlobalSpacingPanelOpen(page)
+  const safeValue = Number(nextValue.toFixed(1))
+  const slider = page.locator('#second-chord-safe-gap-range').first()
+  await slider.evaluate((input, value) => {
+    const element = input as HTMLInputElement
+    element.value = String(value)
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+  }, safeValue)
+  await page.waitForFunction(
+    (value) => {
+      const input = document.querySelector('#second-chord-safe-gap-input') as HTMLInputElement | null
+      if (!input) return false
+      const currentValue = Number(input.value)
+      return Number.isFinite(currentValue) && Math.abs(currentValue - value) < 0.001
+    },
+    safeValue,
+    { timeout: 120000 },
+  )
+  await page.waitForTimeout(150)
 }
 
 async function getPaging(page: Page): Promise<PagingState> {
@@ -839,6 +1128,20 @@ function buildStaffOnsetMetrics(row: MergedMeasureDumpRow, staff: StaffKind): St
         shiftDeltaPx,
         rawLeftReservePx: Number(rawLeftReservePx.toFixed(3)),
         rawRightReservePx: Number(rawRightReservePx.toFixed(3)),
+        leftOccupiedInsetPx: Number(
+          Math.max(
+            0,
+            onsetReserve?.leftOccupiedInsetPx ??
+              (safeFinalOccupiedLeftX !== null && finalX !== null ? finalX - safeFinalOccupiedLeftX : 0),
+          ).toFixed(3),
+        ),
+        rightOccupiedTailPx: Number(
+          Math.max(
+            0,
+            onsetReserve?.rightOccupiedTailPx ??
+              (safeFinalOccupiedRightX !== null && finalX !== null ? safeFinalOccupiedRightX - finalX : 0),
+          ).toFixed(3),
+        ),
         finalOccupiedLeftX: safeFinalOccupiedLeftX,
         finalOccupiedRightX: safeFinalOccupiedRightX,
         baseOccupiedLeftX:
@@ -857,17 +1160,21 @@ function computeExpectedLeftRequestPx(
   metrics: StaffOnsetMetrics,
   previousMetrics: StaffOnsetMetrics | null,
   boundaryStartX: number | null,
+  secondChordSafeGapPx = DEFAULT_SECOND_CHORD_SAFE_GAP_PX,
 ): number {
   if (metrics.rawLeftReservePx <= HEAD_X_EPSILON_PX) return 0
   if (metrics.baseX === null) return 0
-  const blockerRightX = previousMetrics?.baseOccupiedRightX ?? boundaryStartX
-  if (blockerRightX === null) return 0
-  const availableLeftClearancePx = Math.max(0, metrics.baseX - blockerRightX)
-  return Number(Math.max(0, metrics.rawLeftReservePx - availableLeftClearancePx).toFixed(3))
-}
-
-function hasStemForCollision(note: DumpNoteRow | null): boolean {
-  return Boolean(note && note.isRest !== true && note.duration !== 'w')
+  const visibleLeftGapPx =
+    previousMetrics && previousMetrics.baseX !== null
+      ? metrics.baseX -
+        previousMetrics.baseX -
+        Math.max(0, previousMetrics.rawRightReservePx) -
+        Math.max(0, metrics.rawLeftReservePx)
+      : boundaryStartX !== null
+        ? (metrics.baseX - Math.max(0, metrics.rawLeftReservePx)) - boundaryStartX
+        : null
+  if (visibleLeftGapPx === null) return 0
+  return Number(Math.max(0, secondChordSafeGapPx - visibleLeftGapPx).toFixed(3))
 }
 
 function computeExpectedRightRequestPx(
@@ -875,21 +1182,66 @@ function computeExpectedRightRequestPx(
   nextMetrics: StaffOnsetMetrics | null,
   boundaryEndX: number | null,
   sourceNote: DumpNoteRow | null,
+  secondChordSafeGapPx = DEFAULT_SECOND_CHORD_SAFE_GAP_PX,
 ): number {
   if (metrics.rawRightReservePx <= HEAD_X_EPSILON_PX) return 0
-  if (metrics.baseX === null || metrics.baseOccupiedRightX === null) return 0
-  const blockerLeftX = nextMetrics?.baseOccupiedLeftX ?? boundaryEndX
-  if (blockerLeftX === null) return 0
-  const baseRightTailPx = Math.max(0, metrics.baseOccupiedRightX - metrics.baseX)
-  const collisionPaddingReductionPx = hasStemForCollision(sourceNote)
-    ? Math.max(0, STEM_INVARIANT_RIGHT_PADDING_PX - COLLISION_RIGHT_BODY_PADDING_PX)
-    : 0
-  const baseRightBodyPx = Math.max(
-    0,
-    baseRightTailPx - metrics.rawRightReservePx - collisionPaddingReductionPx,
-  )
-  const availableRightProtrusionClearancePx = Math.max(0, blockerLeftX - metrics.baseX - baseRightBodyPx)
-  return Number(Math.max(0, metrics.rawRightReservePx - availableRightProtrusionClearancePx).toFixed(3))
+  if (metrics.baseX === null) return 0
+  const visibleRightGapPx =
+    nextMetrics && nextMetrics.baseX !== null
+      ? nextMetrics.baseX -
+        metrics.baseX -
+        Math.max(0, metrics.rawRightReservePx) -
+        Math.max(0, nextMetrics.rawLeftReservePx)
+      : boundaryEndX !== null
+        ? boundaryEndX - (metrics.baseX + Math.max(0, metrics.rawRightReservePx))
+        : null
+  if (visibleRightGapPx === null) return 0
+  return Number(Math.max(0, secondChordSafeGapPx - visibleRightGapPx).toFixed(3))
+}
+
+function computeFinalVisibleLeftGapPx(params: {
+  metrics: StaffOnsetMetrics | null
+  previousMetrics: StaffOnsetMetrics | null
+  boundaryStartX: number | null
+  appliedExtraPx: number
+}): number | null {
+  const { metrics, previousMetrics, boundaryStartX, appliedExtraPx } = params
+  if (!metrics || metrics.baseX === null) return null
+  const baseVisibleLeftGapPx =
+    previousMetrics && previousMetrics.baseX !== null
+      ? metrics.baseX -
+        previousMetrics.baseX -
+        Math.max(0, previousMetrics.rawRightReservePx) -
+        Math.max(0, metrics.rawLeftReservePx)
+      : boundaryStartX !== null
+        ? (metrics.baseX - Math.max(0, metrics.rawLeftReservePx)) - boundaryStartX
+        : null
+  if (baseVisibleLeftGapPx === null) return null
+  return Number((baseVisibleLeftGapPx + Math.max(0, appliedExtraPx)).toFixed(3))
+}
+
+function computeFinalVisibleRightGapPx(params: {
+  metrics: StaffOnsetMetrics | null
+  nextMetrics: StaffOnsetMetrics | null
+  boundaryEndX: number | null
+  sourceNote: DumpNoteRow | null
+  appliedExtraPx: number
+}): number | null {
+  const { metrics, nextMetrics, boundaryEndX, sourceNote, appliedExtraPx } = params
+  if (!metrics || metrics.baseX === null) return null
+  const _unusedSourceNote = sourceNote
+  void _unusedSourceNote
+  const baseVisibleRightGapPx =
+    nextMetrics && nextMetrics.baseX !== null
+      ? nextMetrics.baseX -
+        metrics.baseX -
+        Math.max(0, metrics.rawRightReservePx) -
+        Math.max(0, nextMetrics.rawLeftReservePx)
+      : boundaryEndX !== null
+        ? boundaryEndX - (metrics.baseX + Math.max(0, metrics.rawRightReservePx))
+        : null
+  if (baseVisibleRightGapPx === null) return null
+  return Number((baseVisibleRightGapPx + Math.max(0, appliedExtraPx)).toFixed(3))
 }
 
 function resolveSlotRequestSummary(params: {
@@ -951,6 +1303,32 @@ function resolveSlotRequestSummary(params: {
         : Math.max(0, nextSegment?.bassRequestedExtraPx ?? 0),
     winningStaff: nextSegment?.winningStaff ?? 'none',
   }
+}
+
+function findChordNoteByOnset(row: MergedMeasureDumpRow, staff: StaffKind, onsetTicks: number): DumpNoteRow | null {
+  return (
+    row.notes.find(
+      (note) =>
+        note.staff === staff &&
+        note.isRest !== true &&
+        typeof note.onsetTicksInMeasure === 'number' &&
+        Math.round(note.onsetTicksInMeasure) === onsetTicks &&
+        Array.isArray(note.noteHeads) &&
+        note.noteHeads.length > 1,
+    ) ?? null
+  )
+}
+
+function findSpacingSegmentByTicks(
+  row: MergedMeasureDumpRow,
+  fromOnsetTicks: number,
+  toOnsetTicks: number,
+): DumpSpacingSegment | null {
+  return (
+    getSpacingSegments(row).find(
+      (segment) => segment.fromOnsetTicks === fromOnsetTicks && segment.toOnsetTicks === toOnsetTicks,
+    ) ?? null
+  )
 }
 
 function pushFailure(failures: string[], code: string, detail?: string | number | null): void {
@@ -1062,7 +1440,11 @@ function validateNoBarlineOverflow(row: MergedMeasureDumpRow, failures: string[]
   }
 }
 
-function analyzeDesktopTargetRow(row: MergedMeasureDumpRow, pairIndex: number): DesktopTargetResult {
+function analyzeDesktopTargetRow(
+  row: MergedMeasureDumpRow,
+  pairIndex: number,
+  secondChordSafeGapPx = DEFAULT_SECOND_CHORD_SAFE_GAP_PX,
+): DesktopTargetResult {
   const failures: string[] = []
   validateSharedSlotDebug(row, failures)
   validateNoBarlineOverflow(row, failures)
@@ -1080,85 +1462,117 @@ function analyzeDesktopTargetRow(row: MergedMeasureDumpRow, pairIndex: number): 
       ? Number(row.effectiveBoundaryEndX.toFixed(3))
       : null
 
+  const trebleMetrics = buildStaffOnsetMetrics(row, 'treble')
   const bassMetrics = buildStaffOnsetMetrics(row, 'bass')
-  const targetNote =
-    row.notes
-      .filter((note) => note.staff === 'bass' && note.isRest !== true && Array.isArray(note.noteHeads) && note.noteHeads.length > 1)
-      .sort((left, right) => {
-        const leftOnset = left.onsetTicksInMeasure ?? Number.POSITIVE_INFINITY
-        const rightOnset = right.onsetTicksInMeasure ?? Number.POSITIVE_INFINITY
-        if (leftOnset !== rightOnset) return leftOnset - rightOnset
-        return left.noteIndex - right.noteIndex
-      })[0] ?? null
+  const candidates = (['treble', 'bass'] as StaffKind[])
+    .flatMap((staff) => {
+      const staffMetrics = staff === 'treble' ? trebleMetrics : bassMetrics
+      return staffMetrics
+        .filter(
+          (metrics) =>
+            metrics.rawLeftReservePx > HEAD_X_EPSILON_PX || metrics.rawRightReservePx > HEAD_X_EPSILON_PX,
+        )
+        .map((metrics) => ({
+          staff,
+          metrics,
+          note:
+            findChordNoteByOnset(row, staff, metrics.onsetTicks) ??
+            row.notes.find(
+              (note) =>
+                note.staff === staff &&
+                note.isRest !== true &&
+                typeof note.onsetTicksInMeasure === 'number' &&
+                Math.round(note.onsetTicksInMeasure) === metrics.onsetTicks,
+            ) ??
+            null,
+        }))
+        .filter((candidate) => candidate.note !== null)
+    })
+    .sort((left, right) => {
+      if (left.metrics.onsetTicks !== right.metrics.onsetTicks) {
+        return left.metrics.onsetTicks - right.metrics.onsetTicks
+      }
+      if ((left.note?.noteIndex ?? Number.POSITIVE_INFINITY) !== (right.note?.noteIndex ?? Number.POSITIVE_INFINITY)) {
+        return (left.note?.noteIndex ?? Number.POSITIVE_INFINITY) - (right.note?.noteIndex ?? Number.POSITIVE_INFINITY)
+      }
+      return left.staff.localeCompare(right.staff)
+    })
 
-  if (!targetNote) {
-    pushFailure(failures, 'target-bass-displaced-chord-missing')
+  const selectedCandidate = candidates[0] ?? null
+  if (!selectedCandidate) {
+    return {
+      pairIndex,
+      renderedPageIndex: row.renderedPageIndex,
+      noteIndex: null,
+      onsetTicks: null,
+      direction: 'missing',
+      headXs: [],
+      rawLeftReservePx: null,
+      rawRightReservePx: null,
+      expectedLeftRequestPx: null,
+      actualLeftRequestPx: null,
+      leftWinningStaff: 'none',
+      expectedRightRequestPx: null,
+      actualRightRequestPx: null,
+      rightWinningStaff: 'none',
+      visibleLeftGapPx: null,
+      visibleRightGapPx: null,
+      passed: failures.length === 0,
+      failureReasons: failures,
+    }
   }
 
-  const targetOnsetTicks =
-    targetNote && typeof targetNote.onsetTicksInMeasure === 'number' && Number.isFinite(targetNote.onsetTicksInMeasure)
-      ? Math.round(targetNote.onsetTicksInMeasure)
+  const targetStaff = selectedCandidate.staff
+  const targetMetrics = selectedCandidate.metrics
+  const targetNote = selectedCandidate.note
+  const staffMetrics = targetStaff === 'treble' ? trebleMetrics : bassMetrics
+  const targetMetricsIndex = staffMetrics.findIndex((metrics) => metrics.onsetTicks === targetMetrics.onsetTicks)
+  const previousMetrics = targetMetricsIndex > 0 ? staffMetrics[targetMetricsIndex - 1] ?? null : null
+  const nextMetrics =
+    targetMetricsIndex >= 0 && targetMetricsIndex < staffMetrics.length - 1
+      ? staffMetrics[targetMetricsIndex + 1] ?? null
       : null
+  const targetOnsetTicks = targetMetrics.onsetTicks
   const headXs = targetNote ? dedupeSortedNumbers(targetNote.noteHeads.map((head) => head.x), HEAD_X_EPSILON_PX) : []
   const anchorX = targetNote && Number.isFinite(targetNote.x) ? Number(targetNote.x.toFixed(3)) : null
   const direction = classifyDirection(anchorX, headXs)
-  if (targetNote && (direction === 'aligned' || direction === 'missing')) {
-    pushFailure(failures, 'unexpected-direction', direction)
-  }
-
-  const targetMetricsIndex =
-    targetOnsetTicks !== null ? bassMetrics.findIndex((metrics) => metrics.onsetTicks === targetOnsetTicks) : -1
-  const targetMetrics = targetMetricsIndex >= 0 ? bassMetrics[targetMetricsIndex] ?? null : null
-  if (targetNote && !targetMetrics) {
-    pushFailure(failures, 'target-onset-metrics-missing')
-  }
-
-  const previousMetrics = targetMetricsIndex > 0 ? bassMetrics[targetMetricsIndex - 1] ?? null : null
-  const nextMetrics =
-    targetMetricsIndex >= 0 && targetMetricsIndex < bassMetrics.length - 1
-      ? bassMetrics[targetMetricsIndex + 1] ?? null
-      : null
 
   const expectedLeftRequestPx =
-    targetMetrics && direction !== 'forward'
-      ? computeExpectedLeftRequestPx(targetMetrics, previousMetrics, boundaryStartX)
-      : targetMetrics
-        ? 0
-        : null
+    targetMetrics.rawLeftReservePx > HEAD_X_EPSILON_PX
+      ? computeExpectedLeftRequestPx(targetMetrics, previousMetrics, boundaryStartX, secondChordSafeGapPx)
+      : 0
   const expectedRightRequestPx =
-    targetMetrics && direction !== 'backward'
-      ? computeExpectedRightRequestPx(targetMetrics, nextMetrics, boundaryEndX, targetNote)
-      : targetMetrics
-        ? 0
-        : null
+    targetMetrics.rawRightReservePx > HEAD_X_EPSILON_PX
+      ? computeExpectedRightRequestPx(targetMetrics, nextMetrics, boundaryEndX, targetNote, secondChordSafeGapPx)
+      : 0
 
-  const actualLeftSummary =
-    targetOnsetTicks !== null
-      ? resolveSlotRequestSummary({
-          row,
-          staff: 'bass',
-          onsetTicks: targetOnsetTicks,
-          side: 'left',
-        })
-      : { requestedExtraPx: 0, winningStaff: 'none' as StaffSlotWinner }
-  const actualRightSummary =
-    targetOnsetTicks !== null
-      ? resolveSlotRequestSummary({
-          row,
-          staff: 'bass',
-          onsetTicks: targetOnsetTicks,
-          side: 'right',
-        })
-      : { requestedExtraPx: 0, winningStaff: 'none' as StaffSlotWinner }
+  const actualLeftSummary = resolveSlotRequestSummary({
+    row,
+    staff: targetStaff,
+    onsetTicks: targetOnsetTicks,
+    side: 'left',
+  })
+  const actualRightSummary = resolveSlotRequestSummary({
+    row,
+    staff: targetStaff,
+    onsetTicks: targetOnsetTicks,
+    side: 'right',
+  })
 
-  if (expectedLeftRequestPx !== null && !approximatelyEqual(actualLeftSummary.requestedExtraPx, expectedLeftRequestPx)) {
+  if (
+    targetMetrics.rawLeftReservePx > HEAD_X_EPSILON_PX &&
+    !approximatelyEqual(actualLeftSummary.requestedExtraPx, expectedLeftRequestPx)
+  ) {
     pushFailure(
       failures,
       'left-request-mismatch',
       `${actualLeftSummary.requestedExtraPx}!=${expectedLeftRequestPx}`,
     )
   }
-  if (expectedRightRequestPx !== null && !approximatelyEqual(actualRightSummary.requestedExtraPx, expectedRightRequestPx)) {
+  if (
+    targetMetrics.rawRightReservePx > HEAD_X_EPSILON_PX &&
+    !approximatelyEqual(actualRightSummary.requestedExtraPx, expectedRightRequestPx)
+  ) {
     pushFailure(
       failures,
       'right-request-mismatch',
@@ -1166,21 +1580,53 @@ function analyzeDesktopTargetRow(row: MergedMeasureDumpRow, pairIndex: number): 
     )
   }
 
-  if (direction === 'backward' && actualRightSummary.requestedExtraPx > GAP_EPSILON_PX) {
-    pushFailure(failures, 'backward-request-leaked-right', actualRightSummary.requestedExtraPx)
+  if (
+    targetMetrics.rawLeftReservePx > HEAD_X_EPSILON_PX &&
+    actualLeftSummary.requestedExtraPx > GAP_EPSILON_PX &&
+    actualLeftSummary.winningStaff !== targetStaff
+  ) {
+    pushFailure(failures, 'left-winning-staff-mismatch', actualLeftSummary.winningStaff)
   }
-  if (direction === 'forward' && actualLeftSummary.requestedExtraPx > GAP_EPSILON_PX) {
-    pushFailure(failures, 'forward-request-leaked-left', actualLeftSummary.requestedExtraPx)
+  if (
+    targetMetrics.rawRightReservePx > HEAD_X_EPSILON_PX &&
+    actualRightSummary.requestedExtraPx > GAP_EPSILON_PX &&
+    actualRightSummary.winningStaff !== targetStaff
+  ) {
+    pushFailure(failures, 'right-winning-staff-mismatch', actualRightSummary.winningStaff)
   }
 
   const visibleLeftGapPx =
-    typeof row.effectiveLeftGapPx === 'number' && Number.isFinite(row.effectiveLeftGapPx)
-      ? Number(row.effectiveLeftGapPx.toFixed(3))
+    targetMetrics.rawLeftReservePx > HEAD_X_EPSILON_PX
+      ? computeFinalVisibleLeftGapPx({
+          metrics: targetMetrics,
+          previousMetrics,
+          boundaryStartX,
+          appliedExtraPx: actualLeftSummary.requestedExtraPx,
+        })
       : null
   const visibleRightGapPx =
-    typeof row.effectiveRightGapPx === 'number' && Number.isFinite(row.effectiveRightGapPx)
-      ? Number(row.effectiveRightGapPx.toFixed(3))
+    targetMetrics.rawRightReservePx > HEAD_X_EPSILON_PX
+      ? computeFinalVisibleRightGapPx({
+          metrics: targetMetrics,
+          nextMetrics,
+          boundaryEndX,
+          sourceNote: targetNote,
+          appliedExtraPx: actualRightSummary.requestedExtraPx,
+        })
       : null
+
+  if (
+    targetMetrics.rawLeftReservePx > HEAD_X_EPSILON_PX &&
+    (visibleLeftGapPx === null || visibleLeftGapPx < secondChordSafeGapPx - GAP_EPSILON_PX)
+  ) {
+    pushFailure(failures, 'left-visible-gap-too-small', visibleLeftGapPx)
+  }
+  if (
+    targetMetrics.rawRightReservePx > HEAD_X_EPSILON_PX &&
+    (visibleRightGapPx === null || visibleRightGapPx < secondChordSafeGapPx - GAP_EPSILON_PX)
+  ) {
+    pushFailure(failures, 'right-visible-gap-too-small', visibleRightGapPx)
+  }
 
   return {
     pairIndex,
@@ -1189,8 +1635,8 @@ function analyzeDesktopTargetRow(row: MergedMeasureDumpRow, pairIndex: number): 
     onsetTicks: targetOnsetTicks,
     direction,
     headXs,
-    rawLeftReservePx: targetMetrics ? targetMetrics.rawLeftReservePx : null,
-    rawRightReservePx: targetMetrics ? targetMetrics.rawRightReservePx : null,
+    rawLeftReservePx: targetMetrics.rawLeftReservePx,
+    rawRightReservePx: targetMetrics.rawRightReservePx,
     expectedLeftRequestPx,
     actualLeftRequestPx: Number(actualLeftSummary.requestedExtraPx.toFixed(3)),
     leftWinningStaff: actualLeftSummary.winningStaff,
@@ -1204,7 +1650,12 @@ function analyzeDesktopTargetRow(row: MergedMeasureDumpRow, pairIndex: number): 
   }
 }
 
-function analyzeDesktopScenario(rows: MergedMeasureDumpRow[], scale: DebugScaleConfig, key: string): DesktopScenarioReport {
+function analyzeDesktopScenario(
+  rows: MergedMeasureDumpRow[],
+  scale: DebugScaleConfig,
+  key: string,
+  secondChordSafeGapPx = DEFAULT_SECOND_CHORD_SAFE_GAP_PX,
+): DesktopScenarioReport {
   const targets = Array.from({ length: TARGET_PAIR_COUNT }, (_, pairIndex) =>
     analyzeDesktopTargetRow(
       rows[pairIndex] ?? {
@@ -1216,6 +1667,7 @@ function analyzeDesktopScenario(rows: MergedMeasureDumpRow[], scale: DebugScaleC
         notes: [],
       },
       pairIndex,
+      secondChordSafeGapPx,
     ),
   )
 
@@ -1227,7 +1679,11 @@ function analyzeDesktopScenario(rows: MergedMeasureDumpRow[], scale: DebugScaleC
   }
 }
 
-function analyzeCrossStaffFixture(row: MergedMeasureDumpRow, scale: DebugScaleConfig): FixtureResult {
+function analyzeCrossStaffFixture(
+  row: MergedMeasureDumpRow,
+  scale: DebugScaleConfig,
+  secondChordSafeGapPx = DEFAULT_SECOND_CHORD_SAFE_GAP_PX,
+): FixtureResult {
   const failures: string[] = []
   validateSharedSlotDebug(row, failures)
   validateNoBarlineOverflow(row, failures)
@@ -1265,10 +1721,10 @@ function analyzeCrossStaffFixture(row: MergedMeasureDumpRow, scale: DebugScaleCo
       : null
 
   const expectedLeftRequestPx = targetMetrics
-    ? computeExpectedLeftRequestPx(targetMetrics, previousMetrics, boundaryStartX)
+    ? computeExpectedLeftRequestPx(targetMetrics, previousMetrics, boundaryStartX, secondChordSafeGapPx)
     : null
   const expectedRightRequestPx = targetMetrics
-    ? computeExpectedRightRequestPx(targetMetrics, nextMetrics, boundaryEndX, targetNote)
+    ? computeExpectedRightRequestPx(targetMetrics, nextMetrics, boundaryEndX, targetNote, secondChordSafeGapPx)
     : null
 
   if ((expectedLeftRequestPx ?? 0) > GAP_EPSILON_PX || (expectedRightRequestPx ?? 0) > GAP_EPSILON_PX) {
@@ -1361,12 +1817,17 @@ function analyzeCrossStaffFixture(row: MergedMeasureDumpRow, scale: DebugScaleCo
     rightWinningStaff: actualRightSummary.winningStaff,
     visibleLeftGapPx,
     visibleRightGapPx,
+    requestedSafeGapPx: secondChordSafeGapPx,
     passed: failures.length === 0,
     failureReasons: failures,
   }
 }
 
-function analyzeLocalCollisionFixture(row: MergedMeasureDumpRow, scale: DebugScaleConfig): FixtureResult {
+function analyzeLocalCollisionFixture(
+  row: MergedMeasureDumpRow,
+  scale: DebugScaleConfig,
+  secondChordSafeGapPx = DEFAULT_SECOND_CHORD_SAFE_GAP_PX,
+): FixtureResult {
   const failures: string[] = []
   validateSharedSlotDebug(row, failures)
   validateNoBarlineOverflow(row, failures)
@@ -1398,10 +1859,10 @@ function analyzeLocalCollisionFixture(row: MergedMeasureDumpRow, scale: DebugSca
       : null
 
   const expectedLeftRequestPx = targetMetrics
-    ? computeExpectedLeftRequestPx(targetMetrics, null, boundaryStartX)
+    ? computeExpectedLeftRequestPx(targetMetrics, null, boundaryStartX, secondChordSafeGapPx)
     : null
   const expectedRightRequestPx = targetMetrics
-    ? computeExpectedRightRequestPx(targetMetrics, bassMetrics[1] ?? null, boundaryEndX, targetNote)
+    ? computeExpectedRightRequestPx(targetMetrics, bassMetrics[1] ?? null, boundaryEndX, targetNote, secondChordSafeGapPx)
     : null
 
   if ((expectedLeftRequestPx ?? 0) <= GAP_EPSILON_PX) {
@@ -1455,12 +1916,14 @@ function analyzeLocalCollisionFixture(row: MergedMeasureDumpRow, scale: DebugSca
     }
   })
 
-  const visibleLeftGapPx =
-    typeof row.effectiveLeftGapPx === 'number' && Number.isFinite(row.effectiveLeftGapPx)
-      ? Number(row.effectiveLeftGapPx.toFixed(3))
-      : null
-  if (visibleLeftGapPx === null || visibleLeftGapPx < MIN_NON_OVERLAP_GAP_PX - GAP_EPSILON_PX) {
-    pushFailure(failures, 'leading-visible-gap-too-small', visibleLeftGapPx)
+  const finalVisibleLeftGapPx = computeFinalVisibleLeftGapPx({
+    metrics: targetMetrics,
+    previousMetrics: null,
+    boundaryStartX,
+    appliedExtraPx: actualLeftSummary.requestedExtraPx,
+  })
+  if (finalVisibleLeftGapPx === null || finalVisibleLeftGapPx < secondChordSafeGapPx - GAP_EPSILON_PX) {
+    pushFailure(failures, 'leading-visible-gap-too-small', finalVisibleLeftGapPx)
   }
 
   const headXs = targetNote ? dedupeSortedNumbers(targetNote.noteHeads.map((head) => head.x), HEAD_X_EPSILON_PX) : []
@@ -1476,6 +1939,7 @@ function analyzeLocalCollisionFixture(row: MergedMeasureDumpRow, scale: DebugSca
     typeof row.measureWidth === 'number' && Number.isFinite(row.measureWidth)
       ? Number(row.measureWidth.toFixed(3))
       : null
+  const visibleLeftGapPx = finalVisibleLeftGapPx
   const visibleRightGapPx =
     typeof row.effectiveRightGapPx === 'number' && Number.isFinite(row.effectiveRightGapPx)
       ? Number(row.effectiveRightGapPx.toFixed(3))
@@ -1496,24 +1960,450 @@ function analyzeLocalCollisionFixture(row: MergedMeasureDumpRow, scale: DebugSca
     rightWinningStaff: actualRightSummary.winningStaff,
     visibleLeftGapPx,
     visibleRightGapPx,
+    requestedSafeGapPx: secondChordSafeGapPx,
     passed: failures.length === 0,
     failureReasons: failures,
   }
 }
 
-async function runDesktopScenario(page: Page, xmlText: string, scaleCase: ScaleCase): Promise<DesktopScenarioReport> {
+function analyzeInnerSegmentNoExtraFixture(
+  row: MergedMeasureDumpRow,
+  scale: DebugScaleConfig,
+  secondChordSafeGapPx = DEFAULT_SECOND_CHORD_SAFE_GAP_PX,
+): FixtureResult {
+  const failures: string[] = []
+  validateSharedSlotDebug(row, failures)
+  validateNoBarlineOverflow(row, failures)
+
+  const bassMetrics = buildStaffOnsetMetrics(row, 'bass')
+  const firstMetrics = bassMetrics[0] ?? null
+  const secondMetrics = bassMetrics[1] ?? null
+  const firstNote = firstMetrics ? findChordNoteByOnset(row, 'bass', firstMetrics.onsetTicks) : null
+  const secondNote = secondMetrics ? findChordNoteByOnset(row, 'bass', secondMetrics.onsetTicks) : null
+  if (!row.rendered) pushFailure(failures, 'fixture-not-rendered')
+  if (!firstMetrics || !secondMetrics || !firstNote || !secondNote) {
+    pushFailure(failures, 'fixture-missing-inner-chord-pair')
+  }
+
+  const boundaryStartX =
+    typeof row.effectiveBoundaryStartX === 'number' && Number.isFinite(row.effectiveBoundaryStartX)
+      ? Number(row.effectiveBoundaryStartX.toFixed(3))
+      : null
+  const boundaryEndX =
+    typeof row.effectiveBoundaryEndX === 'number' && Number.isFinite(row.effectiveBoundaryEndX)
+      ? Number(row.effectiveBoundaryEndX.toFixed(3))
+      : null
+  const firstDirection = classifyDirection(
+    firstNote && Number.isFinite(firstNote.x) ? Number(firstNote.x.toFixed(3)) : null,
+    firstNote ? dedupeSortedNumbers(firstNote.noteHeads.map((head) => head.x), HEAD_X_EPSILON_PX) : [],
+  )
+  const secondDirection = classifyDirection(
+    secondNote && Number.isFinite(secondNote.x) ? Number(secondNote.x.toFixed(3)) : null,
+    secondNote ? dedupeSortedNumbers(secondNote.noteHeads.map((head) => head.x), HEAD_X_EPSILON_PX) : [],
+  )
+  if (firstDirection !== 'forward') pushFailure(failures, 'fixture-first-direction-not-forward', firstDirection)
+  if (secondDirection !== 'backward') pushFailure(failures, 'fixture-second-direction-not-backward', secondDirection)
+
+  const expectedRightRequestPx =
+    firstMetrics && firstNote
+      ? computeExpectedRightRequestPx(firstMetrics, secondMetrics, boundaryEndX, firstNote, secondChordSafeGapPx)
+      : null
+  const expectedLeftRequestPx =
+    secondMetrics
+      ? computeExpectedLeftRequestPx(secondMetrics, firstMetrics, boundaryStartX, secondChordSafeGapPx)
+      : null
+  const actualRightSummary =
+    firstMetrics !== null
+      ? resolveSlotRequestSummary({
+          row,
+          staff: 'bass',
+          onsetTicks: firstMetrics.onsetTicks,
+          side: 'right',
+        })
+      : { requestedExtraPx: 0, winningStaff: 'none' as StaffSlotWinner }
+  const actualLeftSummary =
+    secondMetrics !== null
+      ? resolveSlotRequestSummary({
+          row,
+          staff: 'bass',
+          onsetTicks: secondMetrics.onsetTicks,
+          side: 'left',
+        })
+      : { requestedExtraPx: 0, winningStaff: 'none' as StaffSlotWinner }
+  const expectedSegmentExtraPx =
+    expectedLeftRequestPx !== null && expectedRightRequestPx !== null
+      ? Number(Math.max(expectedLeftRequestPx, expectedRightRequestPx).toFixed(3))
+      : null
+  const segment = firstMetrics && secondMetrics
+    ? findSpacingSegmentByTicks(row, firstMetrics.onsetTicks, secondMetrics.onsetTicks)
+    : null
+  const actualSegmentExtraPx = Number(Math.max(0, segment?.extraReservePx ?? 0).toFixed(3))
+
+  if ((expectedSegmentExtraPx ?? 0) > GAP_EPSILON_PX) {
+    pushFailure(failures, 'fixture-expected-zero-segment-extra-missing', expectedSegmentExtraPx)
+  }
+  if (actualSegmentExtraPx > GAP_EPSILON_PX) {
+    pushFailure(failures, 'unexpected-segment-extra', actualSegmentExtraPx)
+  }
+  if (segment && !approximatelyEqual(segment.appliedGapPx, segment.baseGapPx)) {
+    pushFailure(failures, 'segment-gap-should-stay-base', `${segment.appliedGapPx ?? 'null'}!=${segment.baseGapPx ?? 'null'}`)
+  }
+
+  const finalVisibleLeftGapPx = computeFinalVisibleLeftGapPx({
+    metrics: secondMetrics,
+    previousMetrics: firstMetrics,
+    boundaryStartX,
+    appliedExtraPx: actualLeftSummary.requestedExtraPx,
+  })
+  const finalVisibleRightGapPx = computeFinalVisibleRightGapPx({
+    metrics: firstMetrics,
+    nextMetrics: secondMetrics,
+    boundaryEndX,
+    sourceNote: firstNote,
+    appliedExtraPx: actualRightSummary.requestedExtraPx,
+  })
+  if (finalVisibleLeftGapPx === null || finalVisibleLeftGapPx < secondChordSafeGapPx - GAP_EPSILON_PX) {
+    pushFailure(failures, 'inner-left-gap-too-small', finalVisibleLeftGapPx)
+  }
+  if (finalVisibleRightGapPx === null || finalVisibleRightGapPx < secondChordSafeGapPx - GAP_EPSILON_PX) {
+    pushFailure(failures, 'inner-right-gap-too-small', finalVisibleRightGapPx)
+  }
+
+  return {
+    key: 'fixture-inner-segment-no-extra',
+    scale,
+    measureWidth:
+      typeof row.measureWidth === 'number' && Number.isFinite(row.measureWidth)
+        ? Number(row.measureWidth.toFixed(3))
+        : null,
+    targetOnsetTicks: firstMetrics?.onsetTicks ?? null,
+    direction: 'both',
+    headXs: [],
+    expectedLeftRequestPx,
+    actualLeftRequestPx: Number(actualLeftSummary.requestedExtraPx.toFixed(3)),
+    leftWinningStaff: actualLeftSummary.winningStaff,
+    expectedRightRequestPx,
+    actualRightRequestPx: Number(actualRightSummary.requestedExtraPx.toFixed(3)),
+    rightWinningStaff: actualRightSummary.winningStaff,
+    visibleLeftGapPx: finalVisibleLeftGapPx,
+    visibleRightGapPx: finalVisibleRightGapPx,
+    requestedSafeGapPx: secondChordSafeGapPx,
+    expectedSegmentExtraPx,
+    actualSegmentExtraPx,
+    passed: failures.length === 0,
+    failureReasons: failures,
+  }
+}
+
+function analyzeInnerSegmentSafeGapFixture(
+  row: MergedMeasureDumpRow,
+  scale: DebugScaleConfig,
+  secondChordSafeGapPx = DEFAULT_SECOND_CHORD_SAFE_GAP_PX,
+): FixtureResult {
+  const failures: string[] = []
+  validateSharedSlotDebug(row, failures)
+  validateNoBarlineOverflow(row, failures)
+
+  const bassMetrics = buildStaffOnsetMetrics(row, 'bass')
+  const firstMetrics = bassMetrics[0] ?? null
+  const secondMetrics = bassMetrics[1] ?? null
+  const firstNote = firstMetrics ? findChordNoteByOnset(row, 'bass', firstMetrics.onsetTicks) : null
+  const secondNote = secondMetrics ? findChordNoteByOnset(row, 'bass', secondMetrics.onsetTicks) : null
+  if (!row.rendered) pushFailure(failures, 'fixture-not-rendered')
+  if (!firstMetrics || !secondMetrics || !firstNote || !secondNote) {
+    pushFailure(failures, 'fixture-missing-inner-chord-pair')
+  }
+
+  const boundaryStartX =
+    typeof row.effectiveBoundaryStartX === 'number' && Number.isFinite(row.effectiveBoundaryStartX)
+      ? Number(row.effectiveBoundaryStartX.toFixed(3))
+      : null
+  const boundaryEndX =
+    typeof row.effectiveBoundaryEndX === 'number' && Number.isFinite(row.effectiveBoundaryEndX)
+      ? Number(row.effectiveBoundaryEndX.toFixed(3))
+      : null
+  const firstDirection = classifyDirection(
+    firstNote && Number.isFinite(firstNote.x) ? Number(firstNote.x.toFixed(3)) : null,
+    firstNote ? dedupeSortedNumbers(firstNote.noteHeads.map((head) => head.x), HEAD_X_EPSILON_PX) : [],
+  )
+  const secondDirection = classifyDirection(
+    secondNote && Number.isFinite(secondNote.x) ? Number(secondNote.x.toFixed(3)) : null,
+    secondNote ? dedupeSortedNumbers(secondNote.noteHeads.map((head) => head.x), HEAD_X_EPSILON_PX) : [],
+  )
+  if (firstDirection === 'missing') pushFailure(failures, 'fixture-first-direction-missing')
+  if (secondDirection === 'missing') pushFailure(failures, 'fixture-second-direction-missing')
+
+  const expectedRightRequestPx =
+    firstMetrics && firstNote
+      ? computeExpectedRightRequestPx(firstMetrics, secondMetrics, boundaryEndX, firstNote, secondChordSafeGapPx)
+      : null
+  const expectedLeftRequestPx =
+    secondMetrics
+      ? computeExpectedLeftRequestPx(secondMetrics, firstMetrics, boundaryStartX, secondChordSafeGapPx)
+      : null
+  const actualRightSummary =
+    firstMetrics !== null
+      ? resolveSlotRequestSummary({
+          row,
+          staff: 'bass',
+          onsetTicks: firstMetrics.onsetTicks,
+          side: 'right',
+        })
+      : { requestedExtraPx: 0, winningStaff: 'none' as StaffSlotWinner }
+  const actualLeftSummary =
+    secondMetrics !== null
+      ? resolveSlotRequestSummary({
+          row,
+          staff: 'bass',
+          onsetTicks: secondMetrics.onsetTicks,
+          side: 'left',
+        })
+      : { requestedExtraPx: 0, winningStaff: 'none' as StaffSlotWinner }
+  const expectedSegmentExtraPx =
+    expectedLeftRequestPx !== null && expectedRightRequestPx !== null
+      ? Number(Math.max(expectedLeftRequestPx, expectedRightRequestPx).toFixed(3))
+      : null
+  const segment = firstMetrics && secondMetrics
+    ? findSpacingSegmentByTicks(row, firstMetrics.onsetTicks, secondMetrics.onsetTicks)
+    : null
+  const actualSegmentExtraPx = Number(Math.max(0, segment?.extraReservePx ?? 0).toFixed(3))
+
+  if ((expectedSegmentExtraPx ?? 0) <= GAP_EPSILON_PX) {
+    pushFailure(failures, 'fixture-expected-positive-segment-extra-missing', expectedSegmentExtraPx)
+  }
+  if (actualSegmentExtraPx <= GAP_EPSILON_PX) {
+    pushFailure(failures, 'fixture-actual-segment-extra-missing', actualSegmentExtraPx)
+  }
+  if (actualLeftSummary.requestedExtraPx <= GAP_EPSILON_PX) {
+    pushFailure(failures, 'inner-left-request-missing', actualLeftSummary.requestedExtraPx)
+  }
+  if (actualLeftSummary.winningStaff !== 'bass') {
+    pushFailure(failures, 'inner-left-winning-staff-not-bass', actualLeftSummary.winningStaff)
+  }
+
+  if (
+    (expectedRightRequestPx ?? 0) > GAP_EPSILON_PX &&
+    !approximatelyEqual(actualRightSummary.requestedExtraPx, expectedRightRequestPx)
+  ) {
+    pushFailure(failures, 'inner-right-request-mismatch', `${actualRightSummary.requestedExtraPx}!=${expectedRightRequestPx}`)
+  }
+  if (
+    (expectedLeftRequestPx ?? 0) > GAP_EPSILON_PX &&
+    !approximatelyEqual(actualLeftSummary.requestedExtraPx, expectedLeftRequestPx)
+  ) {
+    pushFailure(failures, 'inner-left-request-mismatch', `${actualLeftSummary.requestedExtraPx}!=${expectedLeftRequestPx}`)
+  }
+  if (expectedSegmentExtraPx !== null && !approximatelyEqual(actualSegmentExtraPx, expectedSegmentExtraPx)) {
+    pushFailure(failures, 'inner-segment-extra-mismatch', `${actualSegmentExtraPx}!=${expectedSegmentExtraPx}`)
+  }
+
+  const finalVisibleLeftGapPx = computeFinalVisibleLeftGapPx({
+    metrics: secondMetrics,
+    previousMetrics: firstMetrics,
+    boundaryStartX,
+    appliedExtraPx: actualLeftSummary.requestedExtraPx,
+  })
+  const finalVisibleRightGapPx = computeFinalVisibleRightGapPx({
+    metrics: firstMetrics,
+    nextMetrics: secondMetrics,
+    boundaryEndX,
+    sourceNote: firstNote,
+    appliedExtraPx: actualRightSummary.requestedExtraPx,
+  })
+  if (finalVisibleLeftGapPx === null || finalVisibleLeftGapPx < secondChordSafeGapPx - GAP_EPSILON_PX) {
+    pushFailure(failures, 'inner-left-gap-too-small', finalVisibleLeftGapPx)
+  }
+  if (
+    (expectedRightRequestPx ?? 0) > GAP_EPSILON_PX &&
+    (finalVisibleRightGapPx === null || finalVisibleRightGapPx < secondChordSafeGapPx - GAP_EPSILON_PX)
+  ) {
+    pushFailure(failures, 'inner-right-gap-too-small', finalVisibleRightGapPx)
+  }
+
+  return {
+    key: 'fixture-inner-segment-safe-gap',
+    scale,
+    measureWidth:
+      typeof row.measureWidth === 'number' && Number.isFinite(row.measureWidth)
+        ? Number(row.measureWidth.toFixed(3))
+        : null,
+    targetOnsetTicks: firstMetrics?.onsetTicks ?? null,
+    direction:
+      firstDirection === 'missing' && secondDirection === 'missing'
+        ? 'missing'
+        : firstDirection === secondDirection
+          ? firstDirection
+          : 'both',
+    headXs: [],
+    expectedLeftRequestPx,
+    actualLeftRequestPx: Number(actualLeftSummary.requestedExtraPx.toFixed(3)),
+    leftWinningStaff: actualLeftSummary.winningStaff,
+    expectedRightRequestPx,
+    actualRightRequestPx:
+      (expectedRightRequestPx ?? 0) > GAP_EPSILON_PX
+        ? Number(actualRightSummary.requestedExtraPx.toFixed(3))
+        : 0,
+    rightWinningStaff:
+      (expectedRightRequestPx ?? 0) > GAP_EPSILON_PX ? actualRightSummary.winningStaff : 'none',
+    visibleLeftGapPx: finalVisibleLeftGapPx,
+    visibleRightGapPx: finalVisibleRightGapPx,
+    requestedSafeGapPx: secondChordSafeGapPx,
+    expectedSegmentExtraPx,
+    actualSegmentExtraPx,
+    passed: failures.length === 0,
+    failureReasons: failures,
+  }
+}
+
+function analyzeTrailingCollisionFixture(
+  row: MergedMeasureDumpRow,
+  scale: DebugScaleConfig,
+  secondChordSafeGapPx = DEFAULT_SECOND_CHORD_SAFE_GAP_PX,
+): FixtureResult {
+  const failures: string[] = []
+  validateSharedSlotDebug(row, failures)
+  validateNoBarlineOverflow(row, failures)
+
+  const bassMetrics = buildStaffOnsetMetrics(row, 'bass')
+  const targetMetrics = [...bassMetrics].reverse().find((metrics) => metrics.rawRightReservePx > HEAD_X_EPSILON_PX) ?? null
+  const targetNote =
+    targetMetrics ? findChordNoteByOnset(row, 'bass', targetMetrics.onsetTicks) : null
+
+  if (!row.rendered) pushFailure(failures, 'fixture-not-rendered')
+  if (!targetMetrics || !targetNote) pushFailure(failures, 'target-bass-forward-chord-missing')
+
+  const boundaryStartX =
+    typeof row.effectiveBoundaryStartX === 'number' && Number.isFinite(row.effectiveBoundaryStartX)
+      ? Number(row.effectiveBoundaryStartX.toFixed(3))
+      : null
+  const boundaryEndX =
+    typeof row.effectiveBoundaryEndX === 'number' && Number.isFinite(row.effectiveBoundaryEndX)
+      ? Number(row.effectiveBoundaryEndX.toFixed(3))
+      : null
+  const targetIndex =
+    targetMetrics !== null ? bassMetrics.findIndex((metrics) => metrics.onsetTicks === targetMetrics.onsetTicks) : -1
+  const previousMetrics = targetIndex > 0 ? bassMetrics[targetIndex - 1] ?? null : null
+
+  const expectedLeftRequestPx = targetMetrics
+    ? computeExpectedLeftRequestPx(targetMetrics, previousMetrics, boundaryStartX, secondChordSafeGapPx)
+    : null
+  const expectedRightRequestPx = targetMetrics && targetNote
+    ? computeExpectedRightRequestPx(targetMetrics, null, boundaryEndX, targetNote, secondChordSafeGapPx)
+    : null
+
+  if ((expectedLeftRequestPx ?? 0) > GAP_EPSILON_PX) {
+    pushFailure(failures, 'fixture-should-not-request-left', expectedLeftRequestPx)
+  }
+
+  const actualLeftSummary =
+    targetMetrics !== null
+      ? resolveSlotRequestSummary({
+          row,
+          staff: 'bass',
+          onsetTicks: targetMetrics.onsetTicks,
+          side: 'left',
+        })
+      : { requestedExtraPx: 0, winningStaff: 'none' as StaffSlotWinner }
+  const actualRightSummary =
+    targetMetrics !== null
+      ? resolveSlotRequestSummary({
+          row,
+          staff: 'bass',
+          onsetTicks: targetMetrics.onsetTicks,
+          side: 'right',
+        })
+      : { requestedExtraPx: 0, winningStaff: 'none' as StaffSlotWinner }
+
+  if (actualLeftSummary.requestedExtraPx > GAP_EPSILON_PX) {
+    pushFailure(failures, 'unexpected-left-request', actualLeftSummary.requestedExtraPx)
+  }
+  if ((expectedRightRequestPx ?? 0) > GAP_EPSILON_PX) {
+    if (!approximatelyEqual(actualRightSummary.requestedExtraPx, expectedRightRequestPx)) {
+      pushFailure(failures, 'trailing-request-mismatch', `${actualRightSummary.requestedExtraPx}!=${expectedRightRequestPx}`)
+    }
+    if (actualRightSummary.winningStaff !== 'bass') {
+      pushFailure(failures, 'trailing-winning-staff-not-bass', actualRightSummary.winningStaff)
+    }
+  } else {
+    if (actualRightSummary.requestedExtraPx > GAP_EPSILON_PX) {
+      pushFailure(failures, 'unexpected-trailing-request', actualRightSummary.requestedExtraPx)
+    }
+    if (actualRightSummary.winningStaff !== 'none') {
+      pushFailure(failures, 'unexpected-trailing-winning-staff', actualRightSummary.winningStaff)
+    }
+  }
+
+  const finalVisibleRightGapPx = computeFinalVisibleRightGapPx({
+    metrics: targetMetrics,
+    nextMetrics: null,
+    boundaryEndX,
+    sourceNote: targetNote,
+    appliedExtraPx: actualRightSummary.requestedExtraPx,
+  })
+  if (finalVisibleRightGapPx === null || finalVisibleRightGapPx < secondChordSafeGapPx - GAP_EPSILON_PX) {
+    pushFailure(failures, 'trailing-visible-gap-too-small', finalVisibleRightGapPx)
+  }
+
+  const direction = classifyDirection(
+    targetNote && Number.isFinite(targetNote.x) ? Number(targetNote.x.toFixed(3)) : null,
+    targetNote ? dedupeSortedNumbers(targetNote.noteHeads.map((head) => head.x), HEAD_X_EPSILON_PX) : [],
+  )
+  if (direction !== 'forward') {
+    pushFailure(failures, 'fixture-direction-not-forward', direction)
+  }
+
+  return {
+    key: 'fixture-trailing-boundary-collision',
+    scale,
+    measureWidth:
+      typeof row.measureWidth === 'number' && Number.isFinite(row.measureWidth)
+        ? Number(row.measureWidth.toFixed(3))
+        : null,
+    targetOnsetTicks: targetMetrics?.onsetTicks ?? null,
+    direction,
+    headXs: targetNote ? dedupeSortedNumbers(targetNote.noteHeads.map((head) => head.x), HEAD_X_EPSILON_PX) : [],
+    expectedLeftRequestPx,
+    actualLeftRequestPx: Number(actualLeftSummary.requestedExtraPx.toFixed(3)),
+    leftWinningStaff: actualLeftSummary.winningStaff,
+    expectedRightRequestPx,
+    actualRightRequestPx:
+      (expectedRightRequestPx ?? 0) > GAP_EPSILON_PX
+        ? Number(actualRightSummary.requestedExtraPx.toFixed(3))
+        : 0,
+    rightWinningStaff:
+      (expectedRightRequestPx ?? 0) > GAP_EPSILON_PX ? actualRightSummary.winningStaff : 'none',
+    visibleLeftGapPx:
+      typeof row.effectiveLeftGapPx === 'number' && Number.isFinite(row.effectiveLeftGapPx)
+        ? Number(row.effectiveLeftGapPx.toFixed(3))
+        : null,
+    visibleRightGapPx: finalVisibleRightGapPx,
+    requestedSafeGapPx: secondChordSafeGapPx,
+    passed: failures.length === 0,
+    failureReasons: failures,
+  }
+}
+
+async function runDesktopScenario(
+  page: Page,
+  xmlText: string,
+  scaleCase: ScaleCase,
+  secondChordSafeGapPx = DEFAULT_SECOND_CHORD_SAFE_GAP_PX,
+): Promise<DesktopScenarioReport> {
+  await setSecondChordSafeGapPx(page, secondChordSafeGapPx)
   await importMusicXml(page, xmlText)
   const appliedScale = await setScoreScale(page, scaleCase)
   const mergedRows = await collectMergedRows(page)
-  return analyzeDesktopScenario(mergedRows, appliedScale, scaleCase.key)
+  return analyzeDesktopScenario(mergedRows, appliedScale, scaleCase.key, secondChordSafeGapPx)
 }
 
 async function runFixtureScenario(params: {
   page: Page
   xmlText: string
-  analyzer: (row: MergedMeasureDumpRow, scale: DebugScaleConfig) => FixtureResult
+  analyzer: (row: MergedMeasureDumpRow, scale: DebugScaleConfig, secondChordSafeGapPx: number) => FixtureResult
+  secondChordSafeGapPx?: number
 }): Promise<FixtureResult> {
-  const { page, xmlText, analyzer } = params
+  const { page, xmlText, analyzer, secondChordSafeGapPx = DEFAULT_SECOND_CHORD_SAFE_GAP_PX } = params
+  await setSecondChordSafeGapPx(page, secondChordSafeGapPx)
   await importMusicXml(page, xmlText)
   const appliedScale = await setScoreScale(page, FIXTURE_SCALE_CASE)
   const mergedRows = await collectMergedRows(page)
@@ -1527,7 +2417,30 @@ async function runFixtureScenario(params: {
       overflowVsMeasureEndBarX: null,
       notes: [],
     } satisfies MergedMeasureDumpRow)
-  return analyzer(row, appliedScale)
+  return analyzer(row, appliedScale, secondChordSafeGapPx)
+}
+
+async function runUiSafeGapScenario(params: {
+  page: Page
+  safeGapPx: number
+}): Promise<UiSafeGapScenarioResult> {
+  const { page, safeGapPx } = params
+  const fixture = await runFixtureScenario({
+    page,
+    xmlText: LOCAL_BASS_BOUNDARY_COLLISION_FIXTURE_XML,
+    analyzer: analyzeLocalCollisionFixture,
+    secondChordSafeGapPx: safeGapPx,
+  })
+  return {
+    key: `ui-safe-gap-${safeGapPx}`,
+    appliedSafeGapPx: safeGapPx,
+    expectedLeftRequestPx: fixture.expectedLeftRequestPx,
+    actualLeftRequestPx: fixture.actualLeftRequestPx,
+    expectedRightRequestPx: fixture.expectedRightRequestPx,
+    actualRightRequestPx: fixture.actualRightRequestPx,
+    passed: fixture.passed,
+    failureReasons: [...fixture.failureReasons],
+  }
 }
 
 async function main(): Promise<void> {
@@ -1580,12 +2493,63 @@ async function main(): Promise<void> {
         analyzer: analyzeLocalCollisionFixture,
       }),
     )
+    console.log('[second-chord-spacing] running inner-segment no-extra fixture')
+    fixtureResults.push(
+      await runFixtureScenario({
+        page,
+        xmlText: INNER_SEGMENT_NO_EXTRA_FIXTURE_XML,
+        analyzer: analyzeInnerSegmentNoExtraFixture,
+      }),
+    )
+    console.log('[second-chord-spacing] running inner-segment safe-gap fixture')
+    fixtureResults.push(
+      await runFixtureScenario({
+        page,
+        xmlText: INNER_SEGMENT_SAFE_GAP_FIXTURE_XML,
+        analyzer: analyzeInnerSegmentSafeGapFixture,
+      }),
+    )
+    console.log('[second-chord-spacing] running trailing boundary fixture')
+    fixtureResults.push(
+      await runFixtureScenario({
+        page,
+        xmlText: TRAILING_BASS_BOUNDARY_COLLISION_FIXTURE_XML,
+        analyzer: analyzeTrailingCollisionFixture,
+      }),
+    )
+
+    const uiSafeGapScenarios: UiSafeGapScenarioResult[] = []
+    console.log('[second-chord-spacing] running UI safe-gap scenario 0px')
+    uiSafeGapScenarios.push(await runUiSafeGapScenario({ page, safeGapPx: 0 }))
+    console.log('[second-chord-spacing] running UI safe-gap scenario 3px')
+    uiSafeGapScenarios.push(await runUiSafeGapScenario({ page, safeGapPx: DEFAULT_SECOND_CHORD_SAFE_GAP_PX }))
+
+    if (uiSafeGapScenarios.length >= 2) {
+      const zeroGapScenario = uiSafeGapScenarios[0]
+      const defaultGapScenario = uiSafeGapScenarios[1]
+      if (
+        zeroGapScenario &&
+        defaultGapScenario &&
+        zeroGapScenario.actualLeftRequestPx !== null &&
+        defaultGapScenario.actualLeftRequestPx !== null
+      ) {
+        const expectedDeltaPx = DEFAULT_SECOND_CHORD_SAFE_GAP_PX
+        const actualDeltaPx = Number(
+          (defaultGapScenario.actualLeftRequestPx - zeroGapScenario.actualLeftRequestPx).toFixed(3),
+        )
+        if (Math.abs(actualDeltaPx - expectedDeltaPx) > GAP_EPSILON_PX) {
+          defaultGapScenario.passed = false
+          defaultGapScenario.failureReasons.push(`ui-safe-gap-delta:${actualDeltaPx}!=${expectedDeltaPx}`)
+        }
+      }
+    }
 
     const report: FinalReport = {
       generatedAt: new Date().toISOString(),
       xmlPath,
       desktopScenarios,
       fixtureResults,
+      uiSafeGapScenarios,
     }
 
     await mkdir(path.dirname(reportPath), { recursive: true })
@@ -1620,11 +2584,21 @@ async function main(): Promise<void> {
       )
     })
 
+    uiSafeGapScenarios.forEach((scenario) => {
+      console.log(
+        `[second-chord-spacing] ${scenario.key}: ${scenario.passed ? 'PASS' : 'FAIL'} ` +
+          `left=${scenario.actualLeftRequestPx ?? 'null'}/${scenario.expectedLeftRequestPx ?? 'null'} ` +
+          `right=${scenario.actualRightRequestPx ?? 'null'}/${scenario.expectedRightRequestPx ?? 'null'} ` +
+          `${scenario.failureReasons.length > 0 ? JSON.stringify(scenario.failureReasons) : ''}`,
+      )
+    })
+
     console.log(`Generated: ${reportPath}`)
 
     if (
       !desktopScenarios.every((scenario) => scenario.passed) ||
-      !fixtureResults.every((fixture) => fixture.passed)
+      !fixtureResults.every((fixture) => fixture.passed) ||
+      !uiSafeGapScenarios.every((scenario) => scenario.passed)
     ) {
       throw new Error('Second-chord spacing regression detected.')
     }

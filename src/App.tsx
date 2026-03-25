@@ -477,6 +477,11 @@ function clampLeadingBarlineGapPx(value: number): number {
   return Number(clamped.toFixed(2))
 }
 
+function clampSecondChordSafeGapPx(value: number): number {
+  const clamped = clampNumber(value, 0, 12)
+  return Number(clamped.toFixed(2))
+}
+
 function clampPageHorizontalPaddingPx(value: number): number {
   return Math.round(clampNumber(value, 8, 120))
 }
@@ -2230,6 +2235,7 @@ function App() {
     const spacingKey = [
       timeAxisSpacingConfig.baseMinGap32Px,
       timeAxisSpacingConfig.leadingBarlineGapPx,
+      timeAxisSpacingConfig.secondChordSafeGapPx,
       timeAxisSpacingConfig.durationGapRatios.thirtySecond,
       timeAxisSpacingConfig.durationGapRatios.sixteenth,
       timeAxisSpacingConfig.durationGapRatios.eighth,
@@ -2246,6 +2252,7 @@ function App() {
     systemRanges,
     timeAxisSpacingConfig.baseMinGap32Px,
     timeAxisSpacingConfig.leadingBarlineGapPx,
+    timeAxisSpacingConfig.secondChordSafeGapPx,
     timeAxisSpacingConfig.durationGapRatios.thirtySecond,
     timeAxisSpacingConfig.durationGapRatios.sixteenth,
     timeAxisSpacingConfig.durationGapRatios.eighth,
@@ -2512,6 +2519,7 @@ function App() {
   }, [
     timeAxisSpacingConfig.baseMinGap32Px,
     timeAxisSpacingConfig.leadingBarlineGapPx,
+    timeAxisSpacingConfig.secondChordSafeGapPx,
     timeAxisSpacingConfig.interOnsetPaddingPx,
     timeAxisSpacingConfig.durationGapRatios.thirtySecond,
     timeAxisSpacingConfig.durationGapRatios.sixteenth,
@@ -6517,6 +6525,7 @@ function App() {
         chordMarkerPaddingPx={safeChordMarkerPaddingPx}
         baseMinGap32Px={timeAxisSpacingConfig.baseMinGap32Px}
         leadingBarlineGapPx={timeAxisSpacingConfig.leadingBarlineGapPx}
+        secondChordSafeGapPx={timeAxisSpacingConfig.secondChordSafeGapPx}
         durationGapRatio32={timeAxisSpacingConfig.durationGapRatios.thirtySecond}
         durationGapRatio16={timeAxisSpacingConfig.durationGapRatios.sixteenth}
         durationGapRatio8={timeAxisSpacingConfig.durationGapRatios.eighth}
@@ -6542,6 +6551,12 @@ function App() {
           setTimeAxisSpacingConfig((current) => ({
             ...current,
             leadingBarlineGapPx: clampLeadingBarlineGapPx(nextValue),
+          }))
+        }
+        onSecondChordSafeGapPxChange={(nextValue) =>
+          setTimeAxisSpacingConfig((current) => ({
+            ...current,
+            secondChordSafeGapPx: clampSecondChordSafeGapPx(nextValue),
           }))
         }
         onDurationGapRatio32Change={(nextValue) =>

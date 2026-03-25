@@ -171,6 +171,7 @@ function buildMeasureWidthCacheKey(params: {
     `endDecor=${meta.showEndDecorations ? 1 : 0}`,
     `lead=${spacingConfig.leadingBarlineGapPx}`,
     `g32=${spacingConfig.baseMinGap32Px}`,
+    `m2safe=${spacingConfig.secondChordSafeGapPx}`,
     `inter=${spacingConfig.interOnsetPaddingPx}`,
     `r32=${ratios.thirtySecond}`,
     `r16=${ratios.sixteenth}`,

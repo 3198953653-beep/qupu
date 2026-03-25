@@ -121,6 +121,7 @@ export type TimeAxisSpacingConfig = {
   leadingBarlineGapPx: number
   interOnsetPaddingPx: number
   baseMinGap32Px: number
+  secondChordSafeGapPx: number
   durationGapRatios: DurationGapRatioConfig
 }
 
@@ -146,6 +147,7 @@ export const DEFAULT_TIME_AXIS_SPACING_CONFIG: TimeAxisSpacingConfig = {
   leadingBarlineGapPx: 9.7,
   interOnsetPaddingPx: 1,
   baseMinGap32Px: 6.9,
+  secondChordSafeGapPx: 3,
   durationGapRatios: {
     thirtySecond: 0.7,
     sixteenth: 0.78,
@@ -1133,6 +1135,7 @@ function resolveCollisionDrivenOverlay(params: {
   refsByOnset: Map<number, TimeAxisNoteRef[]>
   effectiveBoundaryStartX: number
   effectiveBoundaryEndX: number
+  spacingConfig: TimeAxisSpacingConfig
 }): {
   finalTargetXByOnset: Map<number, number>
   onsetReserves: TimeAxisSpacingOnsetReserve[]
@@ -1145,6 +1148,7 @@ function resolveCollisionDrivenOverlay(params: {
     refsByOnset,
     effectiveBoundaryStartX,
     effectiveBoundaryEndX,
+    spacingConfig,
   } = params
   const finalTargetXByOnset = new Map<number, number>()
   const onsetReserves: TimeAxisSpacingOnsetReserve[] = []
@@ -1157,6 +1161,9 @@ function resolveCollisionDrivenOverlay(params: {
       totalAppliedExtraPx: 0,
     }
   }
+  const secondChordSafeGapPx = Number.isFinite(spacingConfig.secondChordSafeGapPx)
+    ? Math.max(0, spacingConfig.secondChordSafeGapPx)
+    : 0
 
   const sharedOnsetCollisionMetricsByTick = onsetTicks.map((onsetTick) =>
     getOnsetCollisionMetrics(refsByOnset.get(onsetTick)),
@@ -1189,12 +1196,14 @@ function resolveCollisionDrivenOverlay(params: {
       const nextMetrics = index < staffCollisionMetrics.length - 1 ? staffCollisionMetrics[index + 1] ?? null : null
 
       if (Math.max(0, metrics.rawLeftReservePx) > 0) {
-        const blockerRightX =
+        const visibleLeftGapPx =
           previousMetrics === null
-            ? effectiveBoundaryStartX
-            : (baseXByOnset.get(previousMetrics.onsetTicks) ?? 0) + Math.max(0, previousMetrics.rightOccupiedTailPx)
-        const availableLeftClearancePx = Math.max(0, baseAnchorX - blockerRightX)
-        const leftRequestPx = Math.max(0, Math.max(0, metrics.rawLeftReservePx) - availableLeftClearancePx)
+            ? (baseAnchorX - Math.max(0, metrics.rawLeftReservePx)) - effectiveBoundaryStartX
+            : baseAnchorX -
+              (baseXByOnset.get(previousMetrics.onsetTicks) ?? 0) -
+              Math.max(0, previousMetrics.rawRightReservePx) -
+              Math.max(0, metrics.rawLeftReservePx)
+        const leftRequestPx = Math.max(0, secondChordSafeGapPx - visibleLeftGapPx)
         if (leftRequestPx > 0) {
           const request = {
             extraPx: leftRequestPx,
@@ -1211,22 +1220,14 @@ function resolveCollisionDrivenOverlay(params: {
       }
 
       if (Math.max(0, metrics.rawRightReservePx) > 0) {
-        const blockerLeftX =
+        const visibleRightGapPx =
           nextMetrics === null
-            ? effectiveBoundaryEndX
-            : (baseXByOnset.get(nextMetrics.onsetTicks) ?? 0) - Math.max(0, nextMetrics.leftOccupiedInsetPx)
-        const baseRightBodyPx = Math.max(
-          0,
-          Math.max(0, metrics.collisionRightBodyTailPx) - Math.max(0, metrics.rawRightReservePx),
-        )
-        const availableRightProtrusionClearancePx = Math.max(
-          0,
-          blockerLeftX - baseAnchorX - baseRightBodyPx,
-        )
-        const rightRequestPx = Math.max(
-          0,
-          Math.max(0, metrics.rawRightReservePx) - availableRightProtrusionClearancePx,
-        )
+            ? effectiveBoundaryEndX - (baseAnchorX + Math.max(0, metrics.rawRightReservePx))
+            : (baseXByOnset.get(nextMetrics.onsetTicks) ?? 0) -
+              baseAnchorX -
+              Math.max(0, metrics.rawRightReservePx) -
+              Math.max(0, nextMetrics.rawLeftReservePx)
+        const rightRequestPx = Math.max(0, secondChordSafeGapPx - visibleRightGapPx)
         if (rightRequestPx > 0) {
           const request = {
             extraPx: rightRequestPx,
@@ -1495,6 +1496,7 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     refsByOnset,
     effectiveBoundaryStartX: axisBoundaryStart,
     effectiveBoundaryEndX: axisBoundaryEnd,
+    spacingConfig,
   })
   const finalTargetXByOnset = overlay.finalTargetXByOnset
   const onsetReserves = overlay.onsetReserves
