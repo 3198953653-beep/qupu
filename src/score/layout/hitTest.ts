@@ -359,10 +359,37 @@ export function buildHitGridIndex(layouts: NoteLayout[], cellSize = HIT_INDEX_CE
       bounds: { minX: number; maxX: number; minY: number; maxY: number },
       tolerancePx: number,
     ) => {
+      if (
+        !Number.isFinite(bounds.minX) ||
+        !Number.isFinite(bounds.maxX) ||
+        !Number.isFinite(bounds.minY) ||
+        !Number.isFinite(bounds.maxY)
+      ) {
+        return
+      }
       const minCellX = Math.floor((bounds.minX - tolerancePx) / safeCellSize)
       const maxCellX = Math.floor((bounds.maxX + tolerancePx) / safeCellSize)
       const minCellY = Math.floor((bounds.minY - tolerancePx) / safeCellSize)
       const maxCellY = Math.floor((bounds.maxY + tolerancePx) / safeCellSize)
+      const spanCellX = maxCellX - minCellX
+      const spanCellY = maxCellY - minCellY
+      if (
+        !Number.isFinite(minCellX) ||
+        !Number.isFinite(maxCellX) ||
+        !Number.isFinite(minCellY) ||
+        !Number.isFinite(maxCellY) ||
+        Math.abs(minCellX) > 1_000_000 ||
+        Math.abs(maxCellX) > 1_000_000 ||
+        Math.abs(minCellY) > 1_000_000 ||
+        Math.abs(maxCellY) > 1_000_000 ||
+        spanCellX < 0 ||
+        spanCellY < 0 ||
+        spanCellX > 512 ||
+        spanCellY > 512 ||
+        (spanCellX + 1) * (spanCellY + 1) > 4096
+      ) {
+        return
+      }
       for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
         for (let cellY = minCellY; cellY <= maxCellY; cellY += 1) {
           const key = toHitCellKey(cellX, cellY)
