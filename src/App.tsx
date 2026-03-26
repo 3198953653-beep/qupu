@@ -38,13 +38,14 @@ import {
   useScoreRenderEffect,
   useSynthLifecycle,
 } from './score/hooks/useScoreEffects'
-import { getDeleteAccidentalFailureMessage, getDeleteMeasureFailureMessage, getDeleteTieFailureMessage, getAccidentalEditFailureMessage, getCopyPasteFailureMessage, getDurationEditFailureMessage } from './score/editorMessages'
+import { getDeleteAccidentalFailureMessage, getDeleteMeasureFailureMessage, getDeleteTieFailureMessage, getCopyPasteFailureMessage } from './score/editorMessages'
 import { useMidiInputController } from './score/hooks/useMidiInputController'
 import { usePlaybackController } from './score/hooks/usePlaybackController'
 import { useScoreAudioPreviewController } from './score/hooks/useScoreAudioPreviewController'
 import { useChordMarkerController } from './score/hooks/useChordMarkerController'
 import { useScoreMutationController } from './score/hooks/useScoreMutationController'
 import { useEditorActionWrappers } from './score/hooks/useEditorActionWrappers'
+import { useNotationPaletteController } from './score/hooks/useNotationPaletteController'
 import { useScoreSelectionController } from './score/hooks/useScoreSelectionController'
 import {
   getInitialChordDegreeDisplayEnabled,
@@ -66,11 +67,7 @@ import {
   flattenTrebleFromPairs,
 } from './score/scoreOps'
 import { commitDragPitchToScoreData } from './score/dragInteractions'
-import { applyPaletteDurationEdit } from './score/durationEdits'
-import {
-  applyDeleteAccidentalSelection,
-  applyPaletteAccidentalEdit,
-} from './score/accidentalEdits'
+import { applyDeleteAccidentalSelection } from './score/accidentalEdits'
 import { applyDeleteTieSelection } from './score/tieEdits'
 import { applyDeleteMeasureSelection } from './score/measureEdits'
 import { isStaffFullMeasureRest, resolvePairTimeSignature } from './score/measureRestUtils'
@@ -92,9 +89,6 @@ import type { MeasureTimelineBundle } from './score/timeline/types'
 import type { NoteClipboardPayload } from './score/copyPasteTypes'
 import {
   getDefaultNotationPaletteSelection,
-  toggleDottedDuration,
-  toTargetDurationFromPalette,
-  type NotationPaletteItem,
   type NotationPaletteSelection,
 } from './score/notationPaletteConfig'
 import type { HitGridIndex } from './score/layout/hitTest'
@@ -1616,129 +1610,28 @@ function App() {
   useEffect(() => {
     isOsmdPreviewOpenRef.current = isOsmdPreviewOpen
   }, [isOsmdPreviewOpen])
-
-  const openBeamGroupingTool = useCallback(() => {
-    window.alert('音值组合算法已就绪，暂未接入业务流程。')
-    setImportFeedback({
-      kind: 'success',
-      message: '音值组合算法模块已就绪（暂未接入业务流程）。',
-    })
-    console.info('[beam-grouping] 独立算法入口已就绪：src/score/beamGrouping.ts（当前仅占位提示，不改谱面）')
-  }, [])
-
-  const toggleNotationPalette = useCallback(() => {
-    setIsNotationPaletteOpen(true)
-  }, [])
-
-  const closeNotationPalette = useCallback(() => {
-    setIsNotationPaletteOpen(false)
-  }, [])
-
-  const onNotationPaletteSelectionChange = useCallback(
-    (nextSelection: NotationPaletteSelection, actionLabel: string, item: NotationPaletteItem) => {
-      setNotationPaletteSelection(nextSelection)
-      const sourcePairs = measurePairsRef.current
-      const sourceImportedNoteLookup = importedNoteLookupRef.current
-      const importedMode = measurePairsFromImportRef.current !== null
-
-      if (item.behavior === 'ui-only') {
-        setNotationPaletteLastAction(actionLabel)
-        console.info('[notation-palette]', actionLabel, nextSelection)
-        return
-      }
-
-      if (item.behavior === 'rest-to-note-disabled') {
-        if (isSelectionVisible && currentSelection?.isRest) {
-          const message = '首版暂不支持休止符转音符'
-          setNotationPaletteLastAction(message)
-          console.info('[notation-palette]', message, nextSelection)
-          return
-        }
-        setNotationPaletteLastAction(actionLabel)
-        console.info('[notation-palette]', actionLabel, nextSelection)
-        return
-      }
-
-      if (item.behavior === 'accidental-edit' && item.kind === 'accidental') {
-        const attempt = applyPaletteAccidentalEdit({
-          pairs: sourcePairs,
-          activeSelection,
-          selectedSelections,
-          isSelectionVisible,
-          importedNoteLookup: importedNoteLookupRef.current,
-          keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
-          accidentalId: item.id,
-        })
-        if (attempt.error) {
-          const message = getAccidentalEditFailureMessage(attempt.error)
-          setNotationPaletteLastAction(message)
-          console.info('[notation-palette]', message, nextSelection)
-          return
-        }
-        if (attempt.result) {
-          applyKeyboardEditResult(attempt.result.nextPairs, attempt.result.nextSelection, attempt.result.nextSelections)
-          playAccidentalEditPreview({
-            pairs: sourcePairs,
-            previewSelection: attempt.result.previewSelection,
-            previewPitch: attempt.result.previewPitch,
-            importedNoteLookup: sourceImportedNoteLookup,
-          })
-        }
-        setNotationPaletteLastAction(actionLabel)
-        console.info('[notation-palette]', actionLabel, nextSelection)
-        return
-      }
-
-      const action =
-        item.behavior === 'duration-edit' && item.kind === 'duration'
-          ? { type: 'duration' as const, targetDuration: toTargetDurationFromPalette(item.id) }
-          : item.behavior === 'dot-toggle'
-            ? { type: 'toggle-dot' as const, targetDuration: currentSelection ? toggleDottedDuration(currentSelection.duration) : null }
-            : item.behavior === 'note-to-rest'
-              ? { type: 'note-to-rest' as const }
-              : null
-
-      if (!action) {
-        setNotationPaletteLastAction(actionLabel)
-        console.info('[notation-palette]', actionLabel, nextSelection)
-        return
-      }
-
-      const attempt = applyPaletteDurationEdit({
-        pairs: sourcePairs,
-        activeSelection,
-        selectedSelections,
-        isSelectionVisible,
-        importedNoteLookup: importedNoteLookupRef.current,
-        keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
-        timeSignaturesByMeasure: measureTimeSignaturesFromImportRef.current,
-        action,
-        importedMode,
-      })
-
-      if (attempt.error) {
-        const message = getDurationEditFailureMessage(attempt.error)
-        setNotationPaletteLastAction(message)
-        console.info('[notation-palette]', message, nextSelection)
-        return
-      }
-
-      if (attempt.result) {
-        applyKeyboardEditResult(attempt.result.nextPairs, attempt.result.nextSelection, attempt.result.nextSelections)
-      }
-
-      setNotationPaletteLastAction(actionLabel)
-      console.info('[notation-palette]', actionLabel, nextSelection)
-    },
-    [
-      activeSelection,
-      applyKeyboardEditResult,
-      currentSelection,
-      isSelectionVisible,
-      playAccidentalEditPreview,
-      selectedSelections,
-    ],
-  )
+  const {
+    openBeamGroupingTool,
+    toggleNotationPalette,
+    closeNotationPalette,
+    onNotationPaletteSelectionChange,
+  } = useNotationPaletteController({
+    activeSelection,
+    selectedSelections,
+    isSelectionVisible,
+    currentSelection,
+    measurePairsRef,
+    measurePairsFromImportRef,
+    importedNoteLookupRef,
+    measureKeyFifthsFromImportRef,
+    measureTimeSignaturesFromImportRef,
+    setImportFeedback,
+    setIsNotationPaletteOpen,
+    setNotationPaletteSelection,
+    setNotationPaletteLastAction,
+    applyKeyboardEditResult,
+    playAccidentalEditPreview,
+  })
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
