@@ -45,6 +45,7 @@ import { useScoreAudioPreviewController } from './score/hooks/useScoreAudioPrevi
 import { useChordMarkerController } from './score/hooks/useChordMarkerController'
 import { useScoreMutationController } from './score/hooks/useScoreMutationController'
 import { useEditorActionWrappers } from './score/hooks/useEditorActionWrappers'
+import { useScoreSelectionController } from './score/hooks/useScoreSelectionController'
 import {
   getInitialChordDegreeDisplayEnabled,
   getInitialPlayheadFollowEnabled,
@@ -90,13 +91,10 @@ import {
 import type { MeasureTimelineBundle } from './score/timeline/types'
 import type { NoteClipboardPayload } from './score/copyPasteTypes'
 import {
-  buildNotationPaletteDerivedDisplay,
   getDefaultNotationPaletteSelection,
   toggleDottedDuration,
   toTargetDurationFromPalette,
   type NotationPaletteItem,
-  type NotationPaletteDerivedDisplay,
-  type NotationPaletteResolvedSelection,
   type NotationPaletteSelection,
 } from './score/notationPaletteConfig'
 import type { HitGridIndex } from './score/layout/hitTest'
@@ -1333,165 +1331,55 @@ function App() {
     }
   }, [])
 
-  useEffect(() => {
-    const hasActiveTreble = notes.some((note) => note.id === activeSelection.noteId)
-    const hasActiveBass = bassNotes.some((note) => note.id === activeSelection.noteId)
-
-    if (activeSelection.staff === 'treble') {
-      if (hasActiveTreble) return
-      if (notes[0]) {
-        setIsSelectionVisible(true)
-        setActiveSelection({ noteId: notes[0].id, staff: 'treble', keyIndex: 0 })
-        return
-      }
-      if (bassNotes[0]) {
-        setIsSelectionVisible(true)
-        setActiveSelection({ noteId: bassNotes[0].id, staff: 'bass', keyIndex: 0 })
-      }
-      return
-    }
-
-    if (hasActiveBass) return
-    if (bassNotes[0]) {
-      setIsSelectionVisible(true)
-      setActiveSelection({ noteId: bassNotes[0].id, staff: 'bass', keyIndex: 0 })
-      return
-    }
-    if (notes[0]) {
-      setIsSelectionVisible(true)
-      setActiveSelection({ noteId: notes[0].id, staff: 'treble', keyIndex: 0 })
-    }
-  }, [activeSelection, notes, bassNotes])
-
-  const activePool = activeSelection.staff === 'treble' ? notes : bassNotes
-  const activePoolById = activeSelection.staff === 'treble' ? trebleNoteById : bassNoteById
-  const activePoolIndexById = activeSelection.staff === 'treble' ? trebleNoteIndexById : bassNoteIndexById
-  const currentSelection = activePoolById.get(activeSelection.noteId) ?? activePool[0] ?? notes[0]
-  const currentSelectionPosition = (activePoolIndexById.get(currentSelection.id) ?? 0) + 1
-  const currentSelectionPitch =
-    activeSelection.keyIndex > 0
-      ? currentSelection.chordPitches?.[activeSelection.keyIndex - 1] ?? currentSelection.pitch
-      : currentSelection.pitch
-  const currentSelectionPitchLabel = currentSelection.isRest ? '休止符' : toDisplayPitch(currentSelectionPitch)
-  const derivedNotationPaletteDisplay = useMemo<NotationPaletteDerivedDisplay>(() => {
-    if (!isSelectionVisible) {
-      return buildNotationPaletteDerivedDisplay({ isSelectionVisible: false, selections: [] })
-    }
-
-    const selectionExists = (selection: Selection): boolean =>
-      selection.staff === 'treble' ? trebleNoteById.has(selection.noteId) : bassNoteById.has(selection.noteId)
-
-    const effectiveSelections = (() => {
-      const filteredSelections = selectedSelections.filter(selectionExists)
-      return selectionExists(activeSelection) ? appendUniqueSelection(filteredSelections, activeSelection) : filteredSelections
-    })()
-
-    const resolvedSelections: NotationPaletteResolvedSelection[] = effectiveSelections
-      .map((selection) => {
-        const location = findSelectionLocationInPairs({
-          pairs: measurePairs,
-          selection,
-          importedNoteLookup: importedNoteLookupRef.current,
-        })
-        if (!location) return null
-        const pair = measurePairs[location.pairIndex]
-        const note =
-          location.staff === 'treble' ? pair?.treble[location.noteIndex] ?? null : pair?.bass[location.noteIndex] ?? null
-        if (!note || note.id !== selection.noteId) return null
-        return {
-          noteId: selection.noteId,
-          staff: selection.staff,
-          keyIndex: selection.keyIndex,
-          note,
-        }
-      })
-      .filter((selection): selection is NotationPaletteResolvedSelection => selection !== null)
-
-    return buildNotationPaletteDerivedDisplay({
-      isSelectionVisible: true,
-      selections: resolvedSelections,
-    })
-  }, [activeSelection, bassNoteById, isSelectionVisible, measurePairs, selectedSelections, trebleNoteById])
   const trebleSequenceText = useMemo(() => toSequencePreview(notes), [notes])
   const bassSequenceText = useMemo(() => toSequencePreview(bassNotes), [bassNotes])
   const isImportLoading = importFeedback.kind === 'loading'
   const importProgressPercent =
     typeof importFeedback.progress === 'number' ? Math.max(0, Math.min(100, importFeedback.progress)) : null
-  useEffect(() => {
-    activeSelectionRef.current = activeSelection
-  }, [activeSelection])
-  useEffect(() => {
-    selectedSelectionsRef.current = selectedSelections
-  }, [selectedSelections])
-  useEffect(() => {
-    fullMeasureRestCollapseScopeKeysRef.current = fullMeasureRestCollapseScopeKeys
-  }, [fullMeasureRestCollapseScopeKeys])
-
-  useEffect(() => {
-    if (isSelectionVisible) return
-    if (selectedMeasureScope === null) return
-    setSelectedMeasureScope(null)
-  }, [isSelectionVisible, selectedMeasureScope])
-
-  useEffect(() => {
-    if (selectedMeasureScope === null) return
-    if (selectedMeasureScope.pairIndex >= measurePairs.length) {
-      setSelectedMeasureScope(null)
-    }
-  }, [selectedMeasureScope, measurePairs.length])
-  useEffect(() => {
-    if (!activeTieSelection) return
-    const stillExists = activeTieSelection.endpoints.some((endpoint) => {
-      const pair = measurePairs[endpoint.pairIndex]
-      if (!pair) return false
-      const staffNotes = endpoint.staff === 'treble' ? pair.treble : pair.bass
-      const note = staffNotes[endpoint.noteIndex] ?? staffNotes.find((entry) => entry.id === endpoint.noteId)
-      if (!note || note.id !== endpoint.noteId) return false
-      if (endpoint.tieType === 'start') {
-        return endpoint.keyIndex <= 0
-          ? Boolean(note.tieStart)
-          : Boolean(note.chordTieStarts?.[endpoint.keyIndex - 1])
-      }
-      return endpoint.keyIndex <= 0
-        ? Boolean(note.tieStop)
-        : Boolean(note.chordTieStops?.[endpoint.keyIndex - 1])
-    })
-    if (stillExists) return
-    setActiveTieSelection(null)
-  }, [activeTieSelection, measurePairs])
-  useEffect(() => {
-    isSelectionVisibleRef.current = isSelectionVisible
-  }, [isSelectionVisible])
-  useEffect(() => {
-    draggingSelectionRef.current = draggingSelection
-  }, [draggingSelection])
-  useEffect(() => {
-    const exists = (selection: Selection): boolean =>
-      selection.staff === 'treble'
-        ? trebleNoteById.has(selection.noteId)
-        : bassNoteById.has(selection.noteId)
-
-    setSelectedSelections((current) => {
-      if (!isSelectionVisible) {
-        return current.length === 0 ? current : []
-      }
-      const filtered = current.filter((selection) => exists(selection))
-      const withActive = exists(activeSelection)
-        ? appendUniqueSelection(filtered, activeSelection)
-        : filtered
-      if (
-        withActive.length === current.length &&
-        withActive.every((entry, index) => isSameSelection(entry, current[index]))
-      ) {
-        return current
-      }
-      return withActive
-    })
-  }, [activeSelection, isSelectionVisible, trebleNoteById, bassNoteById])
-  useEffect(() => {
-    importFeedbackRef.current = importFeedback
-  }, [importFeedback])
-
+  const {
+    currentSelection,
+    currentSelectionPosition,
+    currentSelectionPitchLabel,
+    selectedPoolSize,
+    derivedNotationPaletteDisplay,
+  } = useScoreSelectionController({
+    notes,
+    bassNotes,
+    measurePairs,
+    activeSelection,
+    selectedSelections,
+    selectedMeasureScope,
+    activeTieSelection,
+    isSelectionVisible,
+    draggingSelection,
+    importFeedback,
+    fallbackSelectionNote: INITIAL_NOTES[0],
+    trebleNoteById,
+    bassNoteById,
+    trebleNoteIndexById,
+    bassNoteIndexById,
+    importedNoteLookupRef,
+    activeSelectionRef,
+    selectedSelectionsRef,
+    fullMeasureRestCollapseScopeKeys,
+    fullMeasureRestCollapseScopeKeysRef,
+    isSelectionVisibleRef,
+    draggingSelectionRef,
+    importFeedbackRef,
+    setIsSelectionVisible,
+    setActiveSelection,
+    setSelectedSelections,
+    setSelectedMeasureScope,
+    setActiveTieSelection,
+  })
+  useEditorPreferencePersistence({
+    playheadFollowEnabled,
+    showChordDegreeEnabled,
+    showInScoreMeasureNumbers,
+    setShowInScoreMeasureNumbers,
+    showNoteHeadJianpuEnabled,
+    setShowNoteHeadJianpuEnabled,
+  })
   const {
     midiPermissionState,
     midiInputOptions,
@@ -1501,14 +1389,6 @@ function App() {
     onMidiNoteNumber: applyMidiReplacementByNoteNumber,
   })
   const midiSupported = midiPermissionState !== 'unsupported'
-  useEditorPreferencePersistence({
-    playheadFollowEnabled,
-    showChordDegreeEnabled,
-    showInScoreMeasureNumbers,
-    setShowInScoreMeasureNumbers,
-    showNoteHeadJianpuEnabled,
-    setShowNoteHeadJianpuEnabled,
-  })
 
   const moveSelectionsByKeyboardSteps = useCallback((
     direction: 'up' | 'down',
@@ -2817,12 +2697,11 @@ function App() {
     selectedPitchLabel: currentSelectionPitchLabel,
     selectedDurationLabel: toDisplayDuration(currentSelection.duration),
     selectedPosition: currentSelectionPosition,
-    selectedPoolSize: activePool.length,
+    selectedPoolSize,
     trebleSequenceText,
     bassSequenceText,
     playheadDebugLogText,
   }), [
-    activePool.length,
     activeSelection.staff,
     bassSequenceText,
     chordMarkerStyleMetrics,
@@ -2852,6 +2731,7 @@ function App() {
     scoreSurfaceOffsetXPx,
     scoreSurfaceOffsetYPx,
     scoreWidth,
+    selectedPoolSize,
     selectedMeasureHighlightRectPx,
     trebleSequenceText,
   ])
