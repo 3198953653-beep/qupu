@@ -25,6 +25,8 @@ export type AccidentalEditResult = {
   nextSelection: Selection
   nextSelections: Selection[]
   changedPairIndices: number[]
+  previewSelection: Selection | null
+  previewPitch: Pitch | null
 }
 
 export type EditableAccidentalTarget = {
@@ -284,6 +286,7 @@ export function applyPaletteAccidentalEdit(params: {
 
   const targetAlter = toTargetAlterFromPaletteAccidental(accidentalId)
   const sourceTargets: SourcePitchTarget[] = []
+  let previewPitch: Pitch | null = null
   let hasEditableNote = false
 
   resolved.targets.forEach((target) => {
@@ -299,6 +302,13 @@ export function applyPaletteAccidentalEdit(params: {
       sourcePitch,
       targetPitch,
     })
+    if (
+      target.staff === activeSelection.staff &&
+      target.noteId === activeSelection.noteId &&
+      target.keyIndex === activeSelection.keyIndex
+    ) {
+      previewPitch = targetPitch
+    }
   })
 
   if (!hasEditableNote) {
@@ -328,6 +338,8 @@ export function applyPaletteAccidentalEdit(params: {
       nextSelection: { ...activeSelection },
       nextSelections: dedupeSelections([...selectedSelections, activeSelection]),
       changedPairIndices: applied.changedPairIndices,
+      previewSelection: { ...activeSelection },
+      previewPitch,
     },
     error: null,
   }
@@ -427,6 +439,8 @@ export function applyDeleteAccidentalSelection(params: {
       nextSelection: { ...selection },
       nextSelections: [{ ...selection }],
       changedPairIndices: applied.changedPairIndices,
+      previewSelection: { ...selection },
+      previewPitch: targetPitch,
     },
     error: null,
   }

@@ -26,6 +26,13 @@ type DumpNoteHead = {
   y: number
 }
 
+type DumpAccidentalCoord = {
+  keyIndex: number
+  rightX: number
+  leftX: number
+  visualRightX: number | null
+}
+
 type DumpNoteRow = {
   staff: 'treble' | 'bass'
   noteId: string
@@ -33,6 +40,7 @@ type DumpNoteRow = {
   pitch: string | null
   x: number
   noteHeads: DumpNoteHead[]
+  accidentalCoords: DumpAccidentalCoord[]
 }
 
 type MeasureDumpRow = {
@@ -46,27 +54,121 @@ type MeasureDump = {
   rows: MeasureDumpRow[]
 }
 
+type DebugSelection = {
+  noteId: string
+  staff: 'treble' | 'bass'
+  keyIndex: number
+}
+
+type DebugSelectedSelection = DebugSelection & {
+  pairIndex: number | null
+  noteIndex: number | null
+  pitch: string | null
+  duration: string | null
+  isRest: boolean
+}
+
 const DEV_HOST = '127.0.0.1'
 const DEV_PORT = 4173
 const DEV_URL = `http://${DEV_HOST}:${DEV_PORT}`
 const DEFAULT_DRAG_DELTA_CLIENT_Y = -42
 
+const ACCIDENTAL_PREVIEW_FIXTURE_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC
+  "-//Recordare//DTD MusicXML 3.1 Partwise//EN"
+  "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <part-list>
+    <score-part id="P1">
+      <part-name>Piano</part-name>
+    </score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <staves>2</staves>
+        <clef number="1"><sign>G</sign><line>2</line></clef>
+        <clef number="2"><sign>F</sign><line>4</line></clef>
+      </attributes>
+      <note>
+        <pitch><step>C</step><octave>5</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>D</step><octave>5</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>E</step><octave>5</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>F</step><octave>5</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>C</step><octave>3</octave></pitch>
+        <duration>16</duration>
+        <type>whole</type>
+        <staff>2</staff>
+      </note>
+    </measure>
+    <measure number="2">
+      <note>
+        <pitch><step>B</step><octave>4</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <chord/>
+        <pitch><step>C</step><octave>5</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>E</step><octave>5</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>F</step><octave>5</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>G</step><octave>5</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>C</step><octave>3</octave></pitch>
+        <duration>16</duration>
+        <type>whole</type>
+        <staff>2</staff>
+      </note>
+    </measure>
+  </part>
+</score-partwise>
+`
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-async function waitForServer(url: string, timeoutMs: number): Promise<void> {
-  const startedAt = Date.now()
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      const response = await fetch(url, { method: 'GET' })
-      if (response.ok) return
-    } catch {
-      // retry
-    }
-    await sleep(350)
-  }
-  throw new Error(`Timed out waiting for dev server: ${url}`)
 }
 
 function startDevServer(): ChildProcess {
@@ -78,7 +180,7 @@ function startDevServer(): ChildProcess {
   })
 }
 
-function stopDevServer(server: ChildProcess): Promise<void> {
+async function stopDevServer(server: ChildProcess): Promise<void> {
   return new Promise((resolve) => {
     if (server.exitCode !== null || server.killed) {
       resolve()
@@ -96,6 +198,20 @@ function stopDevServer(server: ChildProcess): Promise<void> {
   })
 }
 
+async function waitForServer(url: string, timeoutMs: number): Promise<void> {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const response = await fetch(url, { method: 'GET' })
+      if (response.ok) return
+    } catch {
+      // retry
+    }
+    await sleep(350)
+  }
+  throw new Error(`Timed out waiting for dev server: ${url}`)
+}
+
 async function waitForDebugApi(page: Page): Promise<void> {
   await page.waitForFunction(() => {
     const api = (window as unknown as { __scoreDebug?: Record<string, unknown> }).__scoreDebug
@@ -107,7 +223,9 @@ async function waitForDebugApi(page: Page): Promise<void> {
       typeof api.setAutoScaleEnabled === 'function' &&
       typeof api.setManualScalePercent === 'function' &&
       typeof api.getNotePreviewEvents === 'function' &&
-      typeof api.clearNotePreviewEvents === 'function'
+      typeof api.clearNotePreviewEvents === 'function' &&
+      typeof api.getSelectedSelections === 'function' &&
+      typeof api.getActiveSelection === 'function'
     )
   })
 }
@@ -151,6 +269,8 @@ async function importMusicXmlViaDebugApi(page: Page, xmlText: string): Promise<v
   if (feedback.kind !== 'success') {
     throw new Error(`MusicXML import failed: ${feedback.message}`)
   }
+
+  await page.waitForTimeout(160)
 }
 
 async function dumpAllMeasureCoordinates(page: Page): Promise<MeasureDump> {
@@ -196,6 +316,40 @@ function pickPlayableTarget(params: {
   return { note, head }
 }
 
+function findRenderedNote(params: {
+  rows: MeasureDumpRow[]
+  pairIndex: number
+  staff: 'treble' | 'bass'
+  noteIndex: number
+}): DumpNoteRow {
+  const { rows, pairIndex, staff, noteIndex } = params
+  const row = rows.find((entry) => entry.pairIndex === pairIndex)
+  if (!row?.rendered) {
+    throw new Error(`Measure pair ${pairIndex} is not rendered.`)
+  }
+  const note = row.notes.find((entry) => entry.staff === staff && entry.noteIndex === noteIndex)
+  if (!note) {
+    throw new Error(`Unable to find note pair=${pairIndex} staff=${staff} noteIndex=${noteIndex}.`)
+  }
+  return note
+}
+
+function findRenderedNoteById(rows: MeasureDumpRow[], noteId: string): DumpNoteRow {
+  for (const row of rows) {
+    const note = row.notes.find((entry) => entry.noteId === noteId)
+    if (note) return note
+  }
+  throw new Error(`Unable to find noteId=${noteId} in rendered dump.`)
+}
+
+function findNoteHead(note: DumpNoteRow, keyIndex: number): DumpNoteHead {
+  const head = note.noteHeads.find((entry) => entry.keyIndex === keyIndex)
+  if (!head) {
+    throw new Error(`Unable to find keyIndex=${keyIndex} for note ${note.noteId}.`)
+  }
+  return head
+}
+
 async function toClientPoint(page: Page, logicalX: number, logicalY: number): Promise<{ x: number; y: number }> {
   return page.evaluate(({ x, y }) => {
     const canvas = document.querySelector('canvas.score-surface') as HTMLCanvasElement | null
@@ -226,6 +380,36 @@ async function getNotePreviewEvents(page: Page): Promise<NotePreviewEvent[]> {
       (window as unknown as { __scoreDebug: { getNotePreviewEvents: () => NotePreviewEvent[] } }).__scoreDebug
     return api.getNotePreviewEvents()
   })
+}
+
+async function getSelectedSelections(page: Page): Promise<DebugSelectedSelection[]> {
+  return page.evaluate(() => {
+    const api =
+      (window as unknown as { __scoreDebug: { getSelectedSelections: () => DebugSelectedSelection[] } }).__scoreDebug
+    return api.getSelectedSelections()
+  })
+}
+
+async function getActiveSelection(page: Page): Promise<DebugSelection> {
+  return page.evaluate(() => {
+    const api =
+      (window as unknown as { __scoreDebug: { getActiveSelection: () => DebugSelection } }).__scoreDebug
+    return api.getActiveSelection()
+  })
+}
+
+async function waitForNotePreviewCountAtLeast(page: Page, expectedCount: number): Promise<NotePreviewEvent[]> {
+  await page.waitForFunction(
+    (count) => {
+      const api =
+        (window as unknown as { __scoreDebug?: { getNotePreviewEvents: () => NotePreviewEvent[] } }).__scoreDebug
+      if (!api || typeof api.getNotePreviewEvents !== 'function') return false
+      return api.getNotePreviewEvents().length >= count
+    },
+    expectedCount,
+    { timeout: 2_000 },
+  )
+  return getNotePreviewEvents(page)
 }
 
 function findNotePitch(rows: MeasureDumpRow[], noteId: string): string | null {
@@ -272,6 +456,189 @@ async function runDragPreview(params: {
   return {
     events,
     pitchAfter: findNotePitch(rowsAfter, note.noteId),
+  }
+}
+
+async function ensureNotationPaletteOpen(page: Page): Promise<void> {
+  const dialog = page.getByRole('dialog', { name: '记谱工具面板' })
+  const alreadyOpen = (await dialog.count()) > 0 && await dialog.first().isVisible()
+  if (alreadyOpen) return
+  await page.getByRole('button', { name: '记谱工具' }).click()
+  await page.waitForSelector('[aria-label="记谱工具面板"]', { state: 'visible', timeout: 2_000 })
+}
+
+async function clickNotationPaletteButton(page: Page, label: string): Promise<void> {
+  await ensureNotationPaletteOpen(page)
+  await page.getByRole('button', { name: label, exact: true }).click()
+}
+
+async function clickNoteHead(params: {
+  page: Page
+  note: DumpNoteRow
+  keyIndex?: number
+  append?: boolean
+}): Promise<void> {
+  const { page, note, keyIndex = 0, append = false } = params
+  const head = findNoteHead(note, keyIndex)
+  const clientPoint = await toClientPoint(page, head.x, head.y)
+  if (append) {
+    await page.keyboard.down('Control')
+  }
+  await page.mouse.move(clientPoint.x, clientPoint.y)
+  await page.mouse.down()
+  await page.mouse.up()
+  if (append) {
+    await page.keyboard.up('Control')
+  }
+  await page.waitForTimeout(140)
+}
+
+async function clickAccidentalGlyph(params: {
+  page: Page
+  note: DumpNoteRow
+  keyIndex?: number
+}): Promise<void> {
+  const { page, note, keyIndex = 0 } = params
+  const accidental = note.accidentalCoords.find((entry) => entry.keyIndex === keyIndex)
+  if (!accidental) {
+    throw new Error(`Unable to find accidental glyph for note ${note.noteId} keyIndex=${keyIndex}.`)
+  }
+  const head = findNoteHead(note, keyIndex)
+  const rightEdge = typeof accidental.visualRightX === 'number' && Number.isFinite(accidental.visualRightX)
+    ? accidental.visualRightX
+    : accidental.rightX
+  const logicalX = Number.isFinite(accidental.leftX) && Number.isFinite(rightEdge)
+    ? (accidental.leftX + rightEdge) / 2
+    : accidental.leftX
+  const clientPoint = await toClientPoint(page, logicalX, head.y)
+  await page.mouse.move(clientPoint.x, clientPoint.y)
+  await page.mouse.down()
+  await page.mouse.up()
+  await page.waitForTimeout(140)
+}
+
+function expectSingleClickPreviewPitch(events: NotePreviewEvent[], expectedPitch: string, context: string): void {
+  const clickEvents = events.filter((event) => event.mode === 'click')
+  if (clickEvents.length !== 1) {
+    throw new Error(`${context}: expected exactly 1 click preview event, got ${clickEvents.length}.`)
+  }
+  if (clickEvents[0]?.pitch !== expectedPitch) {
+    throw new Error(`${context}: expected pitch=${expectedPitch}, got ${clickEvents[0]?.pitch ?? 'null'}.`)
+  }
+}
+
+async function runAccidentalPreviewScenarios(page: Page) {
+  await importMusicXmlViaDebugApi(page, ACCIDENTAL_PREVIEW_FIXTURE_XML)
+  await setScoreScale(page)
+  await ensureNotationPaletteOpen(page)
+
+  const baseRows = await collectMergedDump(page)
+  const singleNote = findRenderedNote({ rows: baseRows, pairIndex: 0, staff: 'treble', noteIndex: 0 })
+  await clickNoteHead({ page, note: singleNote, keyIndex: 0 })
+
+  await clearNotePreviewEvents(page)
+  await clickNotationPaletteButton(page, '升记号')
+  const sharpEvents = await waitForNotePreviewCountAtLeast(page, 1)
+  expectSingleClickPreviewPitch(sharpEvents, 'c#/5', 'single-note sharp preview')
+
+  await clearNotePreviewEvents(page)
+  await clickNotationPaletteButton(page, '还原记号')
+  const naturalEvents = await waitForNotePreviewCountAtLeast(page, 1)
+  expectSingleClickPreviewPitch(naturalEvents, 'c/5', 'single-note natural preview')
+
+  await clearNotePreviewEvents(page)
+  await clickNotationPaletteButton(page, '升记号')
+  const reSharpEvents = await waitForNotePreviewCountAtLeast(page, 1)
+  expectSingleClickPreviewPitch(reSharpEvents, 'c#/5', 'single-note re-sharp preview')
+
+  await clearNotePreviewEvents(page)
+  await clickNotationPaletteButton(page, '升记号')
+  await page.waitForTimeout(180)
+  const noOpEvents = await getNotePreviewEvents(page)
+  if (noOpEvents.length !== 0) {
+    throw new Error(`no-op accidental edit should not preview, got ${noOpEvents.length} event(s).`)
+  }
+
+  const sharpRows = await collectMergedDump(page)
+  const sharpNote = findRenderedNoteById(sharpRows, singleNote.noteId)
+  await clearNotePreviewEvents(page)
+  await clickAccidentalGlyph({ page, note: sharpNote, keyIndex: 0 })
+  await clearNotePreviewEvents(page)
+  await page.keyboard.press('Delete')
+  const deleteEvents = await waitForNotePreviewCountAtLeast(page, 1)
+  expectSingleClickPreviewPitch(deleteEvents, 'c/5', 'accidental delete preview')
+
+  const afterDeleteRows = await collectMergedDump(page)
+  const deletedPitch = findRenderedNoteById(afterDeleteRows, singleNote.noteId).pitch
+  if (deletedPitch !== 'c/5') {
+    throw new Error(`accidental delete should commit c/5, got ${deletedPitch ?? 'null'}.`)
+  }
+
+  await importMusicXmlViaDebugApi(page, ACCIDENTAL_PREVIEW_FIXTURE_XML)
+  await setScoreScale(page)
+  await ensureNotationPaletteOpen(page)
+
+  const chordRows = await collectMergedDump(page)
+  const chordNote = findRenderedNote({ rows: chordRows, pairIndex: 1, staff: 'treble', noteIndex: 0 })
+  await clickNoteHead({ page, note: chordNote, keyIndex: 1 })
+  const chordActiveSelection = await getActiveSelection(page)
+  if (
+    chordActiveSelection.noteId !== chordNote.noteId ||
+    chordActiveSelection.staff !== 'treble' ||
+    chordActiveSelection.keyIndex !== 1
+  ) {
+    throw new Error(`Chord-member selection did not activate keyIndex 1: ${JSON.stringify(chordActiveSelection)}`)
+  }
+
+  await clearNotePreviewEvents(page)
+  await clickNotationPaletteButton(page, '升记号')
+  const chordEvents = await waitForNotePreviewCountAtLeast(page, 1)
+  expectSingleClickPreviewPitch(chordEvents, 'c#/5', 'chord-member accidental preview')
+
+  await importMusicXmlViaDebugApi(page, ACCIDENTAL_PREVIEW_FIXTURE_XML)
+  await setScoreScale(page)
+  await ensureNotationPaletteOpen(page)
+
+  const multiRows = await collectMergedDump(page)
+  const firstNote = findRenderedNote({ rows: multiRows, pairIndex: 0, staff: 'treble', noteIndex: 0 })
+  const secondNote = findRenderedNote({ rows: multiRows, pairIndex: 0, staff: 'treble', noteIndex: 1 })
+  await clickNoteHead({ page, note: firstNote, keyIndex: 0 })
+  await clickNoteHead({ page, note: secondNote, keyIndex: 0, append: true })
+
+  const selectedSelections = await getSelectedSelections(page)
+  const selectedKeys = new Set(selectedSelections.map((entry) => `${entry.staff}:${entry.noteId}:${entry.keyIndex}`))
+  if (
+    !selectedKeys.has(`treble:${firstNote.noteId}:0`) ||
+    !selectedKeys.has(`treble:${secondNote.noteId}:0`)
+  ) {
+    throw new Error(`Multi-selection did not include both notes: ${JSON.stringify(selectedSelections)}`)
+  }
+
+  const multiActiveSelection = await getActiveSelection(page)
+  if (
+    multiActiveSelection.noteId !== secondNote.noteId ||
+    multiActiveSelection.staff !== 'treble' ||
+    multiActiveSelection.keyIndex !== 0
+  ) {
+    throw new Error(`Multi-selection active note mismatch: ${JSON.stringify(multiActiveSelection)}`)
+  }
+
+  await clearNotePreviewEvents(page)
+  await clickNotationPaletteButton(page, '降记号')
+  const multiEvents = await waitForNotePreviewCountAtLeast(page, 1)
+  expectSingleClickPreviewPitch(multiEvents, 'db/5', 'multi-selection accidental preview')
+
+  return {
+    sharpEvents,
+    naturalEvents,
+    reSharpEvents,
+    noOpEvents,
+    deleteEvents,
+    chordEvents,
+    multiEvents,
+    chordActiveSelection,
+    multiActiveSelection,
+    selectedSelections,
   }
 }
 
@@ -343,6 +710,8 @@ async function main() {
       )
     }
 
+    const accidentalPreview = await runAccidentalPreviewScenarios(page)
+
     const report = {
       generatedAt: new Date().toISOString(),
       demo: {
@@ -358,6 +727,7 @@ async function main() {
         fastDragEvents: fastDrag.events,
         fastDragPitchAfter: fastDrag.pitchAfter,
       },
+      accidentalPreview,
     }
 
     await mkdir(path.dirname(outputPath), { recursive: true })
@@ -367,6 +737,7 @@ async function main() {
     console.log(`Demo click events: ${demoClickEvents.length}`)
     console.log(`Imported smooth drag events: ${smoothDrag.events.length}`)
     console.log(`Imported fast drag events: ${fastDrag.events.length}`)
+    console.log(`Accidental preview scenarios validated: 6`)
 
     await browser.close()
   } finally {

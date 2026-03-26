@@ -2599,6 +2599,42 @@ function App() {
     })
   }, [])
 
+  const playAccidentalEditPreview = useCallback((params: {
+    pairs: MeasurePair[]
+    previewSelection: Selection | null
+    previewPitch: Pitch | null
+    importedNoteLookup?: Map<string, ImportedNoteLocation> | null
+  }) => {
+    const {
+      pairs,
+      previewSelection,
+      previewPitch,
+      importedNoteLookup = null,
+    } = params
+    if (!previewSelection || !previewPitch) return
+
+    const selectionLocation = findSelectionLocationInPairs({
+      pairs,
+      selection: previewSelection,
+      importedNoteLookup,
+    })
+    if (!selectionLocation) return
+
+    const sourcePair = pairs[selectionLocation.pairIndex]
+    if (!sourcePair) return
+
+    const staffNotes = selectionLocation.staff === 'treble' ? sourcePair.treble : sourcePair.bass
+    const sourceNote = staffNotes[selectionLocation.noteIndex]
+    if (!sourceNote || sourceNote.id !== previewSelection.noteId || sourceNote.isRest) return
+
+    handlePreviewScoreNote({
+      note: sourceNote,
+      keyIndex: previewSelection.keyIndex,
+      mode: 'click',
+      targetPitch: previewPitch,
+    })
+  }, [handlePreviewScoreNote])
+
   const requestPlaybackCursorReset = useCallback(() => {
     setPlaybackCursorResetVersion((current) => current + 1)
   }, [])
@@ -4208,6 +4244,7 @@ function App() {
     (nextSelection: NotationPaletteSelection, actionLabel: string, item: NotationPaletteItem) => {
       setNotationPaletteSelection(nextSelection)
       const sourcePairs = measurePairsRef.current
+      const sourceImportedNoteLookup = importedNoteLookupRef.current
       const importedMode = measurePairsFromImportRef.current !== null
 
       if (item.behavior === 'ui-only') {
@@ -4246,6 +4283,12 @@ function App() {
         }
         if (attempt.result) {
           applyKeyboardEditResult(attempt.result.nextPairs, attempt.result.nextSelection, attempt.result.nextSelections)
+          playAccidentalEditPreview({
+            pairs: sourcePairs,
+            previewSelection: attempt.result.previewSelection,
+            previewPitch: attempt.result.previewPitch,
+            importedNoteLookup: sourceImportedNoteLookup,
+          })
         }
         setNotationPaletteLastAction(actionLabel)
         console.info('[notation-palette]', actionLabel, nextSelection)
@@ -4298,6 +4341,7 @@ function App() {
       applyKeyboardEditResult,
       currentSelection,
       isSelectionVisible,
+      playAccidentalEditPreview,
       selectedSelections,
     ],
   )
@@ -4645,10 +4689,11 @@ function App() {
       }
 
       if (event.key === 'Delete' && activeAccidentalSelection) {
+        const sourceImportedNoteLookup = importedNoteLookupRef.current
         const deleteAttempt = applyDeleteAccidentalSelection({
           pairs: measurePairs,
           selection: activeAccidentalSelection,
-          importedNoteLookup: importedNoteLookupRef.current,
+          importedNoteLookup: sourceImportedNoteLookup,
           keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
         })
         if (deleteAttempt.error || !deleteAttempt.result) {
@@ -4663,6 +4708,12 @@ function App() {
           deleteAttempt.result.nextSelection,
           deleteAttempt.result.nextSelections,
         )
+        playAccidentalEditPreview({
+          pairs: measurePairs,
+          previewSelection: deleteAttempt.result.previewSelection,
+          previewPitch: deleteAttempt.result.previewPitch,
+          importedNoteLookup: sourceImportedNoteLookup,
+        })
         setActiveAccidentalSelection(null)
         setIsSelectionVisible(false)
         setSelectedSelections([])
@@ -4782,6 +4833,7 @@ function App() {
     applyKeyboardEditResult,
     moveSelectionsByKeyboardSteps,
     moveSelectionByKeyboardArrow,
+    playAccidentalEditPreview,
     undoLastScoreEdit,
   ])
 
