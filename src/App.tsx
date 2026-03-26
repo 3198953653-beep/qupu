@@ -43,6 +43,7 @@ import { useMidiInputController } from './score/hooks/useMidiInputController'
 import { usePlaybackController } from './score/hooks/usePlaybackController'
 import { useScoreAudioPreviewController } from './score/hooks/useScoreAudioPreviewController'
 import { useChordMarkerController } from './score/hooks/useChordMarkerController'
+import { useScoreMutationController } from './score/hooks/useScoreMutationController'
 import { useOsmdPreviewController } from './score/hooks/useOsmdPreviewController'
 import { useScoreDebugApi } from './score/hooks/useScoreDebugApi'
 import { ScoreControls } from './score/components/ScoreControls'
@@ -53,7 +54,6 @@ import {
 } from './score/pitchUtils'
 import {
   buildBassMockNotes,
-  buildImportedNoteLookup,
   buildMeasurePairs,
   flattenBassFromPairs,
   flattenTrebleFromPairs,
@@ -65,17 +65,15 @@ import {
   applyPaletteAccidentalEdit,
 } from './score/accidentalEdits'
 import { applyDeleteTieSelection } from './score/tieEdits'
-import { applyMidiStepInput, type MidiStepInputMode } from './score/midiStepEdits'
 import { applyDeleteMeasureSelection } from './score/measureEdits'
 import { isStaffFullMeasureRest, resolvePairTimeSignature } from './score/measureRestUtils'
 import { appendIntervalKey, deleteSelectedKey, findSelectionLocationInPairs } from './score/keyboardEdits'
 import { applyClipboardPaste, buildClipboardFromSelections } from './score/copyPasteEdits'
-import { toPitchFromMidiWithKeyPreference } from './score/midiInput'
 import { getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './score/pitchMath'
-import { compareTimelinePoint, resolveSelectionTimelinePoint } from './score/selectionTimelineRange'
 import { resolveForwardTieTargets, resolvePreviousTieTarget } from './score/tieChain'
 import { buildSelectionGroupMoveTargets } from './score/selectionGroupTargets'
 import { buildChordRulerEntries, type ChordRulerEntry } from './score/chordRuler'
+import { mergeFullMeasureRestCollapseScopeKeys, toMeasureStaffScopeKey } from './score/fullMeasureRestCollapse'
 import {
   buildFirstMeasureDiffReport,
   buildMeasureCoordinateDebugReport,
@@ -140,7 +138,6 @@ const HORIZONTAL_VIEW_HEIGHT_PX = SCORE_TOP_PADDING * 2 + SYSTEM_HEIGHT + 26
 const MAX_CANVAS_RENDER_DIM_PX = 32760
 const HORIZONTAL_RENDER_BUFFER_PX = 400
 const HORIZONTAL_RENDER_EDGE_BUFFER_MEASURES = 1
-const UNDO_HISTORY_LIMIT = 120
 const LOCAL_STORAGE_EDITOR_MEASURE_NUMBER_KEY = 'score.editor.showInScoreMeasureNumbers'
 const LOCAL_STORAGE_NOTEHEAD_JIANPU_DISPLAY_KEY = 'score.editor.showNoteHeadJianpu'
 const LOCAL_STORAGE_PLAYHEAD_FOLLOW_KEY = 'score.playhead.followEnabled'
@@ -162,30 +159,6 @@ function toSequencePreview(notes: ScoreNote[]): string {
     .map((note) => (note.isRest ? `Rest(${toDisplayDuration(note.duration)})` : toDisplayPitch(note.pitch)))
     .join('  |  ')
   return `${preview}  |  ...（还剩 ${notes.length - INSPECTOR_SEQUENCE_PREVIEW_LIMIT} 个）`
-}
-
-function cloneScoreNote(note: ScoreNote): ScoreNote {
-  return {
-    ...note,
-    chordPitches: note.chordPitches ? [...note.chordPitches] : undefined,
-    chordAccidentals: note.chordAccidentals ? [...note.chordAccidentals] : undefined,
-    chordTieStarts: note.chordTieStarts ? [...note.chordTieStarts] : undefined,
-    chordTieStops: note.chordTieStops ? [...note.chordTieStops] : undefined,
-    chordTieFrozenIncomingPitches: note.chordTieFrozenIncomingPitches ? [...note.chordTieFrozenIncomingPitches] : undefined,
-    chordTieFrozenIncomingFromNoteIds: note.chordTieFrozenIncomingFromNoteIds
-      ? [...note.chordTieFrozenIncomingFromNoteIds]
-      : undefined,
-    chordTieFrozenIncomingFromKeyIndices: note.chordTieFrozenIncomingFromKeyIndices
-      ? [...note.chordTieFrozenIncomingFromKeyIndices]
-      : undefined,
-  }
-}
-
-function cloneMeasurePairs(pairs: MeasurePair[]): MeasurePair[] {
-  return pairs.map((pair) => ({
-    treble: pair.treble.map(cloneScoreNote),
-    bass: pair.bass.map(cloneScoreNote),
-  }))
 }
 
 function getAutoScoreScale(measureCount: number): number {
@@ -371,107 +344,6 @@ function appendUniqueSelection(current: Selection[], next: Selection): Selection
   if (current.some((entry) => isSameSelection(entry, next))) return current
   return [...current, next]
 }
-
-type MeasureStaffScope = {
-  pairIndex: number
-  staff: Selection['staff']
-}
-
-function toMeasureStaffScopeKey(scope: MeasureStaffScope): string {
-  return `${Math.trunc(scope.pairIndex)}:${scope.staff}`
-}
-
-function parseMeasureStaffScopeKey(key: string): MeasureStaffScope | null {
-  if (!key) return null
-  const [rawPairIndex, rawStaff] = key.split(':')
-  if (rawStaff !== 'treble' && rawStaff !== 'bass') return null
-  const pairIndex = Number(rawPairIndex)
-  if (!Number.isFinite(pairIndex)) return null
-  return {
-    pairIndex: Math.trunc(pairIndex),
-    staff: rawStaff,
-  }
-}
-
-function sortMeasureStaffScopeKeys(keys: Iterable<string>): string[] {
-  const scopes: MeasureStaffScope[] = []
-  const deduped = new Set<string>()
-  for (const key of keys) {
-    const parsed = parseMeasureStaffScopeKey(key)
-    if (!parsed || parsed.pairIndex < 0) continue
-    const normalized = toMeasureStaffScopeKey(parsed)
-    if (deduped.has(normalized)) continue
-    deduped.add(normalized)
-    scopes.push(parsed)
-  }
-  scopes.sort((left, right) => {
-    if (left.pairIndex !== right.pairIndex) return left.pairIndex - right.pairIndex
-    if (left.staff === right.staff) return 0
-    return left.staff === 'treble' ? -1 : 1
-  })
-  return scopes.map((scope) => toMeasureStaffScopeKey(scope))
-}
-
-function collectChangedMeasureStaffScopeKeys(sourcePairs: MeasurePair[], nextPairs: MeasurePair[]): Set<string> {
-  const changed = new Set<string>()
-  const pairCount = Math.max(sourcePairs.length, nextPairs.length)
-  for (let pairIndex = 0; pairIndex < pairCount; pairIndex += 1) {
-    const sourcePair = sourcePairs[pairIndex]
-    const nextPair = nextPairs[pairIndex]
-    if (!sourcePair || !nextPair) {
-      changed.add(toMeasureStaffScopeKey({ pairIndex, staff: 'treble' }))
-      changed.add(toMeasureStaffScopeKey({ pairIndex, staff: 'bass' }))
-      continue
-    }
-    if (sourcePair.treble !== nextPair.treble) {
-      changed.add(toMeasureStaffScopeKey({ pairIndex, staff: 'treble' }))
-    }
-    if (sourcePair.bass !== nextPair.bass) {
-      changed.add(toMeasureStaffScopeKey({ pairIndex, staff: 'bass' }))
-    }
-  }
-  return changed
-}
-
-function mergeFullMeasureRestCollapseScopeKeys(params: {
-  currentScopeKeys: string[]
-  sourcePairs: MeasurePair[]
-  nextPairs: MeasurePair[]
-  collapseScopesToAdd?: MeasureStaffScope[]
-}): string[] {
-  const {
-    currentScopeKeys,
-    sourcePairs,
-    nextPairs,
-    collapseScopesToAdd = [],
-  } = params
-  const nextScopeKeys = new Set<string>()
-  const changedScopeKeys = collectChangedMeasureStaffScopeKeys(sourcePairs, nextPairs)
-  const maxPairIndex = nextPairs.length - 1
-
-  currentScopeKeys.forEach((scopeKey) => {
-    const parsed = parseMeasureStaffScopeKey(scopeKey)
-    if (!parsed) return
-    if (parsed.pairIndex < 0 || parsed.pairIndex > maxPairIndex) return
-    const normalized = toMeasureStaffScopeKey(parsed)
-    if (changedScopeKeys.has(normalized)) return
-    nextScopeKeys.add(normalized)
-  })
-
-  collapseScopesToAdd.forEach((scope) => {
-    const normalized: MeasureStaffScope = {
-      pairIndex: Math.trunc(scope.pairIndex),
-      staff: scope.staff,
-    }
-    if (!Number.isFinite(normalized.pairIndex)) return
-    if (normalized.pairIndex < 0 || normalized.pairIndex > maxPairIndex) return
-    if (normalized.staff !== 'treble' && normalized.staff !== 'bass') return
-    nextScopeKeys.add(toMeasureStaffScopeKey(normalized))
-  })
-
-  return sortMeasureStaffScopeKeys(nextScopeKeys)
-}
-
 function buildSelectionsForMeasureStaff(
   pair: MeasurePair,
   staff: Selection['staff'],
@@ -497,14 +369,6 @@ function buildSelectionsForMeasureStaff(
     }
   })
   return selections
-}
-
-type UndoSnapshot = {
-  pairs: MeasurePair[]
-  imported: boolean
-  selection: Selection
-  isSelectionVisible: boolean
-  fullMeasureRestCollapseScopeKeys: string[]
 }
 
 function App() {
@@ -619,7 +483,7 @@ function App() {
   const fullMeasureRestCollapseScopeKeysRef = useRef<string[]>(fullMeasureRestCollapseScopeKeys)
   const isSelectionVisibleRef = useRef<boolean>(isSelectionVisible)
   const draggingSelectionRef = useRef<Selection | null>(draggingSelection)
-  const undoHistoryRef = useRef<UndoSnapshot[]>([])
+  const clearDragOverlayRef = useRef<() => void>(() => {})
   const layoutReflowHintRef = useRef<LayoutReflowHint | null>(null)
   const midiStepChainRef = useRef(false)
   const midiStepLastSelectionRef = useRef<Selection | null>(null)
@@ -952,15 +816,15 @@ function App() {
   const clearDraggingSelection = useCallback(() => {
     setDraggingSelection(null)
   }, [])
+  const clearDragPreviewState = useCallback(() => {
+    setDragPreviewState(null)
+  }, [])
+  const clearImportedChordRulerEntries = useCallback(() => {
+    setImportedChordRulerEntriesByPairFromImport(null)
+  }, [])
   const resetMidiStepChain = useCallback(() => {
     midiStepChainRef.current = false
     midiStepLastSelectionRef.current = null
-  }, [])
-  const canContinueMidiStep = useCallback((targetSelection: Selection): boolean => {
-    if (!midiStepChainRef.current) return false
-    const lastSelection = midiStepLastSelectionRef.current
-    if (!lastSelection) return false
-    return isSameSelection(lastSelection, targetSelection)
   }, [])
   const {
     chordMarkerLayoutRevision,
@@ -1006,6 +870,52 @@ function App() {
     clearSelectedMeasureScope,
     clearDraggingSelection,
     resetMidiStepChain,
+  })
+  const {
+    pushUndoSnapshot,
+    undoLastScoreEdit,
+    applyKeyboardEditResult,
+    applyMidiReplacementByNoteNumber,
+  } = useScoreMutationController({
+    measurePairsRef,
+    measurePairsFromImportRef,
+    measureKeyFifthsFromImport,
+    measureKeyFifthsFromImportRef,
+    measureDivisionsFromImport,
+    measureDivisionsFromImportRef,
+    measureTimeSignaturesFromImport,
+    measureTimeSignaturesFromImportRef,
+    musicXmlMetadataFromImport,
+    importedNoteLookupRef,
+    selectedSelectionsRef,
+    activeSelectionRef,
+    isSelectionVisibleRef,
+    fullMeasureRestCollapseScopeKeysRef,
+    midiStepChainRef,
+    midiStepLastSelectionRef,
+    dragRef,
+    draggingSelectionRef,
+    isOsmdPreviewOpenRef,
+    clearDragOverlayRef,
+    clearDragPreviewState,
+    clearDraggingSelection,
+    resetMidiStepChain,
+    clearActiveAccidentalSelection,
+    clearActiveTieSelection,
+    clearSelectedMeasureScope,
+    clearActiveChordSelection,
+    setMeasurePairsFromImport,
+    clearImportedChordRulerEntries,
+    setNotes,
+    setBassNotes,
+    setIsSelectionVisible,
+    setFullMeasureRestCollapseScopeKeys,
+    setActiveSelection,
+    setSelectedSelections,
+    setIsRhythmLinked,
+    setMeasureKeyFifthsFromImport,
+    setMeasureDivisionsFromImport,
+    setMeasureTimeSignaturesFromImport,
   })
   const {
     playbackCursorPoint,
@@ -1173,22 +1083,6 @@ function App() {
     timeAxisSpacingConfig.durationGapRatios.half,
     timeAxisSpacingConfig.durationGapRatios.whole,
   ])
-
-  const pushUndoSnapshot = useCallback((sourcePairs: MeasurePair[]) => {
-    if (!sourcePairs || sourcePairs.length === 0) return
-    const stack = undoHistoryRef.current
-    stack.push({
-      pairs: cloneMeasurePairs(sourcePairs),
-      imported: measurePairsFromImportRef.current !== null,
-      selection: { ...activeSelectionRef.current },
-      isSelectionVisible: isSelectionVisibleRef.current,
-      fullMeasureRestCollapseScopeKeys: [...fullMeasureRestCollapseScopeKeysRef.current],
-    })
-    if (stack.length > UNDO_HISTORY_LIMIT) {
-      stack.splice(0, stack.length - UNDO_HISTORY_LIMIT)
-    }
-  }, [])
-
   const {
     clearDragOverlay,
     onSurfacePointerMove,
@@ -1349,6 +1243,7 @@ function App() {
     spacingLayoutMode,
     showNoteHeadJianpu: showNoteHeadJianpuEnabled,
   })
+  clearDragOverlayRef.current = clearDragOverlay
 
   const {
     playScore,
@@ -1670,278 +1565,6 @@ function App() {
   useEffect(() => {
     importFeedbackRef.current = importFeedback
   }, [importFeedback])
-
-  useEffect(() => {
-    // Import/reset can replace key signature/time signature context; clear undo chain
-    // to avoid replaying snapshots under mismatched score metadata.
-    undoHistoryRef.current = []
-  }, [
-    measureKeyFifthsFromImport,
-    measureDivisionsFromImport,
-    measureTimeSignaturesFromImport,
-    musicXmlMetadataFromImport,
-  ])
-
-  const undoLastScoreEdit = useCallback((): boolean => {
-    const stack = undoHistoryRef.current
-    if (stack.length === 0) return false
-    const snapshot = stack.pop()
-    if (!snapshot) return false
-
-    const restoredPairs = cloneMeasurePairs(snapshot.pairs)
-    setDragPreviewState(null)
-    dragRef.current = null
-    clearDragOverlay()
-    setDraggingSelection(null)
-    resetMidiStepChain()
-
-    if (snapshot.imported) {
-      measurePairsFromImportRef.current = restoredPairs
-      setMeasurePairsFromImport(restoredPairs)
-    } else {
-      measurePairsFromImportRef.current = null
-      setMeasurePairsFromImport(null)
-      setImportedChordRulerEntriesByPairFromImport(null)
-    }
-    importedNoteLookupRef.current = buildImportedNoteLookup(restoredPairs)
-    setNotes(flattenTrebleFromPairs(restoredPairs))
-    setBassNotes(flattenBassFromPairs(restoredPairs))
-    setIsSelectionVisible(snapshot.isSelectionVisible)
-    setActiveAccidentalSelection(null)
-    setActiveTieSelection(null)
-    setSelectedMeasureScope(null)
-    clearActiveChordSelection()
-    setFullMeasureRestCollapseScopeKeys(snapshot.fullMeasureRestCollapseScopeKeys)
-    setActiveSelection(snapshot.selection)
-    setSelectedSelections(snapshot.isSelectionVisible ? [snapshot.selection] : [])
-    return true
-  }, [
-    clearActiveChordSelection,
-    clearDragOverlay,
-    resetMidiStepChain,
-    setActiveAccidentalSelection,
-    setActiveTieSelection,
-    setBassNotes,
-    setFullMeasureRestCollapseScopeKeys,
-    setMeasurePairsFromImport,
-    setNotes,
-    setImportedChordRulerEntriesByPairFromImport,
-    setDraggingSelection,
-    setSelectedMeasureScope,
-  ])
-
-  const applyKeyboardEditResult = useCallback(
-    (
-      nextPairs: MeasurePair[],
-      nextSelection: Selection,
-      nextSelections: Selection[] = [nextSelection],
-      source: 'default' | 'midi-step' = 'default',
-      options?: {
-        collapseScopesToAdd?: MeasureStaffScope[]
-      },
-    ) => {
-      const sourcePairs = measurePairsRef.current
-      const collapseScopesToAdd = options?.collapseScopesToAdd ?? []
-      if (nextPairs !== sourcePairs) {
-        pushUndoSnapshot(sourcePairs)
-      }
-      if (nextPairs !== sourcePairs || collapseScopesToAdd.length > 0) {
-        setFullMeasureRestCollapseScopeKeys((current) =>
-          mergeFullMeasureRestCollapseScopeKeys({
-            currentScopeKeys: current,
-            sourcePairs,
-            nextPairs,
-            collapseScopesToAdd,
-          }),
-        )
-      }
-      if (source !== 'midi-step') {
-        resetMidiStepChain()
-      }
-      setIsRhythmLinked(false)
-      if (measurePairsFromImportRef.current) {
-        measurePairsFromImportRef.current = nextPairs
-        setMeasurePairsFromImport(nextPairs)
-      }
-      importedNoteLookupRef.current = buildImportedNoteLookup(nextPairs)
-      setNotes(flattenTrebleFromPairs(nextPairs))
-      setBassNotes(flattenBassFromPairs(nextPairs))
-      setIsSelectionVisible(true)
-      setActiveAccidentalSelection(null)
-      setActiveTieSelection(null)
-      setSelectedMeasureScope(null)
-      clearActiveChordSelection()
-      setActiveSelection(nextSelection)
-      setSelectedSelections(nextSelections)
-    },
-    [
-      clearActiveChordSelection,
-      pushUndoSnapshot,
-      resetMidiStepChain,
-      setFullMeasureRestCollapseScopeKeys,
-      setActiveAccidentalSelection,
-      setActiveTieSelection,
-      setBassNotes,
-      setMeasurePairsFromImport,
-      setNotes,
-      setActiveSelection,
-      setIsRhythmLinked,
-      setSelectedMeasureScope,
-    ],
-  )
-
-  const resolveMidiTargetSelection = useCallback((pairs: MeasurePair[]): Selection | null => {
-    if (pairs.length === 0) return null
-    const fallbackSelection = activeSelectionRef.current
-    const candidateSelections =
-      selectedSelectionsRef.current.length > 0 ? selectedSelectionsRef.current : [fallbackSelection]
-    const timelinePoints = candidateSelections
-      .map((selection) =>
-        resolveSelectionTimelinePoint({
-          pairs,
-          selection,
-          importedNoteLookup: importedNoteLookupRef.current,
-        }),
-      )
-      .filter((point): point is NonNullable<typeof point> => point !== null)
-    if (timelinePoints.length === 0) {
-      return candidateSelections[0] ?? null
-    }
-    timelinePoints.sort((left, right) => {
-      const byTime = compareTimelinePoint(left, right)
-      if (byTime !== 0) return byTime
-      if (left.staff !== right.staff) return left.staff === 'treble' ? -1 : 1
-      if (left.noteIndex !== right.noteIndex) return left.noteIndex - right.noteIndex
-      if (left.selection.keyIndex !== right.selection.keyIndex) return left.selection.keyIndex - right.selection.keyIndex
-      return left.selection.noteId.localeCompare(right.selection.noteId)
-    })
-    return timelinePoints[0]?.selection ?? candidateSelections[0] ?? null
-  }, [])
-
-  const applyMidiReplacementByNoteNumber = useCallback((midiNoteNumber: number) => {
-    if (isOsmdPreviewOpenRef.current) return
-    if (dragRef.current || draggingSelectionRef.current) return
-    if (!isSelectionVisibleRef.current) return
-
-    const sourcePairs = measurePairsRef.current
-    const targetSelection = resolveMidiTargetSelection(sourcePairs)
-    if (!targetSelection) return
-
-    const selectionLocation = findSelectionLocationInPairs({
-      pairs: sourcePairs,
-      selection: targetSelection,
-      importedNoteLookup: importedNoteLookupRef.current,
-    })
-    if (!selectionLocation) return
-
-    const keyFifths = resolvePairKeyFifthsForKeyboard(selectionLocation.pairIndex, measureKeyFifthsFromImportRef.current)
-    const targetPitch = toPitchFromMidiWithKeyPreference(midiNoteNumber, keyFifths)
-    const mode: MidiStepInputMode = canContinueMidiStep(targetSelection)
-      ? 'insert-after-anchor'
-      : 'replace-anchor'
-
-    const stepAttempt = applyMidiStepInput({
-      pairs: sourcePairs,
-      anchorSelection: targetSelection,
-      mode,
-      targetPitch,
-      importedMode: measurePairsFromImportRef.current !== null,
-      importedNoteLookup: importedNoteLookupRef.current,
-      keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
-      timeSignaturesByMeasure: measureTimeSignaturesFromImportRef.current,
-      allowAutoAppendMeasure: true,
-    })
-    if (!stepAttempt.result || stepAttempt.error) return
-
-    const { result } = stepAttempt
-    if (result.appendedMeasureCount > 0 && measurePairsFromImportRef.current) {
-      const targetLength = result.nextPairs.length
-      const extendNumberSeries = (
-        source: number[] | null,
-        fallback: number,
-        normalize: (value: number) => number,
-      ): number[] => {
-        const next: number[] = []
-        let carry = normalize(fallback)
-        for (let index = 0; index < targetLength; index += 1) {
-          const raw = source?.[index]
-          if (Number.isFinite(raw)) {
-            carry = normalize(raw as number)
-          }
-          next.push(carry)
-        }
-        return next
-      }
-      const extendTimeSignatureSeries = (source: TimeSignature[] | null): TimeSignature[] => {
-        const next: TimeSignature[] = []
-        let carry: TimeSignature = { beats: 4, beatType: 4 }
-        for (let index = 0; index < targetLength; index += 1) {
-          const candidate = source?.[index]
-          if (
-            candidate &&
-            Number.isFinite(candidate.beats) &&
-            candidate.beats > 0 &&
-            Number.isFinite(candidate.beatType) &&
-            candidate.beatType > 0
-          ) {
-            carry = {
-              beats: Math.max(1, Math.round(candidate.beats)),
-              beatType: Math.max(1, Math.round(candidate.beatType)),
-            }
-          }
-          next.push({
-            beats: carry.beats,
-            beatType: carry.beatType,
-          })
-        }
-        return next
-      }
-
-      const nextKeyFifths = extendNumberSeries(
-        measureKeyFifthsFromImportRef.current,
-        0,
-        (value) => Math.trunc(value),
-      )
-      const nextDivisions = extendNumberSeries(
-        measureDivisionsFromImportRef.current,
-        16,
-        (value) => Math.max(1, Math.round(value)),
-      )
-      const nextTimeSignatures = extendTimeSignatureSeries(measureTimeSignaturesFromImportRef.current)
-      measureKeyFifthsFromImportRef.current = nextKeyFifths
-      setMeasureKeyFifthsFromImport(nextKeyFifths)
-      measureDivisionsFromImportRef.current = nextDivisions
-      setMeasureDivisionsFromImport(nextDivisions)
-      measureTimeSignaturesFromImportRef.current = nextTimeSignatures
-      setMeasureTimeSignaturesFromImport(nextTimeSignatures)
-    }
-
-    const collapseScopesToAdd: MeasureStaffScope[] = []
-    if (result.appendedMeasureCount > 0) {
-      const appendStartPairIndex = Math.max(0, result.nextPairs.length - result.appendedMeasureCount)
-      for (let pairIndex = appendStartPairIndex; pairIndex < result.nextPairs.length; pairIndex += 1) {
-        collapseScopesToAdd.push({ pairIndex, staff: 'treble' })
-        collapseScopesToAdd.push({ pairIndex, staff: 'bass' })
-      }
-    }
-
-    applyKeyboardEditResult(
-      result.nextPairs,
-      result.nextSelection,
-      [result.nextSelection],
-      'midi-step',
-      { collapseScopesToAdd },
-    )
-    midiStepChainRef.current = true
-    midiStepLastSelectionRef.current = result.nextSelection
-  }, [
-    applyKeyboardEditResult,
-    canContinueMidiStep,
-    resolveMidiTargetSelection,
-    setMeasureDivisionsFromImport,
-    setMeasureKeyFifthsFromImport,
-    setMeasureTimeSignaturesFromImport,
-  ])
 
   const {
     midiPermissionState,
