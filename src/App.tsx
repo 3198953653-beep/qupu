@@ -5873,10 +5873,22 @@ function App() {
               y: head.y,
             })),
             accidentalCoords: Object.entries(layout.accidentalRightXByKeyIndex)
-              .map(([rawKeyIndex, rightX]) => ({
-                keyIndex: Number(rawKeyIndex),
-                rightX,
-              }))
+              .map(([rawKeyIndex, leftX]) => {
+                const keyIndex = Number(rawKeyIndex)
+                const accidentalLayout = layout.accidentalLayouts.find((entry) => entry.keyIndex === keyIndex)
+                return {
+                  keyIndex,
+                  rightX: leftX,
+                  leftX:
+                    typeof accidentalLayout?.hitMinX === 'number' && Number.isFinite(accidentalLayout.hitMinX)
+                      ? accidentalLayout.hitMinX
+                      : leftX,
+                  visualRightX:
+                    typeof accidentalLayout?.hitMaxX === 'number' && Number.isFinite(accidentalLayout.hitMaxX)
+                      ? accidentalLayout.hitMaxX
+                      : null,
+                }
+              })
               .filter((entry) => Number.isFinite(entry.keyIndex) && Number.isFinite(entry.rightX))
               .sort((left, right) => left.keyIndex - right.keyIndex),
           }
@@ -5911,7 +5923,9 @@ function App() {
           if (Number.isFinite(head.x)) rowMin = Math.min(rowMin, head.x)
         })
         row.accidentalCoords.forEach((accidental) => {
-          if (Number.isFinite(accidental.rightX)) {
+          if (typeof accidental.leftX === 'number' && Number.isFinite(accidental.leftX)) {
+            rowMin = Math.min(rowMin, accidental.leftX)
+          } else if (Number.isFinite(accidental.rightX)) {
             rowMin = Math.min(rowMin, accidental.rightX - 9)
           }
         })
@@ -6083,6 +6097,11 @@ function App() {
             noteRestVisibleGapPx:
               typeof entry.noteRestVisibleGapPx === 'number'
                 ? toRoundedNumber(entry.noteRestVisibleGapPx, 3)
+                : null,
+            accidentalRequestedExtraPx: toRoundedNumber(entry.accidentalRequestedExtraPx, 3),
+            accidentalVisibleGapPx:
+              typeof entry.accidentalVisibleGapPx === 'number'
+                ? toRoundedNumber(entry.accidentalVisibleGapPx, 3)
                 : null,
             winningStaff: entry.winningStaff,
           })) ?? [],

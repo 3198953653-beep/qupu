@@ -347,6 +347,8 @@ export type MeasureLayout = {
     bassRequestedExtraPx: number
     noteRestRequestedExtraPx?: number
     noteRestVisibleGapPx?: number | null
+    accidentalRequestedExtraPx?: number
+    accidentalVisibleGapPx?: number | null
     winningStaff: 'treble' | 'bass' | 'tie' | 'none'
   }>
   overlayRect: {

@@ -22,6 +22,7 @@ type TimeAxisNoteRef = {
   onsetTicks: number
   vexNote: StaveNote
   rawLeftReservePx: number
+  rawLeftStructuralReservePx: number
   rawRightReservePx: number
   leftOccupiedInsetPx: number
   rightOccupiedTailPx: number
@@ -39,6 +40,7 @@ type TimeAxisRenderedRef = {
 
 type OnsetCollisionMetrics = {
   rawLeftReservePx: number
+  rawLeftStructuralReservePx: number
   rawRightReservePx: number
   leftOccupiedInsetPx: number
   rightOccupiedTailPx: number
@@ -59,9 +61,11 @@ type StaffVisualBlockerRef = {
   hasRest: boolean
   hasNonRest: boolean
   hasStandaloneFlaggedNote: boolean
+  hasRenderedAccidental: boolean
   anchorX: number
   visualLeftX: number
   visualRightX: number
+  accidentalLeftX: number | null
   projectedLeftExtraPx: number
   projectedRightExtraPx: number
 }
@@ -69,6 +73,7 @@ type StaffVisualBlockerRef = {
 type ProjectedVisualBlockerBounds = {
   visualLeftX: number
   visualRightX: number
+  accidentalLeftX: number | null
 }
 
 function getStandaloneFlagProjectionPx(duration: ScoreNote['duration']): number | null {
@@ -105,6 +110,7 @@ type LeadingTrailingDebug = {
 
 type NoteSpacingGeometry = {
   rawLeftReservePx: number
+  rawLeftStructuralReservePx: number
   rawRightReservePx: number
   leftOccupiedInsetPx: number
   rightOccupiedTailPx: number
@@ -155,6 +161,7 @@ const UNIFORM_TIMELINE_EDGE_TICK_RATIO = 0
 const ACCIDENTAL_PREALLOCATED_CLEARANCE_PX = 0
 const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
 const COLLISION_RIGHT_BODY_PADDING_PX = 1.0
+const ACCIDENTAL_COLLISION_SAFE_GAP_PX = 1
 const MAX_RENDERED_NOTE_HEAD_WIDTH_PX = DEFAULT_NOTE_HEAD_WIDTH_PX * 2.5
 const MAX_NOTE_HEAD_COLUMN_OFFSET_PX = DEFAULT_NOTE_HEAD_WIDTH_PX * 5
 const NOTE_HEAD_COLUMN_COMPARE_EPSILON_PX = 0.01
@@ -411,8 +418,26 @@ function getRenderedNoteOccupiedBounds(
   }
 }
 
-function getNoteRawReserveExtents(vexNote: StaveNote): { rawLeftReservePx: number; rawRightReservePx: number } {
+function getRenderedNoteAccidentalLeftX(vexNote: StaveNote): number | null {
+  let accidentalMinX = Number.POSITIVE_INFINITY
+  vexNote.getModifiersByType(Accidental.CATEGORY).forEach((modifier) => {
+    const accidental = modifier as Accidental
+    const renderedIndex = accidental.getIndex()
+    if (typeof renderedIndex !== 'number' || !Number.isFinite(renderedIndex)) return
+    const accidentalX = getAccidentalVisualX(vexNote, accidental, renderedIndex)
+    if (typeof accidentalX !== 'number' || !Number.isFinite(accidentalX)) return
+    accidentalMinX = Math.min(accidentalMinX, accidentalX)
+  })
+  return Number.isFinite(accidentalMinX) ? accidentalMinX : null
+}
+
+function getNoteRawReserveExtents(vexNote: StaveNote): {
+  rawLeftReservePx: number
+  rawLeftStructuralReservePx: number
+  rawRightReservePx: number
+} {
   let rawLeftReservePx = 0
+  let rawLeftStructuralReservePx = 0
   let rawRightReservePx = 0
   const fallbackAnchorX = getRenderedNoteVisualX(vexNote)
   if (Number.isFinite(fallbackAnchorX)) {
@@ -423,28 +448,19 @@ function getNoteRawReserveExtents(vexNote: StaveNote): { rawLeftReservePx: numbe
       rightColumnReservePx,
     } = getRenderedNoteHeadColumnReserves(vexNote, fallbackAnchorX)
     if (hasMultipleColumns) {
-      rawLeftReservePx = Math.max(rawLeftReservePx, leftColumnReservePx)
+      rawLeftStructuralReservePx = Math.max(rawLeftStructuralReservePx, leftColumnReservePx)
       rawRightReservePx = Math.max(rawRightReservePx, rightColumnReservePx)
     }
-
-    let accidentalMinX = Number.POSITIVE_INFINITY
-    vexNote.getModifiersByType(Accidental.CATEGORY).forEach((modifier) => {
-      const accidental = modifier as Accidental
-      const renderedIndex = accidental.getIndex()
-      if (typeof renderedIndex !== 'number' || !Number.isFinite(renderedIndex)) return
-      const accidentalX = getAccidentalVisualX(vexNote, accidental, renderedIndex)
-      if (typeof accidentalX === 'number' && Number.isFinite(accidentalX)) {
-        accidentalMinX = Math.min(accidentalMinX, accidentalX)
-      }
-    })
-    if (Number.isFinite(accidentalMinX)) {
+    rawLeftReservePx = Math.max(rawLeftReservePx, rawLeftStructuralReservePx)
+    const accidentalMinX = getRenderedNoteAccidentalLeftX(vexNote)
+    if (typeof accidentalMinX === 'number' && Number.isFinite(accidentalMinX)) {
       rawLeftReservePx = Math.max(
         rawLeftReservePx,
         resolvedAnchorX - accidentalMinX + ACCIDENTAL_PREALLOCATED_CLEARANCE_PX,
       )
     }
   }
-  return { rawLeftReservePx, rawRightReservePx }
+  return { rawLeftReservePx, rawLeftStructuralReservePx, rawRightReservePx }
 }
 
 function getNoteOccupiedInsets(vexNote: StaveNote): {
@@ -476,10 +492,11 @@ function getNoteOccupiedInsets(vexNote: StaveNote): {
 }
 
 function getNoteSpacingGeometry(vexNote: StaveNote): NoteSpacingGeometry {
-  const { rawLeftReservePx, rawRightReservePx } = getNoteRawReserveExtents(vexNote)
+  const { rawLeftReservePx, rawLeftStructuralReservePx, rawRightReservePx } = getNoteRawReserveExtents(vexNote)
   const { leftOccupiedInsetPx, rightOccupiedTailPx, collisionRightBodyTailPx } = getNoteOccupiedInsets(vexNote)
   return {
     rawLeftReservePx,
+    rawLeftStructuralReservePx,
     rawRightReservePx,
     leftOccupiedInsetPx,
     rightOccupiedTailPx,
@@ -507,6 +524,7 @@ function buildTimeAxisRefs(params: {
       onsetTicks,
       vexNote: renderedEntry.vexNote,
       rawLeftReservePx: geometry.rawLeftReservePx,
+      rawLeftStructuralReservePx: geometry.rawLeftStructuralReservePx,
       rawRightReservePx: geometry.rawRightReservePx,
       leftOccupiedInsetPx: geometry.leftOccupiedInsetPx,
       rightOccupiedTailPx: geometry.rightOccupiedTailPx,
@@ -580,8 +598,9 @@ function buildStaffVisualBlockerRefs(refs: TimeAxisRenderedRef[]): Record<StaffK
     const glyphBounds = getRenderedNoteGlyphBounds(ref.vexNote)
     if (!glyphBounds) return
     const anchorX = getRenderedNoteVisualX(ref.vexNote)
-    let visualLeftX = glyphBounds.leftX
-    let visualRightX = glyphBounds.rightX
+    const visualLeftX = glyphBounds.leftX
+    const visualRightX = glyphBounds.rightX
+    const accidentalLeftX = getRenderedNoteAccidentalLeftX(ref.vexNote)
     const flagProjectionPx =
       ref.isRest !== true && ref.vexNote.hasFlag() && !ref.vexNote.getBeam()
         ? getStandaloneFlagProjectionPx(ref.duration)
@@ -597,9 +616,11 @@ function buildStaffVisualBlockerRefs(refs: TimeAxisRenderedRef[]): Record<StaffK
       hasRest: ref.isRest,
       hasNonRest: !ref.isRest,
       hasStandaloneFlaggedNote: flagProjectionPx !== null,
+      hasRenderedAccidental: typeof accidentalLeftX === 'number' && Number.isFinite(accidentalLeftX),
       anchorX: Number.isFinite(anchorX) ? anchorX : glyphBounds.leftX,
       visualLeftX,
       visualRightX,
+      accidentalLeftX,
       projectedLeftExtraPx,
       projectedRightExtraPx,
     })
@@ -735,6 +756,8 @@ export type TimeAxisSpacingSegmentReserve = {
   bassRequestedExtraPx: number
   noteRestRequestedExtraPx: number
   noteRestVisibleGapPx: number | null
+  accidentalRequestedExtraPx: number
+  accidentalVisibleGapPx: number | null
   winningStaff: StaffSlotWinner
 }
 
@@ -1142,6 +1165,7 @@ function getOnsetCollisionMetrics(noteRefs: TimeAxisNoteRef[] | undefined): Onse
   if (!noteRefs || noteRefs.length === 0) {
     return {
       rawLeftReservePx: 0,
+      rawLeftStructuralReservePx: 0,
       rawRightReservePx: 0,
       leftOccupiedInsetPx: 0,
       rightOccupiedTailPx: 0,
@@ -1150,6 +1174,7 @@ function getOnsetCollisionMetrics(noteRefs: TimeAxisNoteRef[] | undefined): Onse
   }
   return {
     rawLeftReservePx: noteRefs.reduce((max, ref) => Math.max(max, ref.rawLeftReservePx), 0),
+    rawLeftStructuralReservePx: noteRefs.reduce((max, ref) => Math.max(max, ref.rawLeftStructuralReservePx), 0),
     rawRightReservePx: noteRefs.reduce((max, ref) => Math.max(max, ref.rawRightReservePx), 0),
     leftOccupiedInsetPx: noteRefs.reduce((max, ref) => Math.max(max, ref.leftOccupiedInsetPx), 0),
     rightOccupiedTailPx: noteRefs.reduce((max, ref) => Math.max(max, ref.rightOccupiedTailPx), 0),
@@ -1178,6 +1203,7 @@ function buildStaffOnsetCollisionMetricsByStaff(params: {
         onsetTicks: onsetTick,
         sharedOnsetIndex,
         rawLeftReservePx: metrics.rawLeftReservePx,
+        rawLeftStructuralReservePx: metrics.rawLeftStructuralReservePx,
         rawRightReservePx: metrics.rawRightReservePx,
         leftOccupiedInsetPx: metrics.leftOccupiedInsetPx,
         rightOccupiedTailPx: metrics.rightOccupiedTailPx,
@@ -1262,6 +1288,10 @@ function resolveProjectedVisualBlockerBounds(
   return {
     visualLeftX: blocker.visualLeftX + deltaX,
     visualRightX: blocker.visualRightX + deltaX,
+    accidentalLeftX:
+      typeof blocker.accidentalLeftX === 'number' && Number.isFinite(blocker.accidentalLeftX)
+        ? blocker.accidentalLeftX + deltaX
+        : null,
   }
 }
 
@@ -1351,7 +1381,12 @@ function resolveCollisionDrivenOverlay(params: {
   const noteRestLeadingRequests = createStaffExtraRecord()
   const noteRestTrailingRequests = createStaffExtraRecord()
   const noteRestSegmentRequests = onsetTicks.slice(1).map(() => createStaffExtraRecord())
+  const accidentalLeadingRequests = createStaffExtraRecord()
+  const accidentalSegmentRequests = onsetTicks.slice(1).map(() => createStaffExtraRecord())
   const noteRestSegmentVisibleGaps = onsetTicks
+    .slice(1)
+    .map(() => ({ treble: null as number | null, bass: null as number | null }))
+  const accidentalSegmentVisibleGaps = onsetTicks
     .slice(1)
     .map(() => ({ treble: null as number | null, bass: null as number | null }))
   const baseXs = onsetTicks.map((onset, index) => {
@@ -1373,14 +1408,15 @@ function resolveCollisionDrivenOverlay(params: {
       const previousMetrics = index > 0 ? staffCollisionMetrics[index - 1] ?? null : null
       const nextMetrics = index < staffCollisionMetrics.length - 1 ? staffCollisionMetrics[index + 1] ?? null : null
 
-      if (Math.max(0, metrics.rawLeftReservePx) > 0) {
+      const rawLeftStructuralReservePx = Math.max(0, metrics.rawLeftStructuralReservePx)
+      if (rawLeftStructuralReservePx > 0) {
         const visibleLeftGapPx =
           previousMetrics === null
-            ? (baseAnchorX - Math.max(0, metrics.rawLeftReservePx)) - effectiveBoundaryStartX
+            ? (baseAnchorX - rawLeftStructuralReservePx) - effectiveBoundaryStartX
             : baseAnchorX -
               (baseXByOnset.get(previousMetrics.onsetTicks) ?? 0) -
               Math.max(0, previousMetrics.rawRightReservePx) -
-              Math.max(0, metrics.rawLeftReservePx)
+              rawLeftStructuralReservePx
         const leftRequestPx = Math.max(0, secondChordSafeGapPx - visibleLeftGapPx)
         if (leftRequestPx > 0) {
           const request = {
@@ -1404,7 +1440,7 @@ function resolveCollisionDrivenOverlay(params: {
             : (baseXByOnset.get(nextMetrics.onsetTicks) ?? 0) -
               baseAnchorX -
               Math.max(0, metrics.rawRightReservePx) -
-              Math.max(0, nextMetrics.rawLeftReservePx)
+              Math.max(0, nextMetrics.rawLeftStructuralReservePx)
         const rightRequestPx = Math.max(0, secondChordSafeGapPx - visibleRightGapPx)
         if (rightRequestPx > 0) {
           const request = {
@@ -1481,6 +1517,50 @@ function resolveCollisionDrivenOverlay(params: {
       if (requestPx <= 0) continue
       noteRestSegmentRequests[slotIndex]![staff] = Math.max(noteRestSegmentRequests[slotIndex]![staff], requestPx)
     }
+
+    const firstAccidentalBlocker = staffBlockers[0]
+    if (firstAccidentalBlocker?.hasRenderedAccidental) {
+      const projectedFirstBounds = resolveProjectedVisualBlockerBounds(firstAccidentalBlocker, baseXByOnset)
+      const accidentalLeftX = projectedFirstBounds.accidentalLeftX
+      if (typeof accidentalLeftX === 'number' && Number.isFinite(accidentalLeftX)) {
+        const visibleLeadingGapPx = accidentalLeftX - effectiveBoundaryStartX
+        const requestPx = Math.max(0, ACCIDENTAL_COLLISION_SAFE_GAP_PX - visibleLeadingGapPx)
+        if (requestPx > 0) {
+          accidentalLeadingRequests[staff] = Math.max(accidentalLeadingRequests[staff], requestPx)
+        }
+      }
+    }
+
+    for (let index = 1; index < staffBlockers.length; index += 1) {
+      const previousBlocker = staffBlockers[index - 1]!
+      const nextBlocker = staffBlockers[index]!
+      if (!nextBlocker.hasRenderedAccidental) continue
+      const previousSharedIndex = onsetIndexByTick.get(previousBlocker.onsetTicks)
+      const nextSharedIndex = onsetIndexByTick.get(nextBlocker.onsetTicks)
+      if (
+        typeof previousSharedIndex !== 'number' ||
+        !Number.isFinite(previousSharedIndex) ||
+        typeof nextSharedIndex !== 'number' ||
+        !Number.isFinite(nextSharedIndex) ||
+        nextSharedIndex <= previousSharedIndex
+      ) {
+        continue
+      }
+      const slotIndex = nextSharedIndex - 1
+      const projectedPreviousBounds = resolveProjectedVisualBlockerBounds(previousBlocker, baseXByOnset)
+      const projectedNextBounds = resolveProjectedVisualBlockerBounds(nextBlocker, baseXByOnset)
+      const accidentalLeftX = projectedNextBounds.accidentalLeftX
+      if (typeof accidentalLeftX !== 'number' || !Number.isFinite(accidentalLeftX)) continue
+      const visibleGapPx = accidentalLeftX - projectedPreviousBounds.visualRightX
+      const currentVisibleGapPx = accidentalSegmentVisibleGaps[slotIndex]?.[staff]
+      accidentalSegmentVisibleGaps[slotIndex]![staff] =
+        typeof currentVisibleGapPx === 'number' && Number.isFinite(currentVisibleGapPx)
+          ? Math.min(currentVisibleGapPx, visibleGapPx)
+          : visibleGapPx
+      const requestPx = Math.max(0, ACCIDENTAL_COLLISION_SAFE_GAP_PX - visibleGapPx)
+      if (requestPx <= 0) continue
+      accidentalSegmentRequests[slotIndex]![staff] = Math.max(accidentalSegmentRequests[slotIndex]![staff], requestPx)
+    }
   })
 
   const leadingDebug: LeadingTrailingDebug = {
@@ -1496,11 +1576,17 @@ function resolveCollisionDrivenOverlay(params: {
     noteRestLeadingRequests.treble,
     noteRestLeadingRequests.bass,
   )
+  const leadingAccidentalRequestedExtraPx = Math.max(
+    0,
+    accidentalLeadingRequests.treble,
+    accidentalLeadingRequests.bass,
+  )
   const leadingAppliedExtraPx = Math.max(
     0,
     leadingDebug.trebleRequestedExtraPx,
     leadingDebug.bassRequestedExtraPx,
     leadingNoteRestRequestedExtraPx,
+    leadingAccidentalRequestedExtraPx,
   )
   if (leadingAppliedExtraPx > 0) {
     safeLeftReserves[0] += leadingAppliedExtraPx
@@ -1525,7 +1611,23 @@ function resolveCollisionDrivenOverlay(params: {
     const noteRestVisibleGapPx = [currentNoteRestVisibleGap.treble, currentNoteRestVisibleGap.bass]
       .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
       .reduce<number | null>((minValue, value) => (minValue === null ? value : Math.min(minValue, value)), null)
-    const extraReservePx = Math.max(0, trebleRequestedExtraPx, bassRequestedExtraPx, noteRestRequestedExtraPx)
+    const currentAccidentalRequests = accidentalSegmentRequests[index - 1] ?? createStaffExtraRecord()
+    const accidentalRequestedExtraPx = Math.max(
+      0,
+      currentAccidentalRequests.treble,
+      currentAccidentalRequests.bass,
+    )
+    const currentAccidentalVisibleGap = accidentalSegmentVisibleGaps[index - 1] ?? { treble: null, bass: null }
+    const accidentalVisibleGapPx = [currentAccidentalVisibleGap.treble, currentAccidentalVisibleGap.bass]
+      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+      .reduce<number | null>((minValue, value) => (minValue === null ? value : Math.min(minValue, value)), null)
+    const extraReservePx = Math.max(
+      0,
+      trebleRequestedExtraPx,
+      bassRequestedExtraPx,
+      noteRestRequestedExtraPx,
+      accidentalRequestedExtraPx,
+    )
     const winningRequest = pickWinningStaffSlotRequest({
       trebleRequest: currentSegmentRequests.treble,
       bassRequest: currentSegmentRequests.bass,
@@ -1550,6 +1652,8 @@ function resolveCollisionDrivenOverlay(params: {
       bassRequestedExtraPx,
       noteRestRequestedExtraPx,
       noteRestVisibleGapPx,
+      accidentalRequestedExtraPx,
+      accidentalVisibleGapPx,
       winningStaff: resolveWinningStaff({
         trebleRequestedExtraPx,
         bassRequestedExtraPx,
