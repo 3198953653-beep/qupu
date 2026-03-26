@@ -1,36 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import * as Tone from 'tone'
-import { Renderer } from 'vexflow'
+import { useCallback } from 'react'
 import './App.css'
 import {
-  A4_PAGE_WIDTH,
   INITIAL_NOTES,
   PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX,
   PREVIEW_START_THRESHOLD_PX,
 } from './score/constants'
-import {
-  DEFAULT_TIME_AXIS_SPACING_CONFIG,
-} from './score/layout/timeAxisSpacing'
-import { useMidiInputController } from './score/hooks/useMidiInputController'
 import { usePlaybackController } from './score/hooks/usePlaybackController'
 import { useScoreAudioPreviewController } from './score/hooks/useScoreAudioPreviewController'
 import { useChordMarkerController } from './score/hooks/useChordMarkerController'
 import { useScoreMutationController } from './score/hooks/useScoreMutationController'
-import { useNotationPaletteController } from './score/hooks/useNotationPaletteController'
-import { useScoreSelectionController } from './score/hooks/useScoreSelectionController'
-import {
-  getInitialChordDegreeDisplayEnabled,
-  getInitialPlayheadFollowEnabled,
-  useEditorPreferencePersistence,
-} from './score/hooks/useEditorPreferencePersistence'
-import { useOsmdPreviewController } from './score/hooks/useOsmdPreviewController'
-import { usePlaybackCursorLayout } from './score/hooks/usePlaybackCursorLayout'
-import { useKeyboardCommandController } from './score/hooks/useKeyboardCommandController'
-import { useScoreRuntimeDebugController } from './score/hooks/useScoreRuntimeDebugController'
 import { useScoreViewProps } from './score/hooks/useScoreViewProps'
 import { useHorizontalScoreLayout } from './score/hooks/useHorizontalScoreLayout'
 import { useScoreSurfaceController } from './score/hooks/useScoreSurfaceController'
 import { useScoreDocumentActionsController } from './score/hooks/useScoreDocumentActionsController'
+import { useScoreEditorUiController } from './score/hooks/useScoreEditorUiController'
+import { useScorePlaybackDebugController } from './score/hooks/useScorePlaybackDebugController'
+import { useScoreAppState } from './score/hooks/useScoreAppState'
+import { useScoreEditorRefs } from './score/hooks/useScoreEditorRefs'
 import { ScoreControls } from './score/components/ScoreControls'
 import { ScoreBoard } from './score/components/ScoreBoard'
 import {
@@ -40,40 +26,17 @@ import {
   buildBassMockNotes,
 } from './score/scoreOps'
 import { isStaffFullMeasureRest, resolvePairTimeSignature } from './score/measureRestUtils'
-import type { ChordRulerEntry } from './score/chordRuler'
 import { mergeFullMeasureRestCollapseScopeKeys, toMeasureStaffScopeKey } from './score/fullMeasureRestCollapse'
 import { ImportProgressModal } from './score/components/ImportProgressModal'
 import { OsmdPreviewModal } from './score/components/OsmdPreviewModal'
-import type { MeasureTimelineBundle } from './score/timeline/types'
-import {
-  getDefaultNotationPaletteSelection,
-  type NotationPaletteSelection,
-} from './score/notationPaletteConfig'
-import {
-  DEFAULT_CHORD_MARKER_PADDING_PX,
-  DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT,
-  DEFAULT_PAGE_HORIZONTAL_PADDING_PX,
-  toSequencePreview,
-} from './score/scorePresentation'
-import type { HitGridIndex } from './score/layout/hitTest'
 import type {
-  BuiltInDemoMode,
-  DragDebugSnapshot,
-  DragState,
-  ImportFeedback,
-  ImportedNoteLocation,
-  LayoutReflowHint,
-  MeasureLayout,
   MeasurePair,
-  MusicXmlMetadata,
-  NoteLayout,
   Pitch,
-  RhythmPresetId,
   ScoreNote,
   Selection,
-  TieSelection,
   TimeSignature,
 } from './score/types'
+import { Renderer } from 'vexflow'
 
 const SCORE_RENDER_BACKEND = Renderer.Backends.CANVAS
 const SCORE_STAGE_BORDER_PX = 1
@@ -114,102 +77,144 @@ function buildSelectionsForMeasureStaff(
 }
 
 function App() {
-  const [notes, setNotes] = useState<ScoreNote[]>(INITIAL_NOTES)
-  const [bassNotes, setBassNotes] = useState<ScoreNote[]>(INITIAL_BASS_NOTES)
-  const [rhythmPreset, setRhythmPreset] = useState<RhythmPresetId>('quarter')
-  const [activeBuiltInDemo, setActiveBuiltInDemo] = useState<BuiltInDemoMode>('none')
-  const [activeSelection, setActiveSelection] = useState<Selection>({ noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 })
-  const [activeAccidentalSelection, setActiveAccidentalSelection] = useState<Selection | null>(null)
-  const [activeTieSelection, setActiveTieSelection] = useState<TieSelection | null>(null)
-  const [selectedSelections, setSelectedSelections] = useState<Selection[]>([
-    { noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 },
-  ])
-  const [selectedMeasureScope, setSelectedMeasureScope] = useState<{ pairIndex: number; staff: Selection['staff'] } | null>(null)
-  const [fullMeasureRestCollapseScopeKeys, setFullMeasureRestCollapseScopeKeys] = useState<string[]>([])
-  const [isSelectionVisible, setIsSelectionVisible] = useState(true)
-  const [draggingSelection, setDraggingSelection] = useState<Selection | null>(null)
-  const [dragPreviewState, setDragPreviewState] = useState<DragState | null>(null)
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [musicXmlInput, setMusicXmlInput] = useState<string>('')
-  const [importFeedback, setImportFeedback] = useState<ImportFeedback>({ kind: 'idle', message: '' })
-  const [isNotationPaletteOpen, setIsNotationPaletteOpen] = useState(false)
-  const [notationPaletteSelection, setNotationPaletteSelection] = useState<NotationPaletteSelection>(
-    () => getDefaultNotationPaletteSelection(),
-  )
-  const [notationPaletteLastAction, setNotationPaletteLastAction] = useState('未选择')
-  const [isRhythmLinked, setIsRhythmLinked] = useState(false)
-  const [measurePairsFromImport, setMeasurePairsFromImport] = useState<MeasurePair[] | null>(null)
-  const [measureKeyFifthsFromImport, setMeasureKeyFifthsFromImport] = useState<number[] | null>(null)
-  const [measureKeyModesFromImport, setMeasureKeyModesFromImport] = useState<string[] | null>(null)
-  const [measureDivisionsFromImport, setMeasureDivisionsFromImport] = useState<number[] | null>(null)
-  const [measureTimeSignaturesFromImport, setMeasureTimeSignaturesFromImport] = useState<TimeSignature[] | null>(null)
-  const [musicXmlMetadataFromImport, setMusicXmlMetadataFromImport] = useState<MusicXmlMetadata | null>(null)
-  const [importedChordRulerEntriesByPairFromImport, setImportedChordRulerEntriesByPairFromImport] = useState<ChordRulerEntry[][] | null>(null)
-  const [, setDragDebugReport] = useState<string>('')
-  const [autoScaleEnabled, setAutoScaleEnabled] = useState(false)
-  const [manualScalePercent, setManualScalePercent] = useState(100)
-  const [canvasHeightPercent, setCanvasHeightPercent] = useState(100)
-  const [playheadFollowEnabled, setPlayheadFollowEnabled] = useState(() => getInitialPlayheadFollowEnabled())
-  const [showChordDegreeEnabled, setShowChordDegreeEnabled] = useState(() => getInitialChordDegreeDisplayEnabled())
-  const [showInScoreMeasureNumbers, setShowInScoreMeasureNumbers] = useState(false)
-  const [showNoteHeadJianpuEnabled, setShowNoteHeadJianpuEnabled] = useState(false)
-  const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
-  const [chordMarkerUiScalePercent, setChordMarkerUiScalePercent] = useState(DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT)
-  const [chordMarkerPaddingPx, setChordMarkerPaddingPx] = useState(DEFAULT_CHORD_MARKER_PADDING_PX)
-  const [timeAxisSpacingConfig, setTimeAxisSpacingConfig] = useState(DEFAULT_TIME_AXIS_SPACING_CONFIG)
-  const [horizontalViewportXRange, setHorizontalViewportXRange] = useState<{ startX: number; endX: number }>({
-    startX: 0,
-    endX: A4_PAGE_WIDTH,
+  const {
+    notes,
+    setNotes,
+    bassNotes,
+    setBassNotes,
+    rhythmPreset,
+    setRhythmPreset,
+    activeBuiltInDemo,
+    setActiveBuiltInDemo,
+    activeSelection,
+    setActiveSelection,
+    activeAccidentalSelection,
+    setActiveAccidentalSelection,
+    activeTieSelection,
+    setActiveTieSelection,
+    selectedSelections,
+    setSelectedSelections,
+    selectedMeasureScope,
+    setSelectedMeasureScope,
+    fullMeasureRestCollapseScopeKeys,
+    setFullMeasureRestCollapseScopeKeys,
+    isSelectionVisible,
+    setIsSelectionVisible,
+    draggingSelection,
+    setDraggingSelection,
+    dragPreviewState,
+    setDragPreviewState,
+    isPlaying,
+    setIsPlaying,
+    musicXmlInput,
+    setMusicXmlInput,
+    importFeedback,
+    setImportFeedback,
+    isNotationPaletteOpen,
+    setIsNotationPaletteOpen,
+    notationPaletteSelection,
+    setNotationPaletteSelection,
+    notationPaletteLastAction,
+    setNotationPaletteLastAction,
+    isRhythmLinked,
+    setIsRhythmLinked,
+    measurePairsFromImport,
+    setMeasurePairsFromImport,
+    measureKeyFifthsFromImport,
+    setMeasureKeyFifthsFromImport,
+    measureKeyModesFromImport,
+    setMeasureKeyModesFromImport,
+    measureDivisionsFromImport,
+    setMeasureDivisionsFromImport,
+    measureTimeSignaturesFromImport,
+    setMeasureTimeSignaturesFromImport,
+    musicXmlMetadataFromImport,
+    setMusicXmlMetadataFromImport,
+    importedChordRulerEntriesByPairFromImport,
+    setImportedChordRulerEntriesByPairFromImport,
+    setDragDebugReport,
+    autoScaleEnabled,
+    setAutoScaleEnabled,
+    manualScalePercent,
+    setManualScalePercent,
+    canvasHeightPercent,
+    setCanvasHeightPercent,
+    playheadFollowEnabled,
+    setPlayheadFollowEnabled,
+    showChordDegreeEnabled,
+    setShowChordDegreeEnabled,
+    showInScoreMeasureNumbers,
+    setShowInScoreMeasureNumbers,
+    showNoteHeadJianpuEnabled,
+    setShowNoteHeadJianpuEnabled,
+    pageHorizontalPaddingPx,
+    setPageHorizontalPaddingPx,
+    chordMarkerUiScalePercent,
+    setChordMarkerUiScalePercent,
+    chordMarkerPaddingPx,
+    setChordMarkerPaddingPx,
+    timeAxisSpacingConfig,
+    setTimeAxisSpacingConfig,
+    horizontalViewportXRange,
+    setHorizontalViewportXRange,
+  } = useScoreAppState(INITIAL_BASS_NOTES)
+
+  const {
+    scoreRef,
+    scoreOverlayRef,
+    scoreScrollRef,
+    scoreStageRef,
+    fileInputRef,
+    synthRef,
+    noteLayoutsRef,
+    noteLayoutsByPairRef,
+    noteLayoutByKeyRef,
+    horizontalRenderOffsetXRef,
+    hitGridRef,
+    measureLayoutsRef,
+    measureTimelineBundlesRef,
+    measurePairsRef,
+    dragDebugFramesRef,
+    dragRef,
+    dragPreviewFrameRef,
+    dragRafRef,
+    dragPendingRef,
+    rendererRef,
+    rendererSizeRef,
+    widthProbeRendererRef,
+    horizontalMeasureWidthCacheRef,
+    overlayRendererRef,
+    overlayRendererSizeRef,
+    overlayLastRectRef,
+    stopPlayTimerRef,
+    playbackPointTimerIdsRef,
+    playbackSessionIdRef,
+    measurePairsFromImportRef,
+    measureKeyFifthsFromImportRef,
+    measureKeyModesFromImportRef,
+    measureDivisionsFromImportRef,
+    measureTimeSignaturesFromImportRef,
+    musicXmlMetadataFromImportRef,
+    importedNoteLookupRef,
+    importFeedbackRef,
+    activeSelectionRef,
+    selectedSelectionsRef,
+    fullMeasureRestCollapseScopeKeysRef,
+    isSelectionVisibleRef,
+    draggingSelectionRef,
+    clearDragOverlayRef,
+    layoutReflowHintRef,
+    midiStepChainRef,
+    midiStepLastSelectionRef,
+    isOsmdPreviewOpenRef,
+  } = useScoreEditorRefs({
+    importFeedback,
+    activeSelection,
+    selectedSelections,
+    fullMeasureRestCollapseScopeKeys,
+    isSelectionVisible,
+    draggingSelection,
   })
-
-  const scoreRef = useRef<HTMLCanvasElement | null>(null)
-  const scoreOverlayRef = useRef<HTMLCanvasElement | null>(null)
-  const scoreScrollRef = useRef<HTMLDivElement | null>(null)
-  const scoreStageRef = useRef<HTMLDivElement | null>(null)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const synthRef = useRef<Tone.PolySynth | Tone.Sampler | null>(null)
-
-  const noteLayoutsRef = useRef<NoteLayout[]>([])
-  const noteLayoutsByPairRef = useRef<Map<number, NoteLayout[]>>(new Map())
-  const noteLayoutByKeyRef = useRef<Map<string, NoteLayout>>(new Map())
-  const horizontalRenderOffsetXRef = useRef(0)
-  const hitGridRef = useRef<HitGridIndex | null>(null)
-  const measureLayoutsRef = useRef<Map<number, MeasureLayout>>(new Map())
-  const measureTimelineBundlesRef = useRef<Map<number, MeasureTimelineBundle>>(new Map())
-  const measurePairsRef = useRef<MeasurePair[]>([])
-  const dragDebugFramesRef = useRef<DragDebugSnapshot[]>([])
-  const dragRef = useRef<DragState | null>(null)
-  const dragPreviewFrameRef = useRef(0)
-  const dragRafRef = useRef<number | null>(null)
-  const dragPendingRef = useRef<{ drag: DragState; pitch: Pitch } | null>(null)
-  const rendererRef = useRef<Renderer | null>(null)
-  const rendererSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 })
-  const widthProbeRendererRef = useRef<Renderer | null>(null)
-  const horizontalMeasureWidthCacheRef = useRef<Map<string, number>>(new Map())
-  const overlayRendererRef = useRef<Renderer | null>(null)
-  const overlayRendererSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 })
-  const overlayLastRectRef = useRef<MeasureLayout['overlayRect'] | null>(null)
-  const stopPlayTimerRef = useRef<number | null>(null)
-  const playbackPointTimerIdsRef = useRef<number[]>([])
-  const playbackSessionIdRef = useRef(0)
-  const measurePairsFromImportRef = useRef<MeasurePair[] | null>(null)
-  const measureKeyFifthsFromImportRef = useRef<number[] | null>(null)
-  const measureKeyModesFromImportRef = useRef<string[] | null>(null)
-  const measureDivisionsFromImportRef = useRef<number[] | null>(null)
-  const measureTimeSignaturesFromImportRef = useRef<TimeSignature[] | null>(null)
-  const musicXmlMetadataFromImportRef = useRef<MusicXmlMetadata | null>(null)
-  const importedNoteLookupRef = useRef<Map<string, ImportedNoteLocation>>(new Map())
-  const importFeedbackRef = useRef<ImportFeedback>(importFeedback)
-  const activeSelectionRef = useRef<Selection>(activeSelection)
-  const selectedSelectionsRef = useRef<Selection[]>(selectedSelections)
-  const fullMeasureRestCollapseScopeKeysRef = useRef<string[]>(fullMeasureRestCollapseScopeKeys)
-  const isSelectionVisibleRef = useRef<boolean>(isSelectionVisible)
-  const draggingSelectionRef = useRef<Selection | null>(draggingSelection)
-  const clearDragOverlayRef = useRef<() => void>(() => {})
-  const layoutReflowHintRef = useRef<LayoutReflowHint | null>(null)
-  const midiStepChainRef = useRef(false)
-  const midiStepLastSelectionRef = useRef<Selection | null>(null)
-  const isOsmdPreviewOpenRef = useRef(false)
   const { notePreviewEventsRef, handlePreviewScoreNote, playAccidentalEditPreview } =
     useScoreAudioPreviewController({
       synthRef,
@@ -739,65 +744,21 @@ function App() {
     synthRef,
   })
 
-  const trebleSequenceText = useMemo(() => toSequencePreview(notes), [notes])
-  const bassSequenceText = useMemo(() => toSequencePreview(bassNotes), [bassNotes])
-  const isImportLoading = importFeedback.kind === 'loading'
-  const importProgressPercent =
-    typeof importFeedback.progress === 'number' ? Math.max(0, Math.min(100, importFeedback.progress)) : null
   const {
+    trebleSequenceText,
+    bassSequenceText,
+    isImportLoading,
+    importProgressPercent,
     currentSelection,
     currentSelectionPosition,
     currentSelectionPitchLabel,
     selectedPoolSize,
     derivedNotationPaletteDisplay,
-  } = useScoreSelectionController({
-    notes,
-    bassNotes,
-    measurePairs,
-    activeSelection,
-    selectedSelections,
-    selectedMeasureScope,
-    activeTieSelection,
-    isSelectionVisible,
-    draggingSelection,
-    importFeedback,
-    fallbackSelectionNote: INITIAL_NOTES[0],
-    trebleNoteById,
-    bassNoteById,
-    trebleNoteIndexById,
-    bassNoteIndexById,
-    importedNoteLookupRef,
-    activeSelectionRef,
-    selectedSelectionsRef,
-    fullMeasureRestCollapseScopeKeys,
-    fullMeasureRestCollapseScopeKeysRef,
-    isSelectionVisibleRef,
-    draggingSelectionRef,
-    importFeedbackRef,
-    setIsSelectionVisible,
-    setActiveSelection,
-    setSelectedSelections,
-    setSelectedMeasureScope,
-    setActiveTieSelection,
-  })
-  useEditorPreferencePersistence({
-    playheadFollowEnabled,
-    showChordDegreeEnabled,
-    showInScoreMeasureNumbers,
-    setShowInScoreMeasureNumbers,
-    showNoteHeadJianpuEnabled,
-    setShowNoteHeadJianpuEnabled,
-  })
-  const {
     midiPermissionState,
     midiInputOptions,
     selectedMidiInputId,
     setSelectedMidiInputId,
-  } = useMidiInputController({
-    onMidiNoteNumber: applyMidiReplacementByNoteNumber,
-  })
-  const midiSupported = midiPermissionState !== 'unsupported'
-  const {
+    midiSupported,
     isOsmdPreviewOpen,
     isOsmdPreviewExportingPdf,
     osmdPreviewStatusText,
@@ -838,164 +799,206 @@ function App() {
     onOsmdPreviewSurfaceClick,
     onOsmdPreviewSurfaceDoubleClick,
     dumpOsmdPreviewSystemMetrics,
-  } = useOsmdPreviewController({
-    measurePairs,
-    measurePairsRef,
-    measureKeyFifthsFromImportRef,
-    measureDivisionsFromImportRef,
-    measureTimeSignaturesFromImportRef,
-    musicXmlMetadataFromImportRef,
-    importedNoteLookupRef,
-    horizontalMeasureFramesByPair,
-    noteLayoutsByPairRef,
-    noteLayoutByKeyRef,
-    horizontalRenderOffsetXRef,
-    scoreScrollRef,
-    scoreScaleX,
-    setIsSelectionVisible,
-    setActiveSelection,
-    setSelectedSelections,
-    setDraggingSelection,
-    setSelectedMeasureScope,
-    clearActiveChordSelection,
-    resetMidiStepChain,
-  })
-
-  useEffect(() => {
-    isOsmdPreviewOpenRef.current = isOsmdPreviewOpen
-  }, [isOsmdPreviewOpen])
-  const {
     openBeamGroupingTool,
     toggleNotationPalette,
     closeNotationPalette,
     onNotationPaletteSelectionChange,
-  } = useNotationPaletteController({
-    activeSelection,
-    selectedSelections,
-    isSelectionVisible,
-    currentSelection,
-    measurePairsRef,
-    measurePairsFromImportRef,
-    importedNoteLookupRef,
-    measureKeyFifthsFromImportRef,
-    measureTimeSignaturesFromImportRef,
-    setImportFeedback,
-    setIsNotationPaletteOpen,
-    setNotationPaletteSelection,
-    setNotationPaletteLastAction,
-    applyKeyboardEditResult,
-    playAccidentalEditPreview,
-  })
-  useKeyboardCommandController({
-    isOsmdPreviewOpen,
-    draggingSelection,
-    isSelectionVisible,
-    measurePairs,
-    activeSelection,
-    selectedSelections,
-    selectedMeasureScope,
-    activeTieSelection,
-    activeAccidentalSelection,
-    measureKeyFifthsFromImport,
-    activeSelectionRef,
-    measurePairsRef,
-    measurePairsFromImportRef,
-    importedNoteLookupRef,
-    measureLayoutsRef,
-    measureKeyFifthsFromImportRef,
-    measureTimeSignaturesFromImportRef,
-    scoreScrollRef,
-    layoutReflowHintRef,
-    layoutStabilityKey,
-    pushUndoSnapshot,
-    resetMidiStepChain,
-    undoLastScoreEdit,
-    applyKeyboardEditResult,
-    playAccidentalEditPreview,
-    setNotes,
-    setBassNotes,
-    setMeasurePairsFromImport,
-    setIsSelectionVisible,
-    setSelectedSelections,
-    setSelectedMeasureScope,
-    setActiveSelection,
-    setActiveTieSelection,
-    setActiveAccidentalSelection,
-    setNotationPaletteLastAction,
+  } = useScoreEditorUiController({
+    notes,
+    bassNotes,
+    importFeedback,
+    selectionController: {
+      notes,
+      bassNotes,
+      measurePairs,
+      activeSelection,
+      selectedSelections,
+      selectedMeasureScope,
+      activeTieSelection,
+      isSelectionVisible,
+      draggingSelection,
+      importFeedback,
+      fallbackSelectionNote: INITIAL_NOTES[0],
+      trebleNoteById,
+      bassNoteById,
+      trebleNoteIndexById,
+      bassNoteIndexById,
+      importedNoteLookupRef,
+      activeSelectionRef,
+      selectedSelectionsRef,
+      fullMeasureRestCollapseScopeKeys,
+      fullMeasureRestCollapseScopeKeysRef,
+      isSelectionVisibleRef,
+      draggingSelectionRef,
+      importFeedbackRef,
+      setIsSelectionVisible,
+      setActiveSelection,
+      setSelectedSelections,
+      setSelectedMeasureScope,
+      setActiveTieSelection,
+    },
+    editorPreferencePersistence: {
+      playheadFollowEnabled,
+      showChordDegreeEnabled,
+      showInScoreMeasureNumbers,
+      setShowInScoreMeasureNumbers,
+      showNoteHeadJianpuEnabled,
+      setShowNoteHeadJianpuEnabled,
+    },
+    midiInputController: {
+      onMidiNoteNumber: applyMidiReplacementByNoteNumber,
+    },
+    osmdPreviewController: {
+      measurePairs,
+      measurePairsRef,
+      measureKeyFifthsFromImportRef,
+      measureDivisionsFromImportRef,
+      measureTimeSignaturesFromImportRef,
+      musicXmlMetadataFromImportRef,
+      importedNoteLookupRef,
+      horizontalMeasureFramesByPair,
+      noteLayoutsByPairRef,
+      noteLayoutByKeyRef,
+      horizontalRenderOffsetXRef,
+      scoreScrollRef,
+      scoreScaleX,
+      setIsSelectionVisible,
+      setActiveSelection,
+      setSelectedSelections,
+      setDraggingSelection,
+      setSelectedMeasureScope,
+      clearActiveChordSelection,
+      resetMidiStepChain,
+    },
+    isOsmdPreviewOpenRef,
+    notationPaletteController: {
+      activeSelection,
+      selectedSelections,
+      isSelectionVisible,
+      measurePairsRef,
+      measurePairsFromImportRef,
+      importedNoteLookupRef,
+      measureKeyFifthsFromImportRef,
+      measureTimeSignaturesFromImportRef,
+      setImportFeedback,
+      setIsNotationPaletteOpen,
+      setNotationPaletteSelection,
+      setNotationPaletteLastAction,
+      applyKeyboardEditResult,
+      playAccidentalEditPreview,
+    },
+    keyboardCommandController: {
+      draggingSelection,
+      isSelectionVisible,
+      measurePairs,
+      activeSelection,
+      selectedSelections,
+      selectedMeasureScope,
+      activeTieSelection,
+      activeAccidentalSelection,
+      measureKeyFifthsFromImport,
+      activeSelectionRef,
+      measurePairsRef,
+      measurePairsFromImportRef,
+      importedNoteLookupRef,
+      measureLayoutsRef,
+      measureKeyFifthsFromImportRef,
+      measureTimeSignaturesFromImportRef,
+      scoreScrollRef,
+      layoutReflowHintRef,
+      layoutStabilityKey,
+      pushUndoSnapshot,
+      resetMidiStepChain,
+      undoLastScoreEdit,
+      applyKeyboardEditResult,
+      playAccidentalEditPreview,
+      setNotes,
+      setBassNotes,
+      setMeasurePairsFromImport,
+      setIsSelectionVisible,
+      setSelectedSelections,
+      setSelectedMeasureScope,
+      setActiveSelection,
+      setActiveTieSelection,
+      setActiveAccidentalSelection,
+      setNotationPaletteLastAction,
+    },
   })
 
-  const { playheadRectPx, playbackCursorState } = usePlaybackCursorLayout({
-    playbackCursorPoint,
-    playbackCursorColor,
-    playbackTimelineEventByPointKey,
-    noteLayoutsByPairRef,
-    measureTimelineBundlesRef,
-    measureLayoutsRef,
-    horizontalMeasureFramesByPair,
-    getMeasureFrameContentGeometry,
-    horizontalRenderOffsetX,
-    layoutStabilityKey,
-    chordMarkerLayoutRevision,
-    scoreScaleX,
-    scoreScaleY,
-    scoreSurfaceOffsetYPx,
-  })
   const {
+    playheadRectPx,
     onBeginDragWithFirstMeasureDebug,
     onEndDragWithFirstMeasureDebug,
-  } = useScoreRuntimeDebugController({
-    enabled: import.meta.env.DEV,
-    beginDrag,
-    endDrag,
-    scoreScrollRef,
-    measureLayoutsRef,
-    noteLayoutsByPairRef,
-    measureTimelineBundlesRef,
-    measurePairsRef,
-    dragDebugFramesRef,
-    dragRef,
-    scoreOverlayRef,
-    scoreRef,
-    overlayLastRectRef,
-    importFeedbackRef,
-    notePreviewEventsRef,
-    playbackCursorState,
-    playbackCursorEventsRef,
-    playbackSessionId,
-    playheadStatus,
-    playheadDebugLogRowsRef,
-    playheadDebugSequenceRef,
-    latestPlayheadDebugSnapshotRef,
-    measurePlayheadDebugLogRow,
-    applyChordSelectionRange,
-    selectedSelectionsRef,
-    activeChordSelection,
-    selectedMeasureHighlightRectPx,
-    chordRulerMarkerMetaByKey,
-    playbackTimelineEvents,
-    safeCurrentPage,
-    pageCount,
-    systemsPerPage,
-    visibleSystemRange,
-    activeSelection,
-    osmdPreviewSelectedSelectionKeyRef,
-    osmdPreviewNoteLookupBySelectionRef,
-    importMusicXmlTextWithCollapseReset,
-    playScore,
-    autoScaleEnabled,
-    setAutoScaleEnabled,
-    showNoteHeadJianpuEnabled,
-    setShowNoteHeadJianpuEnabled,
-    safeManualScalePercent,
-    setManualScalePercent,
-    baseScoreScale,
-    scoreScale,
-    scoreScaleX,
-    scoreScaleY,
-    spacingLayoutMode,
-    dumpOsmdPreviewSystemMetrics,
-    osmdPreviewLastRebalanceStatsRef,
-    osmdPreviewInstanceRef,
+  } = useScorePlaybackDebugController({
+    playbackCursorLayout: {
+      playbackCursorPoint,
+      playbackCursorColor,
+      playbackTimelineEventByPointKey,
+      noteLayoutsByPairRef,
+      measureTimelineBundlesRef,
+      measureLayoutsRef,
+      horizontalMeasureFramesByPair,
+      getMeasureFrameContentGeometry,
+      horizontalRenderOffsetX,
+      layoutStabilityKey,
+      chordMarkerLayoutRevision,
+      scoreScaleX,
+      scoreScaleY,
+      scoreSurfaceOffsetYPx,
+    },
+    runtimeDebugController: {
+      enabled: import.meta.env.DEV,
+      beginDrag,
+      endDrag,
+      scoreScrollRef,
+      measureLayoutsRef,
+      noteLayoutsByPairRef,
+      measureTimelineBundlesRef,
+      measurePairsRef,
+      dragDebugFramesRef,
+      dragRef,
+      scoreOverlayRef,
+      scoreRef,
+      overlayLastRectRef,
+      importFeedbackRef,
+      notePreviewEventsRef,
+      playbackCursorEventsRef,
+      playbackSessionId,
+      playheadStatus,
+      playheadDebugLogRowsRef,
+      playheadDebugSequenceRef,
+      latestPlayheadDebugSnapshotRef,
+      measurePlayheadDebugLogRow,
+      applyChordSelectionRange,
+      selectedSelectionsRef,
+      activeChordSelection,
+      selectedMeasureHighlightRectPx,
+      chordRulerMarkerMetaByKey,
+      playbackTimelineEvents,
+      safeCurrentPage,
+      pageCount,
+      systemsPerPage,
+      visibleSystemRange,
+      activeSelection,
+      osmdPreviewSelectedSelectionKeyRef,
+      osmdPreviewNoteLookupBySelectionRef,
+      importMusicXmlTextWithCollapseReset,
+      playScore,
+      autoScaleEnabled,
+      setAutoScaleEnabled,
+      showNoteHeadJianpuEnabled,
+      setShowNoteHeadJianpuEnabled,
+      safeManualScalePercent,
+      setManualScalePercent,
+      baseScoreScale,
+      scoreScale,
+      scoreScaleX,
+      scoreScaleY,
+      spacingLayoutMode,
+      dumpOsmdPreviewSystemMetrics,
+      osmdPreviewLastRebalanceStatsRef,
+      osmdPreviewInstanceRef,
+    },
   })
 
   const { scoreControlsProps, scoreBoardProps } = useScoreViewProps({
