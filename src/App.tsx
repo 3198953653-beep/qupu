@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import * as Tone from 'tone'
 import { Renderer } from 'vexflow'
 import './App.css'
 import {
   A4_PAGE_HEIGHT,
   A4_PAGE_WIDTH,
-  DURATION_TICKS,
   INITIAL_NOTES,
   PIANO_MAX_MIDI,
   PIANO_MIN_MIDI,
@@ -16,7 +15,6 @@ import {
   SYSTEM_BASS_OFFSET_Y,
   SYSTEM_HEIGHT,
   SYSTEM_TREBLE_OFFSET_Y,
-  TICKS_PER_BEAT,
 } from './score/constants'
 import { buildAccidentalStateBeforeNote, getEffectivePitchForStaffPosition } from './score/accidentals'
 import {
@@ -26,7 +24,6 @@ import {
   DEFAULT_TIME_AXIS_SPACING_CONFIG,
 } from './score/layout/timeAxisSpacing'
 import { solveHorizontalMeasureWidths } from './score/layout/horizontalMeasureWidthSolver'
-import { resolveEffectiveBoundary } from './score/layout/effectiveBoundary'
 import {
   resolveActualStartDecorationWidths,
   resolveStartDecorationDisplayMetas,
@@ -45,6 +42,7 @@ import { getDeleteAccidentalFailureMessage, getDeleteMeasureFailureMessage, getD
 import { useMidiInputController } from './score/hooks/useMidiInputController'
 import { usePlaybackController } from './score/hooks/usePlaybackController'
 import { useScoreAudioPreviewController } from './score/hooks/useScoreAudioPreviewController'
+import { useChordMarkerController } from './score/hooks/useChordMarkerController'
 import { useOsmdPreviewController } from './score/hooks/useOsmdPreviewController'
 import { useScoreDebugApi } from './score/hooks/useScoreDebugApi'
 import { ScoreControls } from './score/components/ScoreControls'
@@ -74,11 +72,17 @@ import { appendIntervalKey, deleteSelectedKey, findSelectionLocationInPairs } fr
 import { applyClipboardPaste, buildClipboardFromSelections } from './score/copyPasteEdits'
 import { toPitchFromMidiWithKeyPreference } from './score/midiInput'
 import { getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './score/pitchMath'
-import { buildStaffOnsetTicks, compareTimelinePoint, resolveSelectionTimelinePoint } from './score/selectionTimelineRange'
+import { compareTimelinePoint, resolveSelectionTimelinePoint } from './score/selectionTimelineRange'
 import { resolveForwardTieTargets, resolvePreviousTieTarget } from './score/tieChain'
 import { buildSelectionGroupMoveTargets } from './score/selectionGroupTargets'
-import { buildChordRulerEntries, getMeasureTicksFromTimeSignature, type ChordRulerEntry } from './score/chordRuler'
-import { chordNameToDegree, normalizeKeyMode } from './score/chordDegree'
+import { buildChordRulerEntries, type ChordRulerEntry } from './score/chordRuler'
+import {
+  buildFirstMeasureDiffReport,
+  buildMeasureCoordinateDebugReport,
+  captureFirstMeasureSnapshot,
+  type FirstMeasureDragContext,
+  type FirstMeasureSnapshot,
+} from './score/scoreDebugReports'
 import type { MeasureTimelineBundle } from './score/timeline/types'
 import type { NoteClipboardPayload } from './score/copyPasteTypes'
 import {
@@ -301,17 +305,6 @@ function resolvePairKeyFifthsForKeyboard(pairIndex: number, keyFifthsByMeasure?:
   return 0
 }
 
-function resolvePairKeyMode(pairIndex: number, keyModesByMeasure?: string[] | null): 'major' | 'minor' {
-  if (!keyModesByMeasure || keyModesByMeasure.length === 0) return 'major'
-  for (let index = pairIndex; index >= 0; index -= 1) {
-    const value = keyModesByMeasure[index]
-    if (typeof value === 'string' && value.trim().length > 0) {
-      return normalizeKeyMode(value)
-    }
-  }
-  return 'major'
-}
-
 function shiftPitchByStaffSteps(pitch: Pitch, direction: 'up' | 'down', staffSteps = 1): Pitch | null {
   const diatonicSteps = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
   const { step, octave } = getStepOctaveAlterFromPitch(pitch)
@@ -364,57 +357,6 @@ function isTextInputTarget(target: EventTarget | null): boolean {
   if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') return true
   if (target.isContentEditable) return true
   return Boolean(target.closest('[contenteditable="true"]'))
-}
-
-type ChordRulerMarker = {
-  key: string
-  xPx: number
-  sourceLabel: string
-  displayLabel: string
-  isActive: boolean
-  pairIndex: number
-  positionText: string
-  beatIndex?: number | null
-}
-
-type ChordRulerMarkerAnchorSource = 'note-head' | 'spacing-tick' | 'axis' | 'frame'
-
-type ChordRulerMarkerGeometry = {
-  key: string
-  pairIndex: number
-  sourceLabel: string
-  startTick: number
-  endTick: number
-  positionText: string
-  beatIndex?: number | null
-  anchorSource: ChordRulerMarkerAnchorSource
-  anchorGlobalX: number
-  keyFifths: number
-  keyMode: 'major' | 'minor'
-}
-
-type ChordRulerMarkerMeta = {
-  key: string
-  pairIndex: number
-  sourceLabel: string
-  displayLabel: string
-  startTick: number
-  endTick: number
-  positionText: string
-  beatIndex?: number | null
-  anchorGlobalX: number
-  anchorXPx: number
-  xPx: number
-  anchorSource: ChordRulerMarkerAnchorSource
-  keyFifths: number
-  keyMode: 'major' | 'minor'
-}
-
-type ActiveChordSelection = {
-  markerKey: string | null
-  pairIndex: number
-  startTick: number
-  endTick: number
 }
 
 function getPlaybackPointKey(point: PlaybackPoint): string {
@@ -557,61 +499,6 @@ function buildSelectionsForMeasureStaff(
   return selections
 }
 
-function buildSelectionsForMeasureTickRange(
-  pair: MeasurePair,
-  startTickInclusive: number,
-  endTickExclusive: number,
-): Selection[] {
-  const safeStartTick = Math.max(0, Math.round(startTickInclusive))
-  const safeEndTick = Math.max(safeStartTick, Math.round(endTickExclusive))
-  if (safeEndTick <= safeStartTick) return []
-  const selections: Selection[] = []
-  ;(['treble', 'bass'] as const).forEach((staff) => {
-    const notes = staff === 'treble' ? pair.treble : pair.bass
-    const onsetTicksByNoteIndex = buildStaffOnsetTicks(notes)
-    notes.forEach((note, noteIndex) => {
-      const onsetTick = onsetTicksByNoteIndex[noteIndex]
-      if (!Number.isFinite(onsetTick)) return
-      if (onsetTick < safeStartTick || onsetTick >= safeEndTick) return
-      const maxKeyIndex = note.chordPitches?.length ?? 0
-      for (let keyIndex = 0; keyIndex <= maxKeyIndex; keyIndex += 1) {
-        selections.push({
-          noteId: note.id,
-          staff,
-          keyIndex,
-        })
-      }
-    })
-  })
-  return selections
-}
-
-type FirstMeasureNoteDebugRow = {
-  staff: 'treble' | 'bass'
-  noteId: string
-  noteIndex: number
-  keyIndex: number
-  pitch: Pitch
-  noteX: number | null
-  noteRightX: number | null
-  spacingRightX: number | null
-  headX: number | null
-  headY: number | null
-  pitchY: number | null
-}
-
-type FirstMeasureSnapshot = {
-  stage: string
-  pairIndex: number
-  generatedAt: string
-  measureX: number | null
-  measureWidth: number | null
-  measureEndBarX: number | null
-  noteStartX: number | null
-  noteEndX: number | null
-  rows: FirstMeasureNoteDebugRow[]
-}
-
 type UndoSnapshot = {
   pairs: MeasurePair[]
   imported: boolean
@@ -632,7 +519,6 @@ function App() {
     { noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 },
   ])
   const [selectedMeasureScope, setSelectedMeasureScope] = useState<{ pairIndex: number; staff: Selection['staff'] } | null>(null)
-  const [activeChordSelection, setActiveChordSelection] = useState<ActiveChordSelection | null>(null)
   const [fullMeasureRestCollapseScopeKeys, setFullMeasureRestCollapseScopeKeys] = useState<string[]>([])
   const [isSelectionVisible, setIsSelectionVisible] = useState(true)
   const [draggingSelection, setDraggingSelection] = useState<Selection | null>(null)
@@ -725,12 +611,7 @@ function App() {
   const musicXmlMetadataFromImportRef = useRef<MusicXmlMetadata | null>(null)
   const importedNoteLookupRef = useRef<Map<string, ImportedNoteLocation>>(new Map())
   const firstMeasureBaselineRef = useRef<FirstMeasureSnapshot | null>(null)
-  const firstMeasureDragContextRef = useRef<{
-    noteId: string
-    staff: Selection['staff']
-    keyIndex: number
-    pairIndex: number
-  } | null>(null)
+  const firstMeasureDragContextRef = useRef<FirstMeasureDragContext | null>(null)
   const firstMeasureDebugRafRef = useRef<number | null>(null)
   const importFeedbackRef = useRef<ImportFeedback>(importFeedback)
   const activeSelectionRef = useRef<Selection>(activeSelection)
@@ -743,8 +624,6 @@ function App() {
   const midiStepChainRef = useRef(false)
   const midiStepLastSelectionRef = useRef<Selection | null>(null)
   const noteClipboardRef = useRef<NoteClipboardPayload | null>(null)
-  const chordMarkerLayoutRequestRef = useRef(0)
-  const chordMarkerLayoutAppliedRef = useRef(0)
   const isOsmdPreviewOpenRef = useRef(false)
   const { notePreviewEventsRef, handlePreviewScoreNote, playAccidentalEditPreview } =
     useScoreAudioPreviewController({
@@ -960,6 +839,9 @@ function App() {
   const scaledScoreContentHeight = Math.max(1, HORIZONTAL_VIEW_HEIGHT_PX * viewportHeightScaleByZoom)
   const displayScoreHeight = Math.max(1, Math.round(scaledScoreContentHeight * canvasHeightScale))
   const scoreHeight = Math.max(1, Math.round(scaledScoreContentHeight / scoreScaleY))
+  const scoreSurfaceOffsetXPx = horizontalRenderOffsetX * scoreScaleX
+  const scaledRenderedScoreHeight = Math.max(1, scoreHeight * scoreScaleY)
+  const scoreSurfaceOffsetYPx = Math.max(0, (displayScoreHeight - scaledRenderedScoreHeight) / 2)
   const renderQualityScale = useMemo(() => {
     const maxBackingStoreDim = 32760
     const devicePixelRatio =
@@ -1058,9 +940,73 @@ function App() {
     timeAxisSpacingConfig.durationGapRatios.whole,
     spacingLayoutMode,
   ])
-  const [chordMarkerLayoutRevision, setChordMarkerLayoutRevision] = useState(0)
-  const [chordRulerMarkerGeometryByKey, setChordRulerMarkerGeometryByKey] =
-    useState<Map<string, ChordRulerMarkerGeometry>>(new Map())
+  const clearActiveAccidentalSelection = useCallback(() => {
+    setActiveAccidentalSelection(null)
+  }, [])
+  const clearActiveTieSelection = useCallback(() => {
+    setActiveTieSelection(null)
+  }, [])
+  const clearSelectedMeasureScope = useCallback(() => {
+    setSelectedMeasureScope(null)
+  }, [])
+  const clearDraggingSelection = useCallback(() => {
+    setDraggingSelection(null)
+  }, [])
+  const resetMidiStepChain = useCallback(() => {
+    midiStepChainRef.current = false
+    midiStepLastSelectionRef.current = null
+  }, [])
+  const canContinueMidiStep = useCallback((targetSelection: Selection): boolean => {
+    if (!midiStepChainRef.current) return false
+    const lastSelection = midiStepLastSelectionRef.current
+    if (!lastSelection) return false
+    return isSameSelection(lastSelection, targetSelection)
+  }, [])
+  const {
+    chordMarkerLayoutRevision,
+    activeChordSelection,
+    clearActiveChordSelection,
+    onAfterScoreRender,
+    measureRulerTicks,
+    chordRulerMarkerMetaByKey,
+    chordRulerMarkers,
+    applyChordSelectionRange,
+    onChordRulerMarkerClick,
+    selectedMeasureHighlightRectPx,
+  } = useChordMarkerController({
+    measurePairs,
+    measurePairsRef,
+    chordRulerEntriesByPair,
+    horizontalMeasureFramesByPair,
+    measureTimeSignaturesFromImport,
+    measureKeyFifthsFromImport,
+    measureKeyModesFromImport,
+    horizontalRenderOffsetX,
+    horizontalRenderOffsetXRef,
+    noteLayoutsByPairRef,
+    measureLayoutsRef,
+    measureTimelineBundlesRef,
+    scoreScaleX,
+    scoreScaleY,
+    scoreSurfaceOffsetXPx,
+    scoreSurfaceOffsetYPx,
+    selectedMeasureScope,
+    showChordDegreeEnabled,
+    chordMarkerLabelLeftInsetPx: chordMarkerStyleMetrics.labelLeftInsetPx,
+    stageBorderPx: SCORE_STAGE_BORDER_PX,
+    chordHighlightPadXPx: CHORD_HIGHLIGHT_PAD_X_PX,
+    chordHighlightPadYPx: CHORD_HIGHLIGHT_PAD_Y_PX,
+    layoutStabilityKey,
+    getMeasureFrameContentGeometry,
+    setIsSelectionVisible,
+    setSelectedSelections,
+    setActiveSelection,
+    clearActiveAccidentalSelection,
+    clearActiveTieSelection,
+    clearSelectedMeasureScope,
+    clearDraggingSelection,
+    resetMidiStepChain,
+  })
   const {
     playbackCursorPoint,
     playbackCursorColor,
@@ -1090,133 +1036,6 @@ function App() {
     playheadGeometryRevision: `${layoutStabilityKey}:${chordMarkerLayoutRevision}`,
     playheadFollowEnabled,
   })
-  useLayoutEffect(() => {
-    chordMarkerLayoutRequestRef.current += 1
-  }, [
-    measurePairs,
-    measurePairsFromImport,
-    measureTimeSignaturesFromImport,
-    horizontalMeasureFramesByPair,
-    horizontalRenderOffsetX,
-    scoreScaleX,
-    layoutStabilityKey,
-  ])
-  const buildChordRulerMarkerGeometrySnapshot = useCallback(() => {
-    const appliedRenderOffsetX = horizontalRenderOffsetXRef.current
-    const markers = new Map<string, ChordRulerMarkerGeometry>()
-    const resolveTickHeadGlobalX = (params: {
-      pairIndex: number
-      startTick: number
-    }): number | null => {
-      const { pairIndex, startTick } = params
-      const pair = measurePairs[pairIndex]
-      if (!pair) return null
-      const pairLayouts = noteLayoutsByPairRef.current.get(pairIndex) ?? []
-      if (pairLayouts.length === 0) return null
-
-      const trebleOnsetTicksByIndex = buildStaffOnsetTicks(pair.treble)
-      const bassOnsetTicksByIndex = buildStaffOnsetTicks(pair.bass)
-      let bestCandidate: { headGlobalX: number; staffPriority: number; noteIndex: number } | null = null
-
-      for (const layout of pairLayouts) {
-        const sourceNote = layout.staff === 'treble' ? pair.treble[layout.noteIndex] : pair.bass[layout.noteIndex]
-        if (!sourceNote || sourceNote.isRest) continue
-        const onsetTicksByIndex = layout.staff === 'treble' ? trebleOnsetTicksByIndex : bassOnsetTicksByIndex
-        const onsetTick = onsetTicksByIndex[layout.noteIndex]
-        if (onsetTick !== startTick) continue
-        const rootHead = layout.noteHeads.find((head) => head.keyIndex === 0) ?? layout.noteHeads[0] ?? null
-        if (!rootHead) continue
-        const localHeadLeftX = Number.isFinite(rootHead.hitMinX) ? (rootHead.hitMinX as number) : rootHead.x
-        if (!Number.isFinite(localHeadLeftX)) continue
-        const candidate = {
-          headGlobalX: localHeadLeftX + appliedRenderOffsetX,
-          staffPriority: layout.staff === 'treble' ? 0 : 1,
-          noteIndex: layout.noteIndex,
-        }
-        if (
-          bestCandidate === null ||
-          candidate.headGlobalX < bestCandidate.headGlobalX - 0.001 ||
-          (Math.abs(candidate.headGlobalX - bestCandidate.headGlobalX) <= 0.001 &&
-            (candidate.staffPriority < bestCandidate.staffPriority ||
-              (candidate.staffPriority === bestCandidate.staffPriority && candidate.noteIndex < bestCandidate.noteIndex)))
-        ) {
-          bestCandidate = candidate
-        }
-      }
-
-      return bestCandidate?.headGlobalX ?? null
-    }
-
-    horizontalMeasureFramesByPair.forEach((frame, pairIndex) => {
-      const timelineBundle = measureTimelineBundlesRef.current.get(pairIndex) ?? null
-      const timeSignature = resolvePairTimeSignature(pairIndex, measureTimeSignaturesFromImport)
-      const measureTicks = Math.max(1, timelineBundle?.measureTicks ?? getMeasureTicksFromTimeSignature(timeSignature))
-      const chordEntries = chordRulerEntriesByPair?.[pairIndex] ?? []
-      chordEntries.forEach((entry, entryIndex) => {
-        const safeStartTick = Math.max(0, Math.min(measureTicks, Math.round(entry.startTick)))
-        const safeEndTick = Math.max(safeStartTick, Math.min(measureTicks, Math.round(entry.endTick)))
-        if (safeEndTick <= safeStartTick) return
-
-        let anchorSource: ChordRulerMarkerAnchorSource = 'frame'
-        let anchorGlobalX = resolveTickHeadGlobalX({ pairIndex, startTick: safeStartTick })
-        if (anchorGlobalX !== null) {
-          anchorSource = 'note-head'
-        } else {
-          const spacingTickX = timelineBundle?.spacingTickToX.get(safeStartTick)
-          if (typeof spacingTickX === 'number' && Number.isFinite(spacingTickX)) {
-            anchorSource = 'spacing-tick'
-            anchorGlobalX = spacingTickX + appliedRenderOffsetX
-          } else {
-            const axisX = timelineBundle?.publicAxisLayout?.tickToX.get(safeStartTick)
-            if (typeof axisX === 'number' && Number.isFinite(axisX)) {
-              anchorSource = 'axis'
-              anchorGlobalX = axisX + appliedRenderOffsetX
-            } else {
-              const frameContentGeometry = getMeasureFrameContentGeometry(frame)
-              anchorSource = 'frame'
-              anchorGlobalX = frameContentGeometry
-                ? frameContentGeometry.contentStartX +
-                  frameContentGeometry.contentMeasureWidth * (safeStartTick / Math.max(1, measureTicks))
-                : frame.measureX + frame.measureWidth * (safeStartTick / Math.max(1, measureTicks))
-            }
-          }
-        }
-
-        if (typeof anchorGlobalX !== 'number' || !Number.isFinite(anchorGlobalX)) return
-        const key = `chord-ruler-${pairIndex + 1}-${safeStartTick}-${entryIndex}`
-        markers.set(key, {
-          key,
-          pairIndex,
-          beatIndex: entry.beatIndex,
-          sourceLabel: entry.label,
-          startTick: safeStartTick,
-          endTick: safeEndTick,
-          positionText: entry.positionText,
-          anchorSource,
-          anchorGlobalX,
-          keyFifths: resolvePairKeyFifthsForKeyboard(pairIndex, measureKeyFifthsFromImport),
-          keyMode: resolvePairKeyMode(pairIndex, measureKeyModesFromImport),
-        })
-      })
-    })
-
-    return markers
-  }, [
-    chordRulerEntriesByPair,
-    getMeasureFrameContentGeometry,
-    horizontalMeasureFramesByPair,
-    measureKeyFifthsFromImport,
-    measureKeyModesFromImport,
-    measurePairs,
-    measureTimeSignaturesFromImport,
-  ])
-  const onAfterScoreRender = useCallback(() => {
-    const request = chordMarkerLayoutRequestRef.current
-    if (request <= chordMarkerLayoutAppliedRef.current) return
-    chordMarkerLayoutAppliedRef.current = request
-    setChordRulerMarkerGeometryByKey(buildChordRulerMarkerGeometrySnapshot())
-    setChordMarkerLayoutRevision((current) => (current === request ? current : request))
-  }, [buildChordRulerMarkerGeometrySnapshot])
 
   useEffect(() => {
     const scrollHost = scoreScrollRef.current
@@ -1368,22 +1187,6 @@ function App() {
     if (stack.length > UNDO_HISTORY_LIMIT) {
       stack.splice(0, stack.length - UNDO_HISTORY_LIMIT)
     }
-  }, [])
-
-  const resetMidiStepChain = useCallback(() => {
-    midiStepChainRef.current = false
-    midiStepLastSelectionRef.current = null
-  }, [])
-
-  const canContinueMidiStep = useCallback((targetSelection: Selection): boolean => {
-    if (!midiStepChainRef.current) return false
-    const lastSelection = midiStepLastSelectionRef.current
-    if (!lastSelection) return false
-    return isSameSelection(lastSelection, targetSelection)
-  }, [])
-
-  const clearActiveChordSelection = useCallback(() => {
-    setActiveChordSelection(null)
   }, [])
 
   const {
@@ -2849,9 +2652,6 @@ function App() {
     undoLastScoreEdit,
   ])
 
-  const scoreSurfaceOffsetXPx = horizontalRenderOffsetX * scoreScaleX
-  const scaledRenderedScoreHeight = Math.max(1, scoreHeight * scoreScaleY)
-  const scoreSurfaceOffsetYPx = Math.max(0, (displayScoreHeight - scaledRenderedScoreHeight) / 2)
   const playheadRectPx = useMemo<PlaybackCursorRect | null>(() => {
     void layoutStabilityKey
     void chordMarkerLayoutRevision
@@ -2975,399 +2775,6 @@ function App() {
     color: playbackCursorColor,
     rectPx: playheadRectPx ? { ...playheadRectPx } : null,
   }), [playbackCursorColor, playbackCursorPoint, playheadRectPx])
-  const measureRulerTicks = useMemo(() => {
-    if (horizontalMeasureFramesByPair.length === 0) return [] as Array<{ key: string; xPx: number; label: string }>
-    return horizontalMeasureFramesByPair.map((frame, index) => {
-      return {
-        key: `measure-ruler-${index + 1}`,
-        // Keep ruler ticks in the same visual coordinate space as barlines in the bordered stage.
-        xPx: frame.measureX * scoreScaleX + SCORE_STAGE_BORDER_PX,
-        label: `${index + 1}`,
-      }
-    })
-  }, [horizontalMeasureFramesByPair, scoreScaleX])
-  const chordRulerMarkerMetaByKey = useMemo(() => {
-    const markers = new Map<string, ChordRulerMarkerMeta>()
-    chordRulerMarkerGeometryByKey.forEach((geometry, key) => {
-      const displayLabel = showChordDegreeEnabled
-        ? chordNameToDegree(geometry.sourceLabel, geometry.keyFifths, geometry.keyMode)
-        : geometry.sourceLabel
-      const textAnchorXPx = geometry.anchorGlobalX * scoreScaleX + SCORE_STAGE_BORDER_PX
-      const buttonLeftXPx = textAnchorXPx - chordMarkerStyleMetrics.labelLeftInsetPx
-      if (!Number.isFinite(buttonLeftXPx)) return
-      markers.set(key, {
-        key: geometry.key,
-        pairIndex: geometry.pairIndex,
-        beatIndex: geometry.beatIndex,
-        sourceLabel: geometry.sourceLabel,
-        displayLabel,
-        startTick: geometry.startTick,
-        endTick: geometry.endTick,
-        positionText: geometry.positionText,
-        anchorGlobalX: geometry.anchorGlobalX,
-        anchorXPx: textAnchorXPx,
-        xPx: buttonLeftXPx,
-        anchorSource: geometry.anchorSource,
-        keyFifths: geometry.keyFifths,
-        keyMode: geometry.keyMode,
-      })
-    })
-    return markers
-  }, [
-    chordMarkerStyleMetrics.labelLeftInsetPx,
-    chordRulerMarkerGeometryByKey,
-    scoreScaleX,
-    showChordDegreeEnabled,
-  ])
-  useEffect(() => {
-    if (!activeChordSelection) return
-    if (activeChordSelection.markerKey === null) return
-    if (chordRulerMarkerMetaByKey.has(activeChordSelection.markerKey)) return
-    setActiveChordSelection(null)
-  }, [activeChordSelection, chordRulerMarkerMetaByKey])
-  const chordRulerMarkers = useMemo(() => {
-    if (chordRulerMarkerMetaByKey.size === 0) return [] as ChordRulerMarker[]
-    return [...chordRulerMarkerMetaByKey.values()].map((marker) => ({
-      key: marker.key,
-      xPx: marker.xPx,
-      sourceLabel: marker.sourceLabel,
-      displayLabel: marker.displayLabel,
-      isActive: activeChordSelection?.markerKey === marker.key,
-      pairIndex: marker.pairIndex,
-      positionText: marker.positionText,
-      beatIndex: marker.beatIndex,
-    }))
-  }, [activeChordSelection, chordRulerMarkerMetaByKey])
-  const applyChordSelectionRange = useCallback((params: {
-    pairIndex: number
-    startTick: number
-    endTick: number
-    markerKey?: string | null
-  }): Selection[] => {
-    const targetPair = measurePairsRef.current[params.pairIndex]
-    if (!targetPair) return []
-    const nextSelections = buildSelectionsForMeasureTickRange(targetPair, params.startTick, params.endTick)
-    resetMidiStepChain()
-    setActiveAccidentalSelection(null)
-    setActiveTieSelection(null)
-    setSelectedMeasureScope(null)
-    setDraggingSelection(null)
-    if (nextSelections.length > 0) {
-      setIsSelectionVisible(true)
-      setSelectedSelections(nextSelections)
-      setActiveSelection(nextSelections[0])
-    } else {
-      setIsSelectionVisible(false)
-      setSelectedSelections([])
-    }
-    setActiveChordSelection({
-      markerKey: params.markerKey ?? null,
-      pairIndex: params.pairIndex,
-      startTick: params.startTick,
-      endTick: params.endTick,
-    })
-    return nextSelections
-  }, [resetMidiStepChain])
-  const onChordRulerMarkerClick = useCallback((markerKey: string) => {
-    const marker = chordRulerMarkerMetaByKey.get(markerKey)
-    if (!marker) return
-    applyChordSelectionRange({
-      pairIndex: marker.pairIndex,
-      startTick: marker.startTick,
-      endTick: marker.endTick,
-      markerKey: marker.key,
-    })
-  }, [applyChordSelectionRange, chordRulerMarkerMetaByKey])
-  const resolveChordHighlightContentBounds = useCallback((params: {
-    pairIndex: number
-    startTick: number
-    endTick: number
-  }): { leftXRaw: number; rightXRaw: number } | null => {
-    const safeStartTick = Math.max(0, Math.round(params.startTick))
-    const safeEndTick = Math.max(safeStartTick, Math.round(params.endTick))
-    if (safeEndTick <= safeStartTick) return null
-
-    const pair = measurePairsRef.current[params.pairIndex]
-    if (!pair) return null
-    const pairLayouts = noteLayoutsByPairRef.current.get(params.pairIndex) ?? []
-    if (pairLayouts.length === 0) return null
-
-    const layoutByStaffNoteIndex = new Map<string, NoteLayout>()
-    pairLayouts.forEach((layout) => {
-      layoutByStaffNoteIndex.set(`${layout.staff}:${layout.noteIndex}`, layout)
-    })
-
-    let minLeftX = Number.POSITIVE_INFINITY
-    let maxRightX = Number.NEGATIVE_INFINITY
-    const acceptBounds = (left: number, right: number) => {
-      if (!Number.isFinite(left) || !Number.isFinite(right)) return
-      if (right <= left) return
-      minLeftX = Math.min(minLeftX, left)
-      maxRightX = Math.max(maxRightX, right)
-    }
-
-    ;(['treble', 'bass'] as const).forEach((staff) => {
-      const staffNotes = staff === 'treble' ? pair.treble : pair.bass
-      const onsetTicksByNoteIndex = buildStaffOnsetTicks(staffNotes)
-      staffNotes.forEach((_, noteIndex) => {
-        const onsetTick = onsetTicksByNoteIndex[noteIndex]
-        if (!Number.isFinite(onsetTick)) return
-        if (onsetTick < safeStartTick || onsetTick >= safeEndTick) return
-
-        const layout = layoutByStaffNoteIndex.get(`${staff}:${noteIndex}`) ?? null
-        if (!layout) return
-
-        const leftCandidates: number[] = []
-        if (Number.isFinite(layout.x)) leftCandidates.push(layout.x)
-        layout.noteHeads.forEach((head) => {
-          if (Number.isFinite(head.hitMinX)) {
-            leftCandidates.push(head.hitMinX as number)
-          } else if (Number.isFinite(head.x)) {
-            leftCandidates.push(head.x)
-          }
-        })
-        layout.accidentalLayouts.forEach((accidental) => {
-          if (Number.isFinite(accidental.hitMinX)) {
-            leftCandidates.push(accidental.hitMinX as number)
-            return
-          }
-          if (!Number.isFinite(accidental.x)) return
-          if (Number.isFinite(accidental.hitRadiusX)) {
-            leftCandidates.push(accidental.x - (accidental.hitRadiusX as number))
-            return
-          }
-          leftCandidates.push(accidental.x - 4)
-        })
-
-        const rightCandidates: number[] = []
-        layout.noteHeads.forEach((head) => {
-          if (Number.isFinite(head.hitMaxX)) {
-            rightCandidates.push(head.hitMaxX as number)
-            return
-          }
-          if (Number.isFinite(head.x)) {
-            rightCandidates.push(head.x + 9)
-          }
-        })
-        if (Number.isFinite(layout.spacingRightX)) {
-          rightCandidates.push(layout.spacingRightX)
-        }
-        if (rightCandidates.length === 0 && Number.isFinite(layout.x)) {
-          rightCandidates.push(layout.x + 9)
-        }
-        if (rightCandidates.length === 0 && Number.isFinite(layout.rightX)) {
-          rightCandidates.push(layout.rightX)
-        }
-
-        const noteLeft = leftCandidates.length > 0 ? Math.min(...leftCandidates) : Number.POSITIVE_INFINITY
-        const noteRight = rightCandidates.length > 0 ? Math.max(...rightCandidates) : Number.NEGATIVE_INFINITY
-        acceptBounds(noteLeft, noteRight)
-      })
-    })
-
-    if (!Number.isFinite(minLeftX) || !Number.isFinite(maxRightX)) return null
-    if (maxRightX <= minLeftX) return null
-    return {
-      leftXRaw: minLeftX,
-      rightXRaw: maxRightX,
-    }
-  }, [])
-  const selectedMeasureHighlightRectPx = useMemo(() => {
-    void layoutStabilityKey
-    void chordMarkerLayoutRevision
-    const measurePadX = 6
-    const measurePadY = 4
-    if (activeChordSelection !== null) {
-      const measureLayout = measureLayoutsRef.current.get(activeChordSelection.pairIndex) ?? null
-      if (!measureLayout) return null
-      const contentBounds = resolveChordHighlightContentBounds({
-        pairIndex: activeChordSelection.pairIndex,
-        startTick: activeChordSelection.startTick,
-        endTick: activeChordSelection.endTick,
-      })
-      if (!contentBounds) return null
-      const trebleTopRaw = Number.isFinite(measureLayout.trebleLineTopY) ? measureLayout.trebleLineTopY : measureLayout.trebleY
-      const trebleBottomRaw =
-        Number.isFinite(measureLayout.trebleLineBottomY) ? measureLayout.trebleLineBottomY : measureLayout.trebleY + 40
-      const bassTopRaw = Number.isFinite(measureLayout.bassLineTopY) ? measureLayout.bassLineTopY : measureLayout.bassY
-      const bassBottomRaw =
-        Number.isFinite(measureLayout.bassLineBottomY) ? measureLayout.bassLineBottomY : measureLayout.bassY + 40
-      const trebleTop = Math.min(trebleTopRaw, trebleBottomRaw)
-      const trebleBottom = Math.max(trebleTopRaw, trebleBottomRaw)
-      const bassTop = Math.min(bassTopRaw, bassBottomRaw)
-      const bassBottom = Math.max(bassTopRaw, bassBottomRaw)
-      const lineTop = Math.min(trebleTop, bassTop)
-      const lineBottom = Math.max(trebleBottom, bassBottom)
-      const x = scoreSurfaceOffsetXPx + contentBounds.leftXRaw * scoreScaleX + SCORE_STAGE_BORDER_PX
-      const y = scoreSurfaceOffsetYPx + lineTop * scoreScaleY + SCORE_STAGE_BORDER_PX
-      const width = (contentBounds.rightXRaw - contentBounds.leftXRaw) * scoreScaleX
-      const height = (lineBottom - lineTop) * scoreScaleY
-      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height)) {
-        return null
-      }
-      if (width <= 0 || height <= 0) return null
-      return {
-        x: x - CHORD_HIGHLIGHT_PAD_X_PX,
-        y: y - CHORD_HIGHLIGHT_PAD_Y_PX,
-        width: width + CHORD_HIGHLIGHT_PAD_X_PX * 2,
-        height: height + CHORD_HIGHLIGHT_PAD_Y_PX * 2,
-      }
-    }
-    if (selectedMeasureScope === null) return null
-    const measureLayout = measureLayoutsRef.current.get(selectedMeasureScope.pairIndex) ?? null
-    if (!measureLayout) return null
-    const frame = horizontalMeasureFramesByPair[selectedMeasureScope.pairIndex] ?? null
-    const x =
-      frame !== null
-        ? frame.measureX * scoreScaleX + SCORE_STAGE_BORDER_PX
-        : scoreSurfaceOffsetXPx + measureLayout.measureX * scoreScaleX + SCORE_STAGE_BORDER_PX
-    const lineTopRaw =
-      selectedMeasureScope.staff === 'treble'
-        ? (Number.isFinite(measureLayout.trebleLineTopY) ? measureLayout.trebleLineTopY : measureLayout.trebleY)
-        : (Number.isFinite(measureLayout.bassLineTopY) ? measureLayout.bassLineTopY : measureLayout.bassY)
-    const lineBottomRaw =
-      selectedMeasureScope.staff === 'treble'
-        ? (Number.isFinite(measureLayout.trebleLineBottomY) ? measureLayout.trebleLineBottomY : measureLayout.trebleY + 40)
-        : (Number.isFinite(measureLayout.bassLineBottomY) ? measureLayout.bassLineBottomY : measureLayout.bassY + 40)
-    const lineTop = Math.min(lineTopRaw, lineBottomRaw)
-    const lineBottom = Math.max(lineTopRaw, lineBottomRaw)
-    const y = scoreSurfaceOffsetYPx + lineTop * scoreScaleY + SCORE_STAGE_BORDER_PX
-    const width =
-      frame !== null
-        ? frame.measureWidth * scoreScaleX
-        : measureLayout.measureWidth * scoreScaleX
-    const height = (lineBottom - lineTop) * scoreScaleY
-    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height)) {
-      return null
-    }
-    if (width <= 0 || height <= 0) return null
-    return {
-      x: x - measurePadX,
-      y: y - measurePadY,
-      width: width + measurePadX * 2,
-      height: height + measurePadY * 2,
-    }
-  }, [
-    activeChordSelection,
-    chordMarkerLayoutRevision,
-    horizontalMeasureFramesByPair,
-    resolveChordHighlightContentBounds,
-    selectedMeasureScope,
-    scoreSurfaceOffsetXPx,
-    scoreSurfaceOffsetYPx,
-    scoreScaleX,
-    scoreScaleY,
-    layoutStabilityKey,
-  ])
-  const formatDebugCoord = (value: number | null | undefined): string => {
-    if (typeof value !== 'number' || !Number.isFinite(value)) return 'null'
-    return value.toFixed(3)
-  }
-  const finiteOrNull = (value: number | null | undefined): number | null => {
-    if (typeof value !== 'number' || !Number.isFinite(value)) return null
-    return value
-  }
-  const getPitchForKeyIndex = (note: ScoreNote, keyIndex: number): Pitch => {
-    if (keyIndex <= 0) return note.pitch
-    return note.chordPitches?.[keyIndex - 1] ?? note.pitch
-  }
-  const captureFirstMeasureSnapshot = (stage: string): FirstMeasureSnapshot | null => {
-    const pairIndex = 0
-    const measure = measurePairsRef.current[pairIndex]
-    if (!measure) return null
-    const layouts = noteLayoutsByPairRef.current.get(pairIndex) ?? []
-    const layoutByNoteKey = new Map<string, NoteLayout>()
-    layouts.forEach((layout) => {
-      layoutByNoteKey.set(`${layout.staff}:${layout.id}`, layout)
-    })
-    const measureLayout = measureLayoutsRef.current.get(pairIndex) ?? null
-    const rows: FirstMeasureNoteDebugRow[] = []
-    const pushRows = (staff: 'treble' | 'bass', notes: ScoreNote[]) => {
-      notes.forEach((note, noteIndex) => {
-        const layout = layoutByNoteKey.get(`${staff}:${note.id}`)
-        const keyCount = 1 + (note.chordPitches?.length ?? 0)
-        for (let keyIndex = 0; keyIndex < keyCount; keyIndex += 1) {
-          const pitch = getPitchForKeyIndex(note, keyIndex)
-          const head = layout?.noteHeads.find((item) => item.keyIndex === keyIndex)
-          rows.push({
-            staff,
-            noteId: note.id,
-            noteIndex,
-            keyIndex,
-            pitch,
-            noteX: finiteOrNull(layout?.x),
-            noteRightX: finiteOrNull(layout?.rightX),
-            spacingRightX: finiteOrNull(layout?.spacingRightX),
-            headX: finiteOrNull(head?.x),
-            headY: finiteOrNull(head?.y),
-            pitchY: finiteOrNull(layout?.pitchYMap[pitch]),
-          })
-        }
-      })
-    }
-    pushRows('treble', measure.treble)
-    pushRows('bass', measure.bass)
-    return {
-      stage,
-      pairIndex,
-      generatedAt: new Date().toISOString(),
-      measureX: finiteOrNull(measureLayout?.measureX),
-      measureWidth: finiteOrNull(measureLayout?.contentMeasureWidth ?? measureLayout?.measureWidth),
-      measureEndBarX: finiteOrNull(
-        measureLayout
-          ? measureLayout.measureX + (measureLayout.renderedMeasureWidth ?? measureLayout.measureWidth)
-          : null,
-      ),
-      noteStartX: finiteOrNull(measureLayout?.noteStartX),
-      noteEndX: finiteOrNull(measureLayout?.noteEndX),
-      rows,
-    }
-  }
-  const buildFirstMeasureDiffReport = (
-    beforeSnapshot: FirstMeasureSnapshot,
-    afterSnapshot: FirstMeasureSnapshot,
-  ): string => {
-    const afterByRowKey = new Map<string, FirstMeasureNoteDebugRow>()
-    afterSnapshot.rows.forEach((row) => {
-      afterByRowKey.set(`${row.staff}:${row.noteId}:${row.keyIndex}`, row)
-    })
-    const lines: string[] = [
-      `generatedAt: ${new Date().toISOString()}`,
-      `debugTarget: first-measure(pair=0)`,
-      `dragged: ${
-        firstMeasureDragContextRef.current
-          ? `${firstMeasureDragContextRef.current.staff}:${firstMeasureDragContextRef.current.noteId}[key=${firstMeasureDragContextRef.current.keyIndex}] pair=${firstMeasureDragContextRef.current.pairIndex}`
-          : 'unknown'
-      }`,
-      `dragPreviewFrameCount: ${dragDebugFramesRef.current.length}`,
-      `baselineStage: ${beforeSnapshot.stage} at ${beforeSnapshot.generatedAt}`,
-      `releaseStage: ${afterSnapshot.stage} at ${afterSnapshot.generatedAt}`,
-      `baseline measureX=${formatDebugCoord(beforeSnapshot.measureX)} measureWidth=${formatDebugCoord(beforeSnapshot.measureWidth)} measureEndBarX=${formatDebugCoord(beforeSnapshot.measureEndBarX)} noteStartX=${formatDebugCoord(beforeSnapshot.noteStartX)} noteEndX=${formatDebugCoord(beforeSnapshot.noteEndX)}`,
-      `release  measureX=${formatDebugCoord(afterSnapshot.measureX)} measureWidth=${formatDebugCoord(afterSnapshot.measureWidth)} measureEndBarX=${formatDebugCoord(afterSnapshot.measureEndBarX)} noteStartX=${formatDebugCoord(afterSnapshot.noteStartX)} noteEndX=${formatDebugCoord(afterSnapshot.noteEndX)}`,
-      '',
-      'rows (before -> after | delta):',
-    ]
-    beforeSnapshot.rows.forEach((beforeRow) => {
-      const rowKey = `${beforeRow.staff}:${beforeRow.noteId}:${beforeRow.keyIndex}`
-      const afterRow = afterByRowKey.get(rowKey)
-      const delta = (afterValue: number | null, beforeValue: number | null): string => {
-        if (typeof afterValue !== 'number' || typeof beforeValue !== 'number') return 'null'
-        return (afterValue - beforeValue).toFixed(3)
-      }
-      lines.push(
-        [
-          `- ${beforeRow.staff} note=${beforeRow.noteId} idx=${beforeRow.noteIndex} key=${beforeRow.keyIndex} pitch=${beforeRow.pitch}:`,
-          `noteX ${formatDebugCoord(beforeRow.noteX)} -> ${formatDebugCoord(afterRow?.noteX)} (d=${delta(afterRow?.noteX ?? null, beforeRow.noteX)})`,
-          `headX ${formatDebugCoord(beforeRow.headX)} -> ${formatDebugCoord(afterRow?.headX)} (d=${delta(afterRow?.headX ?? null, beforeRow.headX)})`,
-          `headY ${formatDebugCoord(beforeRow.headY)} -> ${formatDebugCoord(afterRow?.headY)} (d=${delta(afterRow?.headY ?? null, beforeRow.headY)})`,
-          `pitchY ${formatDebugCoord(beforeRow.pitchY)} -> ${formatDebugCoord(afterRow?.pitchY)} (d=${delta(afterRow?.pitchY ?? null, beforeRow.pitchY)})`,
-          `rightX ${formatDebugCoord(beforeRow.noteRightX)} -> ${formatDebugCoord(afterRow?.noteRightX)} (d=${delta(afterRow?.noteRightX ?? null, beforeRow.noteRightX)})`,
-          `spacingRightX ${formatDebugCoord(beforeRow.spacingRightX)} -> ${formatDebugCoord(afterRow?.spacingRightX)} (d=${delta(afterRow?.spacingRightX ?? null, beforeRow.spacingRightX)})`,
-        ].join(' '),
-      )
-    })
-    return lines.join('\n')
-  }
   const onBeginDragWithFirstMeasureDebug: typeof beginDrag = (event) => {
     scoreScrollRef.current?.focus()
     beginDrag(event)
@@ -3380,7 +2787,12 @@ function App() {
       keyIndex: drag.keyIndex,
       pairIndex: drag.pairIndex,
     }
-    firstMeasureBaselineRef.current = captureFirstMeasureSnapshot('before-drag')
+    firstMeasureBaselineRef.current = captureFirstMeasureSnapshot({
+      stage: 'before-drag',
+      measurePairs: measurePairsRef.current,
+      noteLayoutsByPair: noteLayoutsByPairRef.current,
+      measureLayouts: measureLayoutsRef.current,
+    })
   }
   const onEndDragWithFirstMeasureDebug: typeof endDrag = (event) => {
     const dragging = dragRef.current
@@ -3395,9 +2807,19 @@ function App() {
     }
     firstMeasureDebugRafRef.current = window.requestAnimationFrame(() => {
       firstMeasureDebugRafRef.current = window.requestAnimationFrame(() => {
-        const afterSnapshot = captureFirstMeasureSnapshot('after-drag-release')
+        const afterSnapshot = captureFirstMeasureSnapshot({
+          stage: 'after-drag-release',
+          measurePairs: measurePairsRef.current,
+          noteLayoutsByPair: noteLayoutsByPairRef.current,
+          measureLayouts: measureLayoutsRef.current,
+        })
         if (afterSnapshot) {
-          const report = buildFirstMeasureDiffReport(beforeSnapshot, afterSnapshot)
+          const report = buildFirstMeasureDiffReport({
+            beforeSnapshot,
+            afterSnapshot,
+            dragContext: firstMeasureDragContextRef.current,
+            dragPreviewFrameCount: dragDebugFramesRef.current.length,
+          })
           setMeasureEdgeDebugReport(report)
           console.log(report)
         }
@@ -3407,427 +2829,13 @@ function App() {
       })
     })
   }
-  const dumpAllMeasureCoordinateReport = useCallback(() => {
-    const measureLayouts = measureLayoutsRef.current
-    const noteLayoutsByPair = noteLayoutsByPairRef.current
-    const measureTimelineBundles = measureTimelineBundlesRef.current
-    const pairs = measurePairsRef.current
-    const toRoundedNumber = (value: number | null | undefined, digits: number): number | null => {
-      if (typeof value !== 'number' || !Number.isFinite(value)) return null
-      return Number(value.toFixed(digits))
-    }
-    const buildOnsetTicksByNoteIndex = (staffNotes: ScoreNote[]): number[] => {
-      const onsetTicks: number[] = []
-      let cursor = 0
-      staffNotes.forEach((note) => {
-        onsetTicks.push(cursor)
-        const ticks = DURATION_TICKS[note.duration]
-        const safeTicks = Number.isFinite(ticks) ? Math.max(1, ticks) : TICKS_PER_BEAT
-        cursor += safeTicks
-      })
-      return onsetTicks
-    }
-    const rows = pairs.map((pair, pairIndex) => {
-      const measureLayout = measureLayouts.get(pairIndex) ?? null
-      const pairLayouts = noteLayoutsByPair.get(pairIndex) ?? []
-      const timelineBundle = measureTimelineBundles.get(pairIndex) ?? null
-      const trebleOnsetTicksByIndex = buildOnsetTicksByNoteIndex(pair.treble)
-      const bassOnsetTicksByIndex = buildOnsetTicksByNoteIndex(pair.bass)
-      const axisPointBuckets = new Map<
-        number,
-        { xTotal: number; xCount: number; trebleNoteCount: number; bassNoteCount: number }
-      >()
-      pairLayouts.forEach((layout) => {
-        const onsetTicks =
-          layout.staff === 'treble'
-            ? (trebleOnsetTicksByIndex[layout.noteIndex] ?? null)
-            : (bassOnsetTicksByIndex[layout.noteIndex] ?? null)
-        if (typeof onsetTicks !== 'number' || !Number.isFinite(onsetTicks)) return
-        const bucket = axisPointBuckets.get(onsetTicks) ?? {
-          xTotal: 0,
-          xCount: 0,
-          trebleNoteCount: 0,
-          bassNoteCount: 0,
-        }
-        if (Number.isFinite(layout.x)) {
-          bucket.xTotal += layout.x
-          bucket.xCount += 1
-        }
-        if (layout.staff === 'treble') {
-          bucket.trebleNoteCount += 1
-        } else {
-          bucket.bassNoteCount += 1
-        }
-        axisPointBuckets.set(onsetTicks, bucket)
-      })
-      const orderedOnsets = [...axisPointBuckets.keys()].sort((left, right) => left - right)
-      const timeAxisPointIndexByOnset = new Map<number, number>()
-      const timeAxisPointXByOnset = new Map<number, number | null>()
-      const timeAxisPoints = orderedOnsets.map((onsetTicks, pointIndex) => {
-        const bucket = axisPointBuckets.get(onsetTicks)
-        const averagedX =
-          bucket && bucket.xCount > 0 ? toRoundedNumber(bucket.xTotal / bucket.xCount, 3) : null
-        timeAxisPointIndexByOnset.set(onsetTicks, pointIndex)
-        timeAxisPointXByOnset.set(onsetTicks, averagedX)
-        const trebleNoteCount = bucket?.trebleNoteCount ?? 0
-        const bassNoteCount = bucket?.bassNoteCount ?? 0
-        return {
-          pointIndex,
-          onsetTicksInMeasure: onsetTicks,
-          onsetBeatsInMeasure: toRoundedNumber(onsetTicks / TICKS_PER_BEAT, 4),
-          x: averagedX,
-          noteCount: trebleNoteCount + bassNoteCount,
-          trebleNoteCount,
-          bassNoteCount,
-        }
-      })
-      const layoutRows = pairLayouts
-        .slice()
-        .sort((left, right) => {
-          if (left.staff !== right.staff) return left.staff.localeCompare(right.staff)
-          if (left.noteIndex !== right.noteIndex) return left.noteIndex - right.noteIndex
-          return left.x - right.x
-        })
-        .map((layout) => {
-          const sourceNote = layout.staff === 'treble' ? pair.treble[layout.noteIndex] : pair.bass[layout.noteIndex]
-          const onsetTicksInMeasure =
-            sourceNote && layout.staff === 'treble'
-              ? (trebleOnsetTicksByIndex[layout.noteIndex] ?? null)
-              : sourceNote
-                ? (bassOnsetTicksByIndex[layout.noteIndex] ?? null)
-                : null
-          return {
-            staff: layout.staff,
-            noteId: layout.id,
-            noteIndex: layout.noteIndex,
-            pitch: sourceNote?.pitch ?? null,
-            isRest: sourceNote?.isRest === true,
-            duration: sourceNote?.duration ?? null,
-            durationTicksInMeasure:
-              sourceNote && Number.isFinite(DURATION_TICKS[sourceNote.duration])
-                ? DURATION_TICKS[sourceNote.duration]
-                : null,
-            onsetTicksInMeasure:
-              typeof onsetTicksInMeasure === 'number' && Number.isFinite(onsetTicksInMeasure)
-                ? onsetTicksInMeasure
-                : null,
-            onsetBeatsInMeasure:
-              typeof onsetTicksInMeasure === 'number' && Number.isFinite(onsetTicksInMeasure)
-                ? toRoundedNumber(onsetTicksInMeasure / TICKS_PER_BEAT, 4)
-                : null,
-            timeAxisPointIndex:
-              typeof onsetTicksInMeasure === 'number' && Number.isFinite(onsetTicksInMeasure)
-                ? (timeAxisPointIndexByOnset.get(onsetTicksInMeasure) ?? null)
-                : null,
-            timeAxisPointX:
-              typeof onsetTicksInMeasure === 'number' && Number.isFinite(onsetTicksInMeasure)
-                ? (timeAxisPointXByOnset.get(onsetTicksInMeasure) ?? null)
-                : null,
-            x: layout.x,
-            anchorX: layout.anchorX,
-            visualLeftX: layout.visualLeftX,
-            visualRightX: layout.visualRightX,
-            rightX: layout.rightX,
-            spacingRightX: layout.spacingRightX,
-            noteHeads: layout.noteHeads.map((head) => ({
-              keyIndex: head.keyIndex,
-              pitch: head.pitch,
-              x: head.x,
-              y: head.y,
-            })),
-            accidentalCoords: Object.entries(layout.accidentalRightXByKeyIndex)
-              .map(([rawKeyIndex, leftX]) => {
-                const keyIndex = Number(rawKeyIndex)
-                const accidentalLayout = layout.accidentalLayouts.find((entry) => entry.keyIndex === keyIndex)
-                return {
-                  keyIndex,
-                  rightX: leftX,
-                  leftX:
-                    typeof accidentalLayout?.hitMinX === 'number' && Number.isFinite(accidentalLayout.hitMinX)
-                      ? accidentalLayout.hitMinX
-                      : leftX,
-                  visualRightX:
-                    typeof accidentalLayout?.hitMaxX === 'number' && Number.isFinite(accidentalLayout.hitMaxX)
-                      ? accidentalLayout.hitMaxX
-                      : null,
-                }
-              })
-              .filter((entry) => Number.isFinite(entry.keyIndex) && Number.isFinite(entry.rightX))
-              .sort((left, right) => left.keyIndex - right.keyIndex),
-          }
-        })
-
-      const onsetRows = layoutRows.filter(
-        (row): row is (typeof layoutRows)[number] & { onsetTicksInMeasure: number } =>
-          typeof row.onsetTicksInMeasure === 'number' && Number.isFinite(row.onsetTicksInMeasure),
-      )
-      const firstOnsetTicks =
-        onsetRows.length > 0
-          ? onsetRows.reduce((minValue, row) => Math.min(minValue, row.onsetTicksInMeasure), Number.POSITIVE_INFINITY)
-          : null
-      const lastOnsetTicks =
-        onsetRows.length > 0
-          ? onsetRows.reduce((maxValue, row) => Math.max(maxValue, row.onsetTicksInMeasure), Number.NEGATIVE_INFINITY)
-          : null
-
-      const firstOnsetRows =
-        typeof firstOnsetTicks === 'number' && Number.isFinite(firstOnsetTicks)
-          ? onsetRows.filter((row) => row.onsetTicksInMeasure === firstOnsetTicks)
-          : []
-      const lastOnsetRows =
-        typeof lastOnsetTicks === 'number' && Number.isFinite(lastOnsetTicks)
-          ? onsetRows.filter((row) => row.onsetTicksInMeasure === lastOnsetTicks)
-          : []
-
-      const firstVisualLeftX = firstOnsetRows.reduce((minValue, row) => {
-        let rowMin = Number.POSITIVE_INFINITY
-        if (Number.isFinite(row.x)) rowMin = Math.min(rowMin, row.x)
-        row.noteHeads.forEach((head) => {
-          if (Number.isFinite(head.x)) rowMin = Math.min(rowMin, head.x)
-        })
-        row.accidentalCoords.forEach((accidental) => {
-          if (typeof accidental.leftX === 'number' && Number.isFinite(accidental.leftX)) {
-            rowMin = Math.min(rowMin, accidental.leftX)
-          } else if (Number.isFinite(accidental.rightX)) {
-            rowMin = Math.min(rowMin, accidental.rightX - 9)
-          }
-        })
-        return Number.isFinite(rowMin) ? Math.min(minValue, rowMin) : minValue
-      }, Number.POSITIVE_INFINITY)
-
-      const lastVisualRightX = lastOnsetRows.reduce((maxValue, row) => {
-        const rowRightX = Number.isFinite(row.spacingRightX)
-          ? row.spacingRightX
-          : Number.isFinite(row.rightX)
-            ? row.rightX
-            : Number.NEGATIVE_INFINITY
-        return Number.isFinite(rowRightX) ? Math.max(maxValue, rowRightX) : maxValue
-      }, Number.NEGATIVE_INFINITY)
-
-      const maxVisualRightX =
-        layoutRows.length > 0 ? layoutRows.reduce((maxX, row) => Math.max(maxX, row.rightX), Number.NEGATIVE_INFINITY) : null
-      const maxSpacingRightX =
-        layoutRows.length > 0
-          ? layoutRows.reduce((maxX, row) => Math.max(maxX, row.spacingRightX), Number.NEGATIVE_INFINITY)
-          : null
-
-      const effectiveBoundary = measureLayout
-        ? resolveEffectiveBoundary({
-            measureX: measureLayout.measureX,
-            measureWidth: measureLayout.measureWidth,
-            noteStartX: measureLayout.noteStartX,
-            noteEndX: measureLayout.noteEndX,
-            showStartDecorations:
-              measureLayout.isSystemStart ||
-              measureLayout.showKeySignature ||
-              measureLayout.showTimeSignature ||
-              measureLayout.includeMeasureStartDecorations,
-            showEndDecorations: measureLayout.showEndTimeSignature,
-          })
-        : null
-      const spacingAnchorTicks = timelineBundle?.spacingAnchorTicks ?? orderedOnsets
-      const firstSpacingTick = spacingAnchorTicks.length > 0 ? spacingAnchorTicks[0] ?? null : null
-      const lastSpacingTick = spacingAnchorTicks.length > 0 ? spacingAnchorTicks[spacingAnchorTicks.length - 1] ?? null : null
-      const firstSpacingTickX =
-        typeof firstSpacingTick === 'number' && Number.isFinite(firstSpacingTick)
-          ? timelineBundle?.spacingTickToX.get(firstSpacingTick) ?? timeAxisPointXByOnset.get(firstSpacingTick) ?? null
-          : null
-      const lastSpacingTickX =
-        typeof lastSpacingTick === 'number' && Number.isFinite(lastSpacingTick)
-          ? timelineBundle?.spacingTickToX.get(lastSpacingTick) ?? timeAxisPointXByOnset.get(lastSpacingTick) ?? null
-          : null
-
-      return {
-        pairIndex,
-        rendered: measureLayout !== null,
-        timelineMode: timelineBundle?.timelineMode ?? 'legacy',
-        measureX: measureLayout?.measureX ?? null,
-        measureWidth: measureLayout?.contentMeasureWidth ?? measureLayout?.measureWidth ?? null,
-        renderedMeasureWidthPx:
-          measureLayout?.renderedMeasureWidth ?? measureLayout?.measureWidth ?? null,
-        systemTop: measureLayout?.systemTop ?? null,
-        trebleY: measureLayout?.trebleY ?? null,
-        bassY: measureLayout?.bassY ?? null,
-        measureStartBarX: measureLayout?.measureX ?? null,
-        measureEndBarX:
-          measureLayout
-            ? measureLayout.measureX + (measureLayout.renderedMeasureWidth ?? measureLayout.measureWidth)
-            : null,
-        noteStartX: measureLayout?.noteStartX ?? null,
-        noteEndX: measureLayout?.noteEndX ?? null,
-        sharedStartDecorationReservePx:
-          measureLayout && Number.isFinite(measureLayout.sharedStartDecorationReservePx)
-            ? Number((measureLayout.sharedStartDecorationReservePx as number).toFixed(3))
-            : null,
-        actualStartDecorationWidthPx:
-          measureLayout && Number.isFinite(measureLayout.actualStartDecorationWidthPx)
-            ? Number((measureLayout.actualStartDecorationWidthPx as number).toFixed(3))
-            : null,
-        effectiveBoundaryStartX:
-          measureLayout && Number.isFinite(measureLayout.effectiveBoundaryStartX)
-            ? Number((measureLayout.effectiveBoundaryStartX as number).toFixed(3))
-            : effectiveBoundary
-              ? Number(effectiveBoundary.effectiveStartX.toFixed(3))
-              : null,
-        effectiveBoundaryEndX:
-          measureLayout && Number.isFinite(measureLayout.effectiveBoundaryEndX)
-            ? Number((measureLayout.effectiveBoundaryEndX as number).toFixed(3))
-            : effectiveBoundary
-              ? Number(effectiveBoundary.effectiveEndX.toFixed(3))
-              : null,
-        effectiveLeftGapPx:
-          measureLayout && Number.isFinite(measureLayout.effectiveLeftGapPx)
-            ? Number((measureLayout.effectiveLeftGapPx as number).toFixed(3))
-            : effectiveBoundary && Number.isFinite(firstVisualLeftX)
-              ? Number((firstVisualLeftX - effectiveBoundary.effectiveStartX).toFixed(3))
-              : null,
-        effectiveRightGapPx:
-          measureLayout && Number.isFinite(measureLayout.effectiveRightGapPx)
-            ? Number((measureLayout.effectiveRightGapPx as number).toFixed(3))
-            : effectiveBoundary && Number.isFinite(lastVisualRightX)
-              ? Number((effectiveBoundary.effectiveEndX - lastVisualRightX).toFixed(3))
-              : null,
-        leadingGapPx:
-          measureLayout && Number.isFinite(measureLayout.leadingGapPx)
-            ? Number((measureLayout.leadingGapPx as number).toFixed(3))
-            : effectiveBoundary && typeof firstSpacingTickX === 'number' && Number.isFinite(firstSpacingTickX)
-              ? Number((firstSpacingTickX - effectiveBoundary.effectiveStartX).toFixed(3))
-              : null,
-        trailingTailTicks:
-          measureLayout && Number.isFinite(measureLayout.trailingTailTicks)
-            ? Math.max(0, Math.round(measureLayout.trailingTailTicks as number))
-            : timelineBundle && typeof lastSpacingTick === 'number' && Number.isFinite(lastSpacingTick)
-              ? Math.max(0, Math.round(timelineBundle.measureTicks - lastSpacingTick))
-              : null,
-        trailingGapPx:
-          measureLayout && Number.isFinite(measureLayout.trailingGapPx)
-            ? Number((measureLayout.trailingGapPx as number).toFixed(3))
-            : effectiveBoundary && typeof lastSpacingTickX === 'number' && Number.isFinite(lastSpacingTickX)
-              ? Number((effectiveBoundary.effectiveEndX - lastSpacingTickX).toFixed(3))
-              : null,
-        spacingOccupiedLeftX:
-          measureLayout && Number.isFinite(measureLayout.spacingOccupiedLeftX)
-            ? Number((measureLayout.spacingOccupiedLeftX as number).toFixed(3))
-            : null,
-        spacingOccupiedRightX:
-          measureLayout && Number.isFinite(measureLayout.spacingOccupiedRightX)
-            ? Number((measureLayout.spacingOccupiedRightX as number).toFixed(3))
-            : null,
-        spacingAnchorGapFirstToLastPx:
-          measureLayout && Number.isFinite(measureLayout.spacingAnchorGapFirstToLastPx)
-            ? Number((measureLayout.spacingAnchorGapFirstToLastPx as number).toFixed(3))
-            : null,
-        timeAxisTicksPerBeat: TICKS_PER_BEAT,
-        legacyOnsets: timelineBundle?.legacyOnsets ?? orderedOnsets,
-        spacingAnchorTicks,
-        spacingTickToX:
-          timelineBundle?.spacingTickToX
-            ? Object.fromEntries(
-                [...timelineBundle.spacingTickToX.entries()].map(([tick, x]) => [
-                  String(tick),
-                  toRoundedNumber(x, 3),
-                ]),
-              )
-            : {},
-        spacingOnsetReserves:
-          measureLayout?.spacingOnsetReserves?.map((entry) => ({
-            onsetTicks: entry.onsetTicks,
-            baseX: toRoundedNumber(entry.baseX, 3),
-            finalX: toRoundedNumber(entry.finalX, 3),
-            leftReservePx: toRoundedNumber(entry.leftReservePx, 3),
-            rightReservePx: toRoundedNumber(entry.rightReservePx, 3),
-            rawLeftReservePx: toRoundedNumber(entry.rawLeftReservePx, 3),
-            rawRightReservePx: toRoundedNumber(entry.rawRightReservePx, 3),
-            leftOccupiedInsetPx: toRoundedNumber(entry.leftOccupiedInsetPx, 3),
-            rightOccupiedTailPx: toRoundedNumber(entry.rightOccupiedTailPx, 3),
-            leadingTrebleRequestedExtraPx: toRoundedNumber(entry.leadingTrebleRequestedExtraPx, 3),
-            leadingBassRequestedExtraPx: toRoundedNumber(entry.leadingBassRequestedExtraPx, 3),
-            leadingWinningStaff: entry.leadingWinningStaff,
-            trailingTrebleRequestedExtraPx: toRoundedNumber(entry.trailingTrebleRequestedExtraPx, 3),
-            trailingBassRequestedExtraPx: toRoundedNumber(entry.trailingBassRequestedExtraPx, 3),
-            trailingWinningStaff: entry.trailingWinningStaff,
-          })) ?? [],
-        spacingSegments:
-          measureLayout?.spacingSegments?.map((entry) => ({
-            fromOnsetTicks: entry.fromOnsetTicks,
-            toOnsetTicks: entry.toOnsetTicks,
-            baseGapPx: toRoundedNumber(entry.baseGapPx, 3),
-            extraReservePx: toRoundedNumber(entry.extraReservePx, 3),
-            appliedGapPx: toRoundedNumber(entry.appliedGapPx, 3),
-            trebleRequestedExtraPx: toRoundedNumber(entry.trebleRequestedExtraPx, 3),
-            bassRequestedExtraPx: toRoundedNumber(entry.bassRequestedExtraPx, 3),
-            noteRestRequestedExtraPx: toRoundedNumber(entry.noteRestRequestedExtraPx, 3),
-            noteRestVisibleGapPx:
-              typeof entry.noteRestVisibleGapPx === 'number'
-                ? toRoundedNumber(entry.noteRestVisibleGapPx, 3)
-                : null,
-            accidentalRequestedExtraPx: toRoundedNumber(entry.accidentalRequestedExtraPx, 3),
-            accidentalVisibleGapPx:
-              typeof entry.accidentalVisibleGapPx === 'number'
-                ? toRoundedNumber(entry.accidentalVisibleGapPx, 3)
-                : null,
-            winningStaff: entry.winningStaff,
-          })) ?? [],
-        trebleTimelineEvents:
-          timelineBundle?.trebleTimeline.events.map((event) => ({
-            noteId: event.noteId,
-            noteIndex: event.noteIndex,
-            startTick: event.startTick,
-            endTick: event.endTick,
-            durationTicks: event.durationTicks,
-            isRest: event.isRest,
-          })) ?? [],
-        bassTimelineEvents:
-          timelineBundle?.bassTimeline.events.map((event) => ({
-            noteId: event.noteId,
-            noteIndex: event.noteIndex,
-            startTick: event.startTick,
-            endTick: event.endTick,
-            durationTicks: event.durationTicks,
-            isRest: event.isRest,
-          })) ?? [],
-        publicTimelineTicks: timelineBundle?.publicTimeline.points.map((point) => point.tick) ?? [],
-        publicTickToX:
-          timelineBundle?.publicAxisLayout
-            ? Object.fromEntries(
-                [...timelineBundle.publicAxisLayout.tickToX.entries()].map(([tick, x]) => [
-                  String(tick),
-                  toRoundedNumber(x, 3),
-                ]),
-              )
-            : {},
-        publicTimelineScale:
-          timelineBundle?.publicAxisLayout && Number.isFinite(timelineBundle.publicAxisLayout.timelineScale)
-            ? Number(timelineBundle.publicAxisLayout.timelineScale.toFixed(6))
-            : null,
-        publicTimelineTotalAnchorWeight:
-          timelineBundle?.publicAxisLayout && Number.isFinite(timelineBundle.publicAxisLayout.totalAnchorWeight)
-            ? Number(timelineBundle.publicAxisLayout.totalAnchorWeight.toFixed(6))
-            : null,
-        timelineDiffSummary: timelineBundle?.timelineDiffSummary ?? null,
-        timeAxisPoints,
-        maxVisualRightX,
-        maxSpacingRightX,
-        overflowVsNoteEndX:
-          measureLayout && typeof maxSpacingRightX === 'number'
-            ? Number((maxSpacingRightX - measureLayout.noteEndX).toFixed(3))
-            : null,
-        overflowVsMeasureEndBarX:
-          measureLayout && typeof maxSpacingRightX === 'number'
-            ? Number((maxSpacingRightX - (measureLayout.measureX + measureLayout.measureWidth)).toFixed(3))
-            : null,
-        notes: layoutRows,
-      }
-    })
-
-    return {
-      generatedAt: new Date().toISOString(),
-      totalMeasureCount: pairs.length,
-      renderedMeasureCount: rows.filter((row) => row.rendered).length,
-      visibleSystemRange: { ...visibleSystemRange },
-      rows,
-    }
-  }, [visibleSystemRange])
+  const dumpAllMeasureCoordinateReport = useCallback(() => buildMeasureCoordinateDebugReport({
+    measureLayouts: measureLayoutsRef.current,
+    noteLayoutsByPair: noteLayoutsByPairRef.current,
+    measureTimelineBundles: measureTimelineBundlesRef.current,
+    measurePairs: measurePairsRef.current,
+    visibleSystemRange,
+  }), [visibleSystemRange])
 
   useEffect(() => {
     return () => {
