@@ -7,20 +7,12 @@ import {
   INITIAL_NOTES,
   PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX,
   PREVIEW_START_THRESHOLD_PX,
-  SCORE_TOP_PADDING,
-  SYSTEM_HEIGHT,
 } from './score/constants'
 import {
   DEFAULT_TIME_AXIS_SPACING_CONFIG,
 } from './score/layout/timeAxisSpacing'
-import { solveHorizontalMeasureWidths } from './score/layout/horizontalMeasureWidthSolver'
-import {
-  resolveActualStartDecorationWidths,
-  resolveStartDecorationDisplayMetas,
-} from './score/layout/startDecorationReserve'
 import { useDragHandlers } from './score/dragHandlers'
 import { useEditorHandlers } from './score/editorHandlers'
-import { buildPlaybackTimeline, type PlaybackTimelineEvent } from './score/playbackTimeline'
 import {
   useImportedRefsSync,
   useRendererCleanup,
@@ -29,7 +21,7 @@ import {
   useSynthLifecycle,
 } from './score/hooks/useScoreEffects'
 import { useMidiInputController } from './score/hooks/useMidiInputController'
-import { getPlaybackPointKey, usePlaybackController } from './score/hooks/usePlaybackController'
+import { usePlaybackController } from './score/hooks/usePlaybackController'
 import { useScoreAudioPreviewController } from './score/hooks/useScoreAudioPreviewController'
 import { useChordMarkerController } from './score/hooks/useChordMarkerController'
 import { useScoreMutationController } from './score/hooks/useScoreMutationController'
@@ -46,6 +38,7 @@ import { usePlaybackCursorLayout } from './score/hooks/usePlaybackCursorLayout'
 import { useKeyboardCommandController } from './score/hooks/useKeyboardCommandController'
 import { useScoreRuntimeDebugController } from './score/hooks/useScoreRuntimeDebugController'
 import { useScoreViewProps } from './score/hooks/useScoreViewProps'
+import { useHorizontalScoreLayout } from './score/hooks/useHorizontalScoreLayout'
 import { ScoreControls } from './score/components/ScoreControls'
 import { ScoreBoard } from './score/components/ScoreBoard'
 import {
@@ -53,10 +46,9 @@ import {
 } from './score/pitchUtils'
 import {
   buildBassMockNotes,
-  buildMeasurePairs,
 } from './score/scoreOps'
 import { isStaffFullMeasureRest, resolvePairTimeSignature } from './score/measureRestUtils'
-import { buildChordRulerEntries, type ChordRulerEntry } from './score/chordRuler'
+import type { ChordRulerEntry } from './score/chordRuler'
 import { mergeFullMeasureRestCollapseScopeKeys, toMeasureStaffScopeKey } from './score/fullMeasureRestCollapse'
 import { ImportProgressModal } from './score/components/ImportProgressModal'
 import { OsmdPreviewModal } from './score/components/OsmdPreviewModal'
@@ -69,13 +61,6 @@ import {
   DEFAULT_CHORD_MARKER_PADDING_PX,
   DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT,
   DEFAULT_PAGE_HORIZONTAL_PADDING_PX,
-  applyChordMarkerVisualZoom,
-  clampCanvasHeightPercent,
-  clampChordMarkerPaddingPx,
-  clampChordMarkerUiScalePercent,
-  clampScalePercent,
-  getAutoScoreScale,
-  getChordMarkerBaseStyleMetrics,
   toSequencePreview,
 } from './score/scorePresentation'
 import type { HitGridIndex } from './score/layout/hitTest'
@@ -86,7 +71,6 @@ import type {
   ImportFeedback,
   ImportedNoteLocation,
   LayoutReflowHint,
-  MeasureFrame,
   MeasureLayout,
   MeasurePair,
   MusicXmlMetadata,
@@ -95,19 +79,12 @@ import type {
   RhythmPresetId,
   ScoreNote,
   Selection,
-  SpacingLayoutMode,
   TieSelection,
   TimeSignature,
 } from './score/types'
 
 const SCORE_RENDER_BACKEND = Renderer.Backends.CANVAS
-const MANUAL_SCALE_BASELINE = 1
 const SCORE_STAGE_BORDER_PX = 1
-const HORIZONTAL_VIEW_MEASURE_WIDTH_PX = 220
-const HORIZONTAL_VIEW_HEIGHT_PX = SCORE_TOP_PADDING * 2 + SYSTEM_HEIGHT + 26
-const MAX_CANVAS_RENDER_DIM_PX = 32760
-const HORIZONTAL_RENDER_BUFFER_PX = 400
-const HORIZONTAL_RENDER_EDGE_BUFFER_MEASURES = 1
 const CHORD_HIGHLIGHT_PAD_X_PX = 4
 const CHORD_HIGHLIGHT_PAD_Y_PX = 4
 
@@ -245,317 +222,65 @@ function App() {
     useScoreAudioPreviewController({
       synthRef,
     })
-  const measurePairs = useMemo(
-    () => measurePairsFromImport ?? buildMeasurePairs(notes, bassNotes),
-    [measurePairsFromImport, notes, bassNotes],
-  )
-  const chordRulerEntriesByPair = useMemo(
-    () => {
-      if (measurePairsFromImport !== null) {
-        if (!importedChordRulerEntriesByPairFromImport) return null
-        return measurePairs.map((_, pairIndex) => importedChordRulerEntriesByPairFromImport[pairIndex] ?? [])
-      }
-      return measurePairs.map((_, pairIndex) =>
-        buildChordRulerEntries({
-          pairIndex,
-          timeSignature: resolvePairTimeSignature(pairIndex, measureTimeSignaturesFromImport),
-        }),
-      )
-    },
-    [importedChordRulerEntriesByPairFromImport, measurePairs, measurePairsFromImport, measureTimeSignaturesFromImport],
-  )
-  const supplementalSpacingTicksByPair = useMemo(
-    () =>
-      chordRulerEntriesByPair
-        ? chordRulerEntriesByPair.map((entries) => entries.map((entry) => entry.startTick))
-        : null,
-    [chordRulerEntriesByPair],
-  )
-  const playbackTimelineEvents = useMemo(
-    () =>
-      buildPlaybackTimeline({
-        measurePairs,
-        timeSignaturesByMeasure: measureTimeSignaturesFromImport,
-      }),
-    [measurePairs, measureTimeSignaturesFromImport],
-  )
-  const playbackTimelineEventByPointKey = useMemo(
-    () =>
-      new Map<string, PlaybackTimelineEvent>(
-        playbackTimelineEvents.map((event) => [getPlaybackPointKey(event.point), event] as const),
-      ),
-    [playbackTimelineEvents],
-  )
-  const firstPlaybackPoint = playbackTimelineEvents[0]?.point ?? null
-  const spacingLayoutMode: SpacingLayoutMode = 'custom'
-  const safeChordMarkerUiScalePercent = clampChordMarkerUiScalePercent(chordMarkerUiScalePercent)
-  const safeChordMarkerPaddingPx = clampChordMarkerPaddingPx(chordMarkerPaddingPx)
-  const chordMarkerBaseStyleMetrics = useMemo(
-    () => getChordMarkerBaseStyleMetrics(safeChordMarkerUiScalePercent, safeChordMarkerPaddingPx),
-    [safeChordMarkerPaddingPx, safeChordMarkerUiScalePercent],
-  )
-  const getWidthProbeContext = useCallback((): ReturnType<Renderer['getContext']> | null => {
-    if (typeof window === 'undefined' || typeof document === 'undefined') return null
-    const probeWidth = 2048
-    const probeHeight = 768
-    const existing = widthProbeRendererRef.current
-    if (existing) {
-      existing.resize(probeWidth, probeHeight)
-      return existing.getContext()
-    }
-    const canvas = document.createElement('canvas')
-    const renderer = new Renderer(canvas, SCORE_RENDER_BACKEND)
-    renderer.resize(probeWidth, probeHeight)
-    widthProbeRendererRef.current = renderer
-    return renderer.getContext()
-  }, [])
-  const horizontalMeasureStartDecorationWidths = useMemo(() => {
-    if (measurePairs.length === 0) return []
-    const displayMetas = resolveStartDecorationDisplayMetas({
-      measureCount: measurePairs.length,
-      keyFifthsByPair: measureKeyFifthsFromImport,
-      timeSignaturesByPair: measureTimeSignaturesFromImport,
-    })
-    return resolveActualStartDecorationWidths({
-      metas: displayMetas,
-    }).actualStartDecorationWidthPxByPair
-  }, [measurePairs.length, measureKeyFifthsFromImport, measureTimeSignaturesFromImport])
-  const horizontalContentMeasureWidths = useMemo(() => {
-    if (measurePairs.length === 0) return []
-    const probeContext = getWidthProbeContext()
-    if (!probeContext) {
-      return measurePairs.map(() => HORIZONTAL_VIEW_MEASURE_WIDTH_PX)
-    }
-    const solverMaxIterations =
-      measurePairs.length > 120 ? 8 : measurePairs.length > 48 ? 16 : 60
-    const eagerProbeMeasureLimit =
-      measurePairs.length > 120 ? 16 : measurePairs.length > 60 ? 24 : Number.POSITIVE_INFINITY
-    return solveHorizontalMeasureWidths({
-      context: probeContext,
-      measurePairs,
-      measureKeyFifthsByPair: measureKeyFifthsFromImport,
-      measureTimeSignaturesByPair: measureTimeSignaturesFromImport,
-      supplementalSpacingTicksByPair,
-      spacingConfig: timeAxisSpacingConfig,
-      maxIterations: solverMaxIterations,
-      eagerProbeMeasureLimit,
-      widthCache: horizontalMeasureWidthCacheRef.current,
-    })
-  }, [
-    getWidthProbeContext,
+  const {
     measurePairs,
-    measureKeyFifthsFromImport,
-    measureTimeSignaturesFromImport,
+    chordRulerEntriesByPair,
     supplementalSpacingTicksByPair,
-    timeAxisSpacingConfig,
-  ])
-  const horizontalRenderedMeasureWidths = useMemo(
-    () =>
-      horizontalContentMeasureWidths.map((contentMeasureWidth, pairIndex) =>
-        Math.max(1, contentMeasureWidth + (horizontalMeasureStartDecorationWidths[pairIndex] ?? 0)),
-      ),
-    [horizontalContentMeasureWidths, horizontalMeasureStartDecorationWidths],
-  )
-  const horizontalEstimatedMeasureWidthTotal = useMemo(() => {
-    if (horizontalRenderedMeasureWidths.length === 0) return HORIZONTAL_VIEW_MEASURE_WIDTH_PX
-    const total = horizontalRenderedMeasureWidths.reduce((sum, width) => sum + width, 0)
-    return Math.max(HORIZONTAL_VIEW_MEASURE_WIDTH_PX, total)
-  }, [horizontalRenderedMeasureWidths])
-  const autoScoreScale = useMemo(() => getAutoScoreScale(measurePairs.length), [measurePairs.length])
-  const safeManualScalePercent = clampScalePercent(manualScalePercent)
-  const safeCanvasHeightPercent = clampCanvasHeightPercent(canvasHeightPercent)
-  const relativeScale = autoScaleEnabled ? autoScoreScale : safeManualScalePercent / 100
-  const horizontalDisplayScale = relativeScale * MANUAL_SCALE_BASELINE
-  const provisionalDisplayScoreHeight = HORIZONTAL_VIEW_HEIGHT_PX
-  const displayScoreWidth = useMemo(() => {
-    const totalMeasureWidth = horizontalEstimatedMeasureWidthTotal
-    const baseWidth = Math.max(A4_PAGE_WIDTH, pageHorizontalPaddingPx * 2 + totalMeasureWidth)
-    // Keep horizontal display width in the same scale space as canvas transform.
-    // Otherwise scroll-space and render-space drift apart and can leave blank tails.
-    return Math.max(A4_PAGE_WIDTH, Math.round(baseWidth * horizontalDisplayScale))
-  }, [horizontalEstimatedMeasureWidthTotal, pageHorizontalPaddingPx, horizontalDisplayScale])
-  const baseScoreScale = relativeScale * MANUAL_SCALE_BASELINE
-  const minScaleForCanvasHeight = provisionalDisplayScoreHeight / MAX_CANVAS_RENDER_DIM_PX
-  const scoreScaleX = baseScoreScale
-  const scoreScaleY = Math.max(baseScoreScale, minScaleForCanvasHeight)
-  const chordMarkerStyleMetrics = useMemo(
-    () => applyChordMarkerVisualZoom(chordMarkerBaseStyleMetrics, baseScoreScale),
-    [baseScoreScale, chordMarkerBaseStyleMetrics],
-  )
-  const canvasHeightScale = safeCanvasHeightPercent / 100
-  const viewportHeightScaleByZoom = Math.max(0.1, scoreScaleY / MANUAL_SCALE_BASELINE)
-  const scoreScale = scoreScaleX
-  const autoScalePercent = Math.round(baseScoreScale * 100)
-  const totalScoreWidth = Math.max(1, Math.round(displayScoreWidth / scoreScaleX))
-  const trebleNoteById = useMemo(() => new Map(notes.map((note) => [note.id, note] as const)), [notes])
-  const bassNoteById = useMemo(() => new Map(bassNotes.map((note) => [note.id, note] as const)), [bassNotes])
-  const trebleNoteIndexById = useMemo(() => {
-    const byId = new Map<string, number>()
-    notes.forEach((note, index) => byId.set(note.id, index))
-    return byId
-  }, [notes])
-  const bassNoteIndexById = useMemo(() => {
-    const byId = new Map<string, number>()
-    bassNotes.forEach((note, index) => byId.set(note.id, index))
-    return byId
-  }, [bassNotes])
-  const horizontalMeasureFramesByPair = useMemo(() => {
-    if (horizontalRenderedMeasureWidths.length === 0) return [] as MeasureFrame[]
-    let cursorX = pageHorizontalPaddingPx
-    return horizontalRenderedMeasureWidths.map((measureWidth, pairIndex) => {
-      const contentMeasureWidth = horizontalContentMeasureWidths[pairIndex] ?? Math.max(1, measureWidth)
-      const actualStartDecorationWidthPx = horizontalMeasureStartDecorationWidths[pairIndex] ?? 0
-      const frame: MeasureFrame = {
-        measureX: cursorX,
-        measureWidth,
-        contentMeasureWidth,
-        renderedMeasureWidth: measureWidth,
-        actualStartDecorationWidthPx,
-      }
-      cursorX += measureWidth
-      return frame
-    })
-  }, [
-    horizontalContentMeasureWidths,
-    horizontalRenderedMeasureWidths,
-    horizontalMeasureStartDecorationWidths,
-    pageHorizontalPaddingPx,
-  ])
-  const getMeasureFrameContentGeometry = useCallback((frame: MeasureFrame | null | undefined) => {
-    if (!frame) return null
-    const actualStartDecorationWidthPx =
-      typeof frame.actualStartDecorationWidthPx === 'number' && Number.isFinite(frame.actualStartDecorationWidthPx)
-        ? Math.max(0, frame.actualStartDecorationWidthPx)
-        : 0
-    const contentMeasureWidth =
-      typeof frame.contentMeasureWidth === 'number' && Number.isFinite(frame.contentMeasureWidth)
-        ? Math.max(1, frame.contentMeasureWidth)
-        : Math.max(1, frame.measureWidth - actualStartDecorationWidthPx)
-    return {
-      contentStartX: frame.measureX + actualStartDecorationWidthPx,
-      contentMeasureWidth,
-    }
-  }, [])
-  const horizontalViewportWidthInScore = Math.max(1, horizontalViewportXRange.endX - horizontalViewportXRange.startX)
-  const horizontalRenderSurfaceWidth = useMemo(() => {
-    const desiredWidth = Math.ceil(horizontalViewportWidthInScore + HORIZONTAL_RENDER_BUFFER_PX * 2)
-    const targetWidth = Math.max(1200, desiredWidth)
-    return Math.max(1, Math.min(totalScoreWidth, Math.min(MAX_CANVAS_RENDER_DIM_PX, targetWidth)))
-  }, [totalScoreWidth, horizontalViewportWidthInScore])
-  const horizontalRenderOffsetX = useMemo(() => {
-    // Keep a left buffer inside the render surface so partially visible
-    // measures at viewport start are not clipped when scrolling settles.
-    const desiredOffset = Math.max(0, Math.floor(horizontalViewportXRange.startX - HORIZONTAL_RENDER_BUFFER_PX))
-    const maxOffset = Math.max(0, totalScoreWidth - horizontalRenderSurfaceWidth)
-    return Math.max(0, Math.min(maxOffset, desiredOffset))
-  }, [horizontalViewportXRange.startX, totalScoreWidth, horizontalRenderSurfaceWidth])
-  horizontalRenderOffsetXRef.current = horizontalRenderOffsetX
-  const scoreWidth = horizontalRenderSurfaceWidth
-  const systemRanges = useMemo(() => [{ startPairIndex: 0, endPairIndexExclusive: measurePairs.length }], [measurePairs.length])
-  const scaledScoreContentHeight = Math.max(1, HORIZONTAL_VIEW_HEIGHT_PX * viewportHeightScaleByZoom)
-  const displayScoreHeight = Math.max(1, Math.round(scaledScoreContentHeight * canvasHeightScale))
-  const scoreHeight = Math.max(1, Math.round(scaledScoreContentHeight / scoreScaleY))
-  const scoreSurfaceOffsetXPx = horizontalRenderOffsetX * scoreScaleX
-  const scaledRenderedScoreHeight = Math.max(1, scoreHeight * scoreScaleY)
-  const scoreSurfaceOffsetYPx = Math.max(0, (displayScoreHeight - scaledRenderedScoreHeight) / 2)
-  const renderQualityScale = useMemo(() => {
-    const maxBackingStoreDim = 32760
-    const devicePixelRatio =
-      typeof window !== 'undefined' && Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0
-        ? window.devicePixelRatio
-        : 1
-    const targetQualityX = Math.max(1, devicePixelRatio, Math.abs(scoreScaleX))
-    const targetQualityY = Math.max(1, devicePixelRatio, Math.abs(scoreScaleY))
-    const maxQualityX = Math.max(1, maxBackingStoreDim / Math.max(1, scoreWidth))
-    const maxQualityY = Math.max(1, maxBackingStoreDim / Math.max(1, scoreHeight))
-    return {
-      x: Math.max(1, Math.min(targetQualityX, maxQualityX)),
-      y: Math.max(1, Math.min(targetQualityY, maxQualityY)),
-    }
-  }, [scoreScaleX, scoreScaleY, scoreWidth, scoreHeight])
-  const systemsPerPage = 1
-  const pageCount = 1
-  const safeCurrentPage = 0
-  const visibleSystemRange = useMemo(() => ({ start: 0, end: 0 }), [])
-  const horizontalRenderWindow = useMemo(() => {
-    const frames = horizontalMeasureFramesByPair
-    const renderWindowStartX = horizontalRenderOffsetX
-    const renderWindowEndX = Math.min(totalScoreWidth, horizontalRenderOffsetX + scoreWidth)
-    if (frames.length === 0) {
-      return {
-        startPairIndex: 0,
-        endPairIndexExclusive: 0,
-        startX: renderWindowStartX,
-        endX: renderWindowEndX,
-      }
-    }
-    // The surface range already includes left/right buffer via horizontalRenderOffsetX
-    // and horizontalRenderSurfaceWidth, so use it directly for pair filtering.
-    const bufferedStartX = renderWindowStartX
-    const bufferedEndX = renderWindowEndX
-
-    let startPairIndex = 0
-    while (
-      startPairIndex < frames.length &&
-      frames[startPairIndex].measureX + frames[startPairIndex].measureWidth < bufferedStartX
-    ) {
-      startPairIndex += 1
-    }
-
-    let endPairIndexExclusive = startPairIndex
-    while (endPairIndexExclusive < frames.length && frames[endPairIndexExclusive].measureX <= bufferedEndX) {
-      endPairIndexExclusive += 1
-    }
-
-    startPairIndex = Math.max(0, startPairIndex - HORIZONTAL_RENDER_EDGE_BUFFER_MEASURES)
-    endPairIndexExclusive = Math.min(frames.length, endPairIndexExclusive + HORIZONTAL_RENDER_EDGE_BUFFER_MEASURES)
-    if (endPairIndexExclusive <= startPairIndex) {
-      startPairIndex = Math.max(0, Math.min(frames.length - 1, startPairIndex))
-      endPairIndexExclusive = Math.min(frames.length, startPairIndex + 1)
-    }
-
-    const firstFrame = frames[startPairIndex]
-    const lastFrame = frames[endPairIndexExclusive - 1]
-    const startX = Math.max(0, (firstFrame?.measureX ?? 0) - 120)
-    const endX = Math.min(totalScoreWidth, (lastFrame ? lastFrame.measureX + lastFrame.measureWidth : totalScoreWidth) + 120)
-    return { startPairIndex, endPairIndexExclusive, startX, endX }
-  }, [
-    horizontalMeasureFramesByPair,
-    horizontalRenderOffsetX,
-    scoreWidth,
-    totalScoreWidth,
-  ])
-  const layoutStabilityKey = useMemo(() => {
-    const systemRangeKey = systemRanges.map((range) => `${range.startPairIndex}-${range.endPairIndexExclusive}`).join(',')
-    const spacingKey = [
-      timeAxisSpacingConfig.baseMinGap32Px,
-      timeAxisSpacingConfig.leadingBarlineGapPx,
-      timeAxisSpacingConfig.secondChordSafeGapPx,
-      timeAxisSpacingConfig.durationGapRatios.thirtySecond,
-      timeAxisSpacingConfig.durationGapRatios.sixteenth,
-      timeAxisSpacingConfig.durationGapRatios.eighth,
-      timeAxisSpacingConfig.durationGapRatios.quarter,
-      timeAxisSpacingConfig.durationGapRatios.half,
-      timeAxisSpacingConfig.durationGapRatios.whole,
-      spacingLayoutMode,
-    ].join(',')
-    return `${scoreWidth}|${scoreHeight}|${pageHorizontalPaddingPx}|${systemRangeKey}|${spacingKey}`
-  }, [
+    playbackTimelineEvents,
+    playbackTimelineEventByPointKey,
+    firstPlaybackPoint,
+    spacingLayoutMode,
+    safeChordMarkerUiScalePercent,
+    safeChordMarkerPaddingPx,
+    safeManualScalePercent,
+    safeCanvasHeightPercent,
+    chordMarkerStyleMetrics,
+    autoScalePercent,
+    baseScoreScale,
+    scoreScale,
+    scoreScaleX,
+    scoreScaleY,
+    displayScoreWidth,
+    displayScoreHeight,
     scoreWidth,
     scoreHeight,
-    pageHorizontalPaddingPx,
+    scoreSurfaceOffsetXPx,
+    scoreSurfaceOffsetYPx,
+    totalScoreWidth,
+    trebleNoteById,
+    bassNoteById,
+    trebleNoteIndexById,
+    bassNoteIndexById,
+    horizontalMeasureFramesByPair,
+    getMeasureFrameContentGeometry,
     systemRanges,
-    timeAxisSpacingConfig.baseMinGap32Px,
-    timeAxisSpacingConfig.leadingBarlineGapPx,
-    timeAxisSpacingConfig.secondChordSafeGapPx,
-    timeAxisSpacingConfig.durationGapRatios.thirtySecond,
-    timeAxisSpacingConfig.durationGapRatios.sixteenth,
-    timeAxisSpacingConfig.durationGapRatios.eighth,
-    timeAxisSpacingConfig.durationGapRatios.quarter,
-    timeAxisSpacingConfig.durationGapRatios.half,
-    timeAxisSpacingConfig.durationGapRatios.whole,
-    spacingLayoutMode,
-  ])
+    renderQualityScale,
+    systemsPerPage,
+    pageCount,
+    safeCurrentPage,
+    visibleSystemRange,
+    horizontalRenderOffsetX,
+    horizontalRenderWindow,
+    layoutStabilityKey,
+  } = useHorizontalScoreLayout({
+    notes,
+    bassNotes,
+    measurePairsFromImport,
+    importedChordRulerEntriesByPairFromImport,
+    measureKeyFifthsFromImport,
+    measureTimeSignaturesFromImport,
+    autoScaleEnabled,
+    manualScalePercent,
+    canvasHeightPercent,
+    pageHorizontalPaddingPx,
+    chordMarkerUiScalePercent,
+    chordMarkerPaddingPx,
+    timeAxisSpacingConfig,
+    horizontalViewportXRange,
+    widthProbeRendererRef,
+    horizontalMeasureWidthCacheRef,
+    horizontalRenderOffsetXRef,
+  })
   const clearActiveAccidentalSelection = useCallback(() => {
     setActiveAccidentalSelection(null)
   }, [])
