@@ -3,23 +3,13 @@ import * as Tone from 'tone'
 import { Renderer } from 'vexflow'
 import './App.css'
 import {
-  A4_PAGE_HEIGHT,
   A4_PAGE_WIDTH,
   INITIAL_NOTES,
-  PIANO_MAX_MIDI,
-  PIANO_MIN_MIDI,
   PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX,
   PREVIEW_START_THRESHOLD_PX,
   SCORE_TOP_PADDING,
-  STEP_TO_SEMITONE,
-  SYSTEM_BASS_OFFSET_Y,
   SYSTEM_HEIGHT,
-  SYSTEM_TREBLE_OFFSET_Y,
 } from './score/constants'
-import { buildAccidentalStateBeforeNote, getEffectivePitchForStaffPosition } from './score/accidentals'
-import {
-  toDisplayDuration,
-} from './score/layout/demand'
 import {
   DEFAULT_TIME_AXIS_SPACING_CONFIG,
 } from './score/layout/timeAxisSpacing'
@@ -38,9 +28,8 @@ import {
   useScoreRenderEffect,
   useSynthLifecycle,
 } from './score/hooks/useScoreEffects'
-import { getDeleteAccidentalFailureMessage, getDeleteMeasureFailureMessage, getDeleteTieFailureMessage, getCopyPasteFailureMessage } from './score/editorMessages'
 import { useMidiInputController } from './score/hooks/useMidiInputController'
-import { usePlaybackController } from './score/hooks/usePlaybackController'
+import { getPlaybackPointKey, usePlaybackController } from './score/hooks/usePlaybackController'
 import { useScoreAudioPreviewController } from './score/hooks/useScoreAudioPreviewController'
 import { useChordMarkerController } from './score/hooks/useChordMarkerController'
 import { useScoreMutationController } from './score/hooks/useScoreMutationController'
@@ -53,44 +42,42 @@ import {
   useEditorPreferencePersistence,
 } from './score/hooks/useEditorPreferencePersistence'
 import { useOsmdPreviewController } from './score/hooks/useOsmdPreviewController'
-import { useScoreDebugApi } from './score/hooks/useScoreDebugApi'
+import { usePlaybackCursorLayout } from './score/hooks/usePlaybackCursorLayout'
+import { useKeyboardCommandController } from './score/hooks/useKeyboardCommandController'
+import { useScoreRuntimeDebugController } from './score/hooks/useScoreRuntimeDebugController'
+import { useScoreViewProps } from './score/hooks/useScoreViewProps'
 import { ScoreControls } from './score/components/ScoreControls'
 import { ScoreBoard } from './score/components/ScoreBoard'
 import {
   createPianoPitches,
-  toDisplayPitch,
 } from './score/pitchUtils'
 import {
   buildBassMockNotes,
   buildMeasurePairs,
-  flattenBassFromPairs,
-  flattenTrebleFromPairs,
 } from './score/scoreOps'
-import { commitDragPitchToScoreData } from './score/dragInteractions'
-import { applyDeleteAccidentalSelection } from './score/accidentalEdits'
-import { applyDeleteTieSelection } from './score/tieEdits'
-import { applyDeleteMeasureSelection } from './score/measureEdits'
 import { isStaffFullMeasureRest, resolvePairTimeSignature } from './score/measureRestUtils'
-import { appendIntervalKey, deleteSelectedKey, findSelectionLocationInPairs } from './score/keyboardEdits'
-import { applyClipboardPaste, buildClipboardFromSelections } from './score/copyPasteEdits'
-import { getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './score/pitchMath'
-import { resolveForwardTieTargets, resolvePreviousTieTarget } from './score/tieChain'
-import { buildSelectionGroupMoveTargets } from './score/selectionGroupTargets'
 import { buildChordRulerEntries, type ChordRulerEntry } from './score/chordRuler'
 import { mergeFullMeasureRestCollapseScopeKeys, toMeasureStaffScopeKey } from './score/fullMeasureRestCollapse'
-import {
-  buildFirstMeasureDiffReport,
-  buildMeasureCoordinateDebugReport,
-  captureFirstMeasureSnapshot,
-  type FirstMeasureDragContext,
-  type FirstMeasureSnapshot,
-} from './score/scoreDebugReports'
+import { ImportProgressModal } from './score/components/ImportProgressModal'
+import { OsmdPreviewModal } from './score/components/OsmdPreviewModal'
 import type { MeasureTimelineBundle } from './score/timeline/types'
-import type { NoteClipboardPayload } from './score/copyPasteTypes'
 import {
   getDefaultNotationPaletteSelection,
   type NotationPaletteSelection,
 } from './score/notationPaletteConfig'
+import {
+  DEFAULT_CHORD_MARKER_PADDING_PX,
+  DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT,
+  DEFAULT_PAGE_HORIZONTAL_PADDING_PX,
+  applyChordMarkerVisualZoom,
+  clampCanvasHeightPercent,
+  clampChordMarkerPaddingPx,
+  clampChordMarkerUiScalePercent,
+  clampScalePercent,
+  getAutoScoreScale,
+  getChordMarkerBaseStyleMetrics,
+  toSequencePreview,
+} from './score/scorePresentation'
 import type { HitGridIndex } from './score/layout/hitTest'
 import type {
   BuiltInDemoMode,
@@ -104,9 +91,6 @@ import type {
   MeasurePair,
   MusicXmlMetadata,
   NoteLayout,
-  PlaybackCursorRect,
-  PlaybackCursorState,
-  PlaybackPoint,
   Pitch,
   RhythmPresetId,
   ScoreNote,
@@ -117,20 +101,8 @@ import type {
 } from './score/types'
 
 const SCORE_RENDER_BACKEND = Renderer.Backends.CANVAS
-const INSPECTOR_SEQUENCE_PREVIEW_LIMIT = 64
 const MANUAL_SCALE_BASELINE = 1
-const DEFAULT_PAGE_HORIZONTAL_PADDING_PX = 86
-const DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT = 134
-const DEFAULT_CHORD_MARKER_PADDING_PX = 6
-const CHORD_MARKER_UI_SCALE_PERCENT_MIN = 60
-const CHORD_MARKER_UI_SCALE_PERCENT_MAX = 240
-const CHORD_MARKER_PADDING_PX_MIN = 0
-const CHORD_MARKER_PADDING_PX_MAX = 24
 const SCORE_STAGE_BORDER_PX = 1
-const PLAYHEAD_OFFSET_PX = 2
-const PLAYHEAD_WIDTH_PX = 2
-const PLAYHEAD_VERTICAL_MARGIN_PX = 15
-const ENABLE_AUTO_FIRST_MEASURE_DRAG_DEBUG = false
 const HORIZONTAL_VIEW_MEASURE_WIDTH_PX = 220
 const HORIZONTAL_VIEW_HEIGHT_PX = SCORE_TOP_PADDING * 2 + SYSTEM_HEIGHT + 26
 const MAX_CANVAS_RENDER_DIM_PX = 32760
@@ -142,201 +114,8 @@ const CHORD_HIGHLIGHT_PAD_Y_PX = 4
 const PITCHES: Pitch[] = createPianoPitches()
 const INITIAL_BASS_NOTES: ScoreNote[] = buildBassMockNotes(INITIAL_NOTES)
 
-function toSequencePreview(notes: ScoreNote[]): string {
-  if (notes.length <= INSPECTOR_SEQUENCE_PREVIEW_LIMIT) {
-    return notes
-      .map((note) => (note.isRest ? `Rest(${toDisplayDuration(note.duration)})` : toDisplayPitch(note.pitch)))
-      .join('  |  ')
-  }
-  const preview = notes
-    .slice(0, INSPECTOR_SEQUENCE_PREVIEW_LIMIT)
-    .map((note) => (note.isRest ? `Rest(${toDisplayDuration(note.duration)})` : toDisplayPitch(note.pitch)))
-    .join('  |  ')
-  return `${preview}  |  ...（还剩 ${notes.length - INSPECTOR_SEQUENCE_PREVIEW_LIMIT} 个）`
-}
-
-function getAutoScoreScale(measureCount: number): number {
-  if (measureCount >= 180) return 0.62
-  if (measureCount >= 140) return 0.68
-  if (measureCount >= 110) return 0.74
-  if (measureCount >= 80) return 0.8
-  if (measureCount >= 56) return 0.86
-  if (measureCount >= 36) return 0.92
-  return 1
-}
-
-function clampScalePercent(value: number): number {
-  if (!Number.isFinite(value)) return 100
-  return Math.max(55, Math.min(300, Math.round(value)))
-}
-
-function clampCanvasHeightPercent(value: number): number {
-  if (!Number.isFinite(value)) return 100
-  return Math.max(70, Math.min(260, Math.round(value)))
-}
-
-function clampChordMarkerUiScalePercent(value: number): number {
-  if (!Number.isFinite(value)) return DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT
-  return Math.max(
-    CHORD_MARKER_UI_SCALE_PERCENT_MIN,
-    Math.min(CHORD_MARKER_UI_SCALE_PERCENT_MAX, Math.round(value)),
-  )
-}
-
-function clampChordMarkerPaddingPx(value: number): number {
-  if (!Number.isFinite(value)) return DEFAULT_CHORD_MARKER_PADDING_PX
-  return Math.round(clampNumber(value, CHORD_MARKER_PADDING_PX_MIN, CHORD_MARKER_PADDING_PX_MAX) * 2) / 2
-}
-
-function clampNumber(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min
-  return Math.max(min, Math.min(max, value))
-}
-
-type ChordMarkerStyleMetrics = {
-  buttonHeightPx: number
-  fontSizePx: number
-  paddingInlinePx: number
-  paddingBlockPx: number
-  borderRadiusPx: number
-  inlineTopPx: number
-  inlineHeightPx: number
-  stripHeightPx: number
-  labelLeftInsetPx: number
-}
-
-function roundChordMarkerPx(value: number): number {
-  return Math.round(value * 10) / 10
-}
-
-function getChordMarkerBaseStyleMetrics(scalePercent: number, uniformPaddingPx: number): ChordMarkerStyleMetrics {
-  const safeScalePercent = clampChordMarkerUiScalePercent(scalePercent)
-  const safePaddingPx = clampChordMarkerPaddingPx(uniformPaddingPx)
-  const scale = safeScalePercent / 100
-  const fontSizePx = roundChordMarkerPx(Math.max(8, 10 * scale))
-  const paddingInlinePx = safePaddingPx
-  const paddingBlockPx = safePaddingPx
-  const buttonHeightPx = roundChordMarkerPx(fontSizePx + paddingBlockPx * 2)
-  const borderRadiusPx = roundChordMarkerPx(Math.max(5, 7 * scale))
-  const inlineTopPx = 22
-  const inlineHeightPx = roundChordMarkerPx(Math.max(24, buttonHeightPx + 2))
-  const stripHeightPx = roundChordMarkerPx(Math.max(46, inlineTopPx + inlineHeightPx))
-  return {
-    buttonHeightPx,
-    fontSizePx,
-    paddingInlinePx,
-    paddingBlockPx,
-    borderRadiusPx,
-    inlineTopPx,
-    inlineHeightPx,
-    stripHeightPx,
-    labelLeftInsetPx: paddingInlinePx,
-  }
-}
-
-function applyChordMarkerVisualZoom(
-  baseMetrics: ChordMarkerStyleMetrics,
-  zoomScale: number,
-): ChordMarkerStyleMetrics {
-  const safeZoomScale = Number.isFinite(zoomScale) && zoomScale > 0 ? zoomScale : 1
-  const buttonHeightPx = roundChordMarkerPx(baseMetrics.buttonHeightPx * safeZoomScale)
-  const fontSizePx = roundChordMarkerPx(baseMetrics.fontSizePx * safeZoomScale)
-  const paddingInlinePx = roundChordMarkerPx(baseMetrics.paddingInlinePx * safeZoomScale)
-  const paddingBlockPx = roundChordMarkerPx(baseMetrics.paddingBlockPx * safeZoomScale)
-  const borderRadiusPx = roundChordMarkerPx(baseMetrics.borderRadiusPx * safeZoomScale)
-  const inlineTopPx = baseMetrics.inlineTopPx
-  const inlineHeightPx = roundChordMarkerPx(baseMetrics.inlineHeightPx * safeZoomScale)
-  const baseBottomGapPx = Math.max(0, baseMetrics.stripHeightPx - (baseMetrics.inlineTopPx + baseMetrics.inlineHeightPx))
-  const stripHeightPx = roundChordMarkerPx(
-    inlineTopPx + inlineHeightPx + baseBottomGapPx * safeZoomScale,
-  )
-  return {
-    buttonHeightPx,
-    fontSizePx,
-    paddingInlinePx,
-    paddingBlockPx,
-    borderRadiusPx,
-    inlineTopPx,
-    inlineHeightPx,
-    stripHeightPx,
-    labelLeftInsetPx: roundChordMarkerPx(baseMetrics.labelLeftInsetPx * safeZoomScale),
-  }
-}
-
-function resolvePairKeyFifthsForKeyboard(pairIndex: number, keyFifthsByMeasure?: number[] | null): number {
-  if (!keyFifthsByMeasure || keyFifthsByMeasure.length === 0) return 0
-  for (let index = pairIndex; index >= 0; index -= 1) {
-    const value = keyFifthsByMeasure[index]
-    if (Number.isFinite(value)) return Math.trunc(value)
-  }
-  return 0
-}
-
-function shiftPitchByStaffSteps(pitch: Pitch, direction: 'up' | 'down', staffSteps = 1): Pitch | null {
-  const diatonicSteps = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
-  const { step, octave } = getStepOctaveAlterFromPitch(pitch)
-  const sourceIndex = diatonicSteps.indexOf(step)
-  if (sourceIndex < 0) return null
-  const shift = Math.max(1, Math.trunc(staffSteps))
-  const shiftedRawIndex = sourceIndex + (direction === 'up' ? shift : -shift)
-  const octaveShift = Math.floor(shiftedRawIndex / diatonicSteps.length)
-  const wrappedIndex = ((shiftedRawIndex % diatonicSteps.length) + diatonicSteps.length) % diatonicSteps.length
-  const targetStep = diatonicSteps[wrappedIndex]
-  const targetOctave = octave + octaveShift
-  return toPitchFromStepAlter(targetStep, 0, targetOctave)
-}
-
-function isPitchWithinPianoRange(pitch: Pitch): boolean {
-  const { step, octave, alter } = getStepOctaveAlterFromPitch(pitch)
-  const semitone = STEP_TO_SEMITONE[step]
-  if (semitone === undefined) return false
-  const midi = (octave + 1) * 12 + semitone + alter
-  return midi >= PIANO_MIN_MIDI && midi <= PIANO_MAX_MIDI
-}
-
-function clampDurationGapRatio(value: number): number {
-  const clamped = clampNumber(value, 0.5, 4)
-  return Number(clamped.toFixed(2))
-}
-
-function clampBaseMinGap32Px(value: number): number {
-  const clamped = clampNumber(value, 0, 12)
-  return Number(clamped.toFixed(2))
-}
-
-function clampLeadingBarlineGapPx(value: number): number {
-  const clamped = clampNumber(value, 0, 80)
-  return Number(clamped.toFixed(2))
-}
-
-function clampSecondChordSafeGapPx(value: number): number {
-  const clamped = clampNumber(value, 0, 12)
-  return Number(clamped.toFixed(2))
-}
-
-function clampPageHorizontalPaddingPx(value: number): number {
-  return Math.round(clampNumber(value, 8, 120))
-}
-
-function isTextInputTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  const tagName = target.tagName.toLowerCase()
-  if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') return true
-  if (target.isContentEditable) return true
-  return Boolean(target.closest('[contenteditable="true"]'))
-}
-
-function getPlaybackPointKey(point: PlaybackPoint): string {
-  return `${point.pairIndex}:${point.onsetTick}`
-}
-
 function isSameSelection(left: Selection, right: Selection): boolean {
   return left.noteId === right.noteId && left.staff === right.staff && left.keyIndex === right.keyIndex
-}
-
-function appendUniqueSelection(current: Selection[], next: Selection): Selection[] {
-  if (current.some((entry) => isSameSelection(entry, next))) return current
-  return [...current, next]
 }
 function buildSelectionsForMeasureStaff(
   pair: MeasurePair,
@@ -398,7 +177,6 @@ function App() {
   const [musicXmlMetadataFromImport, setMusicXmlMetadataFromImport] = useState<MusicXmlMetadata | null>(null)
   const [importedChordRulerEntriesByPairFromImport, setImportedChordRulerEntriesByPairFromImport] = useState<ChordRulerEntry[][] | null>(null)
   const [, setDragDebugReport] = useState<string>('')
-  const [, setMeasureEdgeDebugReport] = useState<string>('')
   const [autoScaleEnabled, setAutoScaleEnabled] = useState(false)
   const [manualScalePercent, setManualScalePercent] = useState(100)
   const [canvasHeightPercent, setCanvasHeightPercent] = useState(100)
@@ -452,9 +230,6 @@ function App() {
   const measureTimeSignaturesFromImportRef = useRef<TimeSignature[] | null>(null)
   const musicXmlMetadataFromImportRef = useRef<MusicXmlMetadata | null>(null)
   const importedNoteLookupRef = useRef<Map<string, ImportedNoteLocation>>(new Map())
-  const firstMeasureBaselineRef = useRef<FirstMeasureSnapshot | null>(null)
-  const firstMeasureDragContextRef = useRef<FirstMeasureDragContext | null>(null)
-  const firstMeasureDebugRafRef = useRef<number | null>(null)
   const importFeedbackRef = useRef<ImportFeedback>(importFeedback)
   const activeSelectionRef = useRef<Selection>(activeSelection)
   const selectedSelectionsRef = useRef<Selection[]>(selectedSelections)
@@ -465,7 +240,6 @@ function App() {
   const layoutReflowHintRef = useRef<LayoutReflowHint | null>(null)
   const midiStepChainRef = useRef(false)
   const midiStepLastSelectionRef = useRef<Selection | null>(null)
-  const noteClipboardRef = useRef<NoteClipboardPayload | null>(null)
   const isOsmdPreviewOpenRef = useRef(false)
   const { notePreviewEventsRef, handlePreviewScoreNote, playAccidentalEditPreview } =
     useScoreAudioPreviewController({
@@ -1383,166 +1157,6 @@ function App() {
     onMidiNoteNumber: applyMidiReplacementByNoteNumber,
   })
   const midiSupported = midiPermissionState !== 'unsupported'
-
-  const moveSelectionsByKeyboardSteps = useCallback((
-    direction: 'up' | 'down',
-    staffSteps: number,
-    scope: 'active' | 'selected' = 'active',
-  ): boolean => {
-    const currentSelection = activeSelectionRef.current
-    const sourcePairs = measurePairsRef.current
-    const importedLookup = importedNoteLookupRef.current
-    const selectionLocation = findSelectionLocationInPairs({
-      pairs: sourcePairs,
-      selection: currentSelection,
-      importedNoteLookup: importedLookup,
-    })
-    if (!selectionLocation) return false
-
-    const sourcePair = sourcePairs[selectionLocation.pairIndex]
-    if (!sourcePair) return false
-    const staffNotes = selectionLocation.staff === 'treble' ? sourcePair.treble : sourcePair.bass
-    const sourceNote = staffNotes[selectionLocation.noteIndex]
-    if (!sourceNote || sourceNote.isRest) return false
-
-    const selectedPitch =
-      currentSelection.keyIndex > 0
-        ? sourceNote.chordPitches?.[currentSelection.keyIndex - 1] ?? null
-        : sourceNote.pitch
-    if (!selectedPitch) return false
-
-    const shiftedStaffPositionPitch = shiftPitchByStaffSteps(selectedPitch, direction, staffSteps)
-    if (!shiftedStaffPositionPitch) return false
-
-    const keyFifths = resolvePairKeyFifthsForKeyboard(selectionLocation.pairIndex, measureKeyFifthsFromImportRef.current)
-    const accidentalStateBeforeNote = buildAccidentalStateBeforeNote(staffNotes, selectionLocation.noteIndex, keyFifths)
-    const nextPitch = getEffectivePitchForStaffPosition(
-      shiftedStaffPositionPitch,
-      keyFifths,
-      accidentalStateBeforeNote,
-    )
-    if (!isPitchWithinPianoRange(nextPitch) || nextPitch === selectedPitch) return false
-
-    const importedPairs = measurePairsFromImportRef.current
-    const activePairs = importedPairs ?? sourcePairs
-    const linkedTieTargets = resolveForwardTieTargets({
-      measurePairs: activePairs,
-      pairIndex: selectionLocation.pairIndex,
-      noteIndex: selectionLocation.noteIndex,
-      keyIndex: currentSelection.keyIndex,
-      staff: currentSelection.staff,
-      pitchHint: selectedPitch,
-    })
-    const previousTieTarget = resolvePreviousTieTarget({
-      measurePairs: activePairs,
-      pairIndex: selectionLocation.pairIndex,
-      noteIndex: selectionLocation.noteIndex,
-      keyIndex: currentSelection.keyIndex,
-      staff: currentSelection.staff,
-      pitchHint: selectedPitch,
-    })
-
-    const dragState: DragState = {
-      noteId: currentSelection.noteId,
-      staff: currentSelection.staff,
-      keyIndex: currentSelection.keyIndex,
-      pairIndex: selectionLocation.pairIndex,
-      noteIndex: selectionLocation.noteIndex,
-      linkedTieTargets:
-        linkedTieTargets.length > 0
-          ? linkedTieTargets
-          : [
-              {
-                pairIndex: selectionLocation.pairIndex,
-                noteIndex: selectionLocation.noteIndex,
-                staff: currentSelection.staff,
-                noteId: currentSelection.noteId,
-                keyIndex: currentSelection.keyIndex,
-                pitch: selectedPitch,
-              },
-            ],
-      previousTieTarget,
-      groupMoveTargets:
-        scope === 'selected'
-          ? buildSelectionGroupMoveTargets({
-              effectiveSelections: appendUniqueSelection(selectedSelections, currentSelection),
-              primarySelection: currentSelection,
-              measurePairs: activePairs,
-              importedNoteLookup: importedLookup,
-              measureLayouts: measureLayoutsRef.current,
-              importedKeyFifths: measureKeyFifthsFromImportRef.current,
-            })
-          : [],
-      pointerId: -1,
-      surfaceTop: 0,
-      surfaceClientToScoreScaleY: 1,
-      startClientY: 0,
-      originPitch: selectedPitch,
-      pitch: selectedPitch,
-      previewStarted: false,
-      grabOffsetY: 0,
-      pitchYMap: {} as Record<Pitch, number>,
-      keyFifths,
-      accidentalStateBeforeNote,
-      layoutCacheReady: false,
-      staticAnchorXById: new Map(),
-      previewAccidentalRightXById: new Map(),
-      debugStaticByNoteKey: new Map(),
-    }
-
-    const result = commitDragPitchToScoreData({
-      drag: dragState,
-      pitch: nextPitch,
-      importedPairs,
-      importedNoteLookup: importedLookup,
-      currentPairs: sourcePairs,
-      importedKeyFifths: measureKeyFifthsFromImportRef.current,
-    })
-
-    const sourceSnapshotPairs = result.fromImported ? (importedPairs ?? sourcePairs) : sourcePairs
-    if (result.normalizedPairs !== sourceSnapshotPairs) {
-      pushUndoSnapshot(sourceSnapshotPairs)
-    }
-
-    const decoratedLayoutHint = result.layoutReflowHint.scoreContentChanged
-      ? { ...result.layoutReflowHint, layoutStabilityKey }
-      : null
-    layoutReflowHintRef.current = decoratedLayoutHint
-
-    if (result.fromImported) {
-      measurePairsFromImportRef.current = result.normalizedPairs
-      setMeasurePairsFromImport(result.normalizedPairs)
-      setNotes(flattenTrebleFromPairs(result.normalizedPairs))
-      setBassNotes(flattenBassFromPairs(result.normalizedPairs))
-    } else {
-      setNotes(result.trebleNotes)
-      setBassNotes(result.bassNotes)
-    }
-    setIsSelectionVisible(true)
-    setActiveSelection({
-      noteId: currentSelection.noteId,
-      staff: currentSelection.staff,
-      keyIndex: currentSelection.keyIndex,
-    })
-    if (scope === 'selected') {
-      setSelectedSelections((current) => appendUniqueSelection(current, currentSelection))
-    }
-    resetMidiStepChain()
-    return true
-  }, [
-    layoutStabilityKey,
-    pushUndoSnapshot,
-    resetMidiStepChain,
-    selectedSelections,
-    setBassNotes,
-    setMeasurePairsFromImport,
-    setNotes,
-    setActiveSelection,
-  ])
-
-  const moveSelectionByKeyboardArrow = useCallback((direction: 'up' | 'down'): boolean => {
-    return moveSelectionsByKeyboardSteps(direction, 1, 'active')
-  }, [moveSelectionsByKeyboardSteps])
   const {
     isOsmdPreviewOpen,
     isOsmdPreviewExportingPdf,
@@ -1632,267 +1246,7 @@ function App() {
     applyKeyboardEditResult,
     playAccidentalEditPreview,
   })
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (isOsmdPreviewOpen) return
-      if (dragRef.current || draggingSelection) return
-      if (isTextInputTarget(event.target)) return
-
-      const scrollHost = scoreScrollRef.current
-      if (!scrollHost) return
-      const activeElement = document.activeElement
-      if (!(activeElement instanceof HTMLElement)) return
-      if (!(activeElement === scrollHost || scrollHost.contains(activeElement))) return
-
-      const isUndoShortcut =
-        (event.ctrlKey || event.metaKey) &&
-        !event.altKey &&
-        !event.shiftKey &&
-        event.key.toLowerCase() === 'z'
-      if (isUndoShortcut) {
-        const restored = undoLastScoreEdit()
-        if (restored) {
-          event.preventDefault()
-        }
-        return
-      }
-
-      if (event.key === 'Escape' && activeTieSelection) {
-        event.preventDefault()
-        setActiveTieSelection(null)
-        return
-      }
-
-      if (event.key === 'Escape' && activeAccidentalSelection) {
-        event.preventDefault()
-        setActiveAccidentalSelection(null)
-        return
-      }
-
-      const isCopyShortcut =
-        (event.ctrlKey || event.metaKey) &&
-        !event.altKey &&
-        !event.shiftKey &&
-        event.key.toLowerCase() === 'c'
-      if (isCopyShortcut) {
-        event.preventDefault()
-        const copyAttempt = buildClipboardFromSelections({
-          pairs: measurePairs,
-          activeSelection,
-          selectedSelections,
-          isSelectionVisible,
-          importedNoteLookup: importedNoteLookupRef.current,
-        })
-        if (!copyAttempt.payload || copyAttempt.error) {
-          const message = getCopyPasteFailureMessage(copyAttempt.error ?? 'selection-not-found')
-          setNotationPaletteLastAction(message)
-          console.info('[copy-paste]', message)
-          return
-        }
-        noteClipboardRef.current = copyAttempt.payload
-        const message = `已复制 ${copyAttempt.payload.pitches.length} 个音（${toDisplayDuration(copyAttempt.payload.duration)}）`
-        setNotationPaletteLastAction(message)
-        console.info('[copy-paste]', message, copyAttempt.payload)
-        return
-      }
-
-      const isPasteShortcut =
-        (event.ctrlKey || event.metaKey) &&
-        !event.altKey &&
-        !event.shiftKey &&
-        event.key.toLowerCase() === 'v'
-      if (isPasteShortcut) {
-        event.preventDefault()
-        const pasteAttempt = applyClipboardPaste({
-          pairs: measurePairs,
-          clipboard: noteClipboardRef.current,
-          activeSelection,
-          isSelectionVisible,
-          importedNoteLookup: importedNoteLookupRef.current,
-          keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
-          timeSignaturesByMeasure: measureTimeSignaturesFromImportRef.current,
-          importedMode: measurePairsFromImportRef.current !== null,
-        })
-        if (!pasteAttempt.result || pasteAttempt.error) {
-          const message = getCopyPasteFailureMessage(pasteAttempt.error ?? 'selection-not-found')
-          setNotationPaletteLastAction(message)
-          console.info('[copy-paste]', message)
-          return
-        }
-        applyKeyboardEditResult(
-          pasteAttempt.result.nextPairs,
-          pasteAttempt.result.nextSelection,
-          pasteAttempt.result.nextSelections,
-        )
-        const copiedCount = noteClipboardRef.current?.pitches.length ?? 0
-        const message = `已粘贴 ${copiedCount} 个音`
-        setNotationPaletteLastAction(message)
-        console.info('[copy-paste]', message)
-        return
-      }
-
-      if (event.key === 'Delete' && activeTieSelection) {
-        const deleteAttempt = applyDeleteTieSelection({
-          pairs: measurePairs,
-          selection: activeTieSelection,
-          fallbackSelection: activeSelection,
-        })
-        if (deleteAttempt.error || !deleteAttempt.result) {
-          const message = getDeleteTieFailureMessage(deleteAttempt.error ?? 'selection-not-found')
-          setNotationPaletteLastAction(message)
-          console.info('[tie-delete]', message)
-          return
-        }
-        event.preventDefault()
-        applyKeyboardEditResult(
-          deleteAttempt.result.nextPairs,
-          deleteAttempt.result.nextSelection,
-          deleteAttempt.result.nextSelections,
-        )
-        setActiveTieSelection(null)
-        setIsSelectionVisible(false)
-        setSelectedSelections([])
-        setSelectedMeasureScope(null)
-        setNotationPaletteLastAction('已删除延音线')
-        console.info('[tie-delete] 已删除延音线')
-        return
-      }
-
-      if (event.key === 'Delete' && activeAccidentalSelection) {
-        const sourceImportedNoteLookup = importedNoteLookupRef.current
-        const deleteAttempt = applyDeleteAccidentalSelection({
-          pairs: measurePairs,
-          selection: activeAccidentalSelection,
-          importedNoteLookup: sourceImportedNoteLookup,
-          keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
-        })
-        if (deleteAttempt.error || !deleteAttempt.result) {
-          const message = getDeleteAccidentalFailureMessage(deleteAttempt.error ?? 'selection-not-found')
-          setNotationPaletteLastAction(message)
-          console.info('[accidental-delete]', message)
-          return
-        }
-        event.preventDefault()
-        applyKeyboardEditResult(
-          deleteAttempt.result.nextPairs,
-          deleteAttempt.result.nextSelection,
-          deleteAttempt.result.nextSelections,
-        )
-        playAccidentalEditPreview({
-          pairs: measurePairs,
-          previewSelection: deleteAttempt.result.previewSelection,
-          previewPitch: deleteAttempt.result.previewPitch,
-          importedNoteLookup: sourceImportedNoteLookup,
-        })
-        setActiveAccidentalSelection(null)
-        setIsSelectionVisible(false)
-        setSelectedSelections([])
-        setSelectedMeasureScope(null)
-        setNotationPaletteLastAction('已删除变音记号（按上下文回落并重算）')
-        console.info('[accidental-delete] 已删除变音记号（按上下文回落并重算）')
-        return
-      }
-
-      if (event.key === 'Delete' && selectedMeasureScope && isSelectionVisible) {
-        const deleteAttempt = applyDeleteMeasureSelection({
-          pairs: measurePairs,
-          selectedMeasureScope,
-          importedMode: measurePairsFromImportRef.current !== null,
-          keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
-          timeSignaturesByMeasure: measureTimeSignaturesFromImportRef.current,
-        })
-        if (deleteAttempt.error || !deleteAttempt.result) {
-          const message = getDeleteMeasureFailureMessage(deleteAttempt.error ?? 'selection-not-found')
-          setNotationPaletteLastAction(message)
-          console.info('[measure-delete]', message)
-          return
-        }
-        event.preventDefault()
-        applyKeyboardEditResult(
-          deleteAttempt.result.nextPairs,
-          deleteAttempt.result.nextSelection,
-          deleteAttempt.result.nextSelections,
-          'default',
-          {
-            collapseScopesToAdd: [{
-              pairIndex: selectedMeasureScope.pairIndex,
-              staff: selectedMeasureScope.staff,
-            }],
-          },
-        )
-        setSelectedMeasureScope({
-          pairIndex: selectedMeasureScope.pairIndex,
-          staff: selectedMeasureScope.staff,
-        })
-        setSelectedSelections([deleteAttempt.result.nextSelection])
-        setNotationPaletteLastAction('已清空该小节并替换为全休止符')
-        console.info('[measure-delete] 已清空该小节并替换为全休止符', selectedMeasureScope)
-        return
-      }
-
-      if (!isSelectionVisible) return
-
-      if (
-        event.ctrlKey &&
-        !event.metaKey &&
-        !event.altKey &&
-        (event.key === 'ArrowUp' || event.key === 'ArrowDown')
-      ) {
-        const moved = moveSelectionsByKeyboardSteps(event.key === 'ArrowUp' ? 'up' : 'down', 7, 'selected')
-        if (moved) {
-          event.preventDefault()
-        }
-        return
-      }
-
-      if (event.metaKey || event.ctrlKey || event.altKey) return
-
-      if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
-        const moved = moveSelectionByKeyboardArrow(event.key === 'ArrowUp' ? 'up' : 'down')
-        if (moved) {
-          event.preventDefault()
-        }
-        return
-      }
-
-      if (event.key === 'Delete') {
-        const result = deleteSelectedKey({
-          pairs: measurePairs,
-          selection: activeSelection,
-          keyFifthsByMeasure: measureKeyFifthsFromImport,
-          importedNoteLookup: importedNoteLookupRef.current,
-        })
-        if (!result) return
-        event.preventDefault()
-        applyKeyboardEditResult(result.nextPairs, result.nextSelection)
-        return
-      }
-
-      const digitMatch = /^Digit([2-8])$/.exec(event.code)
-      if (!digitMatch) return
-      const intervalDegree = Number(digitMatch[1])
-      if (!Number.isFinite(intervalDegree)) return
-      const result = appendIntervalKey({
-        pairs: measurePairs,
-        selection: activeSelection,
-        intervalDegree,
-        direction: event.shiftKey ? 'down' : 'up',
-        keyFifthsByMeasure: measureKeyFifthsFromImport,
-        importedNoteLookup: importedNoteLookupRef.current,
-      })
-      if (!result) return
-      event.preventDefault()
-      applyKeyboardEditResult(result.nextPairs, result.nextSelection)
-    }
-
-    window.addEventListener('keydown', onKeyDown)
-    return () => {
-      window.removeEventListener('keydown', onKeyDown)
-    }
-  }, [
-    activeAccidentalSelection,
-    activeTieSelection,
+  useKeyboardCommandController({
     isOsmdPreviewOpen,
     draggingSelection,
     isSelectionVisible,
@@ -1900,734 +1254,200 @@ function App() {
     activeSelection,
     selectedSelections,
     selectedMeasureScope,
+    activeTieSelection,
+    activeAccidentalSelection,
     measureKeyFifthsFromImport,
-    applyKeyboardEditResult,
-    moveSelectionsByKeyboardSteps,
-    moveSelectionByKeyboardArrow,
-    playAccidentalEditPreview,
+    activeSelectionRef,
+    measurePairsRef,
+    measurePairsFromImportRef,
+    importedNoteLookupRef,
+    measureLayoutsRef,
+    measureKeyFifthsFromImportRef,
+    measureTimeSignaturesFromImportRef,
+    scoreScrollRef,
+    layoutReflowHintRef,
+    layoutStabilityKey,
+    pushUndoSnapshot,
+    resetMidiStepChain,
     undoLastScoreEdit,
-  ])
+    applyKeyboardEditResult,
+    playAccidentalEditPreview,
+    setNotes,
+    setBassNotes,
+    setMeasurePairsFromImport,
+    setIsSelectionVisible,
+    setSelectedSelections,
+    setSelectedMeasureScope,
+    setActiveSelection,
+    setActiveTieSelection,
+    setActiveAccidentalSelection,
+    setNotationPaletteLastAction,
+  })
 
-  const playheadRectPx = useMemo<PlaybackCursorRect | null>(() => {
-    void layoutStabilityKey
-    void chordMarkerLayoutRevision
-    if (!playbackCursorPoint) return null
-    const playbackEvent = playbackTimelineEventByPointKey.get(getPlaybackPointKey(playbackCursorPoint)) ?? null
-    if (!playbackEvent) return null
-
-    const pairLayouts = noteLayoutsByPairRef.current.get(playbackCursorPoint.pairIndex) ?? []
-    const layoutByStaffNoteIndex = new Map<string, NoteLayout>()
-    pairLayouts.forEach((layout) => {
-      layoutByStaffNoteIndex.set(`${layout.staff}:${layout.noteIndex}`, layout)
-    })
-
-    let bestHeadCandidate:
-      | {
-          globalX: number
-          staffPriority: number
-          noteIndex: number
-          keyIndex: number
-        }
-      | null = null
-
-    for (const target of playbackEvent.targets) {
-      const layout = layoutByStaffNoteIndex.get(`${target.staff}:${target.noteIndex}`) ?? null
-      if (!layout) continue
-      const head = layout.noteHeads.find((item) => item.keyIndex === target.keyIndex) ?? null
-      if (!head) continue
-      const localLeftX = Number.isFinite(head.hitMinX) ? (head.hitMinX as number) : head.x
-      if (!Number.isFinite(localLeftX)) continue
-      const candidate = {
-        globalX: localLeftX + horizontalRenderOffsetX,
-        staffPriority: target.staff === 'treble' ? 0 : 1,
-        noteIndex: target.noteIndex,
-        keyIndex: target.keyIndex,
-      }
-      if (
-        bestHeadCandidate === null ||
-        candidate.globalX < bestHeadCandidate.globalX - 0.001 ||
-        (Math.abs(candidate.globalX - bestHeadCandidate.globalX) <= 0.001 &&
-          (candidate.staffPriority < bestHeadCandidate.staffPriority ||
-            (candidate.staffPriority === bestHeadCandidate.staffPriority &&
-              (candidate.noteIndex < bestHeadCandidate.noteIndex ||
-                (candidate.noteIndex === bestHeadCandidate.noteIndex && candidate.keyIndex < bestHeadCandidate.keyIndex)))))
-      ) {
-        bestHeadCandidate = candidate
-      }
-    }
-
-    let globalHeadLeftX: number | null = null
-    if (bestHeadCandidate !== null) {
-      globalHeadLeftX = bestHeadCandidate.globalX
-    }
-    if (globalHeadLeftX === null) {
-      const timelineBundle = measureTimelineBundlesRef.current.get(playbackCursorPoint.pairIndex) ?? null
-      const axisX = timelineBundle?.publicAxisLayout?.tickToX.get(playbackCursorPoint.onsetTick)
-      if (typeof axisX === 'number' && Number.isFinite(axisX)) {
-        globalHeadLeftX = axisX + horizontalRenderOffsetX
-      }
-    }
-    if (globalHeadLeftX === null) {
-      const frame = horizontalMeasureFramesByPair[playbackCursorPoint.pairIndex] ?? null
-      const frameContentGeometry = getMeasureFrameContentGeometry(frame)
-      if (frame && frameContentGeometry) {
-        globalHeadLeftX =
-          frameContentGeometry.contentStartX +
-          frameContentGeometry.contentMeasureWidth *
-            (playbackCursorPoint.onsetTick / Math.max(1, playbackEvent.measureTicks))
-      }
-    }
-    if (globalHeadLeftX === null || !Number.isFinite(globalHeadLeftX)) return null
-
-    const measureLayout =
-      measureLayoutsRef.current.get(playbackCursorPoint.pairIndex) ??
-      [...measureLayoutsRef.current.values()][0] ??
-      null
-    const trebleTopRaw =
-      measureLayout !== null && Number.isFinite(measureLayout.trebleLineTopY)
-        ? measureLayout.trebleLineTopY
-        : SCORE_TOP_PADDING + SYSTEM_TREBLE_OFFSET_Y
-    const trebleBottomRaw =
-      measureLayout !== null && Number.isFinite(measureLayout.trebleLineBottomY)
-        ? measureLayout.trebleLineBottomY
-        : SCORE_TOP_PADDING + SYSTEM_TREBLE_OFFSET_Y + 40
-    const bassTopRaw =
-      measureLayout !== null && Number.isFinite(measureLayout.bassLineTopY)
-        ? measureLayout.bassLineTopY
-        : SCORE_TOP_PADDING + SYSTEM_BASS_OFFSET_Y
-    const bassBottomRaw =
-      measureLayout !== null && Number.isFinite(measureLayout.bassLineBottomY)
-        ? measureLayout.bassLineBottomY
-        : SCORE_TOP_PADDING + SYSTEM_BASS_OFFSET_Y + 40
-    const lineTopRaw = Math.min(trebleTopRaw, trebleBottomRaw, bassTopRaw, bassBottomRaw)
-    const lineBottomRaw = Math.max(trebleTopRaw, trebleBottomRaw, bassTopRaw, bassBottomRaw)
-    const x = globalHeadLeftX * scoreScaleX + SCORE_STAGE_BORDER_PX - PLAYHEAD_OFFSET_PX
-    const y = scoreSurfaceOffsetYPx + lineTopRaw * scoreScaleY + SCORE_STAGE_BORDER_PX - PLAYHEAD_VERTICAL_MARGIN_PX
-    const bottomY =
-      scoreSurfaceOffsetYPx + lineBottomRaw * scoreScaleY + SCORE_STAGE_BORDER_PX + PLAYHEAD_VERTICAL_MARGIN_PX
-    const height = bottomY - y
-    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(height)) return null
-    if (height <= 0) return null
-    return {
-      x,
-      y,
-      width: PLAYHEAD_WIDTH_PX,
-      height,
-    }
-  }, [
-    chordMarkerLayoutRevision,
-    getMeasureFrameContentGeometry,
+  const { playheadRectPx, playbackCursorState } = usePlaybackCursorLayout({
+    playbackCursorPoint,
+    playbackCursorColor,
+    playbackTimelineEventByPointKey,
+    noteLayoutsByPairRef,
+    measureTimelineBundlesRef,
+    measureLayoutsRef,
     horizontalMeasureFramesByPair,
+    getMeasureFrameContentGeometry,
     horizontalRenderOffsetX,
     layoutStabilityKey,
-    playbackCursorPoint,
-    playbackTimelineEventByPointKey,
+    chordMarkerLayoutRevision,
     scoreScaleX,
     scoreScaleY,
     scoreSurfaceOffsetYPx,
-  ])
-  const playbackCursorState = useMemo<PlaybackCursorState>(() => ({
-    point: playbackCursorPoint ? { ...playbackCursorPoint } : null,
-    color: playbackCursorColor,
-    rectPx: playheadRectPx ? { ...playheadRectPx } : null,
-  }), [playbackCursorColor, playbackCursorPoint, playheadRectPx])
-  const onBeginDragWithFirstMeasureDebug: typeof beginDrag = (event) => {
-    scoreScrollRef.current?.focus()
-    beginDrag(event)
-    if (!ENABLE_AUTO_FIRST_MEASURE_DRAG_DEBUG) return
-    const drag = dragRef.current
-    if (!drag) return
-    firstMeasureDragContextRef.current = {
-      noteId: drag.noteId,
-      staff: drag.staff,
-      keyIndex: drag.keyIndex,
-      pairIndex: drag.pairIndex,
-    }
-    firstMeasureBaselineRef.current = captureFirstMeasureSnapshot({
-      stage: 'before-drag',
-      measurePairs: measurePairsRef.current,
-      noteLayoutsByPair: noteLayoutsByPairRef.current,
-      measureLayouts: measureLayoutsRef.current,
-    })
-  }
-  const onEndDragWithFirstMeasureDebug: typeof endDrag = (event) => {
-    const dragging = dragRef.current
-    endDrag(event)
-    if (!ENABLE_AUTO_FIRST_MEASURE_DRAG_DEBUG) return
-    if (!dragging) return
-    const beforeSnapshot = firstMeasureBaselineRef.current
-    if (!beforeSnapshot) return
-    if (firstMeasureDebugRafRef.current !== null) {
-      window.cancelAnimationFrame(firstMeasureDebugRafRef.current)
-      firstMeasureDebugRafRef.current = null
-    }
-    firstMeasureDebugRafRef.current = window.requestAnimationFrame(() => {
-      firstMeasureDebugRafRef.current = window.requestAnimationFrame(() => {
-        const afterSnapshot = captureFirstMeasureSnapshot({
-          stage: 'after-drag-release',
-          measurePairs: measurePairsRef.current,
-          noteLayoutsByPair: noteLayoutsByPairRef.current,
-          measureLayouts: measureLayoutsRef.current,
-        })
-        if (afterSnapshot) {
-          const report = buildFirstMeasureDiffReport({
-            beforeSnapshot,
-            afterSnapshot,
-            dragContext: firstMeasureDragContextRef.current,
-            dragPreviewFrameCount: dragDebugFramesRef.current.length,
-          })
-          setMeasureEdgeDebugReport(report)
-          console.log(report)
-        }
-        firstMeasureBaselineRef.current = null
-        firstMeasureDragContextRef.current = null
-        firstMeasureDebugRafRef.current = null
-      })
-    })
-  }
-  const dumpAllMeasureCoordinateReport = useCallback(() => buildMeasureCoordinateDebugReport({
-    measureLayouts: measureLayoutsRef.current,
-    noteLayoutsByPair: noteLayoutsByPairRef.current,
-    measureTimelineBundles: measureTimelineBundlesRef.current,
-    measurePairs: measurePairsRef.current,
-    visibleSystemRange,
-  }), [visibleSystemRange])
-
-  useEffect(() => {
-    return () => {
-      if (firstMeasureDebugRafRef.current !== null) {
-        window.cancelAnimationFrame(firstMeasureDebugRafRef.current)
-      }
-    }
-  }, [])
-  const debugApi = useMemo(() => ({
-    importMusicXmlText: (xmlText: string) => {
-      importMusicXmlTextWithCollapseReset(xmlText)
-    },
-    playScore: () => {
-      void playScore()
-    },
-    getImportFeedback: () => importFeedbackRef.current,
-    getScaleConfig: () => ({
-      autoScaleEnabled,
-      manualScalePercent: safeManualScalePercent,
-      baseScoreScale,
-      scoreScale,
-      scoreScaleX,
-      scoreScaleY,
-      isHorizontalView: true,
-      spacingLayoutMode,
-    }),
-    setAutoScaleEnabled: (enabled: boolean) => {
-      setAutoScaleEnabled(Boolean(enabled))
-    },
-    getShowNoteHeadJianpuEnabled: () => showNoteHeadJianpuEnabled,
-    setShowNoteHeadJianpuEnabled: (enabled: boolean) => {
-      setShowNoteHeadJianpuEnabled(Boolean(enabled))
-    },
-    setManualScalePercent: (nextPercent: number) => {
-      setManualScalePercent(clampScalePercent(nextPercent))
-    },
-    dumpAllMeasureCoordinates: () => dumpAllMeasureCoordinateReport(),
-    getOsmdPreviewSystemMetrics: () => dumpOsmdPreviewSystemMetrics(),
-    getOsmdPreviewRebalanceStats: () => osmdPreviewLastRebalanceStatsRef.current,
-    getOsmdPreviewInstance: () => osmdPreviewInstanceRef.current,
-    getDragPreviewFrames: () =>
-      dragDebugFramesRef.current.map((frame) => ({
-        ...frame,
-        rows: frame.rows.map((row) => ({ ...row })),
-      })),
-    getNotePreviewEvents: () => notePreviewEventsRef.current.map((event) => ({ ...event })),
-    clearNotePreviewEvents: () => {
-      notePreviewEventsRef.current = []
-    },
-    getPlaybackCursorState: () => ({
-      ...playbackCursorState,
-      point: playbackCursorState.point ? { ...playbackCursorState.point } : null,
-      rectPx: playbackCursorState.rectPx ? { ...playbackCursorState.rectPx } : null,
-      status: playheadStatus,
-      sessionId: playbackSessionId,
-    }),
-    getPlaybackCursorEvents: () => playbackCursorEventsRef.current.map((event) => ({
-      ...event,
-      point: event.point ? { ...event.point } : null,
-    })),
-    clearPlaybackCursorEvents: () => {
-      playbackCursorEventsRef.current = []
-    },
-    getPlayheadDebugLogRows: () => playheadDebugLogRowsRef.current.map((row) => ({ ...row })),
-    getPlayheadDebugViewportSnapshot: () =>
-      measurePlayheadDebugLogRow(
-        latestPlayheadDebugSnapshotRef.current?.seq ?? playheadDebugSequenceRef.current,
-      ) ??
-      (latestPlayheadDebugSnapshotRef.current ? { ...latestPlayheadDebugSnapshotRef.current } : null),
-    applyChordSelectionRange: (pairIndex: number, startTick: number, endTick: number) => ({
-      selectedCount: applyChordSelectionRange({
-        pairIndex,
-        startTick,
-        endTick,
-        markerKey: null,
-      }).length,
-    }),
-    getSelectedSelections: () =>
-      selectedSelectionsRef.current.map((selection) => {
-        const matchedEntry = (() => {
-          for (let pairIndex = 0; pairIndex < measurePairsRef.current.length; pairIndex += 1) {
-            const pair = measurePairsRef.current[pairIndex]
-            if (!pair) continue
-            const staffNotes = selection.staff === 'treble' ? pair.treble : pair.bass
-            const noteIndex = staffNotes.findIndex((note) => note.id === selection.noteId)
-            if (noteIndex < 0) continue
-            return {
-              pairIndex,
-              noteIndex,
-              note: staffNotes[noteIndex] ?? null,
-            }
-          }
-          return {
-            pairIndex: null,
-            noteIndex: null,
-            note: null as ScoreNote | null,
-          }
-        })()
-        return {
-          ...selection,
-          pairIndex: matchedEntry.pairIndex,
-          noteIndex: matchedEntry.noteIndex,
-          pitch: matchedEntry.note?.pitch ?? null,
-          duration: matchedEntry.note?.duration ?? null,
-          isRest: matchedEntry.note?.isRest === true,
-        }
-      }),
-    getActiveChordSelection: () => (activeChordSelection ? { ...activeChordSelection } : null),
-    getSelectedMeasureHighlightRect: () =>
-      selectedMeasureHighlightRectPx ? { ...selectedMeasureHighlightRectPx } : null,
-    getChordRulerMarkers: () =>
-      [...chordRulerMarkerMetaByKey.values()].map((marker) => ({
-        key: marker.key,
-        pairIndex: marker.pairIndex,
-        beatIndex: marker.beatIndex,
-        label: marker.displayLabel,
-        sourceLabel: marker.sourceLabel,
-        displayLabel: marker.displayLabel,
-        startTick: marker.startTick,
-        endTick: marker.endTick,
-        positionText: marker.positionText,
-        anchorGlobalX: marker.anchorGlobalX,
-        anchorXPx: marker.anchorXPx,
-        xPx: marker.xPx,
-        anchorSource: marker.anchorSource,
-        keyFifths: marker.keyFifths,
-        keyMode: marker.keyMode,
-      })),
-    getPlaybackTimelinePoints: () =>
-      playbackTimelineEvents.map((event) => ({
-        pairIndex: event.pairIndex,
-        onsetTick: event.onsetTick,
-        atSeconds: event.atSeconds,
-        targetCount: event.targets.length,
-      })),
-    getDragSessionState: () => {
-      const drag = dragRef.current
-      if (!drag) return null
-      return {
-        noteId: drag.noteId,
-        staff: drag.staff,
-        keyIndex: drag.keyIndex,
-        pairIndex: drag.pairIndex,
-        noteIndex: drag.noteIndex,
-        pitch: drag.pitch,
-        previewStarted: drag.previewStarted,
-        groupPreviewLeadTarget: drag.groupPreviewLeadTarget ? { ...drag.groupPreviewLeadTarget } : null,
-        linkedTieTargets: drag.linkedTieTargets?.map((target) => ({ ...target })) ?? [],
-        previousTieTarget: drag.previousTieTarget ? { ...drag.previousTieTarget } : null,
-        previewFrozenBoundary: drag.previewFrozenBoundary
-          ? {
-              fromTarget: { ...drag.previewFrozenBoundary.fromTarget },
-              toTarget: { ...drag.previewFrozenBoundary.toTarget },
-              startX: drag.previewFrozenBoundary.startX,
-              startY: drag.previewFrozenBoundary.startY,
-              endX: drag.previewFrozenBoundary.endX,
-              endY: drag.previewFrozenBoundary.endY,
-              frozenPitch: drag.previewFrozenBoundary.frozenPitch,
-            }
-          : null,
-      }
-    },
-    getTieStateSnapshot: () =>
-      measurePairsRef.current.map((pair, pairIndex) => {
-        const mapNote = (note: ScoreNote, noteIndex: number) => ({
-          noteIndex,
-          noteId: note.id,
-          pitch: note.pitch,
-          tieStart: Boolean(note.tieStart),
-          tieStop: Boolean(note.tieStop),
-          tieFrozenIncomingPitch: note.tieFrozenIncomingPitch ?? null,
-          tieFrozenIncomingFromNoteId: note.tieFrozenIncomingFromNoteId ?? null,
-          tieFrozenIncomingFromKeyIndex:
-            typeof note.tieFrozenIncomingFromKeyIndex === 'number' && Number.isFinite(note.tieFrozenIncomingFromKeyIndex)
-              ? Math.max(0, Math.trunc(note.tieFrozenIncomingFromKeyIndex))
-              : null,
-        })
-        return {
-          pairIndex,
-          treble: pair.treble.map(mapNote),
-          bass: pair.bass.map(mapNote),
-        }
-      }),
-    getOverlayDebugInfo: () => {
-      const overlay = scoreOverlayRef.current
-      const surface = scoreRef.current
-      if (!overlay || !surface) return null
-      const overlayClientRect = overlay.getBoundingClientRect()
-      const surfaceClientRect = surface.getBoundingClientRect()
-      return {
-        scoreScale,
-        overlayRectInScore: overlayLastRectRef.current
-          ? { ...overlayLastRectRef.current }
-          : null,
-        overlayElement: {
-          width: overlay.width,
-          height: overlay.height,
-          styleLeft: overlay.style.left,
-          styleTop: overlay.style.top,
-          styleWidth: overlay.style.width,
-          styleHeight: overlay.style.height,
-          display: overlay.style.display,
-        },
-        overlayClientRect: {
-          left: overlayClientRect.left,
-          top: overlayClientRect.top,
-          width: overlayClientRect.width,
-          height: overlayClientRect.height,
-        },
-        surfaceElement: {
-          width: surface.width,
-          height: surface.height,
-        },
-        surfaceClientRect: {
-          left: surfaceClientRect.left,
-          top: surfaceClientRect.top,
-          width: surfaceClientRect.width,
-          height: surfaceClientRect.height,
-        },
-      }
-    },
-    getPaging: () => ({
-      currentPage: safeCurrentPage,
-      pageCount,
-      systemsPerPage,
-      visibleSystemRange: { ...visibleSystemRange },
-    }),
-    getActiveSelection: () => ({ ...activeSelection }),
-    getOsmdPreviewSelectedSelectionKey: () => osmdPreviewSelectedSelectionKeyRef.current,
-    getOsmdPreviewNoteTargets: () =>
-      [...osmdPreviewNoteLookupBySelectionRef.current.values()].map((target) => ({
-        pairIndex: target.pairIndex,
-        measureNumber: target.measureNumber,
-        onsetTicks: target.onsetTicks,
-        domIds: [...target.domIds],
-        selection: { ...target.selection },
-      })),
-  }), [
-    activeChordSelection,
-    activeSelection,
-    applyChordSelectionRange,
-    autoScaleEnabled,
-    baseScoreScale,
-    chordRulerMarkerMetaByKey,
-    dumpAllMeasureCoordinateReport,
-    dumpOsmdPreviewSystemMetrics,
-    importMusicXmlTextWithCollapseReset,
-    measurePlayheadDebugLogRow,
-    notePreviewEventsRef,
-    osmdPreviewLastRebalanceStatsRef,
-    osmdPreviewSelectedSelectionKeyRef,
-    osmdPreviewNoteLookupBySelectionRef,
-    osmdPreviewInstanceRef,
+  })
+  const {
+    onBeginDragWithFirstMeasureDebug,
+    onEndDragWithFirstMeasureDebug,
+  } = useScoreRuntimeDebugController({
+    enabled: import.meta.env.DEV,
+    beginDrag,
+    endDrag,
+    scoreScrollRef,
+    measureLayoutsRef,
+    noteLayoutsByPairRef,
+    measureTimelineBundlesRef,
+    measurePairsRef,
+    dragDebugFramesRef,
+    dragRef,
+    scoreOverlayRef,
+    scoreRef,
     overlayLastRectRef,
-    pageCount,
-    playbackCursorEventsRef,
+    importFeedbackRef,
+    notePreviewEventsRef,
     playbackCursorState,
+    playbackCursorEventsRef,
     playbackSessionId,
-    playbackTimelineEvents,
     playheadStatus,
     playheadDebugLogRowsRef,
     playheadDebugSequenceRef,
     latestPlayheadDebugSnapshotRef,
-    playScore,
+    measurePlayheadDebugLogRow,
+    applyChordSelectionRange,
+    selectedSelectionsRef,
+    activeChordSelection,
+    selectedMeasureHighlightRectPx,
+    chordRulerMarkerMetaByKey,
+    playbackTimelineEvents,
     safeCurrentPage,
+    pageCount,
+    systemsPerPage,
+    visibleSystemRange,
+    activeSelection,
+    osmdPreviewSelectedSelectionKeyRef,
+    osmdPreviewNoteLookupBySelectionRef,
+    importMusicXmlTextWithCollapseReset,
+    playScore,
+    autoScaleEnabled,
+    setAutoScaleEnabled,
+    showNoteHeadJianpuEnabled,
+    setShowNoteHeadJianpuEnabled,
     safeManualScalePercent,
-    scoreOverlayRef,
-    scoreRef,
+    setManualScalePercent,
+    baseScoreScale,
     scoreScale,
     scoreScaleX,
     scoreScaleY,
-    selectedMeasureHighlightRectPx,
-    showNoteHeadJianpuEnabled,
     spacingLayoutMode,
-    systemsPerPage,
-    visibleSystemRange,
-  ])
-  useScoreDebugApi({
-    enabled: import.meta.env.DEV,
-    debugApi,
+    dumpOsmdPreviewSystemMetrics,
+    osmdPreviewLastRebalanceStatsRef,
+    osmdPreviewInstanceRef,
   })
 
-  const scoreControlsProps = useMemo(() => ({
+  const { scoreControlsProps, scoreBoardProps } = useScoreViewProps({
     isPlaying,
-    onPlayScore: playScore,
-    onStopScore: stopActivePlaybackSession,
-    onReset: resetScoreWithCollapseReset,
+    playScore,
+    stopActivePlaybackSession,
+    resetScoreWithCollapseReset,
     playheadFollowEnabled,
-    onTogglePlayheadFollow: () => setPlayheadFollowEnabled((enabled) => !enabled),
+    setPlayheadFollowEnabled,
     showChordDegreeEnabled,
-    onToggleChordDegreeDisplay: () => setShowChordDegreeEnabled((enabled) => !enabled),
+    setShowChordDegreeEnabled,
     showInScoreMeasureNumbers,
-    onToggleInScoreMeasureNumbers: () => setShowInScoreMeasureNumbers((current) => !current),
+    setShowInScoreMeasureNumbers,
     showNoteHeadJianpuEnabled,
-    onToggleNoteHeadJianpuDisplay: () => setShowNoteHeadJianpuEnabled((current) => !current),
+    setShowNoteHeadJianpuEnabled,
     autoScaleEnabled,
     autoScalePercent,
-    onToggleAutoScale: () => setAutoScaleEnabled((enabled) => !enabled),
-    manualScalePercent: safeManualScalePercent,
-    onManualScalePercentChange: (nextPercent: number) => setManualScalePercent(clampScalePercent(nextPercent)),
-    canvasHeightPercent: safeCanvasHeightPercent,
-    onCanvasHeightPercentChange: (nextPercent: number) => setCanvasHeightPercent(clampCanvasHeightPercent(nextPercent)),
+    setAutoScaleEnabled,
+    safeManualScalePercent,
+    setManualScalePercent,
+    safeCanvasHeightPercent,
+    setCanvasHeightPercent,
     pageHorizontalPaddingPx,
-    chordMarkerUiScalePercent: safeChordMarkerUiScalePercent,
-    chordMarkerPaddingPx: safeChordMarkerPaddingPx,
-    baseMinGap32Px: timeAxisSpacingConfig.baseMinGap32Px,
-    leadingBarlineGapPx: timeAxisSpacingConfig.leadingBarlineGapPx,
-    secondChordSafeGapPx: timeAxisSpacingConfig.secondChordSafeGapPx,
-    durationGapRatio32: timeAxisSpacingConfig.durationGapRatios.thirtySecond,
-    durationGapRatio16: timeAxisSpacingConfig.durationGapRatios.sixteenth,
-    durationGapRatio8: timeAxisSpacingConfig.durationGapRatios.eighth,
-    durationGapRatio4: timeAxisSpacingConfig.durationGapRatios.quarter,
-    durationGapRatio2: timeAxisSpacingConfig.durationGapRatios.half,
-    durationGapRatioWhole: timeAxisSpacingConfig.durationGapRatios.whole,
-    onPageHorizontalPaddingPxChange: (nextValue: number) =>
-      setPageHorizontalPaddingPx(clampPageHorizontalPaddingPx(nextValue)),
-    onChordMarkerUiScalePercentChange: (nextValue: number) =>
-      setChordMarkerUiScalePercent(clampChordMarkerUiScalePercent(nextValue)),
-    onChordMarkerPaddingPxChange: (nextValue: number) =>
-      setChordMarkerPaddingPx(clampChordMarkerPaddingPx(nextValue)),
-    onBaseMinGap32PxChange: (nextValue: number) =>
-      setTimeAxisSpacingConfig((current) => ({
-        ...current,
-        baseMinGap32Px: clampBaseMinGap32Px(nextValue),
-      })),
-    onLeadingBarlineGapPxChange: (nextValue: number) =>
-      setTimeAxisSpacingConfig((current) => ({
-        ...current,
-        leadingBarlineGapPx: clampLeadingBarlineGapPx(nextValue),
-      })),
-    onSecondChordSafeGapPxChange: (nextValue: number) =>
-      setTimeAxisSpacingConfig((current) => ({
-        ...current,
-        secondChordSafeGapPx: clampSecondChordSafeGapPx(nextValue),
-      })),
-    onDurationGapRatio32Change: (nextValue: number) =>
-      setTimeAxisSpacingConfig((current) => ({
-        ...current,
-        durationGapRatios: {
-          ...current.durationGapRatios,
-          thirtySecond: clampDurationGapRatio(nextValue),
-        },
-      })),
-    onDurationGapRatio16Change: (nextValue: number) =>
-      setTimeAxisSpacingConfig((current) => ({
-        ...current,
-        durationGapRatios: {
-          ...current.durationGapRatios,
-          sixteenth: clampDurationGapRatio(nextValue),
-        },
-      })),
-    onDurationGapRatio8Change: (nextValue: number) =>
-      setTimeAxisSpacingConfig((current) => ({
-        ...current,
-        durationGapRatios: {
-          ...current.durationGapRatios,
-          eighth: clampDurationGapRatio(nextValue),
-        },
-      })),
-    onDurationGapRatio4Change: (nextValue: number) =>
-      setTimeAxisSpacingConfig((current) => ({
-        ...current,
-        durationGapRatios: {
-          ...current.durationGapRatios,
-          quarter: clampDurationGapRatio(nextValue),
-        },
-      })),
-    onDurationGapRatio2Change: (nextValue: number) =>
-      setTimeAxisSpacingConfig((current) => ({
-        ...current,
-        durationGapRatios: {
-          ...current.durationGapRatios,
-          half: clampDurationGapRatio(nextValue),
-        },
-      })),
-    onDurationGapRatioWholeChange: (nextValue: number) =>
-      setTimeAxisSpacingConfig((current) => ({
-        ...current,
-        durationGapRatios: {
-          ...current.durationGapRatios,
-          whole: clampDurationGapRatio(nextValue),
-        },
-      })),
-    onResetSpacingConfig: () => {
-      setTimeAxisSpacingConfig({
-        ...DEFAULT_TIME_AXIS_SPACING_CONFIG,
-        durationGapRatios: { ...DEFAULT_TIME_AXIS_SPACING_CONFIG.durationGapRatios },
-      })
-      setPageHorizontalPaddingPx(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
-      setChordMarkerUiScalePercent(DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT)
-      setChordMarkerPaddingPx(DEFAULT_CHORD_MARKER_PADDING_PX)
-    },
-    onOpenMusicXmlFilePicker: openMusicXmlFilePicker,
-    onLoadSampleMusicXml: loadSampleMusicXmlWithCollapseReset,
-    onLoadWholeNoteDemo: loadWholeNoteDemoWithCollapseReset,
-    onLoadHalfNoteDemo: loadHalfNoteDemoWithCollapseReset,
-    onExportMusicXmlFile: exportMusicXmlFile,
-    onOpenOsmdPreview: openOsmdPreview,
-    onOpenBeamGroupingTool: openBeamGroupingTool,
-    isNotationPaletteOpen,
-    onToggleNotationPalette: toggleNotationPalette,
-    onCloseNotationPalette: closeNotationPalette,
-    notationPaletteSelection,
-    notationPaletteLastAction,
-    notationPaletteActiveItemIdsOverride: derivedNotationPaletteDisplay?.activeItemIds ?? null,
-    notationPaletteSummaryOverride: derivedNotationPaletteDisplay?.summary ?? null,
-    onNotationPaletteSelectionChange,
-    onOpenDirectOsmdFilePicker: openDirectOsmdFilePicker,
-    onImportMusicXmlFromTextarea: importMusicXmlFromTextareaWithCollapseReset,
-    midiSupported,
-    midiPermissionState,
-    midiInputOptions,
-    selectedMidiInputId,
-    onSelectedMidiInputIdChange: setSelectedMidiInputId,
-    fileInputRef,
-    osmdDirectFileInputRef,
-    onMusicXmlFileChange: onMusicXmlFileChangeWithCollapseReset,
-    onOsmdDirectFileChange,
-    importFeedback,
-    rhythmPreset,
-    activeBuiltInDemo,
-    onApplyRhythmPreset: applyRhythmPresetWithCollapseReset,
-  }), [
-    activeBuiltInDemo,
-    autoScaleEnabled,
-    autoScalePercent,
-    closeNotationPalette,
-    derivedNotationPaletteDisplay,
-    exportMusicXmlFile,
-    fileInputRef,
-    importFeedback,
-    importMusicXmlFromTextareaWithCollapseReset,
-    isNotationPaletteOpen,
-    isPlaying,
-    loadHalfNoteDemoWithCollapseReset,
+    setPageHorizontalPaddingPx,
+    safeChordMarkerUiScalePercent,
+    setChordMarkerUiScalePercent,
+    safeChordMarkerPaddingPx,
+    setChordMarkerPaddingPx,
+    timeAxisSpacingConfig,
+    setTimeAxisSpacingConfig,
+    openMusicXmlFilePicker,
     loadSampleMusicXmlWithCollapseReset,
     loadWholeNoteDemoWithCollapseReset,
-    midiInputOptions,
-    midiPermissionState,
-    midiSupported,
-    notationPaletteLastAction,
-    notationPaletteSelection,
-    onMusicXmlFileChangeWithCollapseReset,
-    onNotationPaletteSelectionChange,
-    onOsmdDirectFileChange,
-    openBeamGroupingTool,
-    openDirectOsmdFilePicker,
-    openMusicXmlFilePicker,
+    loadHalfNoteDemoWithCollapseReset,
+    exportMusicXmlFile,
     openOsmdPreview,
-    osmdDirectFileInputRef,
-    pageHorizontalPaddingPx,
-    playScore,
-    playheadFollowEnabled,
-    resetScoreWithCollapseReset,
-    rhythmPreset,
-    safeCanvasHeightPercent,
-    safeChordMarkerPaddingPx,
-    safeChordMarkerUiScalePercent,
-    safeManualScalePercent,
-    selectedMidiInputId,
-    showChordDegreeEnabled,
-    showInScoreMeasureNumbers,
-    showNoteHeadJianpuEnabled,
-    stopActivePlaybackSession,
-    timeAxisSpacingConfig,
+    openBeamGroupingTool,
+    isNotationPaletteOpen,
     toggleNotationPalette,
+    closeNotationPalette,
+    notationPaletteSelection,
+    notationPaletteLastAction,
+    derivedNotationPaletteDisplay,
+    onNotationPaletteSelectionChange,
+    openDirectOsmdFilePicker,
+    importMusicXmlFromTextareaWithCollapseReset,
+    midiSupported,
+    midiPermissionState,
+    midiInputOptions,
+    selectedMidiInputId,
+    setSelectedMidiInputId,
+    fileInputRef,
+    osmdDirectFileInputRef,
+    onMusicXmlFileChangeWithCollapseReset,
+    onOsmdDirectFileChange,
+    importFeedback,
+    rhythmPreset,
+    activeBuiltInDemo,
     applyRhythmPresetWithCollapseReset,
-  ])
-
-  const scoreBoardProps = useMemo(() => ({
     scoreScrollRef,
     scoreStageRef,
-    playheadRef: playheadElementRef,
-    displayScoreWidth,
-    displayScoreHeight,
-    chordMarkerStyleMetrics,
-    scoreSurfaceLogicalWidthPx: scoreWidth,
-    scoreSurfaceLogicalHeightPx: scoreHeight,
-    scoreScaleX,
-    scoreScaleY,
-    scoreSurfaceOffsetXPx: scoreSurfaceOffsetXPx,
-    scoreSurfaceOffsetYPx: scoreSurfaceOffsetYPx,
-    measureRulerTicks,
-    chordRulerMarkers,
-    onChordRulerMarkerClick,
-    playheadRectPx,
-    playheadStatus,
-    selectedMeasureHighlightRectPx,
-    draggingSelection,
-    scoreRef,
-    scoreOverlayRef,
-    onBeginDrag: onBeginDragWithFirstMeasureDebug,
-    onSurfacePointerMove,
-    onEndDrag: onEndDragWithFirstMeasureDebug,
-    selectedStaffLabel: activeSelection.staff === 'treble' ? '高音谱表' : '低音谱表',
-    selectedPitchLabel: currentSelectionPitchLabel,
-    selectedDurationLabel: toDisplayDuration(currentSelection.duration),
-    selectedPosition: currentSelectionPosition,
-    selectedPoolSize,
-    trebleSequenceText,
-    bassSequenceText,
-    playheadDebugLogText,
-  }), [
-    activeSelection.staff,
-    bassSequenceText,
-    chordMarkerStyleMetrics,
-    chordRulerMarkers,
-    currentSelection.duration,
-    currentSelectionPitchLabel,
-    currentSelectionPosition,
-    displayScoreHeight,
-    displayScoreWidth,
-    draggingSelection,
-    measureRulerTicks,
-    onBeginDragWithFirstMeasureDebug,
-    onChordRulerMarkerClick,
-    onEndDragWithFirstMeasureDebug,
-    onSurfacePointerMove,
-    playheadDebugLogText,
     playheadElementRef,
-    playheadRectPx,
-    playheadStatus,
+    displayScoreWidth,
+    displayScoreHeight,
+    chordMarkerStyleMetrics,
+    scoreWidth,
     scoreHeight,
-    scoreOverlayRef,
-    scoreRef,
-    scoreScrollRef,
     scoreScaleX,
     scoreScaleY,
-    scoreStageRef,
     scoreSurfaceOffsetXPx,
     scoreSurfaceOffsetYPx,
-    scoreWidth,
-    selectedPoolSize,
+    measureRulerTicks,
+    chordRulerMarkers,
+    onChordRulerMarkerClick,
+    playheadRectPx,
+    playheadStatus,
     selectedMeasureHighlightRectPx,
+    draggingSelection,
+    scoreRef,
+    scoreOverlayRef,
+    onBeginDragWithFirstMeasureDebug,
+    onSurfacePointerMove,
+    onEndDragWithFirstMeasureDebug,
+    activeSelection,
+    currentSelection,
+    currentSelectionPitchLabel,
+    currentSelectionPosition,
+    selectedPoolSize,
     trebleSequenceText,
-  ])
+    bassSequenceText,
+    playheadDebugLogText,
+  })
 
   return (
     <main className="app-shell">
@@ -2635,261 +1455,45 @@ function App() {
 
       <ScoreBoard {...scoreBoardProps} />
 
-      {isImportLoading && (
-        <div className="import-modal" role="status" aria-live="polite" aria-label="导入进行中">
-          <div className="import-modal-card">
-            <h3>正在加载乐谱</h3>
-            <p>{importFeedback.message}</p>
-            <div className="import-modal-track">
-              <div
-                className="import-modal-bar"
-                style={{ width: `${importProgressPercent === null ? 45 : Math.max(4, importProgressPercent)}%` }}
-              />
-            </div>
-            <p className="import-modal-percent">
-              {importProgressPercent === null ? '处理中...' : `${importProgressPercent}%`}
-            </p>
-          </div>
-        </div>
-      )}
+      <ImportProgressModal
+        isOpen={isImportLoading}
+        message={importFeedback.message}
+        progressPercent={importProgressPercent}
+      />
 
-      {isOsmdPreviewOpen && (
-        <div className="osmd-preview-modal" role="dialog" aria-modal="true" aria-label="OSMD预览" onClick={closeOsmdPreview}>
-          <div className="osmd-preview-card" onClick={(event) => event.stopPropagation()}>
-            <div className="osmd-preview-header">
-              <h3>OSMD预览</h3>
-              <div className="osmd-preview-header-actions">
-                <button
-                  type="button"
-                  onClick={exportOsmdPreviewPdf}
-                  disabled={isOsmdPreviewExportingPdf}
-                >
-                  {isOsmdPreviewExportingPdf ? '导出中...' : '导出PDF'}
-                </button>
-                <button type="button" onClick={closeOsmdPreview} disabled={isOsmdPreviewExportingPdf}>关闭</button>
-              </div>
-            </div>
-            <div className="osmd-preview-side">
-              <div className="osmd-preview-pagination">
-                <button type="button" onClick={goToPrevOsmdPreviewPage} disabled={osmdPreviewPageIndex <= 0}>
-                  上一页
-                </button>
-                <span>{`${Math.min(osmdPreviewPageCount, osmdPreviewPageIndex + 1)} / ${osmdPreviewPageCount}`}</span>
-                <button
-                  type="button"
-                  onClick={goToNextOsmdPreviewPage}
-                  disabled={osmdPreviewPageIndex >= osmdPreviewPageCount - 1}
-                >
-                  下一页
-                </button>
-              </div>
-              <div className="osmd-preview-toggle">
-                <label htmlFor="osmd-preview-page-number-toggle">页码</label>
-                <input
-                  id="osmd-preview-page-number-toggle"
-                  type="checkbox"
-                  checked={osmdPreviewShowPageNumbers}
-                  onChange={(event) => onOsmdPreviewShowPageNumbersChange(event.target.checked)}
-                />
-                <span>{osmdPreviewShowPageNumbers ? '显示' : '隐藏'}</span>
-              </div>
-            <div className="osmd-preview-zoom">
-              <label htmlFor="osmd-preview-zoom-range">音符缩放</label>
-              <input
-                id="osmd-preview-zoom-range"
-                type="range"
-                min={35}
-                max={160}
-                step={1}
-                value={osmdPreviewZoomDraftPercent}
-                onInput={(event) =>
-                  scheduleOsmdPreviewZoomPercentCommit(Number((event.target as HTMLInputElement).value))
-                }
-                onPointerUp={(event) => commitOsmdPreviewZoomPercent(Number((event.target as HTMLInputElement).value))}
-                onKeyUp={(event) => {
-                  if (event.key !== 'Enter') return
-                  commitOsmdPreviewZoomPercent(Number((event.target as HTMLInputElement).value))
-                }}
-              />
-              <input
-                type="number"
-                min={35}
-                max={160}
-                step={1}
-                value={osmdPreviewZoomDraftPercent}
-                onInput={(event) =>
-                  scheduleOsmdPreviewZoomPercentCommit(Number((event.target as HTMLInputElement).value))
-                }
-                onBlur={(event) => commitOsmdPreviewZoomPercent(Number((event.target as HTMLInputElement).value))}
-                onKeyDown={(event) => {
-                  if (event.key !== 'Enter') return
-                  commitOsmdPreviewZoomPercent(Number((event.target as HTMLInputElement).value))
-                }}
-              />
-              <span>%</span>
-            </div>
-            <div className="osmd-preview-zoom">
-              <label htmlFor="osmd-preview-paper-scale-range">纸张缩放</label>
-              <input
-                id="osmd-preview-paper-scale-range"
-                type="range"
-                min={50}
-                max={180}
-                step={1}
-                value={safeOsmdPreviewPaperScalePercent}
-                onInput={(event) =>
-                  onOsmdPreviewPaperScalePercentChange(Number((event.target as HTMLInputElement).value))
-                }
-                onChange={(event) => onOsmdPreviewPaperScalePercentChange(Number(event.target.value))}
-              />
-              <input
-                type="number"
-                min={50}
-                max={180}
-                step={1}
-                value={safeOsmdPreviewPaperScalePercent}
-                onInput={(event) =>
-                  onOsmdPreviewPaperScalePercentChange(Number((event.target as HTMLInputElement).value))
-                }
-                onChange={(event) => onOsmdPreviewPaperScalePercentChange(Number(event.target.value))}
-              />
-              <span>%</span>
-            </div>
-            <div className="osmd-preview-zoom">
-              <label htmlFor="osmd-preview-horizontal-margin-range">左右边距</label>
-              <input
-                id="osmd-preview-horizontal-margin-range"
-                type="range"
-                min={0}
-                max={120}
-                step={1}
-                value={safeOsmdPreviewHorizontalMarginPx}
-                onInput={(event) =>
-                  onOsmdPreviewHorizontalMarginPxChange(Number((event.target as HTMLInputElement).value))
-                }
-                onChange={(event) => onOsmdPreviewHorizontalMarginPxChange(Number(event.target.value))}
-              />
-              <input
-                type="number"
-                min={0}
-                max={120}
-                step={1}
-                value={safeOsmdPreviewHorizontalMarginPx}
-                onInput={(event) =>
-                  onOsmdPreviewHorizontalMarginPxChange(Number((event.target as HTMLInputElement).value))
-                }
-                onChange={(event) => onOsmdPreviewHorizontalMarginPxChange(Number(event.target.value))}
-              />
-              <span>px</span>
-            </div>
-            <div className="osmd-preview-zoom">
-              <label htmlFor="osmd-preview-first-top-margin-range">首页顶部</label>
-              <input
-                id="osmd-preview-first-top-margin-range"
-                type="range"
-                min={0}
-                max={180}
-                step={1}
-                value={safeOsmdPreviewFirstPageTopMarginPx}
-                onInput={(event) =>
-                  onOsmdPreviewFirstPageTopMarginPxChange(Number((event.target as HTMLInputElement).value))
-                }
-                onChange={(event) => onOsmdPreviewFirstPageTopMarginPxChange(Number(event.target.value))}
-              />
-              <input
-                type="number"
-                min={0}
-                max={180}
-                step={1}
-                value={safeOsmdPreviewFirstPageTopMarginPx}
-                onInput={(event) =>
-                  onOsmdPreviewFirstPageTopMarginPxChange(Number((event.target as HTMLInputElement).value))
-                }
-                onChange={(event) => onOsmdPreviewFirstPageTopMarginPxChange(Number(event.target.value))}
-              />
-              <span>px</span>
-            </div>
-            <div className="osmd-preview-zoom">
-              <label htmlFor="osmd-preview-top-margin-range">后续页顶部</label>
-              <input
-                id="osmd-preview-top-margin-range"
-                type="range"
-                min={0}
-                max={180}
-                step={1}
-                value={safeOsmdPreviewTopMarginPx}
-                onInput={(event) =>
-                  onOsmdPreviewTopMarginPxChange(Number((event.target as HTMLInputElement).value))
-                }
-                onChange={(event) => onOsmdPreviewTopMarginPxChange(Number(event.target.value))}
-              />
-              <input
-                type="number"
-                min={0}
-                max={180}
-                step={1}
-                value={safeOsmdPreviewTopMarginPx}
-                onInput={(event) =>
-                  onOsmdPreviewTopMarginPxChange(Number((event.target as HTMLInputElement).value))
-                }
-                onChange={(event) => onOsmdPreviewTopMarginPxChange(Number(event.target.value))}
-              />
-              <span>px</span>
-            </div>
-              <div className="osmd-preview-zoom">
-                <label htmlFor="osmd-preview-bottom-margin-range">底部边距</label>
-                <input
-                  id="osmd-preview-bottom-margin-range"
-                  type="range"
-                  min={0}
-                  max={180}
-                  step={1}
-                  value={safeOsmdPreviewBottomMarginPx}
-                  onInput={(event) =>
-                    onOsmdPreviewBottomMarginPxChange(Number((event.target as HTMLInputElement).value))
-                  }
-                  onChange={(event) => onOsmdPreviewBottomMarginPxChange(Number(event.target.value))}
-                />
-                <input
-                  type="number"
-                  min={0}
-                  max={180}
-                  step={1}
-                  value={safeOsmdPreviewBottomMarginPx}
-                  onInput={(event) =>
-                    onOsmdPreviewBottomMarginPxChange(Number((event.target as HTMLInputElement).value))
-                  }
-                  onChange={(event) => onOsmdPreviewBottomMarginPxChange(Number(event.target.value))}
-                />
-                <span>px</span>
-              </div>
-              {osmdPreviewStatusText && <p className="osmd-preview-status">{osmdPreviewStatusText}</p>}
-              {osmdPreviewError && <p className="osmd-preview-error">{osmdPreviewError}</p>}
-            </div>
-            <div className="osmd-preview-body osmd-preview-main-body">
-              <div
-                className="osmd-preview-paper-frame"
-                style={{
-                  width: `${osmdPreviewPaperWidthPx}px`,
-                  height: `${osmdPreviewPaperHeightPx}px`,
-                }}
-              >
-                <div
-                  ref={osmdPreviewContainerRef}
-                  className="osmd-preview-surface"
-                  onClick={onOsmdPreviewSurfaceClick}
-                  onDoubleClick={onOsmdPreviewSurfaceDoubleClick}
-                  style={{
-                    width: `${A4_PAGE_WIDTH}px`,
-                    height: `${A4_PAGE_HEIGHT}px`,
-                    transform: `scale(${osmdPreviewPaperScale})`,
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <OsmdPreviewModal
+        isOpen={isOsmdPreviewOpen}
+        isExportingPdf={isOsmdPreviewExportingPdf}
+        statusText={osmdPreviewStatusText}
+        error={osmdPreviewError}
+        pageIndex={osmdPreviewPageIndex}
+        pageCount={osmdPreviewPageCount}
+        showPageNumbers={osmdPreviewShowPageNumbers}
+        zoomDraftPercent={osmdPreviewZoomDraftPercent}
+        safePaperScalePercent={safeOsmdPreviewPaperScalePercent}
+        safeHorizontalMarginPx={safeOsmdPreviewHorizontalMarginPx}
+        safeFirstPageTopMarginPx={safeOsmdPreviewFirstPageTopMarginPx}
+        safeTopMarginPx={safeOsmdPreviewTopMarginPx}
+        safeBottomMarginPx={safeOsmdPreviewBottomMarginPx}
+        paperScale={osmdPreviewPaperScale}
+        paperWidthPx={osmdPreviewPaperWidthPx}
+        paperHeightPx={osmdPreviewPaperHeightPx}
+        containerRef={osmdPreviewContainerRef}
+        closeOsmdPreview={closeOsmdPreview}
+        exportOsmdPreviewPdf={exportOsmdPreviewPdf}
+        goToPrevOsmdPreviewPage={goToPrevOsmdPreviewPage}
+        goToNextOsmdPreviewPage={goToNextOsmdPreviewPage}
+        commitOsmdPreviewZoomPercent={commitOsmdPreviewZoomPercent}
+        scheduleOsmdPreviewZoomPercentCommit={scheduleOsmdPreviewZoomPercentCommit}
+        onOsmdPreviewPaperScalePercentChange={onOsmdPreviewPaperScalePercentChange}
+        onOsmdPreviewHorizontalMarginPxChange={onOsmdPreviewHorizontalMarginPxChange}
+        onOsmdPreviewFirstPageTopMarginPxChange={onOsmdPreviewFirstPageTopMarginPxChange}
+        onOsmdPreviewTopMarginPxChange={onOsmdPreviewTopMarginPxChange}
+        onOsmdPreviewBottomMarginPxChange={onOsmdPreviewBottomMarginPxChange}
+        onOsmdPreviewShowPageNumbersChange={onOsmdPreviewShowPageNumbersChange}
+        onOsmdPreviewSurfaceClick={onOsmdPreviewSurfaceClick}
+        onOsmdPreviewSurfaceDoubleClick={onOsmdPreviewSurfaceDoubleClick}
+      />
     </main>
   )
 }
