@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as Tone from 'tone'
 import { Renderer } from 'vexflow'
 import './App.css'
@@ -44,6 +44,12 @@ import { usePlaybackController } from './score/hooks/usePlaybackController'
 import { useScoreAudioPreviewController } from './score/hooks/useScoreAudioPreviewController'
 import { useChordMarkerController } from './score/hooks/useChordMarkerController'
 import { useScoreMutationController } from './score/hooks/useScoreMutationController'
+import { useEditorActionWrappers } from './score/hooks/useEditorActionWrappers'
+import {
+  getInitialChordDegreeDisplayEnabled,
+  getInitialPlayheadFollowEnabled,
+  useEditorPreferencePersistence,
+} from './score/hooks/useEditorPreferencePersistence'
 import { useOsmdPreviewController } from './score/hooks/useOsmdPreviewController'
 import { useScoreDebugApi } from './score/hooks/useScoreDebugApi'
 import { ScoreControls } from './score/components/ScoreControls'
@@ -138,10 +144,6 @@ const HORIZONTAL_VIEW_HEIGHT_PX = SCORE_TOP_PADDING * 2 + SYSTEM_HEIGHT + 26
 const MAX_CANVAS_RENDER_DIM_PX = 32760
 const HORIZONTAL_RENDER_BUFFER_PX = 400
 const HORIZONTAL_RENDER_EDGE_BUFFER_MEASURES = 1
-const LOCAL_STORAGE_EDITOR_MEASURE_NUMBER_KEY = 'score.editor.showInScoreMeasureNumbers'
-const LOCAL_STORAGE_NOTEHEAD_JIANPU_DISPLAY_KEY = 'score.editor.showNoteHeadJianpu'
-const LOCAL_STORAGE_PLAYHEAD_FOLLOW_KEY = 'score.playhead.followEnabled'
-const LOCAL_STORAGE_CHORD_DEGREE_DISPLAY_KEY = 'score.chordDegree.enabled'
 const CHORD_HIGHLIGHT_PAD_X_PX = 4
 const CHORD_HIGHLIGHT_PAD_Y_PX = 4
 
@@ -408,20 +410,8 @@ function App() {
   const [autoScaleEnabled, setAutoScaleEnabled] = useState(false)
   const [manualScalePercent, setManualScalePercent] = useState(100)
   const [canvasHeightPercent, setCanvasHeightPercent] = useState(100)
-  const [playheadFollowEnabled, setPlayheadFollowEnabled] = useState(() => {
-    if (typeof window === 'undefined') return true
-    const storedValue = window.localStorage.getItem(LOCAL_STORAGE_PLAYHEAD_FOLLOW_KEY)
-    if (storedValue === '1' || storedValue === 'true') return true
-    if (storedValue === '0' || storedValue === 'false') return false
-    return true
-  })
-  const [showChordDegreeEnabled, setShowChordDegreeEnabled] = useState(() => {
-    if (typeof window === 'undefined') return false
-    const storedValue = window.localStorage.getItem(LOCAL_STORAGE_CHORD_DEGREE_DISPLAY_KEY)
-    if (storedValue === '1' || storedValue === 'true') return true
-    if (storedValue === '0' || storedValue === 'false') return false
-    return false
-  })
+  const [playheadFollowEnabled, setPlayheadFollowEnabled] = useState(() => getInitialPlayheadFollowEnabled())
+  const [showChordDegreeEnabled, setShowChordDegreeEnabled] = useState(() => getInitialChordDegreeDisplayEnabled())
   const [showInScoreMeasureNumbers, setShowInScoreMeasureNumbers] = useState(false)
   const [showNoteHeadJianpuEnabled, setShowNoteHeadJianpuEnabled] = useState(false)
   const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
@@ -437,10 +427,6 @@ function App() {
   const scoreOverlayRef = useRef<HTMLCanvasElement | null>(null)
   const scoreScrollRef = useRef<HTMLDivElement | null>(null)
   const scoreStageRef = useRef<HTMLDivElement | null>(null)
-  const playheadFollowHydratedRef = useRef(false)
-  const chordDegreeDisplayHydratedRef = useRef(false)
-  const showInScoreMeasureNumbersHydratedRef = useRef(false)
-  const showNoteHeadJianpuHydratedRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const synthRef = useRef<Tone.PolySynth | Tone.Sampler | null>(null)
 
@@ -1300,90 +1286,30 @@ function App() {
     initialTrebleNotes: INITIAL_NOTES,
     initialBassNotes: INITIAL_BASS_NOTES,
   })
-
-  const clearFullMeasureRestCollapseScopes = useCallback(() => {
-    setFullMeasureRestCollapseScopeKeys([])
-  }, [])
-
-  const importMusicXmlTextWithCollapseReset = useCallback((xmlText: string) => {
-    stopActivePlaybackSession()
-    clearFullMeasureRestCollapseScopes()
-    clearActiveChordSelection()
-    setActiveBuiltInDemo('none')
-    importMusicXmlText(xmlText)
-  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, importMusicXmlText, stopActivePlaybackSession])
-
-  const importMusicXmlFromTextareaWithCollapseReset = useCallback(() => {
-    stopActivePlaybackSession()
-    clearFullMeasureRestCollapseScopes()
-    clearActiveChordSelection()
-    setActiveBuiltInDemo('none')
-    importMusicXmlFromTextarea()
-  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, importMusicXmlFromTextarea, stopActivePlaybackSession])
-
-  const onMusicXmlFileChangeWithCollapseReset = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
-    stopActivePlaybackSession()
-    clearFullMeasureRestCollapseScopes()
-    clearActiveChordSelection()
-    setActiveBuiltInDemo('none')
-    await onMusicXmlFileChange(event)
-  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, onMusicXmlFileChange, stopActivePlaybackSession])
-
-  const loadSampleMusicXmlWithCollapseReset = useCallback(() => {
-    stopActivePlaybackSession()
-    clearFullMeasureRestCollapseScopes()
-    clearActiveChordSelection()
-    setActiveBuiltInDemo('none')
-    loadSampleMusicXml()
-  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, loadSampleMusicXml, stopActivePlaybackSession])
-
-  const loadWholeNoteDemoWithCollapseReset = useCallback(() => {
-    stopActivePlaybackSession()
-    requestPlaybackCursorReset()
-    clearFullMeasureRestCollapseScopes()
-    clearActiveChordSelection()
-    setActiveBuiltInDemo('whole-note')
-    loadWholeNoteDemo()
-  }, [
+  const {
+    importMusicXmlTextWithCollapseReset,
+    importMusicXmlFromTextareaWithCollapseReset,
+    onMusicXmlFileChangeWithCollapseReset,
+    loadSampleMusicXmlWithCollapseReset,
+    loadWholeNoteDemoWithCollapseReset,
+    loadHalfNoteDemoWithCollapseReset,
+    resetScoreWithCollapseReset,
+    applyRhythmPresetWithCollapseReset,
+  } = useEditorActionWrappers({
+    stopActivePlaybackSession,
+    requestPlaybackCursorReset,
     clearActiveChordSelection,
-    clearFullMeasureRestCollapseScopes,
+    setActiveBuiltInDemo,
+    setFullMeasureRestCollapseScopeKeys,
+    importMusicXmlText,
+    importMusicXmlFromTextarea,
+    onMusicXmlFileChange,
+    loadSampleMusicXml,
     loadWholeNoteDemo,
-    requestPlaybackCursorReset,
-    stopActivePlaybackSession,
-  ])
-
-  const loadHalfNoteDemoWithCollapseReset = useCallback(() => {
-    stopActivePlaybackSession()
-    requestPlaybackCursorReset()
-    clearFullMeasureRestCollapseScopes()
-    clearActiveChordSelection()
-    setActiveBuiltInDemo('half-note')
-    loadHalfNoteDemo()
-  }, [
-    clearActiveChordSelection,
-    clearFullMeasureRestCollapseScopes,
     loadHalfNoteDemo,
-    requestPlaybackCursorReset,
-    stopActivePlaybackSession,
-  ])
-
-  const resetScoreWithCollapseReset = useCallback(() => {
-    stopActivePlaybackSession()
-    requestPlaybackCursorReset()
-    clearFullMeasureRestCollapseScopes()
-    clearActiveChordSelection()
-    setActiveBuiltInDemo('none')
-    resetScore()
-  }, [clearActiveChordSelection, clearFullMeasureRestCollapseScopes, requestPlaybackCursorReset, resetScore, stopActivePlaybackSession])
-
-  const applyRhythmPresetWithCollapseReset = useCallback((presetId: RhythmPresetId) => {
-    stopActivePlaybackSession()
-    requestPlaybackCursorReset()
-    clearFullMeasureRestCollapseScopes()
-    clearActiveChordSelection()
-    setActiveBuiltInDemo('none')
-    applyRhythmPreset(presetId)
-  }, [applyRhythmPreset, clearActiveChordSelection, clearFullMeasureRestCollapseScopes, requestPlaybackCursorReset, stopActivePlaybackSession])
+    resetScore,
+    applyRhythmPreset,
+  })
 
   useEffect(() => {
     return () => {
@@ -1575,80 +1501,14 @@ function App() {
     onMidiNoteNumber: applyMidiReplacementByNoteNumber,
   })
   const midiSupported = midiPermissionState !== 'unsupported'
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    playheadFollowHydratedRef.current = true
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (!playheadFollowHydratedRef.current) return
-    window.localStorage.setItem(
-      LOCAL_STORAGE_PLAYHEAD_FOLLOW_KEY,
-      playheadFollowEnabled ? '1' : '0',
-    )
-  }, [playheadFollowEnabled])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    chordDegreeDisplayHydratedRef.current = true
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (!chordDegreeDisplayHydratedRef.current) return
-    window.localStorage.setItem(
-      LOCAL_STORAGE_CHORD_DEGREE_DISPLAY_KEY,
-      showChordDegreeEnabled ? '1' : '0',
-    )
-  }, [showChordDegreeEnabled])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      showInScoreMeasureNumbersHydratedRef.current = true
-      return
-    }
-    const storedValue = window.localStorage.getItem(LOCAL_STORAGE_EDITOR_MEASURE_NUMBER_KEY)
-    if (storedValue === '1' || storedValue === 'true') {
-      setShowInScoreMeasureNumbers(true)
-    } else if (storedValue === '0' || storedValue === 'false') {
-      setShowInScoreMeasureNumbers(false)
-    }
-    showInScoreMeasureNumbersHydratedRef.current = true
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (!showInScoreMeasureNumbersHydratedRef.current) return
-    window.localStorage.setItem(
-      LOCAL_STORAGE_EDITOR_MEASURE_NUMBER_KEY,
-      showInScoreMeasureNumbers ? '1' : '0',
-    )
-  }, [showInScoreMeasureNumbers])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      showNoteHeadJianpuHydratedRef.current = true
-      return
-    }
-    const storedValue = window.localStorage.getItem(LOCAL_STORAGE_NOTEHEAD_JIANPU_DISPLAY_KEY)
-    if (storedValue === '1' || storedValue === 'true') {
-      setShowNoteHeadJianpuEnabled(true)
-    } else if (storedValue === '0' || storedValue === 'false') {
-      setShowNoteHeadJianpuEnabled(false)
-    }
-    showNoteHeadJianpuHydratedRef.current = true
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (!showNoteHeadJianpuHydratedRef.current) return
-    window.localStorage.setItem(
-      LOCAL_STORAGE_NOTEHEAD_JIANPU_DISPLAY_KEY,
-      showNoteHeadJianpuEnabled ? '1' : '0',
-    )
-  }, [showNoteHeadJianpuEnabled])
+  useEditorPreferencePersistence({
+    playheadFollowEnabled,
+    showChordDegreeEnabled,
+    showInScoreMeasureNumbers,
+    setShowInScoreMeasureNumbers,
+    showNoteHeadJianpuEnabled,
+    setShowNoteHeadJianpuEnabled,
+  })
 
   const moveSelectionsByKeyboardSteps = useCallback((
     direction: 'up' | 'down',
