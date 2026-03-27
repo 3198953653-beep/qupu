@@ -34,41 +34,23 @@ const INITIAL_BASS_NOTES: ScoreNote[] = buildBassMockNotes(INITIAL_NOTES)
 
 function App() {
   const appState = useScoreAppState(INITIAL_BASS_NOTES)
-  const {
-    notes,
-    bassNotes,
-    activeSelection,
-    selectedSelections,
-    fullMeasureRestCollapseScopeKeys,
-    isSelectionVisible,
-    draggingSelection,
-    importFeedback,
-    measurePairsFromImport,
-    measureKeyFifthsFromImport,
-    measureTimeSignaturesFromImport,
-    importedChordRulerEntriesByPairFromImport,
-  } = appState
 
   const editorRefs = useScoreEditorRefs({
-    importFeedback,
-    activeSelection,
-    selectedSelections,
-    fullMeasureRestCollapseScopeKeys,
-    isSelectionVisible,
-    draggingSelection,
+    importFeedback: appState.importFeedback,
+    activeSelection: appState.activeSelection,
+    selectedSelections: appState.selectedSelections,
+    fullMeasureRestCollapseScopeKeys: appState.fullMeasureRestCollapseScopeKeys,
+    isSelectionVisible: appState.isSelectionVisible,
+    draggingSelection: appState.draggingSelection,
   })
-  const {
-    horizontalRenderOffsetXRef,
-    widthProbeRendererRef,
-    horizontalMeasureWidthCacheRef,
-  } = editorRefs
+
   const layout = useHorizontalScoreLayout({
-    notes,
-    bassNotes,
-    measurePairsFromImport,
-    importedChordRulerEntriesByPairFromImport,
-    measureKeyFifthsFromImport,
-    measureTimeSignaturesFromImport,
+    notes: appState.notes,
+    bassNotes: appState.bassNotes,
+    measurePairsFromImport: appState.measurePairsFromImport,
+    importedChordRulerEntriesByPairFromImport: appState.importedChordRulerEntriesByPairFromImport,
+    measureKeyFifthsFromImport: appState.measureKeyFifthsFromImport,
+    measureTimeSignaturesFromImport: appState.measureTimeSignaturesFromImport,
     autoScaleEnabled: appState.autoScaleEnabled,
     manualScalePercent: appState.manualScalePercent,
     canvasHeightPercent: appState.canvasHeightPercent,
@@ -77,10 +59,11 @@ function App() {
     chordMarkerPaddingPx: appState.chordMarkerPaddingPx,
     timeAxisSpacingConfig: appState.timeAxisSpacingConfig,
     horizontalViewportXRange: appState.horizontalViewportXRange,
-    widthProbeRendererRef,
-    horizontalMeasureWidthCacheRef,
-    horizontalRenderOffsetXRef,
+    widthProbeRendererRef: editorRefs.widthProbeRendererRef,
+    horizontalMeasureWidthCacheRef: editorRefs.horizontalMeasureWidthCacheRef,
+    horizontalRenderOffsetXRef: editorRefs.horizontalRenderOffsetXRef,
   })
+
   const coreEditing = useScoreCoreEditingController({
     appState,
     editorRefs,
@@ -104,41 +87,6 @@ function App() {
     previewStartThresholdPx: PREVIEW_START_THRESHOLD_PX,
   })
   const { workspace, editorUi, playback } = runtime
-  const {
-    isImportLoading,
-    importProgressPercent,
-    isOsmdPreviewOpen,
-    isOsmdPreviewExportingPdf,
-    osmdPreviewStatusText,
-    osmdPreviewError,
-    osmdPreviewPageIndex,
-    osmdPreviewPageCount,
-    osmdPreviewShowPageNumbers,
-    osmdPreviewZoomDraftPercent,
-    safeOsmdPreviewPaperScalePercent,
-    safeOsmdPreviewHorizontalMarginPx,
-    safeOsmdPreviewFirstPageTopMarginPx,
-    safeOsmdPreviewTopMarginPx,
-    safeOsmdPreviewBottomMarginPx,
-    osmdPreviewPaperScale,
-    osmdPreviewPaperWidthPx,
-    osmdPreviewPaperHeightPx,
-    osmdPreviewContainerRef,
-    closeOsmdPreview,
-    exportOsmdPreviewPdf,
-    goToPrevOsmdPreviewPage,
-    goToNextOsmdPreviewPage,
-    commitOsmdPreviewZoomPercent,
-    scheduleOsmdPreviewZoomPercentCommit,
-    onOsmdPreviewPaperScalePercentChange,
-    onOsmdPreviewHorizontalMarginPxChange,
-    onOsmdPreviewFirstPageTopMarginPxChange,
-    onOsmdPreviewTopMarginPxChange,
-    onOsmdPreviewBottomMarginPxChange,
-    onOsmdPreviewShowPageNumbersChange,
-    onOsmdPreviewSurfaceClick,
-    onOsmdPreviewSurfaceDoubleClick,
-  } = editorUi
 
   const { scoreControlsProps, scoreBoardProps } = useScoreViewProps({
     appState,
@@ -157,43 +105,43 @@ function App() {
       <ScoreBoard {...scoreBoardProps} />
 
       <ImportProgressModal
-        isOpen={isImportLoading}
-        message={importFeedback.message}
-        progressPercent={importProgressPercent}
+        isOpen={editorUi.isImportLoading}
+        message={appState.importFeedback.message}
+        progressPercent={editorUi.importProgressPercent}
       />
 
       <OsmdPreviewModal
-        isOpen={isOsmdPreviewOpen}
-        isExportingPdf={isOsmdPreviewExportingPdf}
-        statusText={osmdPreviewStatusText}
-        error={osmdPreviewError}
-        pageIndex={osmdPreviewPageIndex}
-        pageCount={osmdPreviewPageCount}
-        showPageNumbers={osmdPreviewShowPageNumbers}
-        zoomDraftPercent={osmdPreviewZoomDraftPercent}
-        safePaperScalePercent={safeOsmdPreviewPaperScalePercent}
-        safeHorizontalMarginPx={safeOsmdPreviewHorizontalMarginPx}
-        safeFirstPageTopMarginPx={safeOsmdPreviewFirstPageTopMarginPx}
-        safeTopMarginPx={safeOsmdPreviewTopMarginPx}
-        safeBottomMarginPx={safeOsmdPreviewBottomMarginPx}
-        paperScale={osmdPreviewPaperScale}
-        paperWidthPx={osmdPreviewPaperWidthPx}
-        paperHeightPx={osmdPreviewPaperHeightPx}
-        containerRef={osmdPreviewContainerRef}
-        closeOsmdPreview={closeOsmdPreview}
-        exportOsmdPreviewPdf={exportOsmdPreviewPdf}
-        goToPrevOsmdPreviewPage={goToPrevOsmdPreviewPage}
-        goToNextOsmdPreviewPage={goToNextOsmdPreviewPage}
-        commitOsmdPreviewZoomPercent={commitOsmdPreviewZoomPercent}
-        scheduleOsmdPreviewZoomPercentCommit={scheduleOsmdPreviewZoomPercentCommit}
-        onOsmdPreviewPaperScalePercentChange={onOsmdPreviewPaperScalePercentChange}
-        onOsmdPreviewHorizontalMarginPxChange={onOsmdPreviewHorizontalMarginPxChange}
-        onOsmdPreviewFirstPageTopMarginPxChange={onOsmdPreviewFirstPageTopMarginPxChange}
-        onOsmdPreviewTopMarginPxChange={onOsmdPreviewTopMarginPxChange}
-        onOsmdPreviewBottomMarginPxChange={onOsmdPreviewBottomMarginPxChange}
-        onOsmdPreviewShowPageNumbersChange={onOsmdPreviewShowPageNumbersChange}
-        onOsmdPreviewSurfaceClick={onOsmdPreviewSurfaceClick}
-        onOsmdPreviewSurfaceDoubleClick={onOsmdPreviewSurfaceDoubleClick}
+        isOpen={editorUi.isOsmdPreviewOpen}
+        isExportingPdf={editorUi.isOsmdPreviewExportingPdf}
+        statusText={editorUi.osmdPreviewStatusText}
+        error={editorUi.osmdPreviewError}
+        pageIndex={editorUi.osmdPreviewPageIndex}
+        pageCount={editorUi.osmdPreviewPageCount}
+        showPageNumbers={editorUi.osmdPreviewShowPageNumbers}
+        zoomDraftPercent={editorUi.osmdPreviewZoomDraftPercent}
+        safePaperScalePercent={editorUi.safeOsmdPreviewPaperScalePercent}
+        safeHorizontalMarginPx={editorUi.safeOsmdPreviewHorizontalMarginPx}
+        safeFirstPageTopMarginPx={editorUi.safeOsmdPreviewFirstPageTopMarginPx}
+        safeTopMarginPx={editorUi.safeOsmdPreviewTopMarginPx}
+        safeBottomMarginPx={editorUi.safeOsmdPreviewBottomMarginPx}
+        paperScale={editorUi.osmdPreviewPaperScale}
+        paperWidthPx={editorUi.osmdPreviewPaperWidthPx}
+        paperHeightPx={editorUi.osmdPreviewPaperHeightPx}
+        containerRef={editorUi.osmdPreviewContainerRef}
+        closeOsmdPreview={editorUi.closeOsmdPreview}
+        exportOsmdPreviewPdf={editorUi.exportOsmdPreviewPdf}
+        goToPrevOsmdPreviewPage={editorUi.goToPrevOsmdPreviewPage}
+        goToNextOsmdPreviewPage={editorUi.goToNextOsmdPreviewPage}
+        commitOsmdPreviewZoomPercent={editorUi.commitOsmdPreviewZoomPercent}
+        scheduleOsmdPreviewZoomPercentCommit={editorUi.scheduleOsmdPreviewZoomPercentCommit}
+        onOsmdPreviewPaperScalePercentChange={editorUi.onOsmdPreviewPaperScalePercentChange}
+        onOsmdPreviewHorizontalMarginPxChange={editorUi.onOsmdPreviewHorizontalMarginPxChange}
+        onOsmdPreviewFirstPageTopMarginPxChange={editorUi.onOsmdPreviewFirstPageTopMarginPxChange}
+        onOsmdPreviewTopMarginPxChange={editorUi.onOsmdPreviewTopMarginPxChange}
+        onOsmdPreviewBottomMarginPxChange={editorUi.onOsmdPreviewBottomMarginPxChange}
+        onOsmdPreviewShowPageNumbersChange={editorUi.onOsmdPreviewShowPageNumbersChange}
+        onOsmdPreviewSurfaceClick={editorUi.onOsmdPreviewSurfaceClick}
+        onOsmdPreviewSurfaceDoubleClick={editorUi.onOsmdPreviewSurfaceDoubleClick}
       />
     </main>
   )
