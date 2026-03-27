@@ -1,6 +1,7 @@
 import type { MutableRefObject } from 'react'
 import { appendIntervalKey } from '../keyboardEdits'
 import type { ImportedNoteLocation, MeasurePair, Selection } from '../types'
+import type { KeyboardEditResultApplier } from './keyboardCommandTypes'
 
 export function handleAppendIntervalCommand(params: {
   measurePairs: MeasurePair[]
@@ -9,13 +10,7 @@ export function handleAppendIntervalCommand(params: {
   shiftKey: boolean
   measureKeyFifthsFromImport: number[] | null
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
-  applyKeyboardEditResult: (
-    nextPairs: MeasurePair[],
-    nextSelection: Selection,
-    nextSelections?: Selection[],
-    source?: 'default' | 'midi-step',
-    options?: { collapseScopesToAdd?: Array<{ pairIndex: number; staff: Selection['staff'] }> },
-  ) => void
+  applyKeyboardEditResult: KeyboardEditResultApplier
 }): boolean {
   const {
     measurePairs,

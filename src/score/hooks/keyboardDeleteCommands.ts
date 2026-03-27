@@ -1,4 +1,4 @@
-import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
+import type { MutableRefObject } from 'react'
 import { applyDeleteAccidentalSelection } from '../accidentalEdits'
 import {
   getDeleteAccidentalFailureMessage,
@@ -11,14 +11,16 @@ import { deleteSelectedKey } from '../keyboardEdits'
 import type {
   ImportedNoteLocation,
   MeasurePair,
-  Pitch,
   Selection,
   TieSelection,
   TimeSignature,
 } from '../types'
 import type { MeasureScope } from './keyboardCommandShared'
-
-type StateSetter<T> = Dispatch<SetStateAction<T>>
+import type {
+  KeyboardAccidentalPreviewPlayer,
+  KeyboardEditResultApplier,
+  StateSetter,
+} from './keyboardCommandTypes'
 
 export function handleEscapeCommand(params: {
   activeTieSelection: TieSelection | null
@@ -48,13 +50,7 @@ export function handleDeleteTieCommand(params: {
   measurePairs: MeasurePair[]
   activeTieSelection: TieSelection
   activeSelection: Selection
-  applyKeyboardEditResult: (
-    nextPairs: MeasurePair[],
-    nextSelection: Selection,
-    nextSelections?: Selection[],
-    source?: 'default' | 'midi-step',
-    options?: { collapseScopesToAdd?: Array<{ pairIndex: number; staff: Selection['staff'] }> },
-  ) => void
+  applyKeyboardEditResult: KeyboardEditResultApplier
   setActiveTieSelection: StateSetter<TieSelection | null>
   setIsSelectionVisible: StateSetter<boolean>
   setSelectedSelections: StateSetter<Selection[]>
@@ -103,19 +99,8 @@ export function handleDeleteAccidentalCommand(params: {
   activeAccidentalSelection: Selection
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
   measureKeyFifthsFromImportRef: MutableRefObject<number[] | null>
-  applyKeyboardEditResult: (
-    nextPairs: MeasurePair[],
-    nextSelection: Selection,
-    nextSelections?: Selection[],
-    source?: 'default' | 'midi-step',
-    options?: { collapseScopesToAdd?: Array<{ pairIndex: number; staff: Selection['staff'] }> },
-  ) => void
-  playAccidentalEditPreview: (params: {
-    pairs: MeasurePair[]
-    previewSelection: Selection | null
-    previewPitch: Pitch | null
-    importedNoteLookup?: Map<string, ImportedNoteLocation> | null
-  }) => void
+  applyKeyboardEditResult: KeyboardEditResultApplier
+  playAccidentalEditPreview: KeyboardAccidentalPreviewPlayer
   setActiveAccidentalSelection: StateSetter<Selection | null>
   setIsSelectionVisible: StateSetter<boolean>
   setSelectedSelections: StateSetter<Selection[]>
@@ -176,13 +161,7 @@ export function handleDeleteMeasureCommand(params: {
   measurePairsFromImportRef: MutableRefObject<MeasurePair[] | null>
   measureKeyFifthsFromImportRef: MutableRefObject<number[] | null>
   measureTimeSignaturesFromImportRef: MutableRefObject<TimeSignature[] | null>
-  applyKeyboardEditResult: (
-    nextPairs: MeasurePair[],
-    nextSelection: Selection,
-    nextSelections?: Selection[],
-    source?: 'default' | 'midi-step',
-    options?: { collapseScopesToAdd?: Array<{ pairIndex: number; staff: Selection['staff'] }> },
-  ) => void
+  applyKeyboardEditResult: KeyboardEditResultApplier
   setSelectedMeasureScope: StateSetter<MeasureScope>
   setSelectedSelections: StateSetter<Selection[]>
   setNotationPaletteLastAction: StateSetter<string>
@@ -241,13 +220,7 @@ export function handleDeleteSelectedKeyCommand(params: {
   activeSelection: Selection
   measureKeyFifthsFromImport: number[] | null
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
-  applyKeyboardEditResult: (
-    nextPairs: MeasurePair[],
-    nextSelection: Selection,
-    nextSelections?: Selection[],
-    source?: 'default' | 'midi-step',
-    options?: { collapseScopesToAdd?: Array<{ pairIndex: number; staff: Selection['staff'] }> },
-  ) => void
+  applyKeyboardEditResult: KeyboardEditResultApplier
 }): boolean {
   const { measurePairs, activeSelection, measureKeyFifthsFromImport, importedNoteLookupRef, applyKeyboardEditResult } = params
   const result = deleteSelectedKey({

@@ -1,4 +1,4 @@
-import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
+import type { MutableRefObject } from 'react'
 import { getCopyPasteFailureMessage } from '../editorMessages'
 import { toDisplayDuration } from '../layout/demand'
 import {
@@ -7,8 +7,7 @@ import {
 } from '../copyPasteEdits'
 import type { NoteClipboardPayload } from '../copyPasteTypes'
 import type { ImportedNoteLocation, MeasurePair, Selection, TimeSignature } from '../types'
-
-type StateSetter<T> = Dispatch<SetStateAction<T>>
+import type { KeyboardEditResultApplier, StateSetter } from './keyboardCommandTypes'
 
 export function handleCopyShortcut(params: {
   measurePairs: MeasurePair[]
@@ -58,13 +57,7 @@ export function handlePasteShortcut(params: {
   measureKeyFifthsFromImportRef: MutableRefObject<number[] | null>
   measureTimeSignaturesFromImportRef: MutableRefObject<TimeSignature[] | null>
   measurePairsFromImportRef: MutableRefObject<MeasurePair[] | null>
-  applyKeyboardEditResult: (
-    nextPairs: MeasurePair[],
-    nextSelection: Selection,
-    nextSelections?: Selection[],
-    source?: 'default' | 'midi-step',
-    options?: { collapseScopesToAdd?: Array<{ pairIndex: number; staff: Selection['staff'] }> },
-  ) => void
+  applyKeyboardEditResult: KeyboardEditResultApplier
   setNotationPaletteLastAction: StateSetter<string>
 }): boolean {
   const {

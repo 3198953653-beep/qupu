@@ -1,6 +1,5 @@
 import {
   useCallback,
-  useEffect,
   useRef,
   type Dispatch,
   type MutableRefObject,
@@ -12,14 +11,17 @@ import type {
   LayoutReflowHint,
   MeasureLayout,
   MeasurePair,
-  Pitch,
   ScoreNote,
   Selection,
   TieSelection,
   TimeSignature,
 } from '../types'
-import { handleKeyboardCommandEvent } from './handleKeyboardCommandEvent'
 import { type MeasureScope } from './keyboardCommandShared'
+import type {
+  KeyboardAccidentalPreviewPlayer,
+  KeyboardEditResultApplier,
+} from './keyboardCommandTypes'
+import { useKeyboardCommandEffect } from './useKeyboardCommandEffect'
 import { moveSelectionByKeyboardArrow, moveSelectionsByKeyboardSteps } from './keyboardSelectionCommands'
 
 export function useKeyboardCommandController(params: {
@@ -46,19 +48,8 @@ export function useKeyboardCommandController(params: {
   pushUndoSnapshot: (sourcePairs: MeasurePair[]) => void
   resetMidiStepChain: () => void
   undoLastScoreEdit: () => boolean
-  applyKeyboardEditResult: (
-    nextPairs: MeasurePair[],
-    nextSelection: Selection,
-    nextSelections?: Selection[],
-    source?: 'default' | 'midi-step',
-    options?: { collapseScopesToAdd?: Array<{ pairIndex: number; staff: Selection['staff'] }> },
-  ) => void
-  playAccidentalEditPreview: (params: {
-    pairs: MeasurePair[]
-    previewSelection: Selection | null
-    previewPitch: Pitch | null
-    importedNoteLookup?: Map<string, ImportedNoteLocation> | null
-  }) => void
+  applyKeyboardEditResult: KeyboardEditResultApplier
+  playAccidentalEditPreview: KeyboardAccidentalPreviewPlayer
   setNotes: Dispatch<SetStateAction<ScoreNote[]>>
   setBassNotes: Dispatch<SetStateAction<ScoreNote[]>>
   setMeasurePairsFromImport: Dispatch<SetStateAction<MeasurePair[] | null>>
@@ -198,70 +189,33 @@ export function useKeyboardCommandController(params: {
     setSelectedSelections,
   ])
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      handleKeyboardCommandEvent({
-        event,
-        isOsmdPreviewOpen,
-        draggingSelection,
-        isSelectionVisible,
-        measurePairs,
-        activeSelection,
-        selectedSelections,
-        selectedMeasureScope,
-        activeTieSelection,
-        activeAccidentalSelection,
-        measureKeyFifthsFromImport,
-        noteClipboardRef,
-        importedNoteLookupRef,
-        measureKeyFifthsFromImportRef,
-        measureTimeSignaturesFromImportRef,
-        measurePairsFromImportRef,
-        scoreScrollRef,
-        undoLastScoreEdit,
-        handleMoveSelectionsByKeyboardSteps,
-        handleMoveSelectionByKeyboardArrow,
-        applyKeyboardEditResult,
-        playAccidentalEditPreview,
-        setActiveTieSelection,
-        setActiveAccidentalSelection,
-        setIsSelectionVisible,
-        setSelectedSelections,
-        setSelectedMeasureScope,
-        setNotationPaletteLastAction,
-      })
-    }
-
-    window.addEventListener('keydown', onKeyDown)
-    return () => {
-      window.removeEventListener('keydown', onKeyDown)
-    }
-  }, [
-    activeAccidentalSelection,
-    activeSelection,
-    activeTieSelection,
-    applyKeyboardEditResult,
-    draggingSelection,
-    handleMoveSelectionByKeyboardArrow,
-    handleMoveSelectionsByKeyboardSteps,
-    importedNoteLookupRef,
+  useKeyboardCommandEffect({
     isOsmdPreviewOpen,
+    draggingSelection,
     isSelectionVisible,
-    measureKeyFifthsFromImport,
-    measureKeyFifthsFromImportRef,
     measurePairs,
-    measurePairsFromImportRef,
-    measureTimeSignaturesFromImportRef,
-    playAccidentalEditPreview,
-    scoreScrollRef,
-    selectedMeasureScope,
+    activeSelection,
     selectedSelections,
-    setActiveAccidentalSelection,
-    setActiveTieSelection,
-    setIsSelectionVisible,
-    setNotationPaletteLastAction,
-    setSelectedMeasureScope,
-    setSelectedSelections,
+    selectedMeasureScope,
+    activeTieSelection,
+    activeAccidentalSelection,
+    measureKeyFifthsFromImport,
+    noteClipboardRef,
+    importedNoteLookupRef,
+    measureKeyFifthsFromImportRef,
+    measureTimeSignaturesFromImportRef,
+    measurePairsFromImportRef,
+    scoreScrollRef,
     undoLastScoreEdit,
-  ])
+    handleMoveSelectionsByKeyboardSteps,
+    handleMoveSelectionByKeyboardArrow,
+    applyKeyboardEditResult,
+    playAccidentalEditPreview,
+    setActiveTieSelection,
+    setActiveAccidentalSelection,
+    setIsSelectionVisible,
+    setSelectedSelections,
+    setSelectedMeasureScope,
+    setNotationPaletteLastAction,
+  })
 }
