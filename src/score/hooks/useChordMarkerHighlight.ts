@@ -1,10 +1,35 @@
 import { useCallback, useMemo, type MutableRefObject } from 'react'
 import { buildStaffOnsetTicks } from '../selectionTimelineRange'
 import type { MeasureFrame, MeasureLayout, MeasurePair, NoteLayout } from '../types'
-import type { ActiveChordSelection, MeasureSelectionScope } from './chordMarkerTypes'
+import type { ActiveChordSelection, ActiveTimelineSegmentHighlight, MeasureSelectionScope } from './chordMarkerTypes'
+
+function resolveStaffLineBounds(measureLayout: MeasureLayout, staff: 'treble' | 'bass') {
+  const lineTopRaw =
+    staff === 'treble'
+      ? (Number.isFinite(measureLayout.trebleLineTopY) ? measureLayout.trebleLineTopY : measureLayout.trebleY)
+      : (Number.isFinite(measureLayout.bassLineTopY) ? measureLayout.bassLineTopY : measureLayout.bassY)
+  const lineBottomRaw =
+    staff === 'treble'
+      ? (Number.isFinite(measureLayout.trebleLineBottomY) ? measureLayout.trebleLineBottomY : measureLayout.trebleY + 40)
+      : (Number.isFinite(measureLayout.bassLineBottomY) ? measureLayout.bassLineBottomY : measureLayout.bassY + 40)
+  return {
+    lineTop: Math.min(lineTopRaw, lineBottomRaw),
+    lineBottom: Math.max(lineTopRaw, lineBottomRaw),
+  }
+}
+
+function resolveCombinedStaffLineBounds(measureLayout: MeasureLayout) {
+  const trebleBounds = resolveStaffLineBounds(measureLayout, 'treble')
+  const bassBounds = resolveStaffLineBounds(measureLayout, 'bass')
+  return {
+    lineTop: Math.min(trebleBounds.lineTop, bassBounds.lineTop),
+    lineBottom: Math.max(trebleBounds.lineBottom, bassBounds.lineBottom),
+  }
+}
 
 export function useChordMarkerHighlight(params: {
   activeChordSelection: ActiveChordSelection | null
+  activeTimelineSegmentHighlight: ActiveTimelineSegmentHighlight | null
   selectedMeasureScope: MeasureSelectionScope | null
   measurePairsRef: MutableRefObject<MeasurePair[]>
   noteLayoutsByPairRef: MutableRefObject<Map<number, NoteLayout[]>>
@@ -22,6 +47,7 @@ export function useChordMarkerHighlight(params: {
 }) {
   const {
     activeChordSelection,
+    activeTimelineSegmentHighlight,
     selectedMeasureScope,
     measurePairsRef,
     noteLayoutsByPairRef,
@@ -149,18 +175,7 @@ export function useChordMarkerHighlight(params: {
       })
       if (!contentBounds) return null
 
-      const trebleTopRaw = Number.isFinite(measureLayout.trebleLineTopY) ? measureLayout.trebleLineTopY : measureLayout.trebleY
-      const trebleBottomRaw =
-        Number.isFinite(measureLayout.trebleLineBottomY) ? measureLayout.trebleLineBottomY : measureLayout.trebleY + 40
-      const bassTopRaw = Number.isFinite(measureLayout.bassLineTopY) ? measureLayout.bassLineTopY : measureLayout.bassY
-      const bassBottomRaw =
-        Number.isFinite(measureLayout.bassLineBottomY) ? measureLayout.bassLineBottomY : measureLayout.bassY + 40
-      const trebleTop = Math.min(trebleTopRaw, trebleBottomRaw)
-      const trebleBottom = Math.max(trebleTopRaw, trebleBottomRaw)
-      const bassTop = Math.min(bassTopRaw, bassBottomRaw)
-      const bassBottom = Math.max(bassTopRaw, bassBottomRaw)
-      const lineTop = Math.min(trebleTop, bassTop)
-      const lineBottom = Math.max(trebleBottom, bassBottom)
+      const { lineTop, lineBottom } = resolveCombinedStaffLineBounds(measureLayout)
       const x = scoreSurfaceOffsetXPx + contentBounds.leftXRaw * scoreScaleX + stageBorderPx
       const y = scoreSurfaceOffsetYPx + lineTop * scoreScaleY + stageBorderPx
       const width = (contentBounds.rightXRaw - contentBounds.leftXRaw) * scoreScaleX
@@ -177,6 +192,46 @@ export function useChordMarkerHighlight(params: {
       }
     }
 
+    if (activeTimelineSegmentHighlight !== null) {
+      const startFrame = horizontalMeasureFramesByPair[activeTimelineSegmentHighlight.startPairIndex] ?? null
+      const endFrame = horizontalMeasureFramesByPair[activeTimelineSegmentHighlight.endPairIndexInclusive] ?? null
+      if (!startFrame || !endFrame) return null
+
+      let minLineTop = Number.POSITIVE_INFINITY
+      let maxLineBottom = Number.NEGATIVE_INFINITY
+
+      for (
+        let pairIndex = activeTimelineSegmentHighlight.startPairIndex;
+        pairIndex <= activeTimelineSegmentHighlight.endPairIndexInclusive;
+        pairIndex += 1
+      ) {
+        const measureLayout = measureLayoutsRef.current.get(pairIndex) ?? null
+        if (!measureLayout) continue
+        const { lineTop, lineBottom } = resolveCombinedStaffLineBounds(measureLayout)
+        minLineTop = Math.min(minLineTop, lineTop)
+        maxLineBottom = Math.max(maxLineBottom, lineBottom)
+      }
+
+      if (!Number.isFinite(minLineTop) || !Number.isFinite(maxLineBottom) || maxLineBottom <= minLineTop) {
+        return null
+      }
+
+      const x = startFrame.measureX * scoreScaleX + stageBorderPx
+      const y = scoreSurfaceOffsetYPx + minLineTop * scoreScaleY + stageBorderPx
+      const width = (endFrame.measureX + endFrame.measureWidth - startFrame.measureX) * scoreScaleX
+      const height = (maxLineBottom - minLineTop) * scoreScaleY
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height)) {
+        return null
+      }
+      if (width <= 0 || height <= 0) return null
+      return {
+        x: x - measurePadX,
+        y: y - measurePadY,
+        width: width + measurePadX * 2,
+        height: height + measurePadY * 2,
+      }
+    }
+
     if (selectedMeasureScope === null) return null
     const measureLayout = measureLayoutsRef.current.get(selectedMeasureScope.pairIndex) ?? null
     if (!measureLayout) return null
@@ -185,16 +240,7 @@ export function useChordMarkerHighlight(params: {
       frame !== null
         ? frame.measureX * scoreScaleX + stageBorderPx
         : scoreSurfaceOffsetXPx + measureLayout.measureX * scoreScaleX + stageBorderPx
-    const lineTopRaw =
-      selectedMeasureScope.staff === 'treble'
-        ? (Number.isFinite(measureLayout.trebleLineTopY) ? measureLayout.trebleLineTopY : measureLayout.trebleY)
-        : (Number.isFinite(measureLayout.bassLineTopY) ? measureLayout.bassLineTopY : measureLayout.bassY)
-    const lineBottomRaw =
-      selectedMeasureScope.staff === 'treble'
-        ? (Number.isFinite(measureLayout.trebleLineBottomY) ? measureLayout.trebleLineBottomY : measureLayout.trebleY + 40)
-        : (Number.isFinite(measureLayout.bassLineBottomY) ? measureLayout.bassLineBottomY : measureLayout.bassY + 40)
-    const lineTop = Math.min(lineTopRaw, lineBottomRaw)
-    const lineBottom = Math.max(lineTopRaw, lineBottomRaw)
+    const { lineTop, lineBottom } = resolveStaffLineBounds(measureLayout, selectedMeasureScope.staff)
     const y = scoreSurfaceOffsetYPx + lineTop * scoreScaleY + stageBorderPx
     const width =
       frame !== null
@@ -213,6 +259,7 @@ export function useChordMarkerHighlight(params: {
     }
   }, [
     activeChordSelection,
+    activeTimelineSegmentHighlight,
     chordHighlightPadXPx,
     chordHighlightPadYPx,
     chordMarkerLayoutRevision,

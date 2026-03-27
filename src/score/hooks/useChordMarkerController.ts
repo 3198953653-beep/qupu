@@ -18,7 +18,11 @@ import {
   buildMeasureRulerTicks,
 } from './chordMarkerGeometry'
 export type { ActiveChordSelection, ChordRulerMarker, ChordRulerMarkerMeta, TimelineSegmentBlock } from './chordMarkerTypes'
-import type { MeasureFrameContentGeometry, MeasureSelectionScope } from './chordMarkerTypes'
+import type {
+  ActiveTimelineSegmentHighlight,
+  MeasureFrameContentGeometry,
+  MeasureSelectionScope,
+} from './chordMarkerTypes'
 import { useChordMarkerHighlight } from './useChordMarkerHighlight'
 import { useChordMarkerSelection } from './useChordMarkerSelection'
 
@@ -191,8 +195,35 @@ export function useChordMarkerController(params: {
     resetMidiStepChain,
   })
 
+  const timelineSegmentBlocks = useMemo(() => buildTimelineSegmentBlocks({
+    measurePairs,
+    horizontalMeasureFramesByPair,
+    scoreScaleX,
+    stageBorderPx,
+    timelineSegmentOverlayMode,
+    activeSelectionSignature: currentSelectionSignature,
+  }), [
+    currentSelectionSignature,
+    horizontalMeasureFramesByPair,
+    measurePairs,
+    scoreScaleX,
+    stageBorderPx,
+    timelineSegmentOverlayMode,
+  ])
+
+  const activeTimelineSegmentHighlight = useMemo<ActiveTimelineSegmentHighlight | null>(() => {
+    const activeSegment = timelineSegmentBlocks.find((entry) => entry.isActive) ?? null
+    if (!activeSegment) return null
+    return {
+      key: activeSegment.key,
+      startPairIndex: activeSegment.startPairIndex,
+      endPairIndexInclusive: activeSegment.endPairIndexInclusive,
+    }
+  }, [timelineSegmentBlocks])
+
   const selectedMeasureHighlightRectPx = useChordMarkerHighlight({
     activeChordSelection,
+    activeTimelineSegmentHighlight,
     selectedMeasureScope,
     measurePairsRef,
     noteLayoutsByPairRef,
@@ -222,22 +253,6 @@ export function useChordMarkerController(params: {
       beatIndex: marker.beatIndex,
     }))
   }, [activeChordSelection, chordRulerMarkerMetaByKey])
-
-  const timelineSegmentBlocks = useMemo(() => buildTimelineSegmentBlocks({
-    measurePairs,
-    horizontalMeasureFramesByPair,
-    scoreScaleX,
-    stageBorderPx,
-    timelineSegmentOverlayMode,
-    activeSelectionSignature: currentSelectionSignature,
-  }), [
-    currentSelectionSignature,
-    horizontalMeasureFramesByPair,
-    measurePairs,
-    scoreScaleX,
-    stageBorderPx,
-    timelineSegmentOverlayMode,
-  ])
 
   const onTimelineSegmentClick = useCallback((segmentKey: string) => {
     const segment = timelineSegmentBlocks.find((entry) => entry.key === segmentKey)

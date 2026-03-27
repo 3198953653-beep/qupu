@@ -64,6 +64,12 @@ export type ActiveChordSelection = {
   endTick: number
 }
 
+export type ActiveTimelineSegmentHighlight = {
+  key: string
+  startPairIndex: number
+  endPairIndexInclusive: number
+}
+
 export type MeasureFrameContentGeometry = {
   contentStartX: number
   contentMeasureWidth: number
