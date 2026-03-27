@@ -11,6 +11,19 @@ export type ChordRulerMarker = {
   beatIndex?: number | null
 }
 
+export type TimelineSegmentBlock = {
+  key: string
+  segmentNumber: number
+  startPairIndex: number
+  endPairIndexInclusive: number
+  leftPx: number
+  widthPx: number
+  variant: 'odd' | 'even'
+  measureStartNumber: number
+  measureEndNumber: number
+  isActive: boolean
+}
+
 export type ChordRulerMarkerAnchorSource = 'note-head' | 'spacing-tick' | 'axis' | 'frame'
 
 export type ChordRulerMarkerGeometry = {

@@ -12,6 +12,7 @@ type EditorActionWrapperBaseParams = Omit<
   | 'loadWholeNoteDemo'
   | 'loadHalfNoteDemo'
   | 'resetScore'
+  | 'runAiDraft'
   | 'applyRhythmPreset'
 >
 
@@ -43,10 +44,12 @@ export function useScoreDocumentActionsController(params: {
     loadWholeNoteDemo: handlers.loadWholeNoteDemo,
     loadHalfNoteDemo: handlers.loadHalfNoteDemo,
     resetScore: handlers.resetScore,
+    runAiDraft: handlers.runAiDraft,
     applyRhythmPreset: handlers.applyRhythmPreset,
   })
 
   useEffect(() => {
+    const synth = synthRef.current
     return () => {
       if (stopPlayTimerRef.current !== null) {
         window.clearTimeout(stopPlayTimerRef.current)
@@ -57,7 +60,7 @@ export function useScoreDocumentActionsController(params: {
       })
       playbackPointTimerIdsRef.current = []
       playbackSessionIdRef.current += 1
-      const stoppableSynth = synthRef.current as (Tone.PolySynth | Tone.Sampler | { releaseAll?: (time?: number) => void }) | null
+      const stoppableSynth = synth as (Tone.PolySynth | Tone.Sampler | { releaseAll?: (time?: number) => void }) | null
       if (stoppableSynth && typeof stoppableSynth.releaseAll === 'function') {
         try {
           stoppableSynth.releaseAll()

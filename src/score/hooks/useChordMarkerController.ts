@@ -1,13 +1,23 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import type { ChordRulerEntry } from '../chordRuler'
+import { buildSelectionSetSignature, buildSelectionsForMeasureRange } from '../selectionMeasureRange'
 import type { MeasureTimelineBundle } from '../timeline/types'
-import type { MeasureFrame, MeasureLayout, MeasurePair, NoteLayout, Selection, TimeSignature } from '../types'
+import type {
+  MeasureFrame,
+  MeasureLayout,
+  MeasurePair,
+  NoteLayout,
+  Selection,
+  TimeSignature,
+  TimelineSegmentOverlayMode,
+} from '../types'
+import { buildTimelineSegmentBlocks } from './buildTimelineSegmentBlocks'
 import {
   buildChordRulerMarkerGeometrySnapshot,
   buildChordRulerMarkerMetaByKey,
   buildMeasureRulerTicks,
 } from './chordMarkerGeometry'
-export type { ActiveChordSelection, ChordRulerMarker, ChordRulerMarkerMeta } from './chordMarkerTypes'
+export type { ActiveChordSelection, ChordRulerMarker, ChordRulerMarkerMeta, TimelineSegmentBlock } from './chordMarkerTypes'
 import type { MeasureFrameContentGeometry, MeasureSelectionScope } from './chordMarkerTypes'
 import { useChordMarkerHighlight } from './useChordMarkerHighlight'
 import { useChordMarkerSelection } from './useChordMarkerSelection'
@@ -30,6 +40,10 @@ export function useChordMarkerController(params: {
   scoreSurfaceOffsetXPx: number
   scoreSurfaceOffsetYPx: number
   selectedMeasureScope: MeasureSelectionScope | null
+  activeSelection: Selection
+  selectedSelections: Selection[]
+  isSelectionVisible: boolean
+  timelineSegmentOverlayMode: TimelineSegmentOverlayMode
   showChordDegreeEnabled: boolean
   chordMarkerLabelLeftInsetPx: number
   stageBorderPx: number
@@ -64,6 +78,10 @@ export function useChordMarkerController(params: {
     scoreSurfaceOffsetXPx,
     scoreSurfaceOffsetYPx,
     selectedMeasureScope,
+    activeSelection,
+    selectedSelections,
+    isSelectionVisible,
+    timelineSegmentOverlayMode,
     showChordDegreeEnabled,
     chordMarkerLabelLeftInsetPx,
     stageBorderPx,
@@ -136,6 +154,11 @@ export function useChordMarkerController(params: {
     stageBorderPx,
   }), [horizontalMeasureFramesByPair, scoreScaleX, stageBorderPx])
 
+  const currentSelectionSignature = useMemo(() => {
+    if (!isSelectionVisible) return ''
+    return buildSelectionSetSignature([...selectedSelections, activeSelection])
+  }, [activeSelection, isSelectionVisible, selectedSelections])
+
   const chordRulerMarkerMetaByKey = useMemo(() => buildChordRulerMarkerMetaByKey({
     chordRulerMarkerGeometryByKey,
     showChordDegreeEnabled,
@@ -200,6 +223,60 @@ export function useChordMarkerController(params: {
     }))
   }, [activeChordSelection, chordRulerMarkerMetaByKey])
 
+  const timelineSegmentBlocks = useMemo(() => buildTimelineSegmentBlocks({
+    measurePairs,
+    horizontalMeasureFramesByPair,
+    scoreScaleX,
+    stageBorderPx,
+    timelineSegmentOverlayMode,
+    activeSelectionSignature: currentSelectionSignature,
+  }), [
+    currentSelectionSignature,
+    horizontalMeasureFramesByPair,
+    measurePairs,
+    scoreScaleX,
+    stageBorderPx,
+    timelineSegmentOverlayMode,
+  ])
+
+  const onTimelineSegmentClick = useCallback((segmentKey: string) => {
+    const segment = timelineSegmentBlocks.find((entry) => entry.key === segmentKey)
+    if (!segment) return
+
+    const nextSelections = buildSelectionsForMeasureRange({
+      measurePairs: measurePairsRef.current,
+      startPairIndex: segment.startPairIndex,
+      endPairIndexInclusive: segment.endPairIndexInclusive,
+    })
+
+    resetMidiStepChain()
+    clearActiveAccidentalSelection()
+    clearActiveTieSelection()
+    clearSelectedMeasureScope()
+    clearDraggingSelection()
+    clearActiveChordSelection()
+    if (nextSelections.length > 0) {
+      setIsSelectionVisible(true)
+      setSelectedSelections(nextSelections)
+      setActiveSelection(nextSelections[0])
+      return
+    }
+    setIsSelectionVisible(false)
+    setSelectedSelections([])
+  }, [
+    clearActiveAccidentalSelection,
+    clearActiveChordSelection,
+    clearActiveTieSelection,
+    clearDraggingSelection,
+    clearSelectedMeasureScope,
+    measurePairsRef,
+    resetMidiStepChain,
+    setActiveSelection,
+    setIsSelectionVisible,
+    setSelectedSelections,
+    timelineSegmentBlocks,
+  ])
+
   return {
     chordMarkerLayoutRevision,
     activeChordSelection,
@@ -208,8 +285,10 @@ export function useChordMarkerController(params: {
     measureRulerTicks,
     chordRulerMarkerMetaByKey,
     chordRulerMarkers,
+    timelineSegmentBlocks,
     applyChordSelectionRange,
     onChordRulerMarkerClick,
+    onTimelineSegmentClick,
     selectedMeasureHighlightRectPx,
   }
 }

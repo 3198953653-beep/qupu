@@ -634,6 +634,82 @@
   position: relative;
   margin: 0;
   height: var(--chord-ruler-strip-height, 46px);
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.score-ruler-strip::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 18px;
+  width: 100%;
+  height: 1px;
+  background: #e5e7eb;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.segment-ruler-inline {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.segment-ruler-block {
+  position: absolute;
+  top: 19px;
+  height: calc(100% - 19px);
+  min-height: 18px;
+  border: 1px solid transparent;
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
+  box-sizing: border-box;
+  pointer-events: auto;
+  cursor: pointer;
+  opacity: 1;
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+}
+
+.segment-ruler-block-odd {
+  background: #fce7f3;
+}
+
+.segment-ruler-block-even {
+  background: #e0e7ff;
+}
+
+.segment-ruler-block-odd:hover {
+  background: #fbcfe8;
+}
+
+.segment-ruler-block-even:hover {
+  background: #c7d2fe;
+}
+
+.segment-ruler-block.is-active {
+  opacity: 1;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.72);
+}
+
+.segment-ruler-block-odd.is-active {
+  border-color: transparent;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.72), inset 0 0 0 2px #f9a8d4;
+}
+
+.segment-ruler-block-even.is-active {
+  border-color: transparent;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.72), inset 0 0 0 2px #a5b4fc;
+}
+
+.segment-ruler-block:focus-visible {
+  outline: 2px solid rgba(99, 102, 241, 0.45);
+  outline-offset: 1px;
 }
 
 .measure-ruler-inline {
@@ -643,6 +719,7 @@
   width: 100%;
   height: 100%;
   pointer-events: none;
+  z-index: 2;
 }
 
 .measure-ruler-tick {
@@ -655,22 +732,22 @@
 .measure-ruler-label {
   position: absolute;
   left: 0;
-  top: 0;
+  top: 4px;
   transform: translateX(-50%);
   white-space: nowrap;
-  color: #2a4359;
-  font-size: 12px;
+  color: #9ca3af;
+  font-size: 11px;
   line-height: 1;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .measure-ruler-mark {
   position: absolute;
   left: 0;
-  top: 14px;
+  top: 18px;
   width: 1px;
-  height: calc(100% - 14px);
-  background: rgba(23, 58, 80, 0.65);
+  height: calc(100% - 18px);
+  background: #e5e7eb;
 }
 
 .chord-ruler-inline {
@@ -680,6 +757,7 @@
   width: 100%;
   height: var(--chord-ruler-inline-height, 24px);
   pointer-events: none;
+  z-index: 3;
 }
 
 .chord-ruler-marker {
@@ -694,11 +772,13 @@
   padding-block: var(--chord-ruler-marker-padding-block, 8px);
   margin: 0;
   box-sizing: border-box;
-  border-radius: var(--chord-ruler-marker-radius, 7px);
-  background: #d9eaff;
+  min-height: var(--chord-ruler-marker-height, 22px);
+  border-radius: 999px;
+  background: #6366f1;
+  box-shadow: 0 1px 3px rgba(79, 70, 229, 0.26);
   pointer-events: auto;
   cursor: pointer;
-  transition: background 120ms ease;
+  transition: background 120ms ease, box-shadow 120ms ease;
 }
 
 .chord-ruler-label {
@@ -708,22 +788,24 @@
   white-space: nowrap;
   margin: 0;
   padding: 0;
-  color: #1f4e74;
+  color: #ffffff;
   font-size: var(--chord-ruler-label-font-size, 10px);
   line-height: 1;
   font-weight: 700;
 }
 
 .chord-ruler-marker:hover {
-  background: #c7e0ff;
+  background: #4f46e5;
+  box-shadow: 0 2px 6px rgba(79, 70, 229, 0.32);
 }
 
 .chord-ruler-marker.is-active .chord-ruler-label {
-  color: #123f66;
+  color: #ffffff;
 }
 
 .chord-ruler-marker.is-active {
-  background: #afcfff;
+  background: #4338ca;
+  box-shadow: 0 2px 7px rgba(67, 56, 202, 0.34);
 }
 
 .score-surface {

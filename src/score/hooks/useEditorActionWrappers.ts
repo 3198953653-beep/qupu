@@ -1,11 +1,12 @@
 import { useCallback, type ChangeEvent, type Dispatch, type SetStateAction } from 'react'
-import type { RhythmPresetId } from '../types'
+import type { RhythmPresetId, TimelineSegmentOverlayMode } from '../types'
 
 export function useEditorActionWrappers(params: {
   stopActivePlaybackSession: () => void
   requestPlaybackCursorReset: () => void
   clearActiveChordSelection: () => void
   setActiveBuiltInDemo: Dispatch<SetStateAction<'none' | 'whole-note' | 'half-note'>>
+  setTimelineSegmentOverlayMode: Dispatch<SetStateAction<TimelineSegmentOverlayMode>>
   setFullMeasureRestCollapseScopeKeys: Dispatch<SetStateAction<string[]>>
   importMusicXmlText: (xmlText: string) => void
   importMusicXmlFromTextarea: () => void
@@ -14,6 +15,7 @@ export function useEditorActionWrappers(params: {
   loadWholeNoteDemo: () => void
   loadHalfNoteDemo: () => void
   resetScore: () => void
+  runAiDraft: () => void
   applyRhythmPreset: (presetId: RhythmPresetId) => void
 }): {
   clearFullMeasureRestCollapseScopes: () => void
@@ -24,6 +26,7 @@ export function useEditorActionWrappers(params: {
   loadWholeNoteDemoWithCollapseReset: () => void
   loadHalfNoteDemoWithCollapseReset: () => void
   resetScoreWithCollapseReset: () => void
+  runAiDraftWithCollapseReset: () => void
   applyRhythmPresetWithCollapseReset: (presetId: RhythmPresetId) => void
 } {
   const {
@@ -31,6 +34,7 @@ export function useEditorActionWrappers(params: {
     requestPlaybackCursorReset,
     clearActiveChordSelection,
     setActiveBuiltInDemo,
+    setTimelineSegmentOverlayMode,
     setFullMeasureRestCollapseScopeKeys,
     importMusicXmlText,
     importMusicXmlFromTextarea,
@@ -39,6 +43,7 @@ export function useEditorActionWrappers(params: {
     loadWholeNoteDemo,
     loadHalfNoteDemo,
     resetScore,
+    runAiDraft,
     applyRhythmPreset,
   } = params
 
@@ -51,12 +56,14 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     setActiveBuiltInDemo('none')
+    setTimelineSegmentOverlayMode('none')
     importMusicXmlText(xmlText)
   }, [
     clearActiveChordSelection,
     clearFullMeasureRestCollapseScopes,
     importMusicXmlText,
     setActiveBuiltInDemo,
+    setTimelineSegmentOverlayMode,
     stopActivePlaybackSession,
   ])
 
@@ -65,12 +72,14 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     setActiveBuiltInDemo('none')
+    setTimelineSegmentOverlayMode('none')
     importMusicXmlFromTextarea()
   }, [
     clearActiveChordSelection,
     clearFullMeasureRestCollapseScopes,
     importMusicXmlFromTextarea,
     setActiveBuiltInDemo,
+    setTimelineSegmentOverlayMode,
     stopActivePlaybackSession,
   ])
 
@@ -79,12 +88,14 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     setActiveBuiltInDemo('none')
+    setTimelineSegmentOverlayMode('none')
     await onMusicXmlFileChange(event)
   }, [
     clearActiveChordSelection,
     clearFullMeasureRestCollapseScopes,
     onMusicXmlFileChange,
     setActiveBuiltInDemo,
+    setTimelineSegmentOverlayMode,
     stopActivePlaybackSession,
   ])
 
@@ -93,12 +104,14 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     setActiveBuiltInDemo('none')
+    setTimelineSegmentOverlayMode('none')
     loadSampleMusicXml()
   }, [
     clearActiveChordSelection,
     clearFullMeasureRestCollapseScopes,
     loadSampleMusicXml,
     setActiveBuiltInDemo,
+    setTimelineSegmentOverlayMode,
     stopActivePlaybackSession,
   ])
 
@@ -108,6 +121,7 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     setActiveBuiltInDemo('whole-note')
+    setTimelineSegmentOverlayMode('none')
     loadWholeNoteDemo()
   }, [
     clearActiveChordSelection,
@@ -115,6 +129,7 @@ export function useEditorActionWrappers(params: {
     loadWholeNoteDemo,
     requestPlaybackCursorReset,
     setActiveBuiltInDemo,
+    setTimelineSegmentOverlayMode,
     stopActivePlaybackSession,
   ])
 
@@ -124,6 +139,7 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     setActiveBuiltInDemo('half-note')
+    setTimelineSegmentOverlayMode('none')
     loadHalfNoteDemo()
   }, [
     clearActiveChordSelection,
@@ -131,6 +147,7 @@ export function useEditorActionWrappers(params: {
     loadHalfNoteDemo,
     requestPlaybackCursorReset,
     setActiveBuiltInDemo,
+    setTimelineSegmentOverlayMode,
     stopActivePlaybackSession,
   ])
 
@@ -140,6 +157,7 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     setActiveBuiltInDemo('none')
+    setTimelineSegmentOverlayMode('default-two-measure-demo')
     resetScore()
   }, [
     clearActiveChordSelection,
@@ -147,6 +165,25 @@ export function useEditorActionWrappers(params: {
     requestPlaybackCursorReset,
     resetScore,
     setActiveBuiltInDemo,
+    setTimelineSegmentOverlayMode,
+    stopActivePlaybackSession,
+  ])
+
+  const runAiDraftWithCollapseReset = useCallback(() => {
+    stopActivePlaybackSession()
+    requestPlaybackCursorReset()
+    clearFullMeasureRestCollapseScopes()
+    clearActiveChordSelection()
+    setActiveBuiltInDemo('none')
+    setTimelineSegmentOverlayMode('none')
+    runAiDraft()
+  }, [
+    clearActiveChordSelection,
+    clearFullMeasureRestCollapseScopes,
+    requestPlaybackCursorReset,
+    runAiDraft,
+    setActiveBuiltInDemo,
+    setTimelineSegmentOverlayMode,
     stopActivePlaybackSession,
   ])
 
@@ -156,6 +193,7 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     setActiveBuiltInDemo('none')
+    setTimelineSegmentOverlayMode('none')
     applyRhythmPreset(presetId)
   }, [
     applyRhythmPreset,
@@ -163,6 +201,7 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes,
     requestPlaybackCursorReset,
     setActiveBuiltInDemo,
+    setTimelineSegmentOverlayMode,
     stopActivePlaybackSession,
   ])
 
@@ -175,6 +214,7 @@ export function useEditorActionWrappers(params: {
     loadWholeNoteDemoWithCollapseReset,
     loadHalfNoteDemoWithCollapseReset,
     resetScoreWithCollapseReset,
+    runAiDraftWithCollapseReset,
     applyRhythmPresetWithCollapseReset,
   }
 }

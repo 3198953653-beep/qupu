@@ -28,6 +28,18 @@ export function ScoreBoard(props: {
     xPx: number
     label: string
   }>
+  timelineSegmentBlocks: Array<{
+    key: string
+    segmentNumber: number
+    startPairIndex: number
+    endPairIndexInclusive: number
+    leftPx: number
+    widthPx: number
+    variant: 'odd' | 'even'
+    measureStartNumber: number
+    measureEndNumber: number
+    isActive: boolean
+  }>
   chordRulerMarkers: Array<{
     key: string
     xPx: number
@@ -38,6 +50,7 @@ export function ScoreBoard(props: {
     positionText: string
     beatIndex?: number | null
   }>
+  onTimelineSegmentClick: (segmentKey: string) => void
   onChordRulerMarkerClick: (markerKey: string) => void
   playheadRectPx?: { x: number; y: number; width: number; height: number } | null
   playheadStatus: 'idle' | 'playing'
@@ -71,7 +84,9 @@ export function ScoreBoard(props: {
     scoreSurfaceOffsetXPx,
     scoreSurfaceOffsetYPx,
     measureRulerTicks,
+    timelineSegmentBlocks,
     chordRulerMarkers,
+    onTimelineSegmentClick,
     onChordRulerMarkerClick,
     playheadRectPx = null,
     playheadStatus,
@@ -115,6 +130,23 @@ export function ScoreBoard(props: {
     <section className="board">
       <div className="score-scroll horizontal-view" ref={scoreScrollRef} tabIndex={0}>
         <div className="score-ruler-strip" style={rulerStripStyle}>
+          <div className="segment-ruler-inline" aria-label="时间轴段落">
+            {timelineSegmentBlocks.map((segment) => (
+              <button
+                type="button"
+                className={`segment-ruler-block segment-ruler-block-${segment.variant}${segment.isActive ? ' is-active' : ''}`}
+                key={segment.key}
+                style={{
+                  left: `${segment.leftPx}px`,
+                  width: `${segment.widthPx}px`,
+                }}
+                onClick={() => onTimelineSegmentClick(segment.key)}
+                title={`第 ${segment.segmentNumber} 段（第 ${segment.measureStartNumber}-${segment.measureEndNumber} 小节）`}
+                aria-label={`第 ${segment.segmentNumber} 段，第 ${segment.measureStartNumber} 到第 ${segment.measureEndNumber} 小节`}
+                aria-pressed={segment.isActive}
+              />
+            ))}
+          </div>
           <div className="measure-ruler-inline" aria-hidden="true">
             {measureRulerTicks.map((tick) => (
               <div className="measure-ruler-tick" key={tick.key} style={{ left: `${tick.xPx}px` }}>

@@ -87,6 +87,7 @@ export function useScoreWorkspaceDocumentActions(params: {
       requestPlaybackCursorReset,
       clearActiveChordSelection,
       setActiveBuiltInDemo: appState.setActiveBuiltInDemo,
+      setTimelineSegmentOverlayMode: appState.setTimelineSegmentOverlayMode,
       setFullMeasureRestCollapseScopeKeys: appState.setFullMeasureRestCollapseScopeKeys,
     },
     stopPlayTimerRef: editorRefs.stopPlayTimerRef,
