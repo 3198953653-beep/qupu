@@ -35,7 +35,7 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
   const [rhythmPreset, setRhythmPreset] = useState<RhythmPresetId>('quarter')
   const [activeBuiltInDemo, setActiveBuiltInDemo] = useState<BuiltInDemoMode>('none')
   const [timelineSegmentOverlayMode, setTimelineSegmentOverlayMode] =
-    useState<TimelineSegmentOverlayMode>('default-two-measure-demo')
+    useState<TimelineSegmentOverlayMode>('curated-two-measure')
   const [activeSelection, setActiveSelection] = useState<Selection>({
     noteId: INITIAL_NOTES[0].id,
     staff: 'treble',

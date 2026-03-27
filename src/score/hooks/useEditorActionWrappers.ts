@@ -104,7 +104,7 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     setActiveBuiltInDemo('none')
-    setTimelineSegmentOverlayMode('none')
+    setTimelineSegmentOverlayMode('curated-two-measure')
     loadSampleMusicXml()
   }, [
     clearActiveChordSelection,
@@ -121,7 +121,7 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     setActiveBuiltInDemo('whole-note')
-    setTimelineSegmentOverlayMode('none')
+    setTimelineSegmentOverlayMode('curated-two-measure')
     loadWholeNoteDemo()
   }, [
     clearActiveChordSelection,
@@ -139,7 +139,7 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     setActiveBuiltInDemo('half-note')
-    setTimelineSegmentOverlayMode('none')
+    setTimelineSegmentOverlayMode('curated-two-measure')
     loadHalfNoteDemo()
   }, [
     clearActiveChordSelection,
@@ -157,7 +157,7 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     setActiveBuiltInDemo('none')
-    setTimelineSegmentOverlayMode('default-two-measure-demo')
+    setTimelineSegmentOverlayMode('curated-two-measure')
     resetScore()
   }, [
     clearActiveChordSelection,
@@ -193,7 +193,7 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     setActiveBuiltInDemo('none')
-    setTimelineSegmentOverlayMode('none')
+    setTimelineSegmentOverlayMode('curated-two-measure')
     applyRhythmPreset(presetId)
   }, [
     applyRhythmPreset,

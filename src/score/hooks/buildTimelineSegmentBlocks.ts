@@ -21,7 +21,7 @@ export function buildTimelineSegmentBlocks(params: {
     activeSelectionSignature,
   } = params
 
-  if (timelineSegmentOverlayMode !== 'default-two-measure-demo') return []
+  if (timelineSegmentOverlayMode !== 'curated-two-measure') return []
   if (measurePairs.length === 0 || horizontalMeasureFramesByPair.length === 0) return []
 
   const segmentBlocks: TimelineSegmentBlock[] = []
