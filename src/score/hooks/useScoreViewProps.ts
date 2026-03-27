@@ -1,11 +1,8 @@
 import {
   useMemo,
   type ComponentProps,
-  type Dispatch,
-  type RefObject,
-  type SetStateAction,
 } from 'react'
-import { DEFAULT_TIME_AXIS_SPACING_CONFIG, type TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
+import { DEFAULT_TIME_AXIS_SPACING_CONFIG } from '../layout/timeAxisSpacing'
 import { toDisplayDuration } from '../layout/demand'
 import {
   DEFAULT_CHORD_MARKER_PADDING_PX,
@@ -20,124 +17,33 @@ import {
   clampPageHorizontalPaddingPx,
   clampScalePercent,
   clampSecondChordSafeGapPx,
-  type ChordMarkerStyleMetrics,
 } from '../scorePresentation'
 import { ScoreBoard } from '../components/ScoreBoard'
 import { ScoreControls } from '../components/ScoreControls'
-import type {
-  BuiltInDemoMode,
-  ImportFeedback,
-  PlaybackCursorRect,
-  RhythmPresetId,
-  ScoreNote,
-  Selection,
-} from '../types'
-import type { NotationPaletteSelection } from '../notationPaletteConfig'
+import { useScoreAppState } from './useScoreAppState'
+import { useScoreEditorRefs } from './useScoreEditorRefs'
+import { useHorizontalScoreLayout } from './useHorizontalScoreLayout'
+import { useScoreCoreEditingController } from './useScoreCoreEditingController'
+import { useScoreInteractionRuntimeController } from './useScoreInteractionRuntimeController'
 
 type ScoreControlsProps = ComponentProps<typeof ScoreControls>
 type ScoreBoardProps = ComponentProps<typeof ScoreBoard>
 
 export function useScoreViewProps(params: {
-  isPlaying: boolean
-  playScore: () => void | Promise<void>
-  stopActivePlaybackSession: () => void
-  resetScoreWithCollapseReset: () => void
-  playheadFollowEnabled: boolean
-  setPlayheadFollowEnabled: Dispatch<SetStateAction<boolean>>
-  showChordDegreeEnabled: boolean
-  setShowChordDegreeEnabled: Dispatch<SetStateAction<boolean>>
-  showInScoreMeasureNumbers: boolean
-  setShowInScoreMeasureNumbers: Dispatch<SetStateAction<boolean>>
-  showNoteHeadJianpuEnabled: boolean
-  setShowNoteHeadJianpuEnabled: Dispatch<SetStateAction<boolean>>
-  autoScaleEnabled: boolean
-  autoScalePercent: number
-  setAutoScaleEnabled: Dispatch<SetStateAction<boolean>>
-  safeManualScalePercent: number
-  setManualScalePercent: Dispatch<SetStateAction<number>>
-  safeCanvasHeightPercent: number
-  setCanvasHeightPercent: Dispatch<SetStateAction<number>>
-  pageHorizontalPaddingPx: number
-  setPageHorizontalPaddingPx: Dispatch<SetStateAction<number>>
-  safeChordMarkerUiScalePercent: number
-  setChordMarkerUiScalePercent: Dispatch<SetStateAction<number>>
-  safeChordMarkerPaddingPx: number
-  setChordMarkerPaddingPx: Dispatch<SetStateAction<number>>
-  timeAxisSpacingConfig: TimeAxisSpacingConfig
-  setTimeAxisSpacingConfig: Dispatch<SetStateAction<TimeAxisSpacingConfig>>
-  openMusicXmlFilePicker: () => void
-  loadSampleMusicXmlWithCollapseReset: () => void
-  loadWholeNoteDemoWithCollapseReset: () => void
-  loadHalfNoteDemoWithCollapseReset: () => void
-  exportMusicXmlFile: () => void
-  openOsmdPreview: () => void
-  openBeamGroupingTool: () => void
-  isNotationPaletteOpen: boolean
-  toggleNotationPalette: () => void
-  closeNotationPalette: () => void
-  notationPaletteSelection: NotationPaletteSelection
-  notationPaletteLastAction: string
-  derivedNotationPaletteDisplay: {
-    activeItemIds?: ReadonlySet<string> | null
-    summary?: string | null
-  } | null
-  onNotationPaletteSelectionChange: ScoreControlsProps['onNotationPaletteSelectionChange']
-  openDirectOsmdFilePicker: () => void
-  importMusicXmlFromTextareaWithCollapseReset: () => void
-  midiSupported: boolean
-  midiPermissionState: ScoreControlsProps['midiPermissionState']
-  midiInputOptions: ScoreControlsProps['midiInputOptions']
-  selectedMidiInputId: string
-  setSelectedMidiInputId: (id: string) => void
-  fileInputRef: RefObject<HTMLInputElement | null>
-  osmdDirectFileInputRef: RefObject<HTMLInputElement | null>
-  onMusicXmlFileChangeWithCollapseReset: ScoreControlsProps['onMusicXmlFileChange']
-  onOsmdDirectFileChange: ScoreControlsProps['onOsmdDirectFileChange']
-  importFeedback: ImportFeedback
-  rhythmPreset: RhythmPresetId
-  activeBuiltInDemo: BuiltInDemoMode
-  applyRhythmPresetWithCollapseReset: (presetId: RhythmPresetId) => void
-  scoreScrollRef: RefObject<HTMLDivElement | null>
-  scoreStageRef: RefObject<HTMLDivElement | null>
-  playheadElementRef: RefObject<HTMLDivElement | null>
-  displayScoreWidth: number
-  displayScoreHeight: number
-  chordMarkerStyleMetrics: ChordMarkerStyleMetrics
-  scoreWidth: number
-  scoreHeight: number
-  scoreScaleX: number
-  scoreScaleY: number
-  scoreSurfaceOffsetXPx: number
-  scoreSurfaceOffsetYPx: number
-  measureRulerTicks: ScoreBoardProps['measureRulerTicks']
-  chordRulerMarkers: ScoreBoardProps['chordRulerMarkers']
-  onChordRulerMarkerClick: (markerKey: string) => void
-  playheadRectPx: PlaybackCursorRect | null
-  playheadStatus: ScoreBoardProps['playheadStatus']
-  selectedMeasureHighlightRectPx: ScoreBoardProps['selectedMeasureHighlightRectPx']
-  draggingSelection: Selection | null
-  scoreRef: RefObject<HTMLCanvasElement | null>
-  scoreOverlayRef: RefObject<HTMLCanvasElement | null>
-  onBeginDragWithFirstMeasureDebug: ScoreBoardProps['onBeginDrag']
-  onSurfacePointerMove: ScoreBoardProps['onSurfacePointerMove']
-  onEndDragWithFirstMeasureDebug: ScoreBoardProps['onEndDrag']
-  activeSelection: Selection
-  currentSelection: ScoreNote
-  currentSelectionPitchLabel: string
-  currentSelectionPosition: number
-  selectedPoolSize: number
-  trebleSequenceText: string
-  bassSequenceText: string
-  playheadDebugLogText: string
+  appState: ReturnType<typeof useScoreAppState>
+  editorRefs: ReturnType<typeof useScoreEditorRefs>
+  layout: ReturnType<typeof useHorizontalScoreLayout>
+  chordMarker: ReturnType<typeof useScoreCoreEditingController>['chordMarker']
+  workspace: ReturnType<typeof useScoreInteractionRuntimeController>['workspace']
+  editorUi: ReturnType<typeof useScoreInteractionRuntimeController>['editorUi']
+  playback: ReturnType<typeof useScoreInteractionRuntimeController>['playback']
 }): {
   scoreControlsProps: ScoreControlsProps
   scoreBoardProps: ScoreBoardProps
 } {
+  const { appState, editorRefs, layout, chordMarker, workspace, editorUi, playback } = params
   const {
     isPlaying,
-    playScore,
-    stopActivePlaybackSession,
-    resetScoreWithCollapseReset,
     playheadFollowEnabled,
     setPlayheadFollowEnabled,
     showChordDegreeEnabled,
@@ -147,82 +53,97 @@ export function useScoreViewProps(params: {
     showNoteHeadJianpuEnabled,
     setShowNoteHeadJianpuEnabled,
     autoScaleEnabled,
-    autoScalePercent,
     setAutoScaleEnabled,
-    safeManualScalePercent,
     setManualScalePercent,
-    safeCanvasHeightPercent,
     setCanvasHeightPercent,
     pageHorizontalPaddingPx,
     setPageHorizontalPaddingPx,
-    safeChordMarkerUiScalePercent,
     setChordMarkerUiScalePercent,
-    safeChordMarkerPaddingPx,
     setChordMarkerPaddingPx,
     timeAxisSpacingConfig,
     setTimeAxisSpacingConfig,
-    openMusicXmlFilePicker,
-    loadSampleMusicXmlWithCollapseReset,
-    loadWholeNoteDemoWithCollapseReset,
-    loadHalfNoteDemoWithCollapseReset,
-    exportMusicXmlFile,
-    openOsmdPreview,
-    openBeamGroupingTool,
     isNotationPaletteOpen,
-    toggleNotationPalette,
-    closeNotationPalette,
     notationPaletteSelection,
     notationPaletteLastAction,
-    derivedNotationPaletteDisplay,
-    onNotationPaletteSelectionChange,
-    openDirectOsmdFilePicker,
-    importMusicXmlFromTextareaWithCollapseReset,
-    midiSupported,
-    midiPermissionState,
-    midiInputOptions,
-    selectedMidiInputId,
-    setSelectedMidiInputId,
-    fileInputRef,
-    osmdDirectFileInputRef,
-    onMusicXmlFileChangeWithCollapseReset,
-    onOsmdDirectFileChange,
     importFeedback,
     rhythmPreset,
     activeBuiltInDemo,
-    applyRhythmPresetWithCollapseReset,
+    draggingSelection,
+    activeSelection,
+  } = appState
+  const {
+    fileInputRef,
     scoreScrollRef,
     scoreStageRef,
-    playheadElementRef,
+    scoreRef,
+    scoreOverlayRef,
+  } = editorRefs
+  const {
+    autoScalePercent,
+    safeManualScalePercent,
+    safeCanvasHeightPercent,
+    safeChordMarkerUiScalePercent,
+    safeChordMarkerPaddingPx,
+    chordMarkerStyleMetrics,
     displayScoreWidth,
     displayScoreHeight,
-    chordMarkerStyleMetrics,
     scoreWidth,
     scoreHeight,
     scoreScaleX,
     scoreScaleY,
     scoreSurfaceOffsetXPx,
     scoreSurfaceOffsetYPx,
+  } = layout
+  const {
     measureRulerTicks,
     chordRulerMarkers,
     onChordRulerMarkerClick,
-    playheadRectPx,
-    playheadStatus,
     selectedMeasureHighlightRectPx,
-    draggingSelection,
-    scoreRef,
-    scoreOverlayRef,
-    onBeginDragWithFirstMeasureDebug,
+  } = chordMarker
+  const {
+    playScore,
+    openMusicXmlFilePicker,
+    exportMusicXmlFile,
+    importMusicXmlFromTextareaWithCollapseReset,
+    onMusicXmlFileChangeWithCollapseReset,
+    loadSampleMusicXmlWithCollapseReset,
+    loadWholeNoteDemoWithCollapseReset,
+    loadHalfNoteDemoWithCollapseReset,
+    resetScoreWithCollapseReset,
+    applyRhythmPresetWithCollapseReset,
     onSurfacePointerMove,
-    onEndDragWithFirstMeasureDebug,
-    activeSelection,
-    currentSelection,
-    currentSelectionPitchLabel,
-    currentSelectionPosition,
-    selectedPoolSize,
+  } = workspace
+  const {
     trebleSequenceText,
     bassSequenceText,
+    currentSelection,
+    currentSelectionPosition,
+    currentSelectionPitchLabel,
+    selectedPoolSize,
+    derivedNotationPaletteDisplay,
+    midiPermissionState,
+    midiInputOptions,
+    selectedMidiInputId,
+    setSelectedMidiInputId,
+    midiSupported,
+    osmdDirectFileInputRef,
+    onOsmdDirectFileChange,
+    openOsmdPreview,
+    openDirectOsmdFilePicker,
+    openBeamGroupingTool,
+    toggleNotationPalette,
+    closeNotationPalette,
+    onNotationPaletteSelectionChange,
+  } = editorUi
+  const {
+    stopActivePlaybackSession,
+    playheadElementRef,
     playheadDebugLogText,
-  } = params
+    playheadRectPx,
+    playheadStatus,
+    onBeginDragWithFirstMeasureDebug,
+    onEndDragWithFirstMeasureDebug,
+  } = playback
 
   const scoreControlsProps = useMemo<ScoreControlsProps>(() => ({
     isPlaying,
