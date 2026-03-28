@@ -4,6 +4,7 @@ const LOCAL_STORAGE_EDITOR_MEASURE_NUMBER_KEY = 'score.editor.showInScoreMeasure
 const LOCAL_STORAGE_NOTEHEAD_JIANPU_DISPLAY_KEY = 'score.editor.showNoteHeadJianpu'
 const LOCAL_STORAGE_PLAYHEAD_FOLLOW_KEY = 'score.playhead.followEnabled'
 const LOCAL_STORAGE_CHORD_DEGREE_DISPLAY_KEY = 'score.chordDegree.enabled'
+const LOCAL_STORAGE_CHORD_MARKER_BACKGROUND_KEY = 'score.chordMarkerBackground.enabled'
 
 function readStoredBoolean(key: string, fallback: boolean): boolean {
   if (typeof window === 'undefined') return fallback
@@ -21,9 +22,14 @@ export function getInitialChordDegreeDisplayEnabled(): boolean {
   return readStoredBoolean(LOCAL_STORAGE_CHORD_DEGREE_DISPLAY_KEY, false)
 }
 
+export function getInitialChordMarkerBackgroundEnabled(): boolean {
+  return readStoredBoolean(LOCAL_STORAGE_CHORD_MARKER_BACKGROUND_KEY, true)
+}
+
 export function useEditorPreferencePersistence(params: {
   playheadFollowEnabled: boolean
   showChordDegreeEnabled: boolean
+  showChordMarkerBackgroundEnabled: boolean
   showInScoreMeasureNumbers: boolean
   setShowInScoreMeasureNumbers: Dispatch<SetStateAction<boolean>>
   showNoteHeadJianpuEnabled: boolean
@@ -32,6 +38,7 @@ export function useEditorPreferencePersistence(params: {
   const {
     playheadFollowEnabled,
     showChordDegreeEnabled,
+    showChordMarkerBackgroundEnabled,
     showInScoreMeasureNumbers,
     setShowInScoreMeasureNumbers,
     showNoteHeadJianpuEnabled,
@@ -40,6 +47,7 @@ export function useEditorPreferencePersistence(params: {
 
   const playheadFollowHydratedRef = useRef(false)
   const chordDegreeDisplayHydratedRef = useRef(false)
+  const chordMarkerBackgroundHydratedRef = useRef(false)
   const showInScoreMeasureNumbersHydratedRef = useRef(false)
   const showNoteHeadJianpuHydratedRef = useRef(false)
 
@@ -70,6 +78,20 @@ export function useEditorPreferencePersistence(params: {
       showChordDegreeEnabled ? '1' : '0',
     )
   }, [showChordDegreeEnabled])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    chordMarkerBackgroundHydratedRef.current = true
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!chordMarkerBackgroundHydratedRef.current) return
+    window.localStorage.setItem(
+      LOCAL_STORAGE_CHORD_MARKER_BACKGROUND_KEY,
+      showChordMarkerBackgroundEnabled ? '1' : '0',
+    )
+  }, [showChordMarkerBackgroundEnabled])
 
   useEffect(() => {
     if (typeof window === 'undefined') {

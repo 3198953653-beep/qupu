@@ -12,6 +12,8 @@ type ScorePlaybackControlsProps = PropsWithChildren<Pick<
   | 'onTogglePlayheadFollow'
   | 'showChordDegreeEnabled'
   | 'onToggleChordDegreeDisplay'
+  | 'showChordMarkerBackgroundEnabled'
+  | 'onToggleChordMarkerBackgroundDisplay'
   | 'showInScoreMeasureNumbers'
   | 'onToggleInScoreMeasureNumbers'
   | 'showNoteHeadJianpuEnabled'
@@ -36,6 +38,8 @@ export function ScorePlaybackControls(props: ScorePlaybackControlsProps) {
     onTogglePlayheadFollow,
     showChordDegreeEnabled,
     onToggleChordDegreeDisplay,
+    showChordMarkerBackgroundEnabled,
+    onToggleChordMarkerBackgroundDisplay,
     showInScoreMeasureNumbers,
     onToggleInScoreMeasureNumbers,
     showNoteHeadJianpuEnabled,
@@ -64,6 +68,9 @@ export function ScorePlaybackControls(props: ScorePlaybackControlsProps) {
         </button>
         <button type="button" onClick={onToggleChordDegreeDisplay}>
           {showChordDegreeEnabled ? '和弦级数：开' : '和弦级数：关'}
+        </button>
+        <button type="button" onClick={onToggleChordMarkerBackgroundDisplay}>
+          {showChordMarkerBackgroundEnabled ? '和弦背景：开' : '和弦背景：关'}
         </button>
         <button type="button" onClick={onToggleInScoreMeasureNumbers}>
           {showInScoreMeasureNumbers ? '谱面序号：开' : '谱面序号：关'}

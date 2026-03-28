@@ -50,6 +50,7 @@ export function ScoreBoard(props: {
     positionText: string
     beatIndex?: number | null
   }>
+  showChordMarkerBackgroundEnabled: boolean
   onTimelineSegmentClick: (segmentKey: string) => void
   onChordRulerMarkerClick: (markerKey: string) => void
   playheadRectPx?: { x: number; y: number; width: number; height: number } | null
@@ -86,6 +87,7 @@ export function ScoreBoard(props: {
     measureRulerTicks,
     timelineSegmentBlocks,
     chordRulerMarkers,
+    showChordMarkerBackgroundEnabled,
     onTimelineSegmentClick,
     onChordRulerMarkerClick,
     playheadRectPx = null,
@@ -155,7 +157,7 @@ export function ScoreBoard(props: {
               </div>
             ))}
           </div>
-          <div className="chord-ruler-inline">
+          <div className={`chord-ruler-inline${showChordMarkerBackgroundEnabled ? '' : ' is-text-only'}`}>
             {chordRulerMarkers.map((marker) => (
               <button
                 type="button"

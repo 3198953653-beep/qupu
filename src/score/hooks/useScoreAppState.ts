@@ -3,6 +3,7 @@ import { A4_PAGE_WIDTH, INITIAL_NOTES } from '../constants'
 import { DEFAULT_TIME_AXIS_SPACING_CONFIG } from '../layout/timeAxisSpacing'
 import {
   getInitialChordDegreeDisplayEnabled,
+  getInitialChordMarkerBackgroundEnabled,
   getInitialPlayheadFollowEnabled,
 } from './useEditorPreferencePersistence'
 import {
@@ -77,6 +78,8 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
   const [canvasHeightPercent, setCanvasHeightPercent] = useState(100)
   const [playheadFollowEnabled, setPlayheadFollowEnabled] = useState(() => getInitialPlayheadFollowEnabled())
   const [showChordDegreeEnabled, setShowChordDegreeEnabled] = useState(() => getInitialChordDegreeDisplayEnabled())
+  const [showChordMarkerBackgroundEnabled, setShowChordMarkerBackgroundEnabled] =
+    useState(() => getInitialChordMarkerBackgroundEnabled())
   const [showInScoreMeasureNumbers, setShowInScoreMeasureNumbers] = useState(false)
   const [showNoteHeadJianpuEnabled, setShowNoteHeadJianpuEnabled] = useState(false)
   const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
@@ -156,6 +159,8 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
     setPlayheadFollowEnabled,
     showChordDegreeEnabled,
     setShowChordDegreeEnabled,
+    showChordMarkerBackgroundEnabled,
+    setShowChordMarkerBackgroundEnabled,
     showInScoreMeasureNumbers,
     setShowInScoreMeasureNumbers,
     showNoteHeadJianpuEnabled,

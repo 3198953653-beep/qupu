@@ -11,6 +11,8 @@ export type ScoreControlsProps = {
   onTogglePlayheadFollow: () => void
   showChordDegreeEnabled: boolean
   onToggleChordDegreeDisplay: () => void
+  showChordMarkerBackgroundEnabled: boolean
+  onToggleChordMarkerBackgroundDisplay: () => void
   showInScoreMeasureNumbers: boolean
   onToggleInScoreMeasureNumbers: () => void
   showNoteHeadJianpuEnabled: boolean

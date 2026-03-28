@@ -14,6 +14,8 @@ export function ScoreControls(props: ScoreControlsProps) {
     onTogglePlayheadFollow,
     showChordDegreeEnabled,
     onToggleChordDegreeDisplay,
+    showChordMarkerBackgroundEnabled,
+    onToggleChordMarkerBackgroundDisplay,
     showInScoreMeasureNumbers,
     onToggleInScoreMeasureNumbers,
     showNoteHeadJianpuEnabled,
@@ -92,6 +94,8 @@ export function ScoreControls(props: ScoreControlsProps) {
       onTogglePlayheadFollow={onTogglePlayheadFollow}
       showChordDegreeEnabled={showChordDegreeEnabled}
       onToggleChordDegreeDisplay={onToggleChordDegreeDisplay}
+      showChordMarkerBackgroundEnabled={showChordMarkerBackgroundEnabled}
+      onToggleChordMarkerBackgroundDisplay={onToggleChordMarkerBackgroundDisplay}
       showInScoreMeasureNumbers={showInScoreMeasureNumbers}
       onToggleInScoreMeasureNumbers={onToggleInScoreMeasureNumbers}
       showNoteHeadJianpuEnabled={showNoteHeadJianpuEnabled}

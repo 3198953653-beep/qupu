@@ -21,6 +21,7 @@ export function useScoreBoardProps(params: ScoreViewAdapterParams): ScoreBoardPr
     measureRulerTicks: chordMarker.measureRulerTicks,
     timelineSegmentBlocks: chordMarker.timelineSegmentBlocks,
     chordRulerMarkers: chordMarker.chordRulerMarkers,
+    showChordMarkerBackgroundEnabled: appState.showChordMarkerBackgroundEnabled,
     onTimelineSegmentClick: chordMarker.onTimelineSegmentClick,
     onChordRulerMarkerClick: chordMarker.onChordRulerMarkerClick,
     playheadRectPx: playback.playheadRectPx,
@@ -43,6 +44,7 @@ export function useScoreBoardProps(params: ScoreViewAdapterParams): ScoreBoardPr
   }), [
     appState.activeSelection.staff,
     appState.draggingSelection,
+    appState.showChordMarkerBackgroundEnabled,
     chordMarker.chordRulerMarkers,
     chordMarker.measureRulerTicks,
     chordMarker.onTimelineSegmentClick,

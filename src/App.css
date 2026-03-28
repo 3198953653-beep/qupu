@@ -783,7 +783,7 @@
   box-shadow: 0 1px 3px rgba(79, 70, 229, 0.26);
   pointer-events: auto;
   cursor: pointer;
-  transition: background 120ms ease, box-shadow 120ms ease;
+  transition: background 120ms ease, box-shadow 120ms ease, color 120ms ease;
 }
 
 .chord-ruler-label {
@@ -811,6 +811,35 @@
 .chord-ruler-marker.is-active {
   background: #4338ca;
   box-shadow: 0 2px 7px rgba(67, 56, 202, 0.34);
+}
+
+.chord-ruler-inline.is-text-only .chord-ruler-marker {
+  background: transparent;
+  box-shadow: none;
+}
+
+.chord-ruler-inline.is-text-only .chord-ruler-label {
+  color: #4338ca;
+}
+
+.chord-ruler-inline.is-text-only .chord-ruler-marker:hover {
+  background: transparent;
+  box-shadow: none;
+}
+
+.chord-ruler-inline.is-text-only .chord-ruler-marker:hover .chord-ruler-label {
+  color: #3730a3;
+}
+
+.chord-ruler-inline.is-text-only .chord-ruler-marker.is-active {
+  background: transparent;
+  box-shadow: none;
+}
+
+.chord-ruler-inline.is-text-only .chord-ruler-marker.is-active .chord-ruler-label {
+  color: #312e81;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .score-surface {
