@@ -61,3 +61,22 @@ export async function previewScoreNote(params: {
   )
   return previewPitch
 }
+
+export async function previewPitchStack(params: {
+  synth: PlaybackSynth | null
+  pitches: Pitch[]
+  mode: ScoreNotePreviewMode
+}): Promise<Pitch[]> {
+  const { synth, pitches, mode } = params
+  const previewPitches = pitches.filter((pitch, index) => pitches.indexOf(pitch) === index)
+  if (!synth || previewPitches.length === 0) return []
+
+  await ensureToneStarted()
+  synth.triggerAttackRelease(
+    previewPitches.map((pitch) => toTonePitch(pitch)),
+    PREVIEW_DURATION_BY_MODE[mode],
+    undefined,
+    PREVIEW_VELOCITY_BY_MODE[mode],
+  )
+  return previewPitches
+}

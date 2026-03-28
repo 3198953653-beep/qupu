@@ -188,6 +188,66 @@ export function findSelectionLocationInPairs(params: {
   return null
 }
 
+export function replaceNoteChordPitches(params: {
+  pairs: MeasurePair[]
+  selection: Selection
+  chordPitches: Pitch[]
+  keyFifthsByMeasure?: number[] | null
+  importedNoteLookup?: Map<string, ImportedNoteLocation> | null
+}): KeyboardEditResult | null {
+  const {
+    pairs,
+    selection,
+    chordPitches,
+    keyFifthsByMeasure = null,
+    importedNoteLookup = null,
+  } = params
+  const location = findSelectionLocationInPairs({ pairs, selection, importedNoteLookup })
+  if (!location) return null
+  const pair = pairs[location.pairIndex]
+  if (!pair) return null
+  const sourceNote = resolveStaffNotes(pair, location.staff)[location.noteIndex]
+  if (!sourceNote || sourceNote.isRest) return null
+
+  const normalizedChordPitches = chordPitches.filter((pitch, index) => {
+    if (pitch === sourceNote.pitch) return false
+    return chordPitches.indexOf(pitch) === index
+  })
+  const sourceChordPitches = sourceNote.chordPitches ?? []
+  const hasSameChordPitches =
+    sourceChordPitches.length === normalizedChordPitches.length &&
+    sourceChordPitches.every((pitch, index) => pitch === normalizedChordPitches[index])
+  if (hasSameChordPitches) {
+    return null
+  }
+
+  const updatedPairs = updateNoteInPairs(pairs, location, (note) => {
+    const nextChord = normalizeChordArrays(
+      normalizedChordPitches.length > 0 ? normalizedChordPitches : undefined,
+      normalizedChordPitches.length > 0 ? new Array(normalizedChordPitches.length).fill(null) : undefined,
+    )
+    return {
+      ...note,
+      isRest: false,
+      chordPitches: undefined,
+      chordAccidentals: undefined,
+      ...nextChord,
+    }
+  })
+  if (updatedPairs === pairs) return null
+
+  const normalizedPairs = normalizeMeasurePairAt(updatedPairs, location.pairIndex, keyFifthsByMeasure)
+  return {
+    nextPairs: normalizedPairs,
+    nextSelection: {
+      noteId: sourceNote.id,
+      staff: location.staff,
+      keyIndex: 0,
+    },
+    changedPairIndex: location.pairIndex,
+  }
+}
+
 export function deleteSelectedKey(params: {
   pairs: MeasurePair[]
   selection: Selection

@@ -376,6 +376,7 @@ export function handleBeginDragPointer(params: {
     dragState.startTimestampMs = event.timeStamp
     dragState.startSelection = selection
   }
+  dragState.selectionMode = selectionMode
   dragState.groupMoveTargets = buildSelectionGroupMoveTargets({
     effectiveSelections,
     primarySelection: selection,
@@ -573,11 +574,11 @@ export function handleEndDragPointer(params: {
     keyIndex: drag.keyIndex,
   }
   const pressDurationMs = event.timeStamp - (drag.startTimestampMs ?? event.timeStamp)
-  const shouldCollapseToSingleSelection =
-    drag.startedWithReplaceDeferred === true &&
+  const shouldTriggerReplaceTapRelease =
+    drag.selectionMode === 'replace' &&
     drag.previewStarted !== true &&
     pressDurationMs <= REPLACE_TAP_SELECTION_THRESHOLD_MS
-  if (shouldCollapseToSingleSelection) {
+  if (shouldTriggerReplaceTapRelease) {
     onSelectionTapRelease?.(dragSelection)
   }
   onSelectionActivated?.()

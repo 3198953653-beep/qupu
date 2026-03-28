@@ -1273,6 +1273,282 @@
   filter: drop-shadow(0 0 1px rgba(17, 132, 215, 0.85));
 }
 
+.smart-chord-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 28;
+  display: grid;
+  place-items: center;
+  background: rgba(6, 18, 28, 0.38);
+  backdrop-filter: blur(3px);
+  padding: 0.75rem;
+}
+
+.smart-chord-modal-card {
+  width: min(760px, calc(100vw - 1.5rem));
+  max-height: min(760px, calc(100vh - 1.5rem));
+  border-radius: 18px;
+  border: 1px solid #d6e3ee;
+  background: #ffffff;
+  box-shadow: 0 28px 60px -34px rgba(8, 24, 38, 0.98);
+  padding: 1rem 1.05rem;
+  display: grid;
+  gap: 0.9rem;
+  overflow: hidden;
+}
+
+.smart-chord-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.smart-chord-modal-header h3 {
+  margin: 0;
+  color: #16384b;
+  font-size: 1.06rem;
+}
+
+.smart-chord-modal-header p {
+  margin: 0.28rem 0 0;
+  color: #4a6476;
+  font-size: 0.88rem;
+}
+
+.smart-chord-modal-close {
+  border: 1px solid #d5e1ea;
+  border-radius: 999px;
+  background: #f7fbff;
+  color: #244a62;
+  font-weight: 600;
+  padding: 0.42rem 0.78rem;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.smart-chord-modal-close:hover {
+  background: #eef6fb;
+  border-color: #bdd2df;
+  color: #16384b;
+}
+
+.smart-chord-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.smart-chord-summary-row {
+  display: grid;
+  gap: 0.24rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 14px;
+  background: #f8fbfe;
+  border: 1px solid #dce8f0;
+}
+
+.smart-chord-summary-label {
+  color: #6a8191;
+  font-size: 0.76rem;
+  letter-spacing: 0.01em;
+}
+
+.smart-chord-summary-row strong {
+  color: #16384b;
+  font-size: 0.96rem;
+}
+
+.smart-chord-option-section,
+.smart-chord-candidate-section {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.smart-chord-option-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.smart-chord-option-header h4 {
+  margin: 0;
+  color: #173c4d;
+  font-size: 0.9rem;
+}
+
+.smart-chord-option-header span {
+  color: #6a8191;
+  font-size: 0.78rem;
+}
+
+.smart-chord-option-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.smart-chord-option-button {
+  border: 1px solid #d6e3ee;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #21495f;
+  padding: 0.44rem 0.78rem;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.smart-chord-option-button:hover {
+  background: #f4f9fd;
+  border-color: #bdd2df;
+  color: #173c4d;
+}
+
+.smart-chord-option-button.is-active {
+  background: #eaf4ff;
+  border-color: #9ec3e4;
+  color: #154a73;
+  box-shadow: inset 0 0 0 1px rgba(33, 114, 176, 0.14);
+}
+
+.smart-chord-notation-strip {
+  border: 1px solid #d8e5ee;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fbfdff 0%, #f5f9ff 100%);
+  overflow: hidden;
+}
+
+.smart-chord-notation-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.smart-chord-notation-stage-wrap {
+  display: flex;
+  align-items: center;
+}
+
+.smart-chord-notation-stage {
+  position: relative;
+  display: inline-block;
+  flex: 0 0 auto;
+  vertical-align: top;
+}
+
+.smart-chord-notation-svg {
+  line-height: 0;
+}
+
+.smart-chord-notation-svg svg {
+  display: block;
+}
+
+.smart-chord-notation-hit-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.smart-chord-notation-slot {
+  position: absolute;
+  appearance: none;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  box-shadow: none;
+  outline: none;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: none;
+}
+
+.smart-chord-notation-slot:hover {
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
+.smart-chord-notation-slot.is-active {
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
+.smart-chord-notation-slot:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.smart-chord-candidate-note {
+  margin: 0;
+  color: #5f7788;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.smart-chord-candidate-list {
+  display: grid;
+  gap: 0.55rem;
+  max-height: 280px;
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+.smart-chord-candidate-button {
+  display: grid;
+  gap: 0.26rem;
+  width: 100%;
+  text-align: left;
+  border: 1px solid #d6e3ee;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #173c4d;
+  padding: 0.72rem 0.82rem;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.smart-chord-candidate-button:hover {
+  background: #f7fbff;
+  border-color: #bdd2df;
+  transform: translateY(-1px);
+}
+
+.smart-chord-candidate-button.is-active {
+  background: #eef6ff;
+  border-color: #98bfe0;
+  box-shadow: inset 0 0 0 1px rgba(33, 114, 176, 0.16);
+}
+
+.smart-chord-candidate-title {
+  color: #16384b;
+  font-size: 0.94rem;
+  font-weight: 700;
+}
+
+.smart-chord-candidate-subtitle {
+  color: #6a8191;
+  font-size: 0.8rem;
+}
+
+.smart-chord-empty-state {
+  border: 1px dashed #ccdae5;
+  border-radius: 14px;
+  background: #f8fbfe;
+  color: #486173;
+  padding: 0.9rem;
+  line-height: 1.45;
+}
+
+.smart-chord-empty-state.is-large {
+  padding: 1rem;
+}
+
 @media (max-width: 1180px) {
   .osmd-preview-card {
     width: min(1100px, calc(100vw - 1rem));
@@ -1294,5 +1570,21 @@
     grid-row: auto;
     max-height: none;
     overflow: visible;
+  }
+
+  .smart-chord-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .smart-chord-modal-card {
+    width: min(760px, calc(100vw - 1rem));
+    max-height: min(760px, calc(100vh - 1rem));
+    padding: 0.9rem;
+  }
+
+  .smart-chord-modal-header,
+  .smart-chord-option-header {
+    display: grid;
+    gap: 0.35rem;
   }
 }

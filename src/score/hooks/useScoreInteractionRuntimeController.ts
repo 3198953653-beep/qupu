@@ -10,6 +10,7 @@ import { useScoreAppState } from './useScoreAppState'
 import { useScoreEditorRefs } from './useScoreEditorRefs'
 import { useHorizontalScoreLayout } from './useHorizontalScoreLayout'
 import { useScoreCoreEditingController } from './useScoreCoreEditingController'
+import { useSmartChordToneDialogController } from './useSmartChordToneDialogController'
 import type { Pitch, ScoreNote, Selection, TimeSignature } from '../types'
 
 export function useScoreInteractionRuntimeController(params: {
@@ -45,6 +46,23 @@ export function useScoreInteractionRuntimeController(params: {
 
   const audioPreview = useScoreAudioPreviewController({
     synthRef: editorRefs.synthRef,
+  })
+
+  const smartChordToneDialog = useSmartChordToneDialogController({
+    measurePairsRef: editorRefs.measurePairsRef,
+    importedNoteLookupRef: editorRefs.importedNoteLookupRef,
+    measureKeyFifthsByMeasure: appState.measureKeyFifthsFromImport,
+    chordRulerMarkerMetaByKey: coreEditing.chordMarker.chordRulerMarkerMetaByKey,
+    handlePreviewPitchStack: audioPreview.handlePreviewPitchStack,
+    applyKeyboardEditResult: coreEditing.mutation.applyKeyboardEditResult,
+    setIsSelectionVisible: appState.setIsSelectionVisible,
+    setSelectedSelections: appState.setSelectedSelections,
+    setActiveSelection: appState.setActiveSelection,
+    clearActiveAccidentalSelection: coreEditing.sessionHelpers.clearActiveAccidentalSelection,
+    clearActiveTieSelection: coreEditing.sessionHelpers.clearActiveTieSelection,
+    clearSelectedMeasureScope: coreEditing.sessionHelpers.clearSelectedMeasureScope,
+    clearActiveChordSelection: coreEditing.chordMarker.clearActiveChordSelection,
+    resetMidiStepChain: coreEditing.sessionHelpers.resetMidiStepChain,
   })
 
   const workspaceRuntimeRefs: WorkspaceRuntimeRefs = {
@@ -87,6 +105,7 @@ export function useScoreInteractionRuntimeController(params: {
     previewDefaultAccidentalOffsetPx,
     previewStartThresholdPx,
     workspacePlaybackHandlers: playbackBridge.workspacePlaybackHandlers,
+    onTrebleSelectionDoubleTap: smartChordToneDialog.openSmartChordToneDialogForSelection,
   })
 
   playbackBridge.syncWorkspaceRuntimeRefs(workspace)
@@ -96,5 +115,6 @@ export function useScoreInteractionRuntimeController(params: {
     workspace,
     editorUi,
     playback: playbackBridge.playback,
+    smartChordToneDialog: smartChordToneDialog.smartChordToneDialog,
   }
 }

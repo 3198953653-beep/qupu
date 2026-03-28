@@ -262,6 +262,7 @@ export type DragState = {
   originPitch: Pitch
   pitch: Pitch
   previewStarted: boolean
+  selectionMode?: 'replace' | 'append' | 'range'
   startedWithReplaceDeferred?: boolean
   startTimestampMs?: number
   startSelection?: Selection

@@ -1,6 +1,12 @@
 import { useCallback, useRef, type MutableRefObject } from 'react'
 import { findSelectionLocationInPairs } from '../keyboardEdits'
-import { previewScoreNote, resolveScoreNotePreviewPitch, type PlaybackSynth, type ScoreNotePreviewMode } from '../notePreview'
+import {
+  previewPitchStack,
+  previewScoreNote,
+  resolveScoreNotePreviewPitch,
+  type PlaybackSynth,
+  type ScoreNotePreviewMode,
+} from '../notePreview'
 import type { ImportedNoteLocation, MeasurePair, Pitch, ScoreNote, Selection } from '../types'
 
 export type NotePreviewDebugEvent = {
@@ -21,6 +27,10 @@ export function useScoreAudioPreviewController(params: {
     keyIndex: number
     mode: ScoreNotePreviewMode
     targetPitch?: Pitch | null
+  }) => void
+  handlePreviewPitchStack: (params: {
+    pitches: Pitch[]
+    mode: ScoreNotePreviewMode
   }) => void
   playAccidentalEditPreview: (params: {
     pairs: MeasurePair[]
@@ -72,6 +82,22 @@ export function useScoreAudioPreviewController(params: {
     })
   }, [synthRef])
 
+  const handlePreviewPitchStack = useCallback((previewParams: {
+    pitches: Pitch[]
+    mode: ScoreNotePreviewMode
+  }) => {
+    const { pitches, mode } = previewParams
+    if (pitches.length === 0) return
+    void previewPitchStack({
+      synth: synthRef.current,
+      pitches,
+      mode,
+    }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(`[audio] 和弦试听失败：${message}`)
+    })
+  }, [synthRef])
+
   const playAccidentalEditPreview = useCallback((previewParams: {
     pairs: MeasurePair[]
     previewSelection: Selection | null
@@ -111,6 +137,7 @@ export function useScoreAudioPreviewController(params: {
   return {
     notePreviewEventsRef,
     handlePreviewScoreNote,
+    handlePreviewPitchStack,
     playAccidentalEditPreview,
   }
 }

@@ -21,6 +21,7 @@ import {
 import { buildSelectionsForMeasureStaff } from './score/selectionBuilders'
 import { ImportProgressModal } from './score/components/ImportProgressModal'
 import { OsmdPreviewModal } from './score/components/OsmdPreviewModal'
+import { SmartChordToneModal } from './score/components/SmartChordToneModal'
 import type { Pitch, ScoreNote } from './score/types'
 import { Renderer } from 'vexflow'
 
@@ -86,7 +87,7 @@ function App() {
     previewDefaultAccidentalOffsetPx: PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX,
     previewStartThresholdPx: PREVIEW_START_THRESHOLD_PX,
   })
-  const { workspace, editorUi, playback } = runtime
+  const { workspace, editorUi, playback, smartChordToneDialog } = runtime
 
   const { scoreControlsProps, scoreBoardProps } = useScoreViewProps({
     appState,
@@ -142,6 +143,22 @@ function App() {
         onOsmdPreviewShowPageNumbersChange={editorUi.onOsmdPreviewShowPageNumbersChange}
         onOsmdPreviewSurfaceClick={editorUi.onOsmdPreviewSurfaceClick}
         onOsmdPreviewSurfaceDoubleClick={editorUi.onOsmdPreviewSurfaceDoubleClick}
+      />
+
+      <SmartChordToneModal
+        isOpen={smartChordToneDialog.isOpen}
+        target={smartChordToneDialog.target}
+        octaveOption={smartChordToneDialog.octaveOption}
+        chordCountOption={smartChordToneDialog.chordCountOption}
+        filterOptions={smartChordToneDialog.filterOptions}
+        candidates={smartChordToneDialog.candidates}
+        selectedCandidateKey={smartChordToneDialog.selectedCandidateKey}
+        onClose={smartChordToneDialog.closeSmartChordToneDialog}
+        onToggleOctaveOption={smartChordToneDialog.toggleOctaveOption}
+        onToggleChordCountOption={smartChordToneDialog.toggleChordCountOption}
+        onToggleFilterOption={smartChordToneDialog.toggleFilterOption}
+        onPreviewCandidate={smartChordToneDialog.previewCandidate}
+        onApplyCandidate={smartChordToneDialog.applyCandidate}
       />
     </main>
   )
