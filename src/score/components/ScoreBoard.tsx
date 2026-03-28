@@ -127,6 +127,28 @@ export function ScoreBoard(props: {
     ['--chord-ruler-marker-radius' as string]: `${chordMarkerStyleMetrics.borderRadiusPx}px`,
     ['--chord-ruler-label-font-size' as string]: `${chordMarkerStyleMetrics.fontSizePx}px`,
   }
+  const firstTimelineSegment = timelineSegmentBlocks[0] ?? null
+  const lastTimelineSegment = timelineSegmentBlocks[timelineSegmentBlocks.length - 1] ?? null
+  const rulerEdgeMaskBleedPx = 1
+  const clampRulerMaskLeftPx = (rawLeftPx: number) => Math.max(0, Math.min(displayScoreWidth, rawLeftPx))
+  const clampRulerMaskWidthPx = (rawWidthPx: number) =>
+    Math.max(0, Math.min(displayScoreWidth, rawWidthPx))
+  const leadingEdgeMaskStyle: CSSProperties | null = firstTimelineSegment
+    ? {
+        left: '0px',
+        width: `${clampRulerMaskWidthPx(firstTimelineSegment.leftPx + rulerEdgeMaskBleedPx)}px`,
+      }
+    : null
+  const trailingEdgeMaskStyle: CSSProperties | null = lastTimelineSegment
+    ? {
+        left: `${clampRulerMaskLeftPx(
+          lastTimelineSegment.leftPx + lastTimelineSegment.widthPx - rulerEdgeMaskBleedPx,
+        )}px`,
+        width: `${clampRulerMaskWidthPx(
+          displayScoreWidth - (lastTimelineSegment.leftPx + lastTimelineSegment.widthPx - rulerEdgeMaskBleedPx),
+        )}px`,
+      }
+    : null
 
   return (
     <section className="board">
@@ -157,6 +179,12 @@ export function ScoreBoard(props: {
               </div>
             ))}
           </div>
+          {leadingEdgeMaskStyle && (
+            <div className="segment-ruler-edge-mask segment-ruler-edge-mask-leading" style={leadingEdgeMaskStyle} />
+          )}
+          {trailingEdgeMaskStyle && (
+            <div className="segment-ruler-edge-mask segment-ruler-edge-mask-trailing" style={trailingEdgeMaskStyle} />
+          )}
           <div className={`chord-ruler-inline${showChordMarkerBackgroundEnabled ? '' : ' is-text-only'}`}>
             {chordRulerMarkers.map((marker) => (
               <button
