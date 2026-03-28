@@ -60,6 +60,7 @@ export function useEditorHandlers(params: {
   musicXmlMetadataFromImportRef: MutableRefObject<MusicXmlMetadata | null>
   setImportedChordRulerEntriesByPairFromImport: StateSetter<ChordRulerEntry[][] | null>
   setImportedTimelineSegmentStartPairIndexesFromImport: StateSetter<number[] | null>
+  setFullMeasureRestCollapseScopeKeys: StateSetter<string[]>
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
   dragRef: MutableRefObject<DragState | null>
   clearDragOverlay: () => void
@@ -121,6 +122,7 @@ export function useEditorHandlers(params: {
     musicXmlMetadataFromImportRef,
     setImportedChordRulerEntriesByPairFromImport,
     setImportedTimelineSegmentStartPairIndexesFromImport,
+    setFullMeasureRestCollapseScopeKeys,
     importedNoteLookupRef,
     dragRef,
     clearDragOverlay,
@@ -182,6 +184,7 @@ export function useEditorHandlers(params: {
       musicXmlMetadataFromImportRef,
       setImportedChordRulerEntriesByPairFromImport,
       setImportedTimelineSegmentStartPairIndexesFromImport,
+      setFullMeasureRestCollapseScopeKeys,
       importedNoteLookupRef,
       dragRef,
       clearDragOverlay,

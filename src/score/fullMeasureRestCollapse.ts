@@ -1,4 +1,5 @@
-import type { MeasurePair, Selection } from './types'
+import { isStaffFullMeasureRest, resolvePairTimeSignature } from './measureRestUtils'
+import type { MeasurePair, Selection, TimeSignature } from './types'
 
 export type MeasureStaffScope = {
   pairIndex: number
@@ -38,6 +39,28 @@ function sortMeasureStaffScopeKeys(keys: Iterable<string>): string[] {
     return left.staff === 'treble' ? -1 : 1
   })
   return scopes.map((scope) => toMeasureStaffScopeKey(scope))
+}
+
+export function collectFullMeasureRestCollapseScopeKeys(params: {
+  measurePairs: MeasurePair[]
+  timeSignaturesByMeasure?: TimeSignature[] | null
+}): string[] {
+  const { measurePairs, timeSignaturesByMeasure = null } = params
+  const scopeKeys: string[] = []
+
+  for (let pairIndex = 0; pairIndex < measurePairs.length; pairIndex += 1) {
+    const pair = measurePairs[pairIndex]
+    const timeSignature = resolvePairTimeSignature(pairIndex, timeSignaturesByMeasure)
+
+    if (isStaffFullMeasureRest(pair.treble, timeSignature)) {
+      scopeKeys.push(toMeasureStaffScopeKey({ pairIndex, staff: 'treble' }))
+    }
+    if (isStaffFullMeasureRest(pair.bass, timeSignature)) {
+      scopeKeys.push(toMeasureStaffScopeKey({ pairIndex, staff: 'bass' }))
+    }
+  }
+
+  return sortMeasureStaffScopeKeys(scopeKeys)
 }
 
 function collectChangedMeasureStaffScopeKeys(sourcePairs: MeasurePair[], nextPairs: MeasurePair[]): Set<string> {

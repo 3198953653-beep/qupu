@@ -10,6 +10,7 @@ import {
 } from './constants'
 import type { ChordRulerEntry } from './chordRuler'
 import { normalizeKeyMode } from './chordDegree'
+import { buildMeasureRestNotes, resolvePairTimeSignature } from './measureRestUtils'
 import { getKeySignatureAlterForStep, getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './pitchMath'
 import {
   beatsToTicks,
@@ -692,24 +693,52 @@ function finalizeImportResult(params: {
   const importedBassNotes: ScoreNote[] = []
   const importedNoteLookup = new Map<string, ImportedNoteLocation>()
   const measureIndexToPairIndex = new Map<number, number>()
+  const pairIndexToMeasureIndex: number[] = []
   const importedChordRulerEntriesByPair: ChordRulerEntry[][] | null =
     importedChordRulerEntriesByMeasureIndex ? [] : null
   let trebleCarry = 'c/4'
   let bassCarry = 'c/3'
 
-  measureSlots.forEach((slot, measureIndex) => {
-    if (!slot || (!slot.touched.treble && !slot.touched.bass)) return
+  const buildImportedStaffNotes = (params: {
+    slot: MeasureSlot
+    staff: StaffKind
+    carryPitch: Pitch
+    timeSignature: TimeSignature
+  }): ScoreNote[] => {
+    const { slot, staff, carryPitch, timeSignature } = params
+    const sourceNotes = slot.notes[staff]
+    const ticksUsed = slot.ticksUsed[staff]
 
-    const treblePitch = getLastPitch(slot.notes.treble, trebleCarry)
-    const bassPitch = getLastPitch(slot.notes.bass, bassCarry)
-    const treble = fillMissingTicksWithCarryNotes(
-      slot.notes.treble,
-      'treble',
-      slot.ticksUsed.treble,
-      treblePitch,
-      slot.measureTicks,
-    )
-    const bass = fillMissingTicksWithCarryNotes(slot.notes.bass, 'bass', slot.ticksUsed.bass, bassPitch, slot.measureTicks)
+    if (sourceNotes.length === 0 && ticksUsed === 0) {
+      return (
+        buildMeasureRestNotes({
+          staff,
+          timeSignature,
+          importedMode: true,
+        }) ?? fillMissingTicksWithCarryNotes([], staff, 0, carryPitch, slot.measureTicks)
+      )
+    }
+
+    const carrySourcePitch = getLastPitch(sourceNotes, carryPitch)
+    return fillMissingTicksWithCarryNotes(sourceNotes, staff, ticksUsed, carrySourcePitch, slot.measureTicks)
+  }
+
+  measureSlots.forEach((slot, measureIndex) => {
+    if (!slot) return
+
+    const timeSignature = resolvePairTimeSignature(measureIndex, measureTimeSignatures)
+    const treble = buildImportedStaffNotes({
+      slot,
+      staff: 'treble',
+      carryPitch: trebleCarry,
+      timeSignature,
+    })
+    const bass = buildImportedStaffNotes({
+      slot,
+      staff: 'bass',
+      carryPitch: bassCarry,
+      timeSignature,
+    })
 
     const pairIndex = importedPairs.length
     for (let noteIndex = 0; noteIndex < treble.length; noteIndex += 1) {
@@ -727,6 +756,7 @@ function finalizeImportResult(params: {
     bassCarry = getLastPitch(bass, bassCarry)
     importedPairs.push({ treble, bass })
     measureIndexToPairIndex.set(measureIndex, pairIndex)
+    pairIndexToMeasureIndex[pairIndex] = measureIndex
     importedChordRulerEntriesByPair?.push(importedChordRulerEntriesByMeasureIndex?.[measureIndex] ?? [])
   })
 
@@ -746,19 +776,29 @@ function finalizeImportResult(params: {
     }
   }
 
-  const alignedKeyFifths =
-    measureKeyFifths.length === importedPairs.length
-      ? measureKeyFifths
-      : importedPairs.map((_, index) => measureKeyFifths[index] ?? measureKeyFifths[index - 1] ?? 0)
-  const alignedKeyModes =
-    measureKeyModes.length === importedPairs.length
-      ? measureKeyModes.map((mode) => normalizeKeyMode(mode))
-      : importedPairs.map((_, index) => normalizeKeyMode(measureKeyModes[index] ?? measureKeyModes[index - 1] ?? 'major'))
-  const alignedDivisions = importedPairs.map(
-    (_, index) => measureDivisions[index] ?? measureDivisions[index - 1] ?? 16,
-  )
-  const alignedTimes = importedPairs.map(
-    (_, index) => measureTimeSignatures[index] ?? measureTimeSignatures[index - 1] ?? { beats: 4, beatType: 4 },
+  const alignedKeyFifths = pairIndexToMeasureIndex.map((measureIndex) => {
+    for (let index = measureIndex; index >= 0; index -= 1) {
+      const value = measureKeyFifths[index]
+      if (Number.isFinite(value)) return Math.trunc(value)
+    }
+    return 0
+  })
+  const alignedKeyModes = pairIndexToMeasureIndex.map((measureIndex) => {
+    for (let index = measureIndex; index >= 0; index -= 1) {
+      const value = measureKeyModes[index]
+      if (value) return normalizeKeyMode(value)
+    }
+    return 'major'
+  })
+  const alignedDivisions = pairIndexToMeasureIndex.map((measureIndex) => {
+    for (let index = measureIndex; index >= 0; index -= 1) {
+      const value = measureDivisions[index]
+      if (Number.isFinite(value) && value > 0) return Math.max(1, Math.round(value))
+    }
+    return 16
+  })
+  const alignedTimes = pairIndexToMeasureIndex.map((measureIndex) =>
+    resolvePairTimeSignature(measureIndex, measureTimeSignatures),
   )
   const importedTimelineSegmentStartPairIndexes = importedTimelineSegmentStartMeasureIndexes
     ? [...new Set(

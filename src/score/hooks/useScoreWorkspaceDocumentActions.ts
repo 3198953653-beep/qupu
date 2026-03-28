@@ -76,6 +76,7 @@ export function useScoreWorkspaceDocumentActions(params: {
       musicXmlMetadataFromImportRef: editorRefs.musicXmlMetadataFromImportRef,
       setImportedChordRulerEntriesByPairFromImport: appState.setImportedChordRulerEntriesByPairFromImport,
       setImportedTimelineSegmentStartPairIndexesFromImport: appState.setImportedTimelineSegmentStartPairIndexesFromImport,
+      setFullMeasureRestCollapseScopeKeys: appState.setFullMeasureRestCollapseScopeKeys,
       importedNoteLookupRef: editorRefs.importedNoteLookupRef,
       dragRef: editorRefs.dragRef,
       clearDragOverlay,

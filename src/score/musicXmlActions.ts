@@ -1,6 +1,7 @@
 import { startTransition, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 import { flushSync } from 'react-dom'
 import MusicXmlImportWorker from './musicXmlImport.worker?worker'
+import { collectFullMeasureRestCollapseScopeKeys } from './fullMeasureRestCollapse'
 import { buildMusicXmlFromMeasurePairs, parseMusicXml } from './musicXml'
 import type { ChordRulerEntry } from './chordRuler'
 import { buildImportedNoteLookup } from './scoreOps'
@@ -190,6 +191,7 @@ export function applyImportedScoreState(params: {
   musicXmlMetadataFromImportRef: MutableRefObject<MusicXmlMetadata | null>
   setImportedChordRulerEntriesByPairFromImport: StateSetter<ChordRulerEntry[][] | null>
   setImportedTimelineSegmentStartPairIndexesFromImport: StateSetter<number[] | null>
+  setFullMeasureRestCollapseScopeKeys: StateSetter<string[]>
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
   dragRef: MutableRefObject<DragState | null>
   clearDragOverlay: () => void
@@ -214,6 +216,7 @@ export function applyImportedScoreState(params: {
     musicXmlMetadataFromImportRef,
     setImportedChordRulerEntriesByPairFromImport,
     setImportedTimelineSegmentStartPairIndexesFromImport,
+    setFullMeasureRestCollapseScopeKeys,
     importedNoteLookupRef,
     dragRef,
     clearDragOverlay,
@@ -237,6 +240,12 @@ export function applyImportedScoreState(params: {
   musicXmlMetadataFromImportRef.current = result.metadata
   setImportedChordRulerEntriesByPairFromImport(result.importedChordRulerEntriesByPair ?? null)
   setImportedTimelineSegmentStartPairIndexesFromImport(result.importedTimelineSegmentStartPairIndexes ?? null)
+  setFullMeasureRestCollapseScopeKeys(
+    collectFullMeasureRestCollapseScopeKeys({
+      measurePairs: result.measurePairs,
+      timeSignaturesByMeasure: result.measureTimeSignatures,
+    }),
+  )
   importedNoteLookupRef.current = result.importedNoteLookup ?? buildImportedNoteLookup(result.measurePairs)
   dragRef.current = null
   clearDragOverlay()
