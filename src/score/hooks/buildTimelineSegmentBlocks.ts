@@ -10,6 +10,7 @@ export function buildTimelineSegmentBlocks(params: {
   scoreScaleX: number
   stageBorderPx: number
   timelineSegmentOverlayMode: TimelineSegmentOverlayMode
+  importedTimelineSegmentStartPairIndexes: number[] | null
   activeSelectionSignature: string
 }): TimelineSegmentBlock[] {
   const {
@@ -18,23 +19,47 @@ export function buildTimelineSegmentBlocks(params: {
     scoreScaleX,
     stageBorderPx,
     timelineSegmentOverlayMode,
+    importedTimelineSegmentStartPairIndexes,
     activeSelectionSignature,
   } = params
 
-  if (timelineSegmentOverlayMode !== 'curated-two-measure') return []
   if (measurePairs.length === 0 || horizontalMeasureFramesByPair.length === 0) return []
 
   const segmentBlocks: TimelineSegmentBlock[] = []
-  for (
-    let startPairIndex = 0;
-    startPairIndex < measurePairs.length && startPairIndex < horizontalMeasureFramesByPair.length;
-    startPairIndex += DEFAULT_TWO_MEASURE_SEGMENT_SIZE
-  ) {
-    const endPairIndexInclusive = Math.min(
-      measurePairs.length - 1,
-      horizontalMeasureFramesByPair.length - 1,
-      startPairIndex + DEFAULT_TWO_MEASURE_SEGMENT_SIZE - 1,
-    )
+  const maxPairIndex = Math.min(measurePairs.length, horizontalMeasureFramesByPair.length) - 1
+  if (maxPairIndex < 0) return []
+
+  const segmentRanges: Array<{ startPairIndex: number; endPairIndexInclusive: number }> = []
+  if (timelineSegmentOverlayMode === 'curated-two-measure') {
+    for (let startPairIndex = 0; startPairIndex <= maxPairIndex; startPairIndex += DEFAULT_TWO_MEASURE_SEGMENT_SIZE) {
+      segmentRanges.push({
+        startPairIndex,
+        endPairIndexInclusive: Math.min(maxPairIndex, startPairIndex + DEFAULT_TWO_MEASURE_SEGMENT_SIZE - 1),
+      })
+    }
+  } else if (timelineSegmentOverlayMode === 'imported-last-part') {
+    const normalizedStarts = [...new Set(importedTimelineSegmentStartPairIndexes ?? [])]
+      .map((value) => Math.trunc(value))
+      .filter((value) => Number.isFinite(value) && value >= 0 && value <= maxPairIndex)
+      .sort((left, right) => left - right)
+
+    if (normalizedStarts.length === 0) return []
+    for (let startIndex = 0; startIndex < normalizedStarts.length; startIndex += 1) {
+      const startPairIndex = normalizedStarts[startIndex]
+      const nextStartPairIndex = normalizedStarts[startIndex + 1]
+      segmentRanges.push({
+        startPairIndex,
+        endPairIndexInclusive:
+          nextStartPairIndex === undefined ? maxPairIndex : Math.min(maxPairIndex, nextStartPairIndex - 1),
+      })
+    }
+  } else {
+    return []
+  }
+
+  for (const range of segmentRanges) {
+    const { startPairIndex, endPairIndexInclusive } = range
+    if (endPairIndexInclusive < startPairIndex) continue
     const startFrame = horizontalMeasureFramesByPair[startPairIndex]
     const endFrame = horizontalMeasureFramesByPair[endPairIndexInclusive]
     if (!startFrame || !endFrame) continue

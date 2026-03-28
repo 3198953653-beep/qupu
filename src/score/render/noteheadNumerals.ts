@@ -17,5 +17,5 @@ export function getJianpuNumeralForPitch(pitch: Pitch): string | null {
 }
 
 export function hasFilledNoteHead(duration: NoteDuration): boolean {
-  return duration !== 'w' && duration !== 'h'
+  return duration !== 'w' && duration !== 'hd' && duration !== 'h'
 }

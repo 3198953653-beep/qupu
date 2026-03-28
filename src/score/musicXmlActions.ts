@@ -189,6 +189,7 @@ export function applyImportedScoreState(params: {
   setMusicXmlMetadataFromImport: StateSetter<MusicXmlMetadata | null>
   musicXmlMetadataFromImportRef: MutableRefObject<MusicXmlMetadata | null>
   setImportedChordRulerEntriesByPairFromImport: StateSetter<ChordRulerEntry[][] | null>
+  setImportedTimelineSegmentStartPairIndexesFromImport: StateSetter<number[] | null>
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
   dragRef: MutableRefObject<DragState | null>
   clearDragOverlay: () => void
@@ -212,6 +213,7 @@ export function applyImportedScoreState(params: {
     setMusicXmlMetadataFromImport,
     musicXmlMetadataFromImportRef,
     setImportedChordRulerEntriesByPairFromImport,
+    setImportedTimelineSegmentStartPairIndexesFromImport,
     importedNoteLookupRef,
     dragRef,
     clearDragOverlay,
@@ -234,6 +236,7 @@ export function applyImportedScoreState(params: {
   setMusicXmlMetadataFromImport(result.metadata)
   musicXmlMetadataFromImportRef.current = result.metadata
   setImportedChordRulerEntriesByPairFromImport(result.importedChordRulerEntriesByPair ?? null)
+  setImportedTimelineSegmentStartPairIndexesFromImport(result.importedTimelineSegmentStartPairIndexes ?? null)
   importedNoteLookupRef.current = result.importedNoteLookup ?? buildImportedNoteLookup(result.measurePairs)
   dragRef.current = null
   clearDragOverlay()

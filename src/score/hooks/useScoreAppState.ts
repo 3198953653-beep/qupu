@@ -72,6 +72,8 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
   const [musicXmlMetadataFromImport, setMusicXmlMetadataFromImport] = useState<MusicXmlMetadata | null>(null)
   const [importedChordRulerEntriesByPairFromImport, setImportedChordRulerEntriesByPairFromImport] =
     useState<ChordRulerEntry[][] | null>(null)
+  const [importedTimelineSegmentStartPairIndexesFromImport, setImportedTimelineSegmentStartPairIndexesFromImport] =
+    useState<number[] | null>(null)
   const [, setDragDebugReport] = useState<string>('')
   const [autoScaleEnabled, setAutoScaleEnabled] = useState(false)
   const [manualScalePercent, setManualScalePercent] = useState(100)
@@ -148,6 +150,8 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
     setMusicXmlMetadataFromImport,
     importedChordRulerEntriesByPairFromImport,
     setImportedChordRulerEntriesByPairFromImport,
+    importedTimelineSegmentStartPairIndexesFromImport,
+    setImportedTimelineSegmentStartPairIndexesFromImport,
     setDragDebugReport,
     autoScaleEnabled,
     setAutoScaleEnabled,

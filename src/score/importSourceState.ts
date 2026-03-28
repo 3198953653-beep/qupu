@@ -18,6 +18,7 @@ export function clearImportedSourceState(params: {
   setMusicXmlMetadataFromImport: StateSetter<MusicXmlMetadata | null>
   musicXmlMetadataFromImportRef: MutableRefObject<MusicXmlMetadata | null>
   setImportedChordRulerEntriesByPairFromImport?: StateSetter<ChordRulerEntry[][] | null>
+  setImportedTimelineSegmentStartPairIndexesFromImport?: StateSetter<number[] | null>
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
   dragRef: MutableRefObject<DragState | null>
   clearDragOverlay: () => void
@@ -37,6 +38,7 @@ export function clearImportedSourceState(params: {
     setMusicXmlMetadataFromImport,
     musicXmlMetadataFromImportRef,
     setImportedChordRulerEntriesByPairFromImport,
+    setImportedTimelineSegmentStartPairIndexesFromImport,
     importedNoteLookupRef,
     dragRef,
     clearDragOverlay,
@@ -56,6 +58,7 @@ export function clearImportedSourceState(params: {
   setMusicXmlMetadataFromImport(null)
   musicXmlMetadataFromImportRef.current = null
   setImportedChordRulerEntriesByPairFromImport?.(null)
+  setImportedTimelineSegmentStartPairIndexesFromImport?.(null)
   importedNoteLookupRef.current.clear()
   dragRef.current = null
   clearDragOverlay()

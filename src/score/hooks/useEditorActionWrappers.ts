@@ -56,14 +56,12 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     setActiveBuiltInDemo('none')
-    setTimelineSegmentOverlayMode('none')
     importMusicXmlText(xmlText)
   }, [
     clearActiveChordSelection,
     clearFullMeasureRestCollapseScopes,
     importMusicXmlText,
     setActiveBuiltInDemo,
-    setTimelineSegmentOverlayMode,
     stopActivePlaybackSession,
   ])
 
@@ -72,14 +70,12 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     setActiveBuiltInDemo('none')
-    setTimelineSegmentOverlayMode('none')
     importMusicXmlFromTextarea()
   }, [
     clearActiveChordSelection,
     clearFullMeasureRestCollapseScopes,
     importMusicXmlFromTextarea,
     setActiveBuiltInDemo,
-    setTimelineSegmentOverlayMode,
     stopActivePlaybackSession,
   ])
 
@@ -88,14 +84,12 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     setActiveBuiltInDemo('none')
-    setTimelineSegmentOverlayMode('none')
     await onMusicXmlFileChange(event)
   }, [
     clearActiveChordSelection,
     clearFullMeasureRestCollapseScopes,
     onMusicXmlFileChange,
     setActiveBuiltInDemo,
-    setTimelineSegmentOverlayMode,
     stopActivePlaybackSession,
   ])
 
@@ -104,14 +98,12 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     setActiveBuiltInDemo('none')
-    setTimelineSegmentOverlayMode('curated-two-measure')
     loadSampleMusicXml()
   }, [
     clearActiveChordSelection,
     clearFullMeasureRestCollapseScopes,
     loadSampleMusicXml,
     setActiveBuiltInDemo,
-    setTimelineSegmentOverlayMode,
     stopActivePlaybackSession,
   ])
 

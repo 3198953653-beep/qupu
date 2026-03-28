@@ -48,6 +48,7 @@ export function useChordMarkerController(params: {
   selectedSelections: Selection[]
   isSelectionVisible: boolean
   timelineSegmentOverlayMode: TimelineSegmentOverlayMode
+  importedTimelineSegmentStartPairIndexes: number[] | null
   showChordDegreeEnabled: boolean
   chordMarkerLabelLeftInsetPx: number
   stageBorderPx: number
@@ -86,6 +87,7 @@ export function useChordMarkerController(params: {
     selectedSelections,
     isSelectionVisible,
     timelineSegmentOverlayMode,
+    importedTimelineSegmentStartPairIndexes,
     showChordDegreeEnabled,
     chordMarkerLabelLeftInsetPx,
     stageBorderPx,
@@ -201,10 +203,12 @@ export function useChordMarkerController(params: {
     scoreScaleX,
     stageBorderPx,
     timelineSegmentOverlayMode,
+    importedTimelineSegmentStartPairIndexes,
     activeSelectionSignature: currentSelectionSignature,
   }), [
     currentSelectionSignature,
     horizontalMeasureFramesByPair,
+    importedTimelineSegmentStartPairIndexes,
     measurePairs,
     scoreScaleX,
     stageBorderPx,

@@ -436,6 +436,7 @@ export function getBaseDurationFromNoteDuration(duration: NoteDuration): Notatio
     case 'q':
     case 'qd':
       return 'q'
+    case 'hd':
     case 'h':
       return 'h'
     case 'w':
@@ -482,6 +483,10 @@ export function toTargetAlterFromPaletteAccidental(
 
 export function toggleDottedDuration(duration: NoteDuration): NoteDuration | null {
   switch (duration) {
+    case 'h':
+      return 'hd'
+    case 'hd':
+      return 'h'
     case 'q':
       return 'qd'
     case 'qd':
@@ -498,7 +503,6 @@ export function toggleDottedDuration(duration: NoteDuration): NoteDuration | nul
       return '32d'
     case '32d':
       return '32'
-    case 'h':
     case 'w':
     default:
       return null
@@ -506,7 +510,7 @@ export function toggleDottedDuration(duration: NoteDuration): NoteDuration | nul
 }
 
 export function isDottedDuration(duration: NoteDuration): boolean {
-  return duration === 'qd' || duration === '8d' || duration === '16d' || duration === '32d'
+  return duration === 'hd' || duration === 'qd' || duration === '8d' || duration === '16d' || duration === '32d'
 }
 
 function getAccidentalIdFromRenderedAccidental(

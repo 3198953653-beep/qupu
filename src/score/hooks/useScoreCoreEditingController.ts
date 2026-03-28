@@ -63,6 +63,7 @@ export function useScoreCoreEditingController(params: {
     selectedSelections: appState.selectedSelections,
     isSelectionVisible: appState.isSelectionVisible,
     timelineSegmentOverlayMode: appState.timelineSegmentOverlayMode,
+    importedTimelineSegmentStartPairIndexes: appState.importedTimelineSegmentStartPairIndexesFromImport,
     showChordDegreeEnabled: appState.showChordDegreeEnabled,
     chordMarkerLabelLeftInsetPx,
     stageBorderPx,

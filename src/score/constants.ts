@@ -36,6 +36,7 @@ export const INITIAL_NOTES: ScoreNote[] = Array.from({ length: DEFAULT_DEMO_MEAS
 
 export const DURATION_BEATS: Record<NoteDuration, number> = {
   w: 4,
+  hd: 3,
   h: 2,
   qd: 1.5,
   q: 1,
@@ -51,6 +52,7 @@ export const TICKS_PER_BEAT = 16
 
 export const DURATION_TICKS: Record<NoteDuration, number> = {
   w: 64,
+  hd: 48,
   h: 32,
   qd: 24,
   q: 16,
@@ -62,11 +64,12 @@ export const DURATION_TICKS: Record<NoteDuration, number> = {
   '32': 2,
 }
 
-export const DURATION_GREEDY_ORDER: NoteDuration[] = ['w', 'h', 'qd', 'q', '8d', '8', '16d', '16', '32d', '32']
+export const DURATION_GREEDY_ORDER: NoteDuration[] = ['w', 'hd', 'h', 'qd', 'q', '8d', '8', '16d', '16', '32d', '32']
 export const MEASURE_TICKS = 64
 
 export const DURATION_TONE: Record<NoteDuration, string> = {
   w: '1n',
+  hd: '2n.',
   h: '2n',
   qd: '4n.',
   q: '4n',
@@ -80,6 +83,7 @@ export const DURATION_TONE: Record<NoteDuration, string> = {
 
 export const DURATION_LABEL: Record<NoteDuration, string> = {
   w: '全音符',
+  hd: '附点二分音符',
   h: '二分音符',
   qd: '附点四分音符',
   q: '四分音符',
@@ -93,6 +97,7 @@ export const DURATION_LABEL: Record<NoteDuration, string> = {
 
 export const DURATION_MUSIC_XML: Record<NoteDuration, { type: string; dots: number }> = {
   w: { type: 'whole', dots: 0 },
+  hd: { type: 'half', dots: 1 },
   h: { type: 'half', dots: 0 },
   qd: { type: 'quarter', dots: 1 },
   q: { type: 'quarter', dots: 0 },
@@ -106,6 +111,7 @@ export const DURATION_MUSIC_XML: Record<NoteDuration, { type: string; dots: numb
 
 export const DURATION_LAYOUT_WEIGHT: Record<NoteDuration, number> = {
   w: 0.8,
+  hd: 1.1,
   h: 1.0,
   qd: 1.3,
   q: 1.2,

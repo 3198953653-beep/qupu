@@ -423,6 +423,32 @@ function analyzeImportedChordPart(partEl: Element, measureLimit: number): Import
   }
 }
 
+function analyzeImportedTimelineSegmentPart(partEl: Element, measureLimit: number): number[] | null {
+  const measureEls = getPartMeasureElements(partEl, measureLimit)
+  const startMeasureIndexes: number[] = []
+
+  for (let measureIndex = 0; measureIndex < measureEls.length; measureIndex += 1) {
+    const noteEls = measureEls[measureIndex].getElementsByTagName('note')
+    let hasSegmentMarker = false
+    for (let noteIndex = 0; noteIndex < noteEls.length; noteIndex += 1) {
+      const noteData = collectFastNoteData(noteEls[noteIndex])
+      if (noteData.isGrace || noteData.isRest) continue
+      hasSegmentMarker = true
+      break
+    }
+    if (hasSegmentMarker) {
+      startMeasureIndexes.push(measureIndex)
+    }
+  }
+
+  if (startMeasureIndexes.length === 0) return null
+  const normalizedStarts = [...new Set(startMeasureIndexes)].sort((left, right) => left - right)
+  if (normalizedStarts[0] !== 0) {
+    normalizedStarts.unshift(0)
+  }
+  return normalizedStarts
+}
+
 function parseVisibleMusicXmlParts(params: {
   partContexts: VisiblePartContext[]
   measureLimit: number
@@ -651,14 +677,21 @@ function finalizeImportResult(params: {
   parsedData: ParsedVisibleMusicXmlData
   metadata: MusicXmlMetadata
   importedChordRulerEntriesByMeasureIndex?: ChordRulerEntry[][] | null
+  importedTimelineSegmentStartMeasureIndexes?: number[] | null
 }): ImportResult {
-  const { parsedData, metadata, importedChordRulerEntriesByMeasureIndex = null } = params
+  const {
+    parsedData,
+    metadata,
+    importedChordRulerEntriesByMeasureIndex = null,
+    importedTimelineSegmentStartMeasureIndexes = null,
+  } = params
   const { measureSlots, measureKeyFifths, measureKeyModes, measureDivisions, measureTimeSignatures } = parsedData
 
   const importedPairs: MeasurePair[] = []
   const importedTrebleNotes: ScoreNote[] = []
   const importedBassNotes: ScoreNote[] = []
   const importedNoteLookup = new Map<string, ImportedNoteLocation>()
+  const measureIndexToPairIndex = new Map<number, number>()
   const importedChordRulerEntriesByPair: ChordRulerEntry[][] | null =
     importedChordRulerEntriesByMeasureIndex ? [] : null
   let trebleCarry = 'c/4'
@@ -693,6 +726,7 @@ function finalizeImportResult(params: {
     trebleCarry = getLastPitch(treble, trebleCarry)
     bassCarry = getLastPitch(bass, bassCarry)
     importedPairs.push({ treble, bass })
+    measureIndexToPairIndex.set(measureIndex, pairIndex)
     importedChordRulerEntriesByPair?.push(importedChordRulerEntriesByMeasureIndex?.[measureIndex] ?? [])
   })
 
@@ -708,6 +742,7 @@ function finalizeImportResult(params: {
       measureTimeSignatures: new Array(fallbackPairs.length).fill(null).map(() => ({ beats: 4, beatType: 4 })),
       metadata,
       importedChordRulerEntriesByPair: null,
+      importedTimelineSegmentStartPairIndexes: null,
     }
   }
 
@@ -725,6 +760,19 @@ function finalizeImportResult(params: {
   const alignedTimes = importedPairs.map(
     (_, index) => measureTimeSignatures[index] ?? measureTimeSignatures[index - 1] ?? { beats: 4, beatType: 4 },
   )
+  const importedTimelineSegmentStartPairIndexes = importedTimelineSegmentStartMeasureIndexes
+    ? [...new Set(
+        importedTimelineSegmentStartMeasureIndexes
+          .map((measureIndex) => measureIndexToPairIndex.get(measureIndex))
+          .filter((pairIndex): pairIndex is number => pairIndex !== undefined),
+      )].sort((left, right) => left - right)
+    : null
+  const normalizedImportedTimelineSegmentStartPairIndexes =
+    importedTimelineSegmentStartPairIndexes && importedTimelineSegmentStartPairIndexes.length > 0
+      ? (importedTimelineSegmentStartPairIndexes[0] === 0
+          ? importedTimelineSegmentStartPairIndexes
+          : [0, ...importedTimelineSegmentStartPairIndexes])
+      : null
 
   return {
     trebleNotes: importedTrebleNotes,
@@ -737,6 +785,7 @@ function finalizeImportResult(params: {
     metadata,
     importedNoteLookup,
     importedChordRulerEntriesByPair,
+    importedTimelineSegmentStartPairIndexes: normalizedImportedTimelineSegmentStartPairIndexes,
   }
 }
 
@@ -801,6 +850,7 @@ function parseMusicXmlMetadata(doc: Document): MusicXmlMetadata {
 function getBeamCountFromDuration(duration: NoteDuration): number {
   const durationMap: Record<NoteDuration, string> = {
     w: 'w',
+    hd: 'h',
     h: 'h',
     q: 'q',
     '8': '8',
@@ -1211,8 +1261,13 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
   if (partNodes.length === 0) {
     throw new Error('该乐谱文件中未找到 <part> 节点。')
   }
-  const firstPart = partNodes[0] ?? null
-  const secondPart = partNodes[1] ?? null
+  const segmentPart = partNodes.length >= 2 ? (partNodes[partNodes.length - 1] ?? null) : null
+  const visiblePartNodes = segmentPart ? partNodes.slice(0, -1) : partNodes
+  const firstPart = visiblePartNodes[0] ?? null
+  const secondPart = visiblePartNodes[1] ?? null
+  const importedTimelineSegmentStartMeasureIndexes = segmentPart
+    ? analyzeImportedTimelineSegmentPart(segmentPart, measureLimit)
+    : null
   const chordPartAnalysis =
     firstPart && secondPart && partLooksLikeTwoStaffPiano(firstPart, measureLimit)
       ? analyzeImportedChordPart(secondPart, measureLimit)
@@ -1225,9 +1280,9 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
   const parsedVisibleData = parseVisibleMusicXmlParts({
     partContexts: shouldUseDedicatedChordImportPath
       ? [{ partEl: firstPart as Element, defaultStaff: 'treble' }]
-      : partNodes.map((partEl, partIndex) => ({
+      : visiblePartNodes.map((partEl, partIndex) => ({
           partEl,
-          defaultStaff: partNodes.length > 1 && partIndex === 1 ? 'bass' : 'treble',
+          defaultStaff: visiblePartNodes.length > 1 && partIndex === 1 ? 'bass' : 'treble',
         })),
     measureLimit,
   })
@@ -1238,5 +1293,6 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
     importedChordRulerEntriesByMeasureIndex: shouldUseDedicatedChordImportPath
       ? chordPartAnalysis?.entriesByMeasureIndex ?? null
       : null,
+    importedTimelineSegmentStartMeasureIndexes,
   })
 }

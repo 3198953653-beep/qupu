@@ -167,6 +167,12 @@ function resolveIsolatedBeamSegment(
 
 export function getBeamLevelFromDuration(duration: NoteDuration): 0 | 1 | 2 | 3 {
   switch (duration) {
+    case 'hd':
+    case 'h':
+    case 'q':
+    case 'qd':
+    case 'w':
+      return 0
     case '8':
     case '8d':
       return 1
@@ -237,4 +243,3 @@ export function computeMeasurePairsBeamGroups(params: {
   }
   return results
 }
-

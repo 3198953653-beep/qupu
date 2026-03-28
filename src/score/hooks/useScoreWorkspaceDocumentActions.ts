@@ -1,7 +1,8 @@
+import { useCallback } from 'react'
 import { useScoreDocumentActionsController } from './useScoreDocumentActionsController'
 import { useScoreAppState } from './useScoreAppState'
 import { useScoreEditorRefs } from './useScoreEditorRefs'
-import type { Pitch, ScoreNote } from '../types'
+import type { ImportResult, Pitch, ScoreNote } from '../types'
 import type { PlaybackTimelineEvent } from '../playbackTimeline'
 import type { MeasurePair } from '../types'
 
@@ -37,6 +38,14 @@ export function useScoreWorkspaceDocumentActions(params: {
     initialBassNotes,
     pitches,
   } = params
+  const handleImportedScoreApplied = useCallback((result: ImportResult) => {
+    requestPlaybackCursorReset()
+    appState.setTimelineSegmentOverlayMode(
+      result.importedTimelineSegmentStartPairIndexes && result.importedTimelineSegmentStartPairIndexes.length > 0
+        ? 'imported-last-part'
+        : 'curated-two-measure',
+    )
+  }, [appState.setTimelineSegmentOverlayMode, requestPlaybackCursorReset])
 
   return useScoreDocumentActionsController({
     editorHandlers: {
@@ -50,7 +59,7 @@ export function useScoreWorkspaceDocumentActions(params: {
       onPlaybackStart: handlePlaybackStart,
       onPlaybackPoint: handlePlaybackPoint,
       onPlaybackComplete: handlePlaybackComplete,
-      onImportedScoreApplied: requestPlaybackCursorReset,
+      onImportedScoreApplied: handleImportedScoreApplied,
       setNotes: appState.setNotes,
       setBassNotes: appState.setBassNotes,
       setMeasurePairsFromImport: appState.setMeasurePairsFromImport,
@@ -66,6 +75,7 @@ export function useScoreWorkspaceDocumentActions(params: {
       setMusicXmlMetadataFromImport: appState.setMusicXmlMetadataFromImport,
       musicXmlMetadataFromImportRef: editorRefs.musicXmlMetadataFromImportRef,
       setImportedChordRulerEntriesByPairFromImport: appState.setImportedChordRulerEntriesByPairFromImport,
+      setImportedTimelineSegmentStartPairIndexesFromImport: appState.setImportedTimelineSegmentStartPairIndexesFromImport,
       importedNoteLookupRef: editorRefs.importedNoteLookupRef,
       dragRef: editorRefs.dragRef,
       clearDragOverlay,

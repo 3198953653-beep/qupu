@@ -17,6 +17,7 @@ const NO_DOT_DURATION_ENTRIES: Array<{ ticks: number; duration: NoteDuration }> 
 
 const NOTE_DURATION_ENTRIES: Array<{ ticks: number; duration: NoteDuration }> = [
   { ticks: 64, duration: 'w' },
+  { ticks: 48, duration: 'hd' },
   { ticks: 32, duration: 'h' },
   { ticks: 24, duration: 'qd' },
   { ticks: 16, duration: 'q' },

@@ -2,11 +2,11 @@ import type { ChordRulerEntry } from './chordRuler'
 
 export type Pitch = string
 export type StemDirection = 1 | -1
-export type NoteDuration = 'w' | 'h' | 'q' | '8' | '16' | '32' | 'qd' | '8d' | '16d' | '32d'
+export type NoteDuration = 'w' | 'hd' | 'h' | 'q' | '8' | '16' | '32' | 'qd' | '8d' | '16d' | '32d'
 export type NoteDurationBase = 'w' | 'h' | 'q' | '8' | '16' | '32'
 export type RhythmPresetId = 'quarter' | 'twoEighth' | 'fourSixteenth' | 'eightSixteenth' | 'shortDotted'
 export type BuiltInDemoMode = 'none' | 'whole-note' | 'half-note'
-export type TimelineSegmentOverlayMode = 'none' | 'curated-two-measure'
+export type TimelineSegmentOverlayMode = 'none' | 'curated-two-measure' | 'imported-last-part'
 export type StaffKind = 'treble' | 'bass'
 export type BeamTag = 'begin' | 'continue' | 'end'
 export type BeamLevelTag = 'begin' | 'continue' | 'end' | 'forward hook' | 'backward hook'
@@ -69,6 +69,7 @@ export type ImportResult = {
   metadata: MusicXmlMetadata
   importedNoteLookup?: Map<string, ImportedNoteLocation>
   importedChordRulerEntriesByPair?: ChordRulerEntry[][] | null
+  importedTimelineSegmentStartPairIndexes?: number[] | null
 }
 
 export type ImportFeedback = {

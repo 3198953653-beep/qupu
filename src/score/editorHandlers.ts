@@ -42,7 +42,7 @@ export function useEditorHandlers(params: {
   onPlaybackStart?: (params: { sessionId: number; firstEvent: PlaybackTimelineEvent | null }) => void
   onPlaybackPoint?: (params: { sessionId: number; event: PlaybackTimelineEvent }) => void
   onPlaybackComplete?: (params: { sessionId: number; lastEvent: PlaybackTimelineEvent | null }) => void
-  onImportedScoreApplied?: () => void
+  onImportedScoreApplied?: (result: ImportResult) => void
 
   setNotes: StateSetter<ScoreNote[]>
   setBassNotes: StateSetter<ScoreNote[]>
@@ -59,6 +59,7 @@ export function useEditorHandlers(params: {
   setMusicXmlMetadataFromImport: StateSetter<MusicXmlMetadata | null>
   musicXmlMetadataFromImportRef: MutableRefObject<MusicXmlMetadata | null>
   setImportedChordRulerEntriesByPairFromImport: StateSetter<ChordRulerEntry[][] | null>
+  setImportedTimelineSegmentStartPairIndexesFromImport: StateSetter<number[] | null>
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
   dragRef: MutableRefObject<DragState | null>
   clearDragOverlay: () => void
@@ -119,6 +120,7 @@ export function useEditorHandlers(params: {
     setMusicXmlMetadataFromImport,
     musicXmlMetadataFromImportRef,
     setImportedChordRulerEntriesByPairFromImport,
+    setImportedTimelineSegmentStartPairIndexesFromImport,
     importedNoteLookupRef,
     dragRef,
     clearDragOverlay,
@@ -179,13 +181,14 @@ export function useEditorHandlers(params: {
       setMusicXmlMetadataFromImport,
       musicXmlMetadataFromImportRef,
       setImportedChordRulerEntriesByPairFromImport,
+      setImportedTimelineSegmentStartPairIndexesFromImport,
       importedNoteLookupRef,
       dragRef,
       clearDragOverlay,
       setDraggingSelection,
       setActiveSelection,
     })
-    onImportedScoreApplied?.()
+    onImportedScoreApplied?.(result)
   }
 
   const importMusicXmlText = (xmlText: string) => {
@@ -249,6 +252,7 @@ export function useEditorHandlers(params: {
     setMusicXmlMetadataFromImport,
     musicXmlMetadataFromImportRef,
     setImportedChordRulerEntriesByPairFromImport,
+    setImportedTimelineSegmentStartPairIndexesFromImport,
     importedNoteLookupRef,
     dragRef,
     clearDragOverlay,
