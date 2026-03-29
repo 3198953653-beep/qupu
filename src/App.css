@@ -1414,6 +1414,41 @@
   box-shadow: inset 0 0 0 1px rgba(33, 114, 176, 0.14);
 }
 
+.smart-chord-disclosure-toggle {
+  justify-self: start;
+  border: 1px solid #d6e3ee;
+  border-radius: 999px;
+  background: #f8fbfe;
+  color: #21495f;
+  padding: 0.44rem 0.88rem;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.smart-chord-disclosure-toggle:hover {
+  background: #f1f8fd;
+  border-color: #bfd6e5;
+  color: #173c4d;
+}
+
+.smart-chord-disclosure-toggle.is-expanded {
+  background: #eaf4ff;
+  border-color: #9ec3e4;
+  color: #154a73;
+  box-shadow: inset 0 0 0 1px rgba(33, 114, 176, 0.14);
+}
+
+.smart-chord-meta-panel {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.smart-chord-meta-panel[hidden] {
+  display: none;
+}
+
 .smart-chord-notation-strip {
   border: 1px solid #d8e5ee;
   border-radius: 16px;

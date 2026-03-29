@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type {
   SmartChordToneCandidate,
   SmartChordToneCountOption,
@@ -57,6 +57,7 @@ export function SmartChordToneModal(props: {
     onPreviewCandidate,
     onApplyCandidate,
   } = props
+  const [isMetaPanelExpanded, setIsMetaPanelExpanded] = useState(false)
 
   useEffect(() => {
     if (!isOpen) return undefined
@@ -69,10 +70,16 @@ export function SmartChordToneModal(props: {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isOpen, onClose])
 
+  useEffect(() => {
+    if (!isOpen) return
+    setIsMetaPanelExpanded(false)
+  }, [isOpen])
+
   if (!isOpen || !target) return null
 
   const hasChordContext = Boolean(target.chordSourceLabel)
   const hasCandidates = candidates.length > 0
+  const metaPanelId = 'smart-chord-meta-panel'
 
   return (
     <div className="smart-chord-modal" onMouseDown={onClose}>
@@ -93,79 +100,112 @@ export function SmartChordToneModal(props: {
           </button>
         </header>
 
-        <section className="smart-chord-summary">
-          <div className="smart-chord-summary-row">
-            <span className="smart-chord-summary-label">旋律音</span>
-            <strong>{target.melodyPitchLabel}</strong>
-          </div>
-          <div className="smart-chord-summary-row">
-            <span className="smart-chord-summary-label">位置</span>
-            <strong>第 {target.measureNumber} 小节</strong>
-          </div>
-          <div className="smart-chord-summary-row">
-            <span className="smart-chord-summary-label">和弦标记</span>
-            <strong>{target.chordSourceLabel ?? '当前音符没有和弦标记'}</strong>
-          </div>
-        </section>
+        {!hasChordContext && (
+          <section className="smart-chord-summary">
+            <div className="smart-chord-summary-row">
+              <span className="smart-chord-summary-label">旋律音</span>
+              <strong>{target.melodyPitchLabel}</strong>
+            </div>
+            <div className="smart-chord-summary-row">
+              <span className="smart-chord-summary-label">位置</span>
+              <strong>第 {target.measureNumber} 小节</strong>
+            </div>
+            <div className="smart-chord-summary-row">
+              <span className="smart-chord-summary-label">和弦标记</span>
+              <strong>{target.chordSourceLabel ?? '当前音符没有和弦标记'}</strong>
+            </div>
+          </section>
+        )}
 
         {hasChordContext ? (
           <>
-            <section className="smart-chord-option-section">
-              <div className="smart-chord-option-header">
-                <h4>八度</h4>
-                <span>再次点击可取消</span>
-              </div>
-              <div className="smart-chord-option-grid">
-                {OCTAVE_OPTIONS.map((option) => (
-                  <button
-                    key={option.key}
-                    type="button"
-                    className={`smart-chord-option-button${octaveOption === option.key ? ' is-active' : ''}`}
-                    onClick={() => onToggleOctaveOption(option.key)}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </section>
+            <button
+              type="button"
+              className={`smart-chord-disclosure-toggle${isMetaPanelExpanded ? ' is-expanded' : ''}`}
+              aria-expanded={isMetaPanelExpanded}
+              aria-controls={metaPanelId}
+              onClick={() => setIsMetaPanelExpanded((current) => !current)}
+            >
+              {isMetaPanelExpanded ? '收起筛选与信息' : '展开筛选与信息'}
+            </button>
 
-            <section className="smart-chord-option-section">
-              <div className="smart-chord-option-header">
-                <h4>和弦音数量</h4>
-                <span>double = 旋律 + 1 个附加音</span>
-              </div>
-              <div className="smart-chord-option-grid">
-                {COUNT_OPTIONS.map((option) => (
-                  <button
-                    key={option.key}
-                    type="button"
-                    className={`smart-chord-option-button${chordCountOption === option.key ? ' is-active' : ''}`}
-                    onClick={() => onToggleChordCountOption(option.key)}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </section>
+            <div
+              id={metaPanelId}
+              className="smart-chord-meta-panel"
+              hidden={!isMetaPanelExpanded}
+            >
+              <section className="smart-chord-summary">
+                <div className="smart-chord-summary-row">
+                  <span className="smart-chord-summary-label">旋律音</span>
+                  <strong>{target.melodyPitchLabel}</strong>
+                </div>
+                <div className="smart-chord-summary-row">
+                  <span className="smart-chord-summary-label">位置</span>
+                  <strong>第 {target.measureNumber} 小节</strong>
+                </div>
+                <div className="smart-chord-summary-row">
+                  <span className="smart-chord-summary-label">和弦标记</span>
+                  <strong>{target.chordSourceLabel ?? '当前音符没有和弦标记'}</strong>
+                </div>
+              </section>
 
-            <section className="smart-chord-option-section">
-              <div className="smart-chord-option-header">
-                <h4>过滤</h4>
-                <span>多选，可组合</span>
-              </div>
-              <div className="smart-chord-option-grid">
-                {FILTER_OPTIONS.map((option) => (
-                  <button
-                    key={option.key}
-                    type="button"
-                    className={`smart-chord-option-button${filterOptions.includes(option.key) ? ' is-active' : ''}`}
-                    onClick={() => onToggleFilterOption(option.key)}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </section>
+              <section className="smart-chord-option-section">
+                <div className="smart-chord-option-header">
+                  <h4>八度</h4>
+                  <span>再次点击可取消</span>
+                </div>
+                <div className="smart-chord-option-grid">
+                  {OCTAVE_OPTIONS.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      className={`smart-chord-option-button${octaveOption === option.key ? ' is-active' : ''}`}
+                      onClick={() => onToggleOctaveOption(option.key)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className="smart-chord-option-section">
+                <div className="smart-chord-option-header">
+                  <h4>和弦音数量</h4>
+                  <span>double = 旋律 + 1 个附加音</span>
+                </div>
+                <div className="smart-chord-option-grid">
+                  {COUNT_OPTIONS.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      className={`smart-chord-option-button${chordCountOption === option.key ? ' is-active' : ''}`}
+                      onClick={() => onToggleChordCountOption(option.key)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className="smart-chord-option-section">
+                <div className="smart-chord-option-header">
+                  <h4>过滤</h4>
+                  <span>多选，可组合</span>
+                </div>
+                <div className="smart-chord-option-grid">
+                  {FILTER_OPTIONS.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      className={`smart-chord-option-button${filterOptions.includes(option.key) ? ' is-active' : ''}`}
+                      onClick={() => onToggleFilterOption(option.key)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            </div>
 
             <section className="smart-chord-candidate-section">
               <div className="smart-chord-option-header">
@@ -182,15 +222,15 @@ export function SmartChordToneModal(props: {
                     onPreviewCandidate={onPreviewCandidate}
                     onApplyCandidate={onApplyCandidate}
                   />
-                  <p className="smart-chord-candidate-note">
-                    每个候选位点显示的是完整结果和弦；真正写入时只会替换该旋律音的附加和弦音，不会改动旋律主音。
-                  </p>
                 </>
               ) : (
                 <div className="smart-chord-empty-state">
                   当前选项下没有可用候选，你可以调整八度、数量或过滤条件后再试。
                 </div>
               )}
+              <p className="smart-chord-candidate-note">
+                每个候选位点显示的是完整结果和弦；真正写入时只会替换该旋律音的附加和弦音，不会改动旋律主音。
+              </p>
             </section>
           </>
         ) : (
