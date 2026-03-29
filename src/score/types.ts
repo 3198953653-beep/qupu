@@ -88,6 +88,8 @@ export type ImportFeedback = {
 
 export type SegmentRhythmTemplateDetail = {
   notes: string
+  rawNotes: string
+  sourceChordType: string | null
   rhythm: string
   pitchRange: string
   structureType: string

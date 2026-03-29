@@ -199,6 +199,10 @@ export function useImportedSegmentRhythmTemplateController(params: {
         measureTimeSignaturesByMeasure,
         measureKeyFifthsByMeasure,
         patternData: selectedTemplate.patternData,
+        seedTemplDetails:
+          selectedBinding?.templateId === selectedTemplate.id
+            ? selectedBinding.templDetails
+            : null,
       })
 
       const nextSelections = buildSelectionsForMeasureRange({

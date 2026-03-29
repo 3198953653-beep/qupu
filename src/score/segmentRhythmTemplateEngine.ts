@@ -54,7 +54,7 @@ const DEFAULT_OCTAVE_MODE = '跟随模板'
 const STRUCTURE_SINGLE = '单音'
 const DURATION_EPSILON = 0.000001
 const MELODY_CONFLICT_THRESHOLD = 0.1
-const DEFAULT_MAX_AVOID_COUNT = 2
+const RHYTHM_TEMPLATE_MAX_AVOID_COUNT = 0
 const NOTE_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B']
 const NOTE_NAMES_SHARP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 const NOTE_NAMES_FLAT = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B']
@@ -68,6 +68,10 @@ const BASE_PITCHES: Record<string, number> = {
   B: 11,
 }
 const ROOT_NOTE_RE = /^([A-G])((?:##|bb|x|#|b)?)(-?\d+)$/
+const CHORD_ROOT_RE = /^([A-G][#b]?)(.*)$/
+const CHORD_SPEC_RE = /^([A-G][#b]?)([^/]*)?(?:\/(.*))?$/
+const ABSOLUTE_PATTERN_TOKEN_RE = /^[A-G](?:##|bb|x|#|b)?-?\d+$/
+const NOTE_LETTERS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'] as const
 
 function clampMidi(midi: number): number {
   return Math.max(0, Math.min(127, Math.round(midi)))
@@ -128,6 +132,36 @@ function midiToNoteNameWithPreference(midi: number, prefer: 'sharp' | 'flat' | n
         ? NOTE_NAMES_FLAT
         : NOTE_NAMES
   return `${table[pitchClass] ?? 'C'}${octave}`
+}
+
+function midiToNoteNameWithSpelling(midi: number, chordName: string | null): string {
+  const safeMidi = clampMidi(midi)
+  const octave = Math.floor(safeMidi / 12) - 1
+  const pitchClass = safeMidi % 12
+  const chordMatch = CHORD_ROOT_RE.exec(String(chordName ?? '').trim())
+  const root = chordMatch?.[1] ?? null
+  const suffix = chordMatch?.[2] ?? ''
+  const prefer = root?.includes('b') ? 'flat' : root?.includes('#') ? 'sharp' : null
+  const table =
+    prefer === 'sharp'
+      ? NOTE_NAMES_SHARP
+      : prefer === 'flat'
+        ? NOTE_NAMES_FLAT
+        : NOTE_NAMES
+  let note = table[pitchClass] ?? 'C'
+  const suffixLower = suffix.toLowerCase()
+  if (
+    prefer === 'sharp' &&
+    (suffixLower.includes('maj7') ||
+      (suffixLower.includes('maj') && suffixLower.includes('7') && !suffixLower.includes('m7'))) &&
+    pitchClass === 5
+  ) {
+    note = 'E#'
+  }
+  if (prefer === 'flat' && suffixLower.includes('m7b5') && pitchClass === 4) {
+    note = 'Fb'
+  }
+  return `${note}${octave}`
 }
 
 function noteNameToPitch(name: string): Pitch {
@@ -247,12 +281,6 @@ function getRhythmVoiceId(durationBeats: number): string {
   return 'P1'
 }
 
-function getSpellingPreference(noteName: string): 'sharp' | 'flat' | null {
-  if (noteName.includes('b') && !noteName.includes('#')) return 'flat'
-  if (noteName.includes('#') && !noteName.includes('b')) return 'sharp'
-  return null
-}
-
 export function normalizeChordForSearch(symbol: string): string {
   const raw = String(symbol ?? '').trim()
   if (!raw) return 'C'
@@ -335,8 +363,15 @@ async function buildRhythmTemplateDetails(params: {
   patternData: string
   chordRulerEntriesByPair: ChordRulerEntry[][] | null
   measureTimeSignaturesByMeasure: TimeSignature[] | null
+  seedTemplDetails?: SegmentRhythmTemplateDetail[] | null
 }): Promise<ExpandedRhythmTemplateDetail[]> {
-  const { scope, patternData, chordRulerEntriesByPair, measureTimeSignaturesByMeasure } = params
+  const {
+    scope,
+    patternData,
+    chordRulerEntriesByPair,
+    measureTimeSignaturesByMeasure,
+    seedTemplDetails = null,
+  } = params
   const chordEvents = buildSegmentChordEvents({
     scope,
     chordRulerEntriesByPair,
@@ -347,7 +382,7 @@ async function buildRhythmTemplateDetails(params: {
   const parsedPattern = parseRhythmTemplatePattern(patternData)
   const voiceCursorByMeasureKey = new Map<string, number>()
 
-  return Promise.all(chordEvents.map(async (event) => {
+  return Promise.all(chordEvents.map(async (event, eventIndex) => {
     const voiceId = getRhythmVoiceId(event.durationBeats)
     const measurePatterns = parsedPattern[voiceId] ?? []
     const measureDurations = measurePatterns[event.relativePairIndex] ?? []
@@ -372,19 +407,37 @@ async function buildRhythmTemplateDetails(params: {
       voiceCursorByMeasureKey.set(cursorKey, cursor)
     }
 
-    const sourceChordFamily = normalizeChordForSearch(event.chordName)
-    const defaultNotes =
-      selectedDurations.length > 0
-        ? await fetchNotesFromRhythmLibrary({
-            chordFamily: sourceChordFamily,
-            noteCount: selectedDurations.length,
-            direction: null,
-            structure: STRUCTURE_SINGLE,
-          })
-        : null
+    const seedDetail = seedTemplDetails?.[eventIndex] ?? null
+    const seededRawNotes = String(seedDetail?.rawNotes ?? '').trim()
+    const seededSourceChordType = String(seedDetail?.sourceChordType ?? '').trim()
+    const defaultSourceChordFamily = normalizeChordForSearch(event.chordName)
+    const hasSeededSource = seededRawNotes.length > 0 && seededSourceChordType.length > 0
+    const sourceChordFamily = hasSeededSource ? seededSourceChordType : defaultSourceChordFamily
+    const rawNotes =
+      hasSeededSource
+        ? seededRawNotes
+        : selectedDurations.length > 0
+          ? await fetchNotesFromRhythmLibrary({
+              chordFamily: sourceChordFamily,
+              noteCount: selectedDurations.length,
+              direction: null,
+              structure: STRUCTURE_SINGLE,
+            })
+          : null
+    const normalizedRawNotes = String(rawNotes ?? '').trim()
+    const sourceChordType = sourceChordFamily || null
+    const notes = normalizedRawNotes
+      ? transposeNotesPattern({
+          pattern: normalizedRawNotes,
+          targetChord: event.chordName,
+          sourceChordType,
+        })
+      : ''
 
     return {
-      notes: defaultNotes ?? '',
+      notes,
+      rawNotes: normalizedRawNotes,
+      sourceChordType,
       rhythm: selectedDurations.map((duration) => trimNumericString(duration)).join(','),
       pitchRange: DEFAULT_PITCH_RANGE,
       structureType: DEFAULT_STRUCTURE_TYPE,
@@ -478,40 +531,49 @@ function detectDirection(tokens: string[]): string {
 type ChordSpec = {
   root: string
   quality: 'maj' | 'min' | 'dom' | 'dim' | 'halfdim' | 'aug' | 'sus2' | 'sus4'
+  bass: string | null
   raw: string
 }
 
 function parseChordSpec(chordName: string): ChordSpec {
   const raw = String(chordName ?? '').trim()
-  const match = /^([A-G][#b]?)([^/]*)?(?:\/.*)?$/.exec(raw)
+  const match = CHORD_SPEC_RE.exec(raw)
   const root = match?.[1] ?? 'C'
-  const suffix = (match?.[2] ?? '').toLowerCase()
+  const suffix = match?.[2] ?? ''
+  const bass = match?.[3]?.trim() || null
+  const suffixLower = suffix.toLowerCase()
 
-  if (suffix.includes('m7b5') || suffix.includes('ø')) {
-    return { root, quality: 'halfdim', raw }
+  if (
+    suffixLower.includes('m7b5') ||
+    suffixLower.includes('min7b5') ||
+    suffix.includes('ø') ||
+    suffixLower.includes('half-dim') ||
+    suffixLower.includes('half diminished')
+  ) {
+    return { root, quality: 'halfdim', bass, raw }
   }
-  if (suffix.includes('dim') || suffix.includes('°') || suffix.includes('o')) {
-    return { root, quality: 'dim', raw }
+  if (suffixLower.includes('dim') || suffix.includes('°') || suffixLower.includes('o')) {
+    return { root, quality: 'dim', bass, raw }
   }
-  if (suffix.includes('aug') || suffix.includes('+')) {
-    return { root, quality: 'aug', raw }
+  if (suffixLower.includes('aug') || suffix.includes('+')) {
+    return { root, quality: 'aug', bass, raw }
   }
-  if (suffix.includes('sus2')) {
-    return { root, quality: 'sus2', raw }
+  if (suffixLower.includes('sus2')) {
+    return { root, quality: 'sus2', bass, raw }
   }
-  if (suffix.includes('sus4') || suffix.includes('sus')) {
-    return { root, quality: 'sus4', raw }
+  if (suffixLower.includes('sus4') || suffixLower.includes('sus')) {
+    return { root, quality: 'sus4', bass, raw }
   }
-  if (suffix.includes('maj')) {
-    return { root, quality: 'maj', raw }
+  if (suffixLower.includes('maj')) {
+    return { root, quality: 'maj', bass, raw }
   }
-  if (suffix.includes('m') && !suffix.includes('maj')) {
-    return { root, quality: 'min', raw }
+  if (suffixLower.includes('m') && !suffixLower.includes('maj')) {
+    return { root, quality: 'min', bass, raw }
   }
-  if (suffix.includes('7')) {
-    return { root, quality: 'dom', raw }
+  if (suffixLower.includes('7')) {
+    return { root, quality: 'dom', bass, raw }
   }
-  return { root, quality: 'maj', raw }
+  return { root, quality: 'maj', bass, raw }
 }
 
 function getDegreeInterval(quality: ChordSpec['quality'], degree: number): number {
@@ -564,7 +626,34 @@ function buildNoteFromDegree(params: {
     getDegreeInterval(spec.quality, parsed.degreeIndex) +
     parsed.accidentalOffset +
     parsed.octaveShift * 12
-  return midiToNoteNameWithPreference(rootMidi + interval, getSpellingPreference(spec.root))
+  return midiToNoteNameWithSpelling(rootMidi + interval, spec.raw)
+}
+
+function normalizeSemitoneDelta(delta: number): number {
+  const value = delta % 12
+  return value > 6 ? value - 12 : value
+}
+
+function chooseRootMidiNear(rootPitchClass: number, referenceMidi: number | null): number {
+  if (referenceMidi === null) {
+    return rootPitchClass + 4 * 12
+  }
+  let bestMidi: number | null = null
+  let bestDiff: number | null = null
+  for (let octave = -1; octave < 10; octave += 1) {
+    const midi = rootPitchClass + (octave + 1) * 12
+    if (midi < 0 || midi > 127) continue
+    const diff = Math.abs(midi - referenceMidi)
+    if (bestMidi === null || bestDiff === null || diff < bestDiff) {
+      bestMidi = midi
+      bestDiff = diff
+    }
+  }
+  return bestMidi ?? rootPitchClass + 4 * 12
+}
+
+function isAbsoluteNoteToken(token: string): boolean {
+  return ABSOLUTE_PATTERN_TOKEN_RE.test(String(token ?? '').trim())
 }
 
 function transposeAbsoluteGroup(params: {
@@ -575,29 +664,71 @@ function transposeAbsoluteGroup(params: {
   const { token, sourceChord, targetChord } = params
   const sourceSpec = parseChordSpec(sourceChord)
   const targetSpec = parseChordSpec(targetChord)
-  const sourceRootMidi = noteNameToMidi(`${sourceSpec.root}4`) ?? 60
-  const targetRootMidi = noteNameToMidi(`${targetSpec.root}4`) ?? 60
-  const targetPrefer = getSpellingPreference(targetSpec.root)
+  const sourceRootPitchClass = noteNameToMidi(`${sourceSpec.root}4`)
+  const targetRootPitchClass = noteNameToMidi(`${targetSpec.root}4`)
+  if (sourceRootPitchClass === null || targetRootPitchClass === null) return token
 
-  return token
+  const sourceLetter = sourceSpec.root[0]?.toUpperCase() ?? 'C'
+  const targetLetter = targetSpec.root[0]?.toUpperCase() ?? 'C'
+  const sourceRootIndex = NOTE_LETTERS.indexOf(sourceLetter as (typeof NOTE_LETTERS)[number])
+  const targetRootIndex = NOTE_LETTERS.indexOf(targetLetter as (typeof NOTE_LETTERS)[number])
+  if (sourceRootIndex < 0 || targetRootIndex < 0) return token
+
+  const parsedParts = token
     .split('+')
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0)
-    .map((noteName) => {
-      const midi = noteNameToMidi(noteName)
-      if (midi === null) return noteName
-      const interval = midi - sourceRootMidi
-      return midiToNoteNameWithPreference(targetRootMidi + interval, targetPrefer)
-    })
-    .join('+')
+    .map((part) => ({
+      part,
+      midi: isAbsoluteNoteToken(part) ? noteNameToMidi(part) : null,
+    }))
+
+  const referenceMidi = parsedParts.reduce<number | null>((current, entry) => {
+    if (entry.midi === null) return current
+    if (current === null || entry.midi < current) return entry.midi
+    return current
+  }, null)
+
+  const sourceRootMidi = chooseRootMidiNear(sourceRootPitchClass % 12, referenceMidi)
+  const targetRootMidi = chooseRootMidiNear(targetRootPitchClass % 12, sourceRootMidi)
+
+  return parsedParts.map(({ part, midi }) => {
+    if (midi === null) return part
+    const letterMatch = /^([A-G])/.exec(part)
+    const noteLetter = letterMatch?.[1]?.toUpperCase()
+    if (!noteLetter) return part
+    const noteIndex = NOTE_LETTERS.indexOf(noteLetter as (typeof NOTE_LETTERS)[number])
+    if (noteIndex < 0) return part
+
+    const degree = ((noteIndex - sourceRootIndex + 7) % 7) + 1
+    const targetNoteLetter = NOTE_LETTERS[(targetRootIndex + degree - 1) % 7]
+    const semitoneOffset = midi - sourceRootMidi
+    const octaveSteps = Math.floor(semitoneOffset / 12)
+    const targetInterval = getDegreeInterval(targetSpec.quality, degree)
+    let targetMidi = targetRootMidi + octaveSteps * 12 + targetInterval
+    while (targetMidi < 0) targetMidi += 12
+    while (targetMidi > 127) targetMidi -= 12
+
+    const targetPitchClass = (targetRootPitchClass + targetInterval) % 12
+    const basePitchClass = BASE_PITCHES[targetNoteLetter]
+    const accidentalDelta = normalizeSemitoneDelta(targetPitchClass - basePitchClass)
+    const accidentalText =
+      accidentalDelta === 0
+        ? ''
+        : accidentalDelta > 0
+          ? '#'.repeat(accidentalDelta)
+          : 'b'.repeat(-accidentalDelta)
+    const octave = Math.floor(targetMidi / 12) - 1
+    return `${targetNoteLetter}${accidentalText}${octave}`
+  }).join('+')
 }
 
 function transposeNotesPattern(params: {
   pattern: string
   targetChord: string
-  sourceChordFamily: string | null
+  sourceChordType: string | null
 }): string {
-  const { pattern, targetChord, sourceChordFamily } = params
+  const { pattern, targetChord, sourceChordType } = params
   if (!pattern) return pattern
   const separator = pattern.includes('_') && !pattern.includes(',') ? '_' : ','
   const tokens = pattern.split(separator).map((entry) => entry.trim()).filter((entry) => entry.length > 0)
@@ -605,11 +736,11 @@ function transposeNotesPattern(params: {
   const mapped = tokens.map((token) => {
     const parts = token.split('+').map((entry) => entry.trim()).filter((entry) => entry.length > 0)
     if (parts.length === 0) return token
-    const isAbsolute = parts.every((part) => ROOT_NOTE_RE.test(part))
-    if (isAbsolute && sourceChordFamily) {
+    const isAbsolute = parts.every((part) => isAbsoluteNoteToken(part))
+    if (isAbsolute && sourceChordType) {
       return transposeAbsoluteGroup({
         token,
-        sourceChord: sourceChordFamily,
+        sourceChord: sourceChordType,
         targetChord,
       })
     }
@@ -681,11 +812,11 @@ function buildGeneratedBassEvents(params: {
     const rhythmEvents = rhythmDurations.map((duration, index) => {
       const startBeat = detail.startBeatInSegment + rhythmDurations.slice(0, index).reduce((sum, value) => sum + value, 0)
       let isRest = false
-      if (index > 0) {
+      if (RHYTHM_TEMPLATE_MAX_AVOID_COUNT > 0 && index > 0) {
         const hasConflict = melodyStartBeats.some((melodyStart) =>
           Math.abs(melodyStart - startBeat) < MELODY_CONFLICT_THRESHOLD,
         )
-        if (hasConflict && avoidCount < DEFAULT_MAX_AVOID_COUNT) {
+        if (hasConflict && avoidCount < RHYTHM_TEMPLATE_MAX_AVOID_COUNT) {
           avoidCount += 1
           isRest = true
         }
@@ -706,7 +837,7 @@ function buildGeneratedBassEvents(params: {
           ? 'none'
           : 'follow'
 
-    let noteTokens = splitPatternTokens(detail.notes)
+    let noteTokens = splitPatternTokens(detail.rawNotes || detail.notes)
     if (octaveMode !== 'follow' && noteTokens.length > 0) {
       noteTokens = splitPatternTokens(applyOctaveToPattern(noteTokens.join(','), octaveMode))
     }
@@ -719,13 +850,17 @@ function buildGeneratedBassEvents(params: {
     void detectDirection(noteTokens)
 
     if (noteTokens.length === 0 && playableRhythmEvents.length > 0) {
+      const sourceChordType = detail.sourceChordType ?? detail.sourceChordFamily
       const fetched = await fetchNotesFromRhythmLibrary({
-        chordFamily: detail.sourceChordFamily,
+        chordFamily: sourceChordType,
         noteCount: playableRhythmEvents.length,
         direction: null,
         structure: targetStructure,
       })
       noteTokens = splitPatternTokens(fetched ?? '')
+      if (octaveMode !== 'follow' && noteTokens.length > 0) {
+        noteTokens = splitPatternTokens(applyOctaveToPattern(noteTokens.join(','), octaveMode))
+      }
     }
 
     if (noteTokens.length === 1 && rhythmEvents.length > 1) {
@@ -771,26 +906,49 @@ function buildGeneratedBassEvents(params: {
 
       const token = playableTokens[playableTokenIndex]?.trim() ?? ''
       playableTokenIndex += 1
-      const transposed = transposeNotesPattern({
-        pattern: token,
-        targetChord: detail.chordName,
-        sourceChordFamily: detail.sourceChordFamily,
-      })
-      const rawPitchNames = transposed
+      const rawParts = token
         .split('+')
         .map((entry) => entry.trim())
         .filter((entry) => entry.length > 0 && entry.toUpperCase() !== 'R')
-
-      const pitchNames = [...new Set(
-        rawPitchNames
-          .map((noteName) => {
-            const midi = noteNameToMidi(noteName)
-            if (midi === null) return null
-            const clampedMidi = clampMidiIntoRange(midi, noteRange.minMidi, noteRange.maxMidi)
-            return midiToNoteNameWithPreference(clampedMidi, getSpellingPreference(detail.chordName))
-          })
-          .filter((noteName): noteName is string => noteName !== null),
-      )].sort((left, right) => (noteNameToMidi(left) ?? 0) - (noteNameToMidi(right) ?? 0))
+      const tokenWasAbsolute = rawParts.length > 0 && rawParts.every((part) => isAbsoluteNoteToken(part))
+      const transposed = transposeNotesPattern({
+        pattern: token,
+        targetChord: detail.chordName,
+        sourceChordType: detail.sourceChordType ?? detail.sourceChordFamily,
+      })
+      const transposedPitchNames = transposed
+        .split('+')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0 && entry.toUpperCase() !== 'R')
+      const pitchEntries = transposedPitchNames
+        .map((noteName, sourceIndex) => {
+          const midi = noteNameToMidi(noteName)
+          if (midi === null) return null
+          if (tokenWasAbsolute) {
+            return {
+              midi,
+              noteName,
+              sourceIndex,
+            }
+          }
+          const clampedMidi = clampMidiIntoRange(midi, noteRange.minMidi, noteRange.maxMidi)
+          return {
+            midi: clampedMidi,
+            noteName: midiToNoteNameWithSpelling(clampedMidi, detail.chordName),
+            sourceIndex,
+          }
+        })
+        .filter((entry): entry is { midi: number; noteName: string; sourceIndex: number } => entry !== null)
+        .sort((left, right) => left.midi - right.midi || left.sourceIndex - right.sourceIndex)
+      const pitchNames = pitchEntries.reduce<string[]>((names, entry) => {
+        const previousName = names[names.length - 1]
+        const previousMidi = previousName ? noteNameToMidi(previousName) : null
+        if (previousMidi !== null && previousMidi === entry.midi) {
+          return names
+        }
+        names.push(entry.noteName)
+        return names
+      }, [])
 
       return {
         pairIndex: detail.pairIndex,
@@ -1013,6 +1171,7 @@ export async function buildSegmentRhythmTemplateApplication(params: {
   measureTimeSignaturesByMeasure: TimeSignature[] | null
   measureKeyFifthsByMeasure: number[] | null
   patternData: string
+  seedTemplDetails?: SegmentRhythmTemplateDetail[] | null
 }): Promise<{
   durationCombo: string
   templDetails: SegmentRhythmTemplateDetail[]
@@ -1026,6 +1185,7 @@ export async function buildSegmentRhythmTemplateApplication(params: {
     measureTimeSignaturesByMeasure,
     measureKeyFifthsByMeasure,
     patternData,
+    seedTemplDetails = null,
   } = params
 
   const durationCombo = buildSegmentDurationCombo({
@@ -1042,6 +1202,7 @@ export async function buildSegmentRhythmTemplateApplication(params: {
     patternData,
     chordRulerEntriesByPair,
     measureTimeSignaturesByMeasure,
+    seedTemplDetails,
   })
   if (templDetails.length === 0) {
     throw new Error('所选律动模板无法映射到当前段落的和弦序列。')
@@ -1068,6 +1229,8 @@ export async function buildSegmentRhythmTemplateApplication(params: {
     durationCombo,
     templDetails: templDetails.map((detail) => ({
       notes: detail.notes,
+      rawNotes: detail.rawNotes,
+      sourceChordType: detail.sourceChordType,
       rhythm: detail.rhythm,
       pitchRange: detail.pitchRange,
       structureType: detail.structureType,
