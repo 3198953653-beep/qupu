@@ -1,4 +1,5 @@
 import { useCallback, useMemo, type MutableRefObject } from 'react'
+import type { ChordRulerEntry } from '../chordRuler'
 import { buildMeasureCoordinateDebugReport } from '../scoreDebugReports'
 import type { PlaybackTimelineEvent } from '../playbackTimeline'
 import { useScoreDebugApi } from './useScoreDebugApi'
@@ -16,6 +17,7 @@ import type {
   MeasurePair,
   NoteLayout,
   PlaybackCursorState,
+  PedalSpan,
   Selection,
   SpacingLayoutMode,
 } from '../types'
@@ -29,6 +31,8 @@ export function useScoreRuntimeDebugController(params: {
   noteLayoutsByPairRef: MutableRefObject<Map<number, NoteLayout[]>>
   measureTimelineBundlesRef: MutableRefObject<Map<number, MeasureTimelineBundle>>
   measurePairsRef: MutableRefObject<MeasurePair[]>
+  chordRulerEntriesByPair: ChordRulerEntry[][] | null
+  pedalSpans: PedalSpan[]
   dragDebugFramesRef: MutableRefObject<DragDebugSnapshot[]>
   dragRef: MutableRefObject<DragState | null>
   scoreOverlayRef: MutableRefObject<HTMLCanvasElement | null>
@@ -91,6 +95,8 @@ export function useScoreRuntimeDebugController(params: {
     noteLayoutsByPairRef,
     measureTimelineBundlesRef,
     measurePairsRef,
+    chordRulerEntriesByPair,
+    pedalSpans,
     dragDebugFramesRef,
     dragRef,
     scoreOverlayRef,
@@ -176,6 +182,9 @@ export function useScoreRuntimeDebugController(params: {
     osmdPreviewLastRebalanceStatsRef,
     osmdPreviewInstanceRef,
     dragDebugFramesRef,
+    measureLayoutsRef,
+    noteLayoutsByPairRef,
+    measureTimelineBundlesRef,
     notePreviewEventsRef,
     playbackCursorState,
     playheadStatus,
@@ -188,6 +197,8 @@ export function useScoreRuntimeDebugController(params: {
     applyChordSelectionRange,
     selectedSelectionsRef,
     measurePairsRef,
+    chordRulerEntriesByPair,
+    pedalSpans,
     activeChordSelection,
     selectedMeasureHighlightRectPx,
     chordRulerMarkerMetaByKey,
@@ -217,7 +228,12 @@ export function useScoreRuntimeDebugController(params: {
     importFeedbackRef,
     importMusicXmlTextWithCollapseReset,
     latestPlayheadDebugSnapshotRef,
+    measureLayoutsRef,
     measurePairsRef,
+    measureTimelineBundlesRef,
+    noteLayoutsByPairRef,
+    chordRulerEntriesByPair,
+    pedalSpans,
     measurePlayheadDebugLogRow,
     notePreviewEventsRef,
     osmdPreviewInstanceRef,

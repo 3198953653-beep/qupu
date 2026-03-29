@@ -1,7 +1,8 @@
 import { getBeatTicksByTimeSignature } from './chordRuler'
+import { collectMeasureTickRangeNotes } from './chordRangeNoteCoverage'
 import { resolvePairTimeSignature } from './measureRestUtils'
 import type { ChordRulerEntry } from './chordRuler'
-import type { PedalApplyScope, PedalSpan, PedalStyle, TimeSignature } from './types'
+import type { MeasurePair, PedalApplyScope, PedalSpan, PedalStyle, TimeSignature } from './types'
 
 export const PEDAL_RETRACT_BEAT_RATIO = 0.1
 export const PEDAL_MIN_VISUAL_GAP_PX = 4
@@ -105,16 +106,18 @@ export function spanIntersectsPedalScope(span: PedalSpan, scope: PedalTargetScop
 export function buildPedalSpansForScope(params: {
   style: PedalStyle
   scope: PedalTargetScopeRange
+  measurePairs: MeasurePair[]
   chordRulerEntriesByPair: ChordRulerEntry[][] | null
   measureTimeSignaturesByMeasure: TimeSignature[] | null
 }): PedalSpan[] {
   const {
     style,
     scope,
+    measurePairs,
     chordRulerEntriesByPair,
     measureTimeSignaturesByMeasure,
   } = params
-  if (!chordRulerEntriesByPair || chordRulerEntriesByPair.length === 0) return []
+  if (!chordRulerEntriesByPair || chordRulerEntriesByPair.length === 0 || measurePairs.length === 0) return []
 
   const nextSpans: PedalSpan[] = []
   chordRulerEntriesByPair.forEach((entries, pairIndex) => {
@@ -137,7 +140,27 @@ export function buildPedalSpansForScope(params: {
       const startTick = normalizeTick(entry.startTick)
       const rawEndTick = normalizeTick(entry.endTick)
       if (rawEndTick <= startTick) return
-      const endTick = Math.max(startTick + 1, rawEndTick - retractTicks)
+      const pair = measurePairs[pairIndex]
+      const latestOnsetTickInRange = pair
+        ? collectMeasureTickRangeNotes({
+            pair,
+            startTickInclusive: startTick,
+            endTickExclusive: rawEndTick,
+            includeRests: false,
+          }).reduce<number | null>((latestTick, noteMatch) => {
+            if (!Number.isFinite(noteMatch.onsetTickInMeasure)) return latestTick
+            if (latestTick === null || noteMatch.onsetTickInMeasure > latestTick) {
+              return noteMatch.onsetTickInMeasure
+            }
+            return latestTick
+          }, null)
+        : null
+      const candidateEndTick = Math.max(startTick + 1, rawEndTick - retractTicks)
+      const safeEndTick =
+        latestOnsetTickInRange !== null
+          ? Math.max(candidateEndTick, latestOnsetTickInRange + 1)
+          : candidateEndTick
+      const endTick = Math.min(rawEndTick, safeEndTick)
       if (endTick <= startTick) return
 
       nextSpans.push(

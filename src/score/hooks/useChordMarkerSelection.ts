@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type MutableRefObject } from 'react'
-import { buildStaffOnsetTicks } from '../selectionTimelineRange'
+import { collectMeasureTickRangeNotes } from '../chordRangeNoteCoverage'
 import type { MeasurePair, Selection } from '../types'
 import type { ActiveChordSelection, ChordRulerMarkerMeta } from './chordMarkerTypes'
 
@@ -8,26 +8,21 @@ function buildSelectionsForMeasureTickRange(
   startTickInclusive: number,
   endTickExclusive: number,
 ): Selection[] {
-  const safeStartTick = Math.max(0, Math.round(startTickInclusive))
-  const safeEndTick = Math.max(safeStartTick, Math.round(endTickExclusive))
-  if (safeEndTick <= safeStartTick) return []
   const selections: Selection[] = []
-  ;(['treble', 'bass'] as const).forEach((staff) => {
-    const notes = staff === 'treble' ? pair.treble : pair.bass
-    const onsetTicksByNoteIndex = buildStaffOnsetTicks(notes)
-    notes.forEach((note, noteIndex) => {
-      const onsetTick = onsetTicksByNoteIndex[noteIndex]
-      if (!Number.isFinite(onsetTick)) return
-      if (onsetTick < safeStartTick || onsetTick >= safeEndTick) return
-      const maxKeyIndex = note.chordPitches?.length ?? 0
-      for (let keyIndex = 0; keyIndex <= maxKeyIndex; keyIndex += 1) {
-        selections.push({
-          noteId: note.id,
-          staff,
-          keyIndex,
-        })
-      }
-    })
+  collectMeasureTickRangeNotes({
+    pair,
+    startTickInclusive,
+    endTickExclusive,
+    includeRests: true,
+  }).forEach(({ staff, note }) => {
+    const maxKeyIndex = note.chordPitches?.length ?? 0
+    for (let keyIndex = 0; keyIndex <= maxKeyIndex; keyIndex += 1) {
+      selections.push({
+        noteId: note.id,
+        staff,
+        keyIndex,
+      })
+    }
   })
   return selections
 }

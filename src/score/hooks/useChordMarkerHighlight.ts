@@ -1,5 +1,8 @@
 import { useCallback, useMemo, type MutableRefObject } from 'react'
-import { buildStaffOnsetTicks } from '../selectionTimelineRange'
+import {
+  collectMeasureTickRangeLayoutCoverage,
+  getMeasureTickRangeLayoutBounds,
+} from '../chordRangeNoteCoverage'
 import type { MeasureFrame, MeasureLayout, MeasurePair, NoteLayout } from '../types'
 import type { ActiveChordSelection, ActiveTimelineSegmentHighlight, MeasureSelectionScope } from './chordMarkerTypes'
 
@@ -77,86 +80,14 @@ export function useChordMarkerHighlight(params: {
     if (!pair) return null
     const pairLayouts = noteLayoutsByPairRef.current.get(highlightParams.pairIndex) ?? []
     if (pairLayouts.length === 0) return null
-
-    const layoutByStaffNoteIndex = new Map<string, NoteLayout>()
-    pairLayouts.forEach((layout) => {
-      layoutByStaffNoteIndex.set(`${layout.staff}:${layout.noteIndex}`, layout)
+    const coverage = collectMeasureTickRangeLayoutCoverage({
+      pair,
+      pairLayouts,
+      startTickInclusive: safeStartTick,
+      endTickExclusive: safeEndTick,
+      includeRests: true,
     })
-
-    let minLeftX = Number.POSITIVE_INFINITY
-    let maxRightX = Number.NEGATIVE_INFINITY
-    const acceptBounds = (left: number, right: number) => {
-      if (!Number.isFinite(left) || !Number.isFinite(right)) return
-      if (right <= left) return
-      minLeftX = Math.min(minLeftX, left)
-      maxRightX = Math.max(maxRightX, right)
-    }
-
-    ;(['treble', 'bass'] as const).forEach((staff) => {
-      const staffNotes = staff === 'treble' ? pair.treble : pair.bass
-      const onsetTicksByNoteIndex = buildStaffOnsetTicks(staffNotes)
-      staffNotes.forEach((_, noteIndex) => {
-        const onsetTick = onsetTicksByNoteIndex[noteIndex]
-        if (!Number.isFinite(onsetTick)) return
-        if (onsetTick < safeStartTick || onsetTick >= safeEndTick) return
-
-        const layout = layoutByStaffNoteIndex.get(`${staff}:${noteIndex}`) ?? null
-        if (!layout) return
-
-        const leftCandidates: number[] = []
-        if (Number.isFinite(layout.x)) leftCandidates.push(layout.x)
-        layout.noteHeads.forEach((head) => {
-          if (Number.isFinite(head.hitMinX)) {
-            leftCandidates.push(head.hitMinX as number)
-          } else if (Number.isFinite(head.x)) {
-            leftCandidates.push(head.x)
-          }
-        })
-        layout.accidentalLayouts.forEach((accidental) => {
-          if (Number.isFinite(accidental.hitMinX)) {
-            leftCandidates.push(accidental.hitMinX as number)
-            return
-          }
-          if (!Number.isFinite(accidental.x)) return
-          if (Number.isFinite(accidental.hitRadiusX)) {
-            leftCandidates.push(accidental.x - (accidental.hitRadiusX as number))
-            return
-          }
-          leftCandidates.push(accidental.x - 4)
-        })
-
-        const rightCandidates: number[] = []
-        layout.noteHeads.forEach((head) => {
-          if (Number.isFinite(head.hitMaxX)) {
-            rightCandidates.push(head.hitMaxX as number)
-            return
-          }
-          if (Number.isFinite(head.x)) {
-            rightCandidates.push(head.x + 9)
-          }
-        })
-        if (Number.isFinite(layout.spacingRightX)) {
-          rightCandidates.push(layout.spacingRightX)
-        }
-        if (rightCandidates.length === 0 && Number.isFinite(layout.x)) {
-          rightCandidates.push(layout.x + 9)
-        }
-        if (rightCandidates.length === 0 && Number.isFinite(layout.rightX)) {
-          rightCandidates.push(layout.rightX)
-        }
-
-        const noteLeft = leftCandidates.length > 0 ? Math.min(...leftCandidates) : Number.POSITIVE_INFINITY
-        const noteRight = rightCandidates.length > 0 ? Math.max(...rightCandidates) : Number.NEGATIVE_INFINITY
-        acceptBounds(noteLeft, noteRight)
-      })
-    })
-
-    if (!Number.isFinite(minLeftX) || !Number.isFinite(maxRightX)) return null
-    if (maxRightX <= minLeftX) return null
-    return {
-      leftXRaw: minLeftX,
-      rightXRaw: maxRightX,
-    }
+    return getMeasureTickRangeLayoutBounds(coverage, 'selection')
   }, [measurePairsRef, noteLayoutsByPairRef])
 
   return useMemo(() => {

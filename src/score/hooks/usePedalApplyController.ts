@@ -9,6 +9,7 @@ import {
 } from '../pedalUtils'
 import type { ChordRulerEntry } from '../chordRuler'
 import type {
+  MeasurePair,
   PedalApplyScope,
   PedalSpan,
   PedalStyle,
@@ -62,6 +63,7 @@ function countChordEntriesInScope(params: {
 }
 
 export function usePedalApplyController(params: {
+  measurePairs: MeasurePair[]
   chordRulerEntriesByPair: ChordRulerEntry[][] | null
   measureTimeSignaturesByMeasure: TimeSignature[] | null
   chordRulerMarkerMetaByKey: Map<string, ChordRulerMarkerMeta>
@@ -71,6 +73,7 @@ export function usePedalApplyController(params: {
   setPedalSpans: (value: PedalSpan[] | ((current: PedalSpan[]) => PedalSpan[])) => void
 }) {
   const {
+    measurePairs,
     chordRulerEntriesByPair,
     measureTimeSignaturesByMeasure,
     chordRulerMarkerMetaByKey,
@@ -198,6 +201,7 @@ export function usePedalApplyController(params: {
     const nextSpans = buildPedalSpansForScope({
       style,
       scope,
+      measurePairs,
       chordRulerEntriesByPair,
       measureTimeSignaturesByMeasure,
     })
@@ -219,6 +223,7 @@ export function usePedalApplyController(params: {
     setIsOpen(false)
   }, [
     chordRulerEntriesByPair,
+    measurePairs,
     measureTimeSignaturesByMeasure,
     pedalSpans,
     resolveScopeRange,

@@ -4,6 +4,7 @@ import { useScoreEditorRefs } from './useScoreEditorRefs'
 import { useHorizontalScoreLayout } from './useHorizontalScoreLayout'
 import { useScoreWorkspaceSelectionBindings } from './useScoreWorkspaceSelectionBindings'
 import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
+import type { ChordRulerEntry } from '../chordRuler'
 import type { Pitch, ScoreNote } from '../types'
 import type { MeasurePair } from '../types'
 import type { useScoreAudioPreviewController } from './useScoreAudioPreviewController'
@@ -27,6 +28,7 @@ export function useScoreWorkspaceSurfaceRuntime(params: {
     layoutStabilityKey: string
     renderQualityScale: ReturnType<typeof useHorizontalScoreLayout>['renderQualityScale']
     supplementalSpacingTicksByPair: ReturnType<typeof useHorizontalScoreLayout>['supplementalSpacingTicksByPair']
+    chordRulerEntriesByPair: ChordRulerEntry[][] | null
     spacingLayoutMode: ReturnType<typeof useHorizontalScoreLayout>['spacingLayoutMode']
     grandStaffLayoutMetrics: GrandStaffLayoutMetrics
     trebleNoteById: Map<string, ScoreNote>
@@ -93,6 +95,7 @@ export function useScoreWorkspaceSurfaceRuntime(params: {
       scoreHeight: layout.scoreHeight,
       measurePairs,
       pedalSpans: appState.pedalSpans,
+      chordRulerEntriesByPair: layout.chordRulerEntriesByPair,
       systemRanges: layout.systemRanges,
       visibleSystemRange: layout.visibleSystemRange,
       renderOriginSystemIndex: layout.visibleSystemRange.start,

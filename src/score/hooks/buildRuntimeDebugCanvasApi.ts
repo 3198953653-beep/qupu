@@ -1,9 +1,14 @@
 import type { MutableRefObject } from 'react'
+import type { ChordRulerEntry } from '../chordRuler'
+import { buildPedalRenderPlan } from '../render/drawPedalSpans'
+import type { MeasureTimelineBundle } from '../timeline/types'
 import type {
   DragDebugSnapshot,
   DragState,
   MeasureLayout,
   MeasurePair,
+  NoteLayout,
+  PedalSpan,
   ScoreNote,
 } from '../types'
 import type { OsmdPreviewInstance, OsmdPreviewRebalanceStats } from './useOsmdPreviewController'
@@ -15,7 +20,12 @@ export function buildRuntimeDebugCanvasApi(params: {
   osmdPreviewInstanceRef: MutableRefObject<OsmdPreviewInstance | null>
   dragDebugFramesRef: MutableRefObject<DragDebugSnapshot[]>
   dragRef: MutableRefObject<DragState | null>
+  measureLayoutsRef: MutableRefObject<Map<number, MeasureLayout>>
+  noteLayoutsByPairRef: MutableRefObject<Map<number, NoteLayout[]>>
+  measureTimelineBundlesRef: MutableRefObject<Map<number, MeasureTimelineBundle>>
   measurePairsRef: MutableRefObject<MeasurePair[]>
+  chordRulerEntriesByPair: ChordRulerEntry[][] | null
+  pedalSpans: PedalSpan[]
   scoreOverlayRef: MutableRefObject<HTMLCanvasElement | null>
   scoreRef: MutableRefObject<HTMLCanvasElement | null>
   overlayLastRectRef: MutableRefObject<MeasureLayout['overlayRect'] | null>
@@ -32,7 +42,12 @@ export function buildRuntimeDebugCanvasApi(params: {
     osmdPreviewInstanceRef,
     dragDebugFramesRef,
     dragRef,
+    measureLayoutsRef,
+    noteLayoutsByPairRef,
+    measureTimelineBundlesRef,
     measurePairsRef,
+    chordRulerEntriesByPair,
+    pedalSpans,
     scoreOverlayRef,
     scoreRef,
     overlayLastRectRef,
@@ -48,6 +63,31 @@ export function buildRuntimeDebugCanvasApi(params: {
     getOsmdPreviewSystemMetrics: () => dumpOsmdPreviewSystemMetrics(),
     getOsmdPreviewRebalanceStats: () => osmdPreviewLastRebalanceStatsRef.current,
     getOsmdPreviewInstance: () => osmdPreviewInstanceRef.current,
+    getPedalRenderPlan: () => {
+      const canvasContext = scoreRef.current?.getContext('2d') ?? null
+      return buildPedalRenderPlan({
+        context2D: canvasContext,
+        measurePairs: measurePairsRef.current,
+        pedalSpans,
+        chordRulerEntriesByPair,
+        measureLayouts: measureLayoutsRef.current,
+        measureTimelineBundles: measureTimelineBundlesRef.current,
+        noteLayoutsByPair: noteLayoutsByPairRef.current,
+      }).map((entry) => ({
+        span: { ...entry.span },
+        baseStartX: entry.baseStartX,
+        baseEndX: entry.baseEndX,
+        startX: entry.startX,
+        endX: entry.endX,
+        occupiedStartX: entry.occupiedStartX,
+        occupiedEndX: entry.occupiedEndX,
+        baseBaselineY: entry.baseBaselineY,
+        baselineY: entry.baselineY,
+        laneIndex: entry.laneIndex,
+        requiredStartX: entry.requiredStartX,
+        requiredEndX: entry.requiredEndX,
+      }))
+    },
     getDragPreviewFrames: () =>
       dragDebugFramesRef.current.map((frame) => ({
         ...frame,

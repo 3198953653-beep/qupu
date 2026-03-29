@@ -1,7 +1,12 @@
-import { getMeasureTicksFromTimeSignature } from '../chordRuler'
+import { getMeasureTicksFromTimeSignature, type ChordRulerEntry } from '../chordRuler'
+import {
+  collectMeasureTickRangeLayoutCoverage,
+  getMeasureTickRangeLayoutBounds,
+} from '../chordRangeNoteCoverage'
+import { PEDAL_LANE_ROW_STEP_PX } from '../grandStaffLayout'
 import { PEDAL_MIN_VISUAL_GAP_PX, sortPedalSpans } from '../pedalUtils'
 import type { MeasureTimelineBundle } from '../timeline/types'
-import type { MeasureLayout, PedalSpan } from '../types'
+import type { MeasureLayout, MeasurePair, NoteLayout, PedalSpan } from '../types'
 
 const PEDAL_BASELINE_OFFSET_PX = 18
 const PEDAL_BRACKET_HOOK_HEIGHT_PX = 10
@@ -9,6 +14,8 @@ const PEDAL_TEXT_MARGIN_RIGHT_PX = 6
 const PEDAL_MIN_DRAW_WIDTH_PX = 4
 const PEDAL_COLOR = '#111111'
 const PEDAL_TEXT_FONT = 'italic 13px "Times New Roman", Georgia, serif'
+const PEDAL_TEXT_LABEL = 'Ped'
+const PEDAL_RELEASE_LABEL = '*'
 
 function getMeasureContentBounds(measureLayout: MeasureLayout): {
   startX: number
@@ -105,48 +112,289 @@ function drawBracketShape(params: {
 
 type VisualPedalSpan = {
   span: PedalSpan
+  baseStartX: number
+  baseEndX: number
   startX: number
   endX: number
+  occupiedStartX: number
+  occupiedEndX: number
+  baseBaselineY: number
   baselineY: number
+  laneIndex: number
+  requiredStartX: number | null
+  requiredEndX: number | null
 }
 
-export function drawPedalSpans(params: {
+type SpanCoverageRange = {
+  startPairIndex: number
+  startTickInclusive: number
+  endPairIndex: number
+  endTickExclusive: number
+}
+
+function normalizeTick(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
+}
+
+function resolveSpanCoverageRange(params: {
+  span: PedalSpan
+  chordRulerEntriesByPair: ChordRulerEntry[][] | null | undefined
+}): SpanCoverageRange {
+  const { span, chordRulerEntriesByPair } = params
+  const startTickInclusive = normalizeTick(span.startTick)
+  const endTickExclusive = Math.max(startTickInclusive + 1, normalizeTick(span.endTick))
+  if (span.startPairIndex !== span.endPairIndex) {
+    return {
+      startPairIndex: span.startPairIndex,
+      startTickInclusive,
+      endPairIndex: span.endPairIndex,
+      endTickExclusive,
+    }
+  }
+  const matchingEntry = chordRulerEntriesByPair?.[span.startPairIndex]?.find((entry) =>
+    normalizeTick(entry.startTick) === startTickInclusive && normalizeTick(entry.endTick) >= endTickExclusive,
+  ) ?? null
+  if (!matchingEntry) {
+    return {
+      startPairIndex: span.startPairIndex,
+      startTickInclusive,
+      endPairIndex: span.endPairIndex,
+      endTickExclusive,
+    }
+  }
+  return {
+    startPairIndex: span.startPairIndex,
+    startTickInclusive,
+    endPairIndex: span.startPairIndex,
+    endTickExclusive: Math.max(startTickInclusive + 1, normalizeTick(matchingEntry.endTick)),
+  }
+}
+
+function collectSpanOnsetReserveBounds(params: {
+  coverageRange: SpanCoverageRange
+  measureLayouts: Map<number, MeasureLayout>
+}): { leftXRaw: number; rightXRaw: number } | null {
+  const { coverageRange, measureLayouts } = params
+  let minLeftX = Number.POSITIVE_INFINITY
+  let maxRightX = Number.NEGATIVE_INFINITY
+
+  for (let pairIndex = coverageRange.startPairIndex; pairIndex <= coverageRange.endPairIndex; pairIndex += 1) {
+    const measureLayout = measureLayouts.get(pairIndex)
+    const onsetReserves = measureLayout?.spacingOnsetReserves ?? []
+    onsetReserves.forEach((reserve) => {
+      const onsetTicks = normalizeTick(reserve.onsetTicks)
+      const startTickInclusive = pairIndex === coverageRange.startPairIndex ? coverageRange.startTickInclusive : 0
+      const endTickExclusive = pairIndex === coverageRange.endPairIndex
+        ? coverageRange.endTickExclusive
+        : Number.MAX_SAFE_INTEGER
+      if (onsetTicks < startTickInclusive || onsetTicks >= endTickExclusive) return
+      if (
+        !Number.isFinite(reserve.finalX) ||
+        !Number.isFinite(reserve.leftOccupiedInsetPx) ||
+        !Number.isFinite(reserve.rightOccupiedTailPx)
+      ) {
+        return
+      }
+      if (reserve.leftOccupiedInsetPx <= 0 && reserve.rightOccupiedTailPx <= 0) return
+      const leftX = reserve.finalX - reserve.leftOccupiedInsetPx
+      const rightX = reserve.finalX + reserve.rightOccupiedTailPx
+      if (!Number.isFinite(leftX) || !Number.isFinite(rightX) || rightX <= leftX) return
+      minLeftX = Math.min(minLeftX, leftX)
+      maxRightX = Math.max(maxRightX, rightX)
+    })
+  }
+
+  if (!Number.isFinite(minLeftX) || !Number.isFinite(maxRightX) || maxRightX <= minLeftX) {
+    return null
+  }
+  return {
+    leftXRaw: minLeftX,
+    rightXRaw: maxRightX,
+  }
+}
+
+function collectSpanCoverageBounds(params: {
+  coverageRange: SpanCoverageRange
+  measurePairs: MeasurePair[]
+  noteLayoutsByPair: Map<number, NoteLayout[]>
+}): { leftXRaw: number; rightXRaw: number } | null {
+  const { coverageRange, measurePairs, noteLayoutsByPair } = params
+  const coverage: ReturnType<typeof collectMeasureTickRangeLayoutCoverage> = []
+  for (let pairIndex = coverageRange.startPairIndex; pairIndex <= coverageRange.endPairIndex; pairIndex += 1) {
+    const pair = measurePairs[pairIndex]
+    const pairLayouts = noteLayoutsByPair.get(pairIndex) ?? []
+    if (!pair || pairLayouts.length === 0) continue
+    coverage.push(...collectMeasureTickRangeLayoutCoverage({
+      pair,
+      pairLayouts,
+      startTickInclusive: pairIndex === coverageRange.startPairIndex ? coverageRange.startTickInclusive : 0,
+      endTickExclusive: pairIndex === coverageRange.endPairIndex
+        ? coverageRange.endTickExclusive
+        : Number.MAX_SAFE_INTEGER,
+      includeRests: false,
+    }))
+  }
+  return getMeasureTickRangeLayoutBounds(coverage, 'visual')
+}
+
+function getPedalOccupiedEndX(params: {
+  span: PedalSpan
+  endX: number
+  releaseWidthPx: number
+}): number {
+  const { span, endX, releaseWidthPx } = params
+  if (span.style === 'text') {
+    return endX + releaseWidthPx / 2
+  }
+  return endX
+}
+
+export function buildPedalRenderPlan(params: {
   context2D: CanvasRenderingContext2D | null | undefined
+  measurePairs: MeasurePair[]
   pedalSpans: PedalSpan[]
+  chordRulerEntriesByPair?: ChordRulerEntry[][] | null
   measureLayouts: Map<number, MeasureLayout>
   measureTimelineBundles: Map<number, MeasureTimelineBundle>
-}): void {
-  const { context2D, pedalSpans, measureLayouts, measureTimelineBundles } = params
-  if (!context2D || pedalSpans.length === 0 || measureLayouts.size === 0) return
+  noteLayoutsByPair: Map<number, NoteLayout[]>
+}): VisualPedalSpan[] {
+  const {
+    context2D,
+    measurePairs,
+    pedalSpans,
+    chordRulerEntriesByPair = null,
+    measureLayouts,
+    measureTimelineBundles,
+    noteLayoutsByPair,
+  } = params
+  if (!context2D || pedalSpans.length === 0 || measureLayouts.size === 0) return []
 
-  const visualSpans: VisualPedalSpan[] = sortPedalSpans(pedalSpans).flatMap((span) => {
+  context2D.save()
+  context2D.font = PEDAL_TEXT_FONT
+  const releaseWidthPx = Math.max(4, context2D.measureText(PEDAL_RELEASE_LABEL).width)
+  context2D.restore()
+
+  const baseEntries: VisualPedalSpan[] = sortPedalSpans(pedalSpans).flatMap((span) => {
     const startMeasureLayout = measureLayouts.get(span.startPairIndex)
     const endMeasureLayout = measureLayouts.get(span.endPairIndex)
     if (!startMeasureLayout || !endMeasureLayout) return []
-    const startX = resolveTickX({
+    const coverageRange = resolveSpanCoverageRange({
+      span,
+      chordRulerEntriesByPair,
+    })
+
+    const baseStartX = resolveTickX({
       tick: span.startTick,
       measureLayout: startMeasureLayout,
       timelineBundle: measureTimelineBundles.get(span.startPairIndex),
     })
-    const endX = resolveTickX({
+    const baseEndX = resolveTickX({
       tick: span.endTick,
       measureLayout: endMeasureLayout,
       timelineBundle: measureTimelineBundles.get(span.endPairIndex),
     })
-    if (!Number.isFinite(startX) || !Number.isFinite(endX)) return []
-    const baselineY = (Number.isFinite(startMeasureLayout.bassLineBottomY)
+    if (!Number.isFinite(baseStartX) || !Number.isFinite(baseEndX)) return []
+
+    const coverageBounds =
+      collectSpanOnsetReserveBounds({
+        coverageRange,
+        measureLayouts,
+      }) ??
+      collectSpanCoverageBounds({
+        coverageRange,
+        measurePairs,
+        noteLayoutsByPair,
+      })
+    const requiredStartX = coverageBounds?.leftXRaw ?? null
+    const requiredEndX = coverageBounds?.rightXRaw ?? null
+    const startX = Number.isFinite(requiredStartX)
+      ? Math.min(baseStartX as number, requiredStartX as number)
+      : (baseStartX as number)
+    const endX = Math.max(
+      baseEndX as number,
+      startX + PEDAL_MIN_DRAW_WIDTH_PX,
+      Number.isFinite(requiredEndX) ? (requiredEndX as number) : Number.NEGATIVE_INFINITY,
+    )
+    const baseBaselineY = (Number.isFinite(startMeasureLayout.bassLineBottomY)
       ? startMeasureLayout.bassLineBottomY
       : startMeasureLayout.bassY + 40) + PEDAL_BASELINE_OFFSET_PX
-    if (!Number.isFinite(baselineY)) return []
+    if (!Number.isFinite(baseBaselineY)) return []
+
     return [{
       span,
-      startX: startX as number,
-      endX: endX as number,
-      baselineY,
+      baseStartX: baseStartX as number,
+      baseEndX: baseEndX as number,
+      startX,
+      endX,
+      occupiedStartX: startX,
+      occupiedEndX: getPedalOccupiedEndX({
+        span,
+        endX,
+        releaseWidthPx,
+      }),
+      baseBaselineY,
+      baselineY: baseBaselineY,
+      laneIndex: 0,
+      requiredStartX,
+      requiredEndX,
     }]
   })
 
+  const laneStatesByBaselineKey = new Map<string, Array<{ occupiedEndX: number }>>()
+  return baseEntries.map((entry) => {
+    const baselineKey = entry.baseBaselineY.toFixed(2)
+    const laneStates = laneStatesByBaselineKey.get(baselineKey) ?? []
+    let laneIndex = 0
+    while (laneIndex < laneStates.length) {
+      const laneState = laneStates[laneIndex]
+      if (entry.occupiedStartX >= laneState.occupiedEndX + PEDAL_MIN_VISUAL_GAP_PX) break
+      laneIndex += 1
+    }
+    if (laneIndex === laneStates.length) {
+      laneStates.push({ occupiedEndX: entry.occupiedEndX })
+    } else {
+      laneStates[laneIndex].occupiedEndX = entry.occupiedEndX
+    }
+    laneStatesByBaselineKey.set(baselineKey, laneStates)
+
+    return {
+      ...entry,
+      laneIndex,
+      baselineY: entry.baseBaselineY + laneIndex * PEDAL_LANE_ROW_STEP_PX,
+    }
+  })
+}
+
+export function drawPedalSpans(params: {
+  context2D: CanvasRenderingContext2D | null | undefined
+  measurePairs: MeasurePair[]
+  pedalSpans: PedalSpan[]
+  chordRulerEntriesByPair?: ChordRulerEntry[][] | null
+  measureLayouts: Map<number, MeasureLayout>
+  measureTimelineBundles: Map<number, MeasureTimelineBundle>
+  noteLayoutsByPair: Map<number, NoteLayout[]>
+}): void {
+  const {
+    context2D,
+    measurePairs,
+    pedalSpans,
+    chordRulerEntriesByPair = null,
+    measureLayouts,
+    measureTimelineBundles,
+    noteLayoutsByPair,
+  } = params
+  const visualSpans = buildPedalRenderPlan({
+    context2D,
+    measurePairs,
+    pedalSpans,
+    chordRulerEntriesByPair,
+    measureLayouts,
+    measureTimelineBundles,
+    noteLayoutsByPair,
+  })
+
   if (visualSpans.length === 0) return
+  if (!context2D) return
 
   context2D.save()
   context2D.strokeStyle = PEDAL_COLOR
@@ -157,23 +405,16 @@ export function drawPedalSpans(params: {
   context2D.font = PEDAL_TEXT_FONT
   context2D.textBaseline = 'alphabetic'
 
-  visualSpans.forEach((entry, index) => {
-    const nextEntry = visualSpans[index + 1] ?? null
-    let startX = entry.startX
-    let endX = entry.endX
-    if (nextEntry && Number.isFinite(nextEntry.startX)) {
-      endX = Math.min(endX, nextEntry.startX - PEDAL_MIN_VISUAL_GAP_PX)
-    }
+  visualSpans.forEach((entry) => {
+    const startX = entry.startX
+    const endX = Math.max(entry.endX, startX + PEDAL_MIN_DRAW_WIDTH_PX)
     if (!Number.isFinite(startX) || !Number.isFinite(endX)) return
-    if (endX <= startX + PEDAL_MIN_DRAW_WIDTH_PX) {
-      endX = startX + PEDAL_MIN_DRAW_WIDTH_PX
-    }
 
     if (entry.span.style === 'text') {
       context2D.textAlign = 'left'
-      context2D.fillText('Ped', startX, entry.baselineY)
+      context2D.fillText(PEDAL_TEXT_LABEL, startX, entry.baselineY)
       context2D.textAlign = 'center'
-      context2D.fillText('*', endX, entry.baselineY)
+      context2D.fillText(PEDAL_RELEASE_LABEL, endX, entry.baselineY)
       return
     }
 
@@ -190,8 +431,8 @@ export function drawPedalSpans(params: {
     }
 
     context2D.textAlign = 'left'
-    context2D.fillText('Ped', startX, entry.baselineY)
-    const pedWidth = context2D.measureText('Ped').width
+    context2D.fillText(PEDAL_TEXT_LABEL, startX, entry.baselineY)
+    const pedWidth = context2D.measureText(PEDAL_TEXT_LABEL).width
     const lineStartX = Math.min(endX, startX + pedWidth + PEDAL_TEXT_MARGIN_RIGHT_PX)
     drawBracketShape({
       context2D,

@@ -79,6 +79,7 @@ export function useScoreInteractionRuntimeController(params: {
   })
 
   const pedalApply = usePedalApplyController({
+    measurePairs: layout.measurePairs,
     chordRulerEntriesByPair: layout.chordRulerEntriesByPair,
     measureTimeSignaturesByMeasure: appState.measureTimeSignaturesFromImport,
     chordRulerMarkerMetaByKey: coreEditing.chordMarker.chordRulerMarkerMetaByKey,

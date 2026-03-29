@@ -1,5 +1,6 @@
 import { useLayoutEffect, type MutableRefObject } from 'react'
 import { Renderer } from 'vexflow'
+import type { ChordRulerEntry } from '../chordRuler'
 import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
 import { buildHitGridIndex, type HitGridIndex } from '../layout/hitTest'
 import type { SystemMeasureRange } from '../layout/demand'
@@ -27,6 +28,7 @@ export function useScoreRenderEffect(params: {
   scoreHeight: number
   measurePairs: MeasurePair[]
   pedalSpans?: PedalSpan[]
+  chordRulerEntriesByPair?: ChordRulerEntry[][] | null
   systemRanges: SystemMeasureRange[]
   visibleSystemRange: { start: number; end: number }
   renderOriginSystemIndex: number
@@ -75,6 +77,7 @@ export function useScoreRenderEffect(params: {
     scoreHeight,
     measurePairs,
     pedalSpans = [],
+    chordRulerEntriesByPair = null,
     systemRanges,
     visibleSystemRange,
     renderOriginSystemIndex,
@@ -174,6 +177,7 @@ export function useScoreRenderEffect(params: {
         context,
         measurePairs,
         pedalSpans,
+        chordRulerEntriesByPair,
         scoreWidth,
         scoreHeight,
         systemRanges,
@@ -222,6 +226,7 @@ export function useScoreRenderEffect(params: {
     scoreHeight,
     measurePairs,
     pedalSpans,
+    chordRulerEntriesByPair,
     systemRanges,
     visibleSystemRange,
     renderOriginSystemIndex,

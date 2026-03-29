@@ -1,11 +1,15 @@
 import type { MutableRefObject } from 'react'
+import type { ChordRulerEntry } from '../chordRuler'
 import type { PlaybackTimelineEvent } from '../playbackTimeline'
+import type { MeasureTimelineBundle } from '../timeline/types'
 import type {
   DragDebugSnapshot,
   DragState,
   MeasureLayout,
   MeasurePair,
+  NoteLayout,
   PlaybackCursorState,
+  PedalSpan,
   Selection,
   SpacingLayoutMode,
 } from '../types'
@@ -38,6 +42,9 @@ export function buildScoreRuntimeDebugApi(params: {
   osmdPreviewLastRebalanceStatsRef: MutableRefObject<OsmdPreviewRebalanceStats | null>
   osmdPreviewInstanceRef: MutableRefObject<OsmdPreviewInstance | null>
   dragDebugFramesRef: MutableRefObject<DragDebugSnapshot[]>
+  measureLayoutsRef: MutableRefObject<Map<number, MeasureLayout>>
+  noteLayoutsByPairRef: MutableRefObject<Map<number, NoteLayout[]>>
+  measureTimelineBundlesRef: MutableRefObject<Map<number, MeasureTimelineBundle>>
   notePreviewEventsRef: MutableRefObject<NotePreviewDebugEvent[]>
   playbackCursorState: PlaybackCursorState
   playheadStatus: 'idle' | 'playing'
@@ -55,6 +62,8 @@ export function buildScoreRuntimeDebugApi(params: {
   }) => Selection[]
   selectedSelectionsRef: MutableRefObject<Selection[]>
   measurePairsRef: MutableRefObject<MeasurePair[]>
+  chordRulerEntriesByPair: ChordRulerEntry[][] | null
+  pedalSpans: PedalSpan[]
   activeChordSelection: ActiveChordSelection | null
   selectedMeasureHighlightRectPx: { x: number; y: number; width: number; height: number } | null
   chordRulerMarkerMetaByKey: Map<string, ChordRulerMarkerMeta>
@@ -95,7 +104,12 @@ export function buildScoreRuntimeDebugApi(params: {
       osmdPreviewInstanceRef: params.osmdPreviewInstanceRef,
       dragDebugFramesRef: params.dragDebugFramesRef,
       dragRef: params.dragRef,
+      measureLayoutsRef: params.measureLayoutsRef,
+      noteLayoutsByPairRef: params.noteLayoutsByPairRef,
+      measureTimelineBundlesRef: params.measureTimelineBundlesRef,
       measurePairsRef: params.measurePairsRef,
+      chordRulerEntriesByPair: params.chordRulerEntriesByPair,
+      pedalSpans: params.pedalSpans,
       scoreOverlayRef: params.scoreOverlayRef,
       scoreRef: params.scoreRef,
       overlayLastRectRef: params.overlayLastRectRef,

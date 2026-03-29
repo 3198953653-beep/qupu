@@ -8,6 +8,7 @@ import {
   SYSTEM_TREBLE_OFFSET_Y,
   TICKS_PER_BEAT,
 } from '../constants'
+import type { ChordRulerEntry } from '../chordRuler'
 import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
 import { type SystemMeasureRange } from '../layout/demand'
 import { getLayoutNoteKey } from '../layout/renderPosition'
@@ -298,6 +299,7 @@ export function renderVisibleSystems(params: {
   context: ReturnType<Renderer['getContext']>
   measurePairs: MeasurePair[]
   pedalSpans?: PedalSpan[]
+  chordRulerEntriesByPair?: ChordRulerEntry[][] | null
   scoreWidth: number
   scoreHeight: number
   systemRanges: SystemMeasureRange[]
@@ -341,6 +343,7 @@ export function renderVisibleSystems(params: {
     context,
     measurePairs,
     pedalSpans = [],
+    chordRulerEntriesByPair = null,
     scoreWidth,
     scoreHeight,
     systemRanges,
@@ -1579,9 +1582,12 @@ export function renderVisibleSystems(params: {
   const context2D = (context as unknown as { context2D?: CanvasRenderingContext2D }).context2D
   drawPedalSpans({
     context2D,
+    measurePairs,
     pedalSpans,
+    chordRulerEntriesByPair,
     measureLayouts: nextMeasureLayouts,
     measureTimelineBundles: nextTimelineBundlesByPair,
+    noteLayoutsByPair: nextLayoutsByPair,
   })
 
   return {
