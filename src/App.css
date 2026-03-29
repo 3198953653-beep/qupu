@@ -779,6 +779,7 @@
   position: absolute;
   left: 0;
   top: 0;
+  z-index: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -793,7 +794,8 @@
   box-shadow: 0 1px 3px rgba(79, 70, 229, 0.26);
   pointer-events: auto;
   cursor: pointer;
-  transition: background 120ms ease, box-shadow 120ms ease, color 120ms ease;
+  transform-origin: center center;
+  transition: transform 140ms ease, background 140ms ease, box-shadow 140ms ease, color 140ms ease;
 }
 
 .chord-ruler-label {
@@ -807,11 +809,14 @@
   font-size: var(--chord-ruler-label-font-size, 10px);
   line-height: 1;
   font-weight: 700;
+  transition: color 140ms ease, text-shadow 140ms ease;
 }
 
 .chord-ruler-marker:hover {
-  background: #4f46e5;
-  box-shadow: 0 2px 6px rgba(79, 70, 229, 0.32);
+  z-index: 2;
+  transform: translateY(-1px) scale(1.08);
+  background: #4c46e8;
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.28);
 }
 
 .chord-ruler-marker.is-active .chord-ruler-label {
@@ -819,8 +824,16 @@
 }
 
 .chord-ruler-marker.is-active {
+  z-index: 1;
   background: #4338ca;
   box-shadow: 0 2px 7px rgba(67, 56, 202, 0.34);
+}
+
+.chord-ruler-marker.is-active:hover {
+  z-index: 2;
+  transform: translateY(-1px) scale(1.08);
+  background: #3f37bc;
+  box-shadow: 0 4px 12px rgba(67, 56, 202, 0.3);
 }
 
 .chord-ruler-inline.is-text-only .chord-ruler-marker {
@@ -833,12 +846,15 @@
 }
 
 .chord-ruler-inline.is-text-only .chord-ruler-marker:hover {
+  z-index: 2;
+  transform: translateY(-1px) scale(1.06);
   background: transparent;
   box-shadow: none;
 }
 
 .chord-ruler-inline.is-text-only .chord-ruler-marker:hover .chord-ruler-label {
   color: #3730a3;
+  text-shadow: 0 1px 4px rgba(55, 48, 163, 0.18);
 }
 
 .chord-ruler-inline.is-text-only .chord-ruler-marker.is-active {
@@ -850,6 +866,11 @@
   color: #312e81;
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+.chord-ruler-inline.is-text-only .chord-ruler-marker.is-active:hover .chord-ruler-label {
+  color: #312e81;
+  text-shadow: 0 1px 4px rgba(49, 46, 129, 0.16);
 }
 
 .score-surface {
