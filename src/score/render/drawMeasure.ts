@@ -1798,6 +1798,24 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         const x = vexNote ? getRenderedNoteVisualX(vexNote) : 0
         const anchorX = vexNote ? getRenderedNoteAnchorX(vexNote) : x
         const visualBounds = vexNote ? getRenderedNoteGlyphBounds(vexNote) : null
+        const visualBoundsY = vexNote
+          ? (() => {
+              const bbox = vexNote.getBoundingBox()
+              const bboxTopY = bbox?.getY()
+              const bboxHeight = bbox?.getH()
+              if (Number.isFinite(bboxTopY) && Number.isFinite(bboxHeight)) {
+                return {
+                  topY: bboxTopY as number,
+                  bottomY: (bboxTopY as number) + (bboxHeight as number),
+                }
+              }
+              const fallbackY = vexNote.getYs()[0] ?? 0
+              return {
+                topY: fallbackY - DEFAULT_NOTE_HEAD_HIT_RADIUS_Y,
+                bottomY: fallbackY + DEFAULT_NOTE_HEAD_HIT_RADIUS_Y,
+              }
+            })()
+          : { topY: 0, bottomY: 0 }
         const hasStandaloneFlag = vexNote?.hasFlag() === true && !vexNote.getBeam()
         let spacingRightX = vexNote ? getRenderedNoteVisualX(vexNote) + 9 : x
         if (vexNote) {
@@ -1819,6 +1837,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           anchorX,
           visualLeftX: visualBounds?.leftX ?? x,
           visualRightX: visualBounds?.rightX ?? spacingRightX,
+          visualTopY: visualBoundsY.topY,
+          visualBottomY: visualBoundsY.bottomY,
           rightX: spacingRightX,
           spacingRightX,
           y: 0,
@@ -1886,6 +1906,129 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     return Number.isFinite(spacingRightX) ? spacingRightX : getRenderedNoteVisualX(vexNote) + 9
   }
 
+  const getRenderedNoteVerticalBounds = (params: {
+    vexNote: StaveNote
+    noteHeads: Array<{ y: number; hitMinY?: number; hitMaxY?: number; hitRadiusY?: number }>
+    accidentalLayouts: Array<{ y: number; hitMinY?: number; hitMaxY?: number; hitRadiusY?: number }>
+  }): { topY: number; bottomY: number } => {
+    const { vexNote, noteHeads, accidentalLayouts } = params
+    const topCandidates: number[] = []
+    const bottomCandidates: number[] = []
+
+    const pushBounds = (topY: number, bottomY: number) => {
+      if (!Number.isFinite(topY) || !Number.isFinite(bottomY) || bottomY < topY) return
+      topCandidates.push(topY)
+      bottomCandidates.push(bottomY)
+    }
+
+    const pushAnchorBounds = (
+      anchors: Array<{ y: number; hitMinY?: number; hitMaxY?: number; hitRadiusY?: number }>,
+      fallbackRadiusY: number,
+    ) => {
+      anchors.forEach((anchor) => {
+        const radiusY = Number.isFinite(anchor.hitRadiusY) ? (anchor.hitRadiusY as number) : fallbackRadiusY
+        const topY = Number.isFinite(anchor.hitMinY) ? (anchor.hitMinY as number) : anchor.y - radiusY
+        const bottomY = Number.isFinite(anchor.hitMaxY) ? (anchor.hitMaxY as number) : anchor.y + radiusY
+        pushBounds(topY, bottomY)
+      })
+    }
+
+    pushAnchorBounds(noteHeads, DEFAULT_NOTE_HEAD_HIT_RADIUS_Y)
+    pushAnchorBounds(accidentalLayouts, DEFAULT_ACCIDENTAL_HIT_RADIUS_Y)
+
+    const bbox = vexNote.getBoundingBox()
+    const bboxTopY = bbox?.getY()
+    const bboxHeight = bbox?.getH()
+    if (Number.isFinite(bboxTopY) && Number.isFinite(bboxHeight)) {
+      pushBounds(bboxTopY as number, (bboxTopY as number) + (bboxHeight as number))
+    }
+
+    if (vexNote.hasStem()) {
+      const stemExtents = vexNote.getStemExtents()
+      pushBounds(
+        Math.min(stemExtents.topY, stemExtents.baseY),
+        Math.max(stemExtents.topY, stemExtents.baseY),
+      )
+    }
+
+    if (topCandidates.length === 0 || bottomCandidates.length === 0) {
+      const fallbackY = noteHeads[0]?.y ?? accidentalLayouts[0]?.y ?? (vexNote.getYs()[0] ?? 0)
+      pushBounds(fallbackY - DEFAULT_NOTE_HEAD_HIT_RADIUS_Y, fallbackY + DEFAULT_NOTE_HEAD_HIT_RADIUS_Y)
+    }
+
+    return {
+      topY: Math.min(...topCandidates),
+      bottomY: Math.max(...bottomCandidates),
+    }
+  }
+
+  const getBeamSegmentBounds = (beam: Beam): Array<{
+    leftX: number
+    rightX: number
+    topY: number
+    bottomY: number
+  }> => {
+    const beamNotes = beam.getNotes()
+    const firstNote = beamNotes[0] as StaveNote | undefined
+    if (!firstNote) return []
+    const firstStemX = firstNote.getStemX()
+    if (!Number.isFinite(firstStemX)) return []
+
+    let beamY = beam.getBeamYToDraw()
+    const beamThickness = beam.renderOptions.beamWidth * beam.getStemDirection()
+    const bounds: Array<{
+      leftX: number
+      rightX: number
+      topY: number
+      bottomY: number
+    }> = []
+
+    VALID_BEAM_DURATIONS.forEach((duration) => {
+      const beamLines = beam.getBeamLines(duration)
+      beamLines.forEach((line) => {
+        if (!Number.isFinite(line.start) || !Number.isFinite(line.end)) return
+        const startBeamX = line.start as number
+        const endBeamX = line.end as number
+        const startBeamY = beam.getSlopeY(startBeamX, firstStemX, beamY, beam.slope)
+        const endBeamY = beam.getSlopeY(endBeamX, firstStemX, beamY, beam.slope)
+        const startEdgeY = startBeamY + beamThickness
+        const endEdgeY = endBeamY + beamThickness
+        bounds.push({
+          leftX: Math.min(startBeamX, endBeamX + 1),
+          rightX: Math.max(startBeamX, endBeamX + 1),
+          topY: Math.min(startBeamY, endBeamY, startEdgeY, endEdgeY),
+          bottomY: Math.max(startBeamY, endBeamY, startEdgeY, endEdgeY),
+        })
+      })
+      beamY += beamThickness * 1.5
+    })
+
+    return bounds
+  }
+
+  const applyBeamVerticalBoundsToLayouts = (params: {
+    beams: Beam[]
+    sourceNoteIndexByVexNote: Map<StaveNote, number>
+    layoutByNoteIndex: Map<number, NoteLayout>
+  }) => {
+    const { beams, sourceNoteIndexByVexNote, layoutByNoteIndex } = params
+    beams.forEach((beam) => {
+      const beamSegmentBounds = getBeamSegmentBounds(beam)
+      if (beamSegmentBounds.length === 0) return
+      beam.getNotes().forEach((note) => {
+        const sourceNoteIndex = sourceNoteIndexByVexNote.get(note as StaveNote)
+        if (sourceNoteIndex === undefined) return
+        const layout = layoutByNoteIndex.get(sourceNoteIndex)
+        if (!layout) return
+        beamSegmentBounds.forEach((segment) => {
+          if (layout.visualRightX < segment.leftX || layout.visualLeftX > segment.rightX) return
+          layout.visualTopY = Math.min(layout.visualTopY, segment.topY)
+          layout.visualBottomY = Math.max(layout.visualBottomY, segment.bottomY)
+        })
+      })
+    })
+  }
+
   const getMaxBeamRightX = (beams: Beam[]): number => {
     let maxRightX = Number.NEGATIVE_INFINITY
     beams.forEach((beam) => {
@@ -1929,8 +2072,16 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     })
   }
 
-  noteLayouts.push(
-    ...trebleRendered.flatMap(({ vexNote, renderedKeys, sourceNoteIndex }) => {
+  const trebleSourceNoteIndexByVexNote = new Map<StaveNote, number>()
+  trebleRendered.forEach(({ vexNote, sourceNoteIndex }) => {
+    trebleSourceNoteIndexByVexNote.set(vexNote, sourceNoteIndex)
+  })
+  const bassSourceNoteIndexByVexNote = new Map<StaveNote, number>()
+  bassRendered.forEach(({ vexNote, sourceNoteIndex }) => {
+    bassSourceNoteIndexByVexNote.set(vexNote, sourceNoteIndex)
+  })
+
+  const trebleNoteLayouts = trebleRendered.flatMap(({ vexNote, renderedKeys, sourceNoteIndex }) => {
       const sourceNote = measure.treble[sourceNoteIndex]
       if (!sourceNote) return []
       const ys = vexNote.getYs()
@@ -1991,6 +2142,11 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       const noteSpacingRightX = getRenderedNoteSpacingRightX(vexNote, noteHeads)
       const noteRightX = isSpacingOnlyLayout ? noteSpacingRightX : getRenderedNoteRightX(vexNote, noteHeads)
       const visualBounds = getRenderedNoteGlyphBounds(vexNote)
+      const verticalBounds = getRenderedNoteVerticalBounds({
+        vexNote,
+        noteHeads,
+        accidentalLayouts,
+      })
       const layoutKey = getLayoutNoteKey('treble', sourceNote.id)
       return {
         id: sourceNote.id,
@@ -2003,6 +2159,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         anchorX: getRenderedNoteAnchorX(vexNote),
         visualLeftX: visualBounds?.leftX ?? getRenderedNoteVisualX(vexNote),
         visualRightX: visualBounds?.rightX ?? noteRightX,
+        visualTopY: verticalBounds.topY,
+        visualBottomY: verticalBounds.bottomY,
         rightX: noteRightX,
         spacingRightX: noteSpacingRightX,
         y: rootHead?.y ?? ys[0] ?? 0,
@@ -2014,10 +2172,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         accidentalRightXByKeyIndex,
         stemDirection: toStemDirectionOrNull(vexNote.getStemDirection()),
       }
-    }),
-  )
-  noteLayouts.push(
-    ...bassRendered.flatMap(({ vexNote, renderedKeys, sourceNoteIndex }) => {
+    })
+  const bassNoteLayouts = bassRendered.flatMap(({ vexNote, renderedKeys, sourceNoteIndex }) => {
       const sourceNote = measure.bass[sourceNoteIndex]
       if (!sourceNote) return []
       const ys = vexNote.getYs()
@@ -2078,6 +2234,11 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       const noteSpacingRightX = getRenderedNoteSpacingRightX(vexNote, noteHeads)
       const noteRightX = isSpacingOnlyLayout ? noteSpacingRightX : getRenderedNoteRightX(vexNote, noteHeads)
       const visualBounds = getRenderedNoteGlyphBounds(vexNote)
+      const verticalBounds = getRenderedNoteVerticalBounds({
+        vexNote,
+        noteHeads,
+        accidentalLayouts,
+      })
       const layoutKey = getLayoutNoteKey('bass', sourceNote.id)
       return {
         id: sourceNote.id,
@@ -2090,6 +2251,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         anchorX: getRenderedNoteAnchorX(vexNote),
         visualLeftX: visualBounds?.leftX ?? getRenderedNoteVisualX(vexNote),
         visualRightX: visualBounds?.rightX ?? noteRightX,
+        visualTopY: verticalBounds.topY,
+        visualBottomY: verticalBounds.bottomY,
         rightX: noteRightX,
         spacingRightX: noteSpacingRightX,
         y: rootHead?.y ?? ys[0] ?? 0,
@@ -2101,8 +2264,20 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         accidentalRightXByKeyIndex,
         stemDirection: toStemDirectionOrNull(vexNote.getStemDirection()),
       }
-    }),
-  )
+    })
+  noteLayouts.push(...trebleNoteLayouts)
+  noteLayouts.push(...bassNoteLayouts)
+
+  applyBeamVerticalBoundsToLayouts({
+    beams: trebleBeams,
+    sourceNoteIndexByVexNote: trebleSourceNoteIndexByVexNote,
+    layoutByNoteIndex: new Map(trebleNoteLayouts.map((layout) => [layout.noteIndex, layout])),
+  })
+  applyBeamVerticalBoundsToLayouts({
+    beams: bassBeams,
+    sourceNoteIndexByVexNote: bassSourceNoteIndexByVexNote,
+    layoutByNoteIndex: new Map(bassNoteLayouts.map((layout) => [layout.noteIndex, layout])),
+  })
 
   if (!isSpacingOnlyLayout) {
     const beamRightX = getMaxBeamRightX([...trebleBeams, ...bassBeams])

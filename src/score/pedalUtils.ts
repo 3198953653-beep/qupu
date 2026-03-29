@@ -2,7 +2,7 @@ import { getBeatTicksByTimeSignature } from './chordRuler'
 import { collectMeasureTickRangeNotes } from './chordRangeNoteCoverage'
 import { resolvePairTimeSignature } from './measureRestUtils'
 import type { ChordRulerEntry } from './chordRuler'
-import type { MeasurePair, PedalApplyScope, PedalSpan, PedalStyle, TimeSignature } from './types'
+import type { MeasurePair, PedalApplyScope, PedalLayoutMode, PedalSpan, PedalStyle, TimeSignature } from './types'
 
 export const PEDAL_RETRACT_BEAT_RATIO = 0.1
 export const PEDAL_MIN_VISUAL_GAP_PX = 2
@@ -11,6 +11,11 @@ export const PEDAL_STYLE_LABELS: Record<PedalStyle, string> = {
   text: 'TEXT',
   bracket: 'BRACKET',
   mixed: 'MIXED',
+}
+
+export const PEDAL_LAYOUT_MODE_LABELS: Record<PedalLayoutMode, string> = {
+  flexible: '灵活',
+  uniform: '统一',
 }
 
 type PedalTargetScopeRange =
@@ -54,7 +59,9 @@ export function sortPedalSpans(spans: readonly PedalSpan[]): PedalSpan[] {
   })
 }
 
-export function normalizePedalSpan(span: PedalSpan): PedalSpan {
+export function normalizePedalSpan(
+  span: Omit<PedalSpan, 'layoutMode'> & { layoutMode?: PedalLayoutMode | null },
+): PedalSpan {
   const startPairIndex = normalizePairIndex(span.startPairIndex)
   const endPairIndex = Math.max(startPairIndex, normalizePairIndex(span.endPairIndex))
   const startTick = normalizeTick(span.startTick)
@@ -62,6 +69,7 @@ export function normalizePedalSpan(span: PedalSpan): PedalSpan {
   return {
     id: span.id || createPedalSpanId(),
     style: span.style,
+    layoutMode: span.layoutMode === 'flexible' ? 'flexible' : 'uniform',
     staff: 'bass',
     startPairIndex,
     startTick,
@@ -105,6 +113,7 @@ export function spanIntersectsPedalScope(span: PedalSpan, scope: PedalTargetScop
 
 export function buildPedalSpansForScope(params: {
   style: PedalStyle
+  layoutMode: PedalLayoutMode
   scope: PedalTargetScopeRange
   measurePairs: MeasurePair[]
   chordRulerEntriesByPair: ChordRulerEntry[][] | null
@@ -112,6 +121,7 @@ export function buildPedalSpansForScope(params: {
 }): PedalSpan[] {
   const {
     style,
+    layoutMode,
     scope,
     measurePairs,
     chordRulerEntriesByPair,
@@ -167,6 +177,7 @@ export function buildPedalSpansForScope(params: {
         normalizePedalSpan({
           id: createPedalSpanId(),
           style,
+          layoutMode,
           staff: 'bass',
           startPairIndex: pairIndex,
           startTick,

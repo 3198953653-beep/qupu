@@ -9,7 +9,7 @@ export const GRAND_STAFF_BOTTOM_PADDING_PX = 60
 export const DEFAULT_STAFF_INTER_GAP_PX = 46
 export const STAFF_INTER_GAP_PX_MIN = 24
 export const STAFF_INTER_GAP_PX_MAX = 140
-export const PEDAL_LANE_EXTRA_HEIGHT_PX = 26
+export const PEDAL_LANE_EXTRA_HEIGHT_PX = 44
 
 export type GrandStaffLayoutMetrics = {
   trebleOffsetY: number

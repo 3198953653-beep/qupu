@@ -203,13 +203,16 @@ function App() {
       <PedalApplyModal
         isOpen={pedalApplyDialog.isOpen}
         selectedScope={pedalApplyDialog.selectedScope}
+        selectedLayoutMode={pedalApplyDialog.selectedLayoutMode}
         scopeOptions={pedalApplyDialog.scopeOptions}
+        layoutModeOptions={pedalApplyDialog.layoutModeOptions}
         scopeSummary={pedalApplyDialog.scopeSummary}
         chordCountInScope={pedalApplyDialog.chordCountInScope}
         hasExistingSpansInScope={pedalApplyDialog.hasExistingSpansInScope}
         styleOptions={pedalApplyDialog.styleOptions}
         onClose={pedalApplyDialog.closeModal}
         onSelectScope={pedalApplyDialog.setSelectedScope}
+        onSelectLayoutMode={pedalApplyDialog.setSelectedLayoutMode}
         onApplyStyle={pedalApplyDialog.applyStyle}
       />
     </main>

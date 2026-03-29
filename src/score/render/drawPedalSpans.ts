@@ -11,6 +11,8 @@ const PEDAL_BASELINE_OFFSET_PX = 18
 const PEDAL_BRACKET_HOOK_HEIGHT_PX = 10
 const PEDAL_TEXT_MARGIN_RIGHT_PX = 6
 const PEDAL_MIN_DRAW_WIDTH_PX = 4
+const PEDAL_MIN_NOTE_CLEARANCE_PX = 2
+const PEDAL_TEXT_ASCENT_FALLBACK_PX = 11
 const PEDAL_COLOR = '#111111'
 const PEDAL_TEXT_FONT = 'italic 13px "Times New Roman", Georgia, serif'
 const PEDAL_TEXT_LABEL = 'Ped'
@@ -111,6 +113,8 @@ function drawBracketShape(params: {
 
 type VisualPedalSpan = {
   span: PedalSpan
+  layoutMode: PedalSpan['layoutMode']
+  systemKey: string
   baseStartX: number
   baseEndX: number
   startX: number
@@ -119,6 +123,10 @@ type VisualPedalSpan = {
   occupiedEndX: number
   baseBaselineY: number
   baselineY: number
+  pedalTopInsetPx: number
+  pedalTopY: number
+  collisionBottomY: number | null
+  requiredBaselineY: number
   laneIndex: number
   requiredStartX: number | null
   requiredEndX: number | null
@@ -278,6 +286,91 @@ function getPedalOccupiedEndX(params: {
   return endX
 }
 
+function getTextAscentPx(context2D: CanvasRenderingContext2D, text: string): number {
+  const metrics = context2D.measureText(text)
+  const ascent = metrics.actualBoundingBoxAscent
+  if (typeof ascent === 'number' && Number.isFinite(ascent) && ascent > 0) return ascent
+  return PEDAL_TEXT_ASCENT_FALLBACK_PX
+}
+
+function getPedalTopInsetPx(params: {
+  span: PedalSpan
+  textAscentPx: number
+}): number {
+  const { span, textAscentPx } = params
+  if (span.style === 'bracket') return PEDAL_BRACKET_HOOK_HEIGHT_PX
+  if (span.style === 'mixed') return Math.max(textAscentPx, PEDAL_BRACKET_HOOK_HEIGHT_PX)
+  return textAscentPx
+}
+
+function getPedalTopY(params: {
+  baselineY: number
+  pedalTopInsetPx: number
+}): number {
+  return params.baselineY - params.pedalTopInsetPx
+}
+
+function getPedalSystemKey(measureLayout: MeasureLayout): string {
+  if (Number.isFinite(measureLayout.systemTop)) {
+    return `system:${measureLayout.systemTop.toFixed(2)}`
+  }
+  const bassBottomY = Number.isFinite(measureLayout.bassLineBottomY)
+    ? measureLayout.bassLineBottomY
+    : measureLayout.bassY + 40
+  return `baseline:${bassBottomY.toFixed(2)}`
+}
+
+function collectSpanCollisionBottomY(params: {
+  coverageRange: SpanCoverageRange
+  systemKey: string
+  startX: number
+  endX: number
+  measurePairs: MeasurePair[]
+  measureLayouts: Map<number, MeasureLayout>
+  noteLayoutsByPair: Map<number, NoteLayout[]>
+}): number | null {
+  const {
+    coverageRange,
+    systemKey,
+    startX,
+    endX,
+    measurePairs,
+    measureLayouts,
+    noteLayoutsByPair,
+  } = params
+  let maxBottomY = Number.NEGATIVE_INFINITY
+
+  for (let pairIndex = coverageRange.startPairIndex; pairIndex <= coverageRange.endPairIndex; pairIndex += 1) {
+    const measureLayout = measureLayouts.get(pairIndex)
+    if (!measureLayout || getPedalSystemKey(measureLayout) !== systemKey) continue
+    const pair = measurePairs[pairIndex]
+    const pairLayouts = noteLayoutsByPair.get(pairIndex) ?? []
+    if (!pair || pairLayouts.length === 0) continue
+
+    const coverage = collectMeasureTickRangeLayoutCoverage({
+      pair,
+      pairLayouts,
+      startTickInclusive: pairIndex === coverageRange.startPairIndex ? coverageRange.startTickInclusive : 0,
+      endTickExclusive: pairIndex === coverageRange.endPairIndex
+        ? coverageRange.endTickExclusive
+        : Number.MAX_SAFE_INTEGER,
+      includeRests: false,
+    })
+
+    coverage.forEach((entry) => {
+      if (entry.staff !== 'bass') return
+      const layoutLeftX = Number.isFinite(entry.layout.visualLeftX) ? entry.layout.visualLeftX : entry.leftXRaw
+      const layoutRightX = Number.isFinite(entry.layout.visualRightX) ? entry.layout.visualRightX : entry.visualRightXRaw
+      if (!Number.isFinite(layoutLeftX) || !Number.isFinite(layoutRightX)) return
+      if (layoutRightX < startX || layoutLeftX > endX) return
+      if (!Number.isFinite(entry.layout.visualBottomY)) return
+      maxBottomY = Math.max(maxBottomY, entry.layout.visualBottomY)
+    })
+  }
+
+  return Number.isFinite(maxBottomY) ? maxBottomY : null
+}
+
 export function buildPedalRenderPlan(params: {
   context2D: CanvasRenderingContext2D | null | undefined
   measurePairs: MeasurePair[]
@@ -301,6 +394,10 @@ export function buildPedalRenderPlan(params: {
   context2D.save()
   context2D.font = PEDAL_TEXT_FONT
   const releaseWidthPx = Math.max(4, context2D.measureText(PEDAL_RELEASE_LABEL).width)
+  const pedalTextAscentPx = Math.max(
+    getTextAscentPx(context2D, PEDAL_TEXT_LABEL),
+    getTextAscentPx(context2D, PEDAL_RELEASE_LABEL),
+  )
   context2D.restore()
 
   const baseEntries: VisualPedalSpan[] = sortPedalSpans(pedalSpans).flatMap((span) => {
@@ -346,9 +443,28 @@ export function buildPedalRenderPlan(params: {
       ? startMeasureLayout.bassLineBottomY
       : startMeasureLayout.bassY + 40) + PEDAL_BASELINE_OFFSET_PX
     if (!Number.isFinite(baseBaselineY)) return []
+    const systemKey = getPedalSystemKey(startMeasureLayout)
+    const pedalTopInsetPx = getPedalTopInsetPx({
+      span,
+      textAscentPx: pedalTextAscentPx,
+    })
+    const collisionBottomY = collectSpanCollisionBottomY({
+      coverageRange,
+      systemKey,
+      startX,
+      endX,
+      measurePairs,
+      measureLayouts,
+      noteLayoutsByPair,
+    })
+    const requiredBaselineY = collisionBottomY !== null
+      ? Math.max(baseBaselineY, collisionBottomY + PEDAL_MIN_NOTE_CLEARANCE_PX + pedalTopInsetPx)
+      : baseBaselineY
 
     return [{
       span,
+      layoutMode: span.layoutMode,
+      systemKey,
       baseStartX: baseStartX as number,
       baseEndX: baseEndX as number,
       startX,
@@ -357,16 +473,32 @@ export function buildPedalRenderPlan(params: {
       occupiedEndX: getPedalOccupiedEndX({ span, endX, releaseWidthPx }),
       baseBaselineY,
       baselineY: baseBaselineY,
+      pedalTopInsetPx,
+      pedalTopY: getPedalTopY({
+        baselineY: baseBaselineY,
+        pedalTopInsetPx,
+      }),
+      collisionBottomY,
+      requiredBaselineY,
       laneIndex: 0,
       requiredStartX,
       requiredEndX,
     }]
   })
 
+  const systemBaselineYByKey = new Map<string, number>()
+  baseEntries.forEach((entry) => {
+    if (entry.layoutMode !== 'uniform') return
+    const current = systemBaselineYByKey.get(entry.systemKey)
+    if (current === undefined || entry.requiredBaselineY > current) {
+      systemBaselineYByKey.set(entry.systemKey, entry.requiredBaselineY)
+    }
+  })
+
   return baseEntries.map((entry, index) => {
     const nextEntry = baseEntries[index + 1] ?? null
     let endX = entry.endX
-    if (nextEntry && Math.abs(nextEntry.baseBaselineY - entry.baseBaselineY) < 0.001) {
+    if (nextEntry && nextEntry.systemKey === entry.systemKey) {
       const nextStartLimitX = nextEntry.startX - PEDAL_MIN_VISUAL_GAP_PX
       const minimumEndX = Math.max(
         entry.startX + PEDAL_MIN_DRAW_WIDTH_PX,
@@ -376,6 +508,9 @@ export function buildPedalRenderPlan(params: {
         endX = nextStartLimitX
       }
     }
+    const baselineY = entry.layoutMode === 'uniform'
+      ? (systemBaselineYByKey.get(entry.systemKey) ?? entry.requiredBaselineY)
+      : entry.requiredBaselineY
 
     return {
       ...entry,
@@ -385,7 +520,11 @@ export function buildPedalRenderPlan(params: {
         endX,
         releaseWidthPx,
       }),
-      baselineY: entry.baseBaselineY,
+      baselineY,
+      pedalTopY: getPedalTopY({
+        baselineY,
+        pedalTopInsetPx: entry.pedalTopInsetPx,
+      }),
       laneIndex: 0,
     }
   })

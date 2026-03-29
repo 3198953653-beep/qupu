@@ -75,6 +75,8 @@ export function buildRuntimeDebugCanvasApi(params: {
         noteLayoutsByPair: noteLayoutsByPairRef.current,
       }).map((entry) => ({
         span: { ...entry.span },
+        layoutMode: entry.layoutMode,
+        systemKey: entry.systemKey,
         baseStartX: entry.baseStartX,
         baseEndX: entry.baseEndX,
         startX: entry.startX,
@@ -83,6 +85,9 @@ export function buildRuntimeDebugCanvasApi(params: {
         occupiedEndX: entry.occupiedEndX,
         baseBaselineY: entry.baseBaselineY,
         baselineY: entry.baselineY,
+        pedalTopY: entry.pedalTopY,
+        collisionBottomY: entry.collisionBottomY,
+        requiredBaselineY: entry.requiredBaselineY,
         laneIndex: entry.laneIndex,
         requiredStartX: entry.requiredStartX,
         requiredEndX: entry.requiredEndX,

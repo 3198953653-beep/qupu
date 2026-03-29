@@ -5,6 +5,7 @@ type PedalRenderPlanRow = {
   span: {
     id: string
     style: 'text' | 'bracket' | 'mixed'
+    layoutMode: 'flexible' | 'uniform'
     staff: 'bass'
     startPairIndex: number
     startTick: number
@@ -15,10 +16,15 @@ type PedalRenderPlanRow = {
   baseEndX: number
   startX: number
   endX: number
+  layoutMode: 'flexible' | 'uniform'
+  systemKey: string
   occupiedStartX: number
   occupiedEndX: number
   baseBaselineY: number
   baselineY: number
+  pedalTopY: number
+  collisionBottomY: number | null
+  requiredBaselineY: number
   laneIndex: number
   requiredStartX: number | null
   requiredEndX: number | null
@@ -42,6 +48,11 @@ const DEMO_CASES = [
 ] as const
 
 const PEDAL_STYLES = ['text', 'bracket', 'mixed'] as const
+const PEDAL_LAYOUT_MODES = ['flexible', 'uniform'] as const
+const PEDAL_LAYOUT_MODE_LABELS: Record<(typeof PEDAL_LAYOUT_MODES)[number], string> = {
+  flexible: '灵活',
+  uniform: '统一',
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -113,6 +124,10 @@ async function openPedalModal(page: Page): Promise<void> {
   await page.getByRole('dialog', { name: '添加踏板' }).waitFor()
 }
 
+async function selectPedalLayoutMode(page: Page, layoutMode: typeof PEDAL_LAYOUT_MODES[number]): Promise<void> {
+  await clickButton(page, PEDAL_LAYOUT_MODE_LABELS[layoutMode])
+}
+
 async function applyPedalStyle(page: Page, style: typeof PEDAL_STYLES[number], overwriteExisting: boolean): Promise<void> {
   if (overwriteExisting) {
     page.once('dialog', (dialog) => {
@@ -153,13 +168,19 @@ function assertCoverage(plan: PedalRenderPlanRow[], contextLabel: string): void 
         `${contextLabel}: pedal ${entry.span.id} ends too early. endX=${entry.endX.toFixed(3)} requiredEndX=${entry.requiredEndX.toFixed(3)}.`,
       )
     }
+    if (entry.collisionBottomY !== null && entry.pedalTopY < entry.collisionBottomY + 2 - PEDAL_GAP_EPSILON_PX) {
+      throw new Error(
+        `${contextLabel}: pedal ${entry.span.id} collides with bass glyphs. pedalTopY=${entry.pedalTopY.toFixed(3)} collisionBottomY=${entry.collisionBottomY.toFixed(3)} requiredBaselineY=${entry.requiredBaselineY.toFixed(3)} baselineY=${entry.baselineY.toFixed(3)}.`,
+      )
+    }
   })
 }
 
 function assertSingleBaseline(plan: PedalRenderPlanRow[], contextLabel: string): void {
   const groups = new Map<string, PedalRenderPlanRow[]>()
   plan.forEach((entry) => {
-    const key = entry.baseBaselineY.toFixed(2)
+    if (entry.layoutMode !== 'uniform') return
+    const key = entry.systemKey
     const existing = groups.get(key)
     if (existing) {
       existing.push(entry)
@@ -170,9 +191,9 @@ function assertSingleBaseline(plan: PedalRenderPlanRow[], contextLabel: string):
 
   groups.forEach((rows, baselineKey) => {
     rows.forEach((entry) => {
-      if (Math.abs(entry.baselineY - entry.baseBaselineY) > PEDAL_BASELINE_EPSILON_PX) {
+      if (entry.baselineY < entry.requiredBaselineY - PEDAL_BASELINE_EPSILON_PX) {
         throw new Error(
-          `${contextLabel}: pedal ${entry.span.id} shifted off the shared baseline. baselineY=${entry.baselineY.toFixed(3)} baseBaselineY=${entry.baseBaselineY.toFixed(3)}.`,
+          `${contextLabel}: pedal ${entry.span.id} baseline is below the required avoidance baseline. baselineY=${entry.baselineY.toFixed(3)} requiredBaselineY=${entry.requiredBaselineY.toFixed(3)}.`,
         )
       }
       if (entry.laneIndex !== 0) {
@@ -191,18 +212,34 @@ function assertSingleBaseline(plan: PedalRenderPlanRow[], contextLabel: string):
   })
 }
 
+function assertFlexibleBaselines(plan: PedalRenderPlanRow[], contextLabel: string): void {
+  plan.forEach((entry) => {
+    if (entry.layoutMode !== 'flexible') return
+    if (entry.baselineY < entry.requiredBaselineY - PEDAL_BASELINE_EPSILON_PX) {
+      throw new Error(
+        `${contextLabel}: flexible pedal ${entry.span.id} baseline is below the required avoidance baseline. baselineY=${entry.baselineY.toFixed(3)} requiredBaselineY=${entry.requiredBaselineY.toFixed(3)}.`,
+      )
+    }
+    if (entry.laneIndex !== 0) {
+      throw new Error(`${contextLabel}: flexible pedal ${entry.span.id} unexpectedly used lane ${entry.laneIndex}.`)
+    }
+  })
+}
+
 async function runCase(page: Page, params: {
   buttonLabel: string
   demoKey: string
   style: typeof PEDAL_STYLES[number]
+  layoutMode: typeof PEDAL_LAYOUT_MODES[number]
   overwriteExisting: boolean
 }): Promise<{
   demoKey: string
   style: typeof PEDAL_STYLES[number]
+  layoutMode: typeof PEDAL_LAYOUT_MODES[number]
   spanCount: number
   baselineCount: number
 }> {
-  const { buttonLabel, demoKey, style, overwriteExisting } = params
+  const { buttonLabel, demoKey, style, layoutMode, overwriteExisting } = params
   await clickButton(page, buttonLabel)
   await page.waitForFunction(() => {
     const api = (window as unknown as {
@@ -213,16 +250,23 @@ async function runCase(page: Page, params: {
     return api.getPedalRenderPlan().length === 0
   })
   await openPedalModal(page)
+  await selectPedalLayoutMode(page, layoutMode)
   await applyPedalStyle(page, style, overwriteExisting)
   const plan = await waitForPedalPlan(page)
-  const contextLabel = `${demoKey}/${style}`
+  const contextLabel = `${demoKey}/${layoutMode}/${style}`
   assertCoverage(plan, contextLabel)
+  assertFlexibleBaselines(plan, contextLabel)
   assertSingleBaseline(plan, contextLabel)
   return {
     demoKey,
     style,
+    layoutMode,
     spanCount: plan.length,
-    baselineCount: new Set(plan.map((entry) => entry.baseBaselineY.toFixed(2))).size,
+    baselineCount: new Set(
+      plan
+        .filter((entry) => entry.layoutMode === 'uniform')
+        .map((entry) => entry.systemKey),
+    ).size,
   }
 }
 
@@ -239,21 +283,25 @@ async function main(): Promise<void> {
     const results: Array<{
       demoKey: string
       style: typeof PEDAL_STYLES[number]
+      layoutMode: typeof PEDAL_LAYOUT_MODES[number]
       spanCount: number
       baselineCount: number
     }> = []
 
     for (const demoCase of DEMO_CASES) {
-      let overwriteExisting = false
-      for (const style of PEDAL_STYLES) {
-        const result = await runCase(page, {
-          buttonLabel: demoCase.buttonLabel,
-          demoKey: demoCase.key,
-          style,
-          overwriteExisting,
-        })
-        overwriteExisting = true
-        results.push(result)
+      for (const layoutMode of PEDAL_LAYOUT_MODES) {
+        let overwriteExisting = false
+        for (const style of PEDAL_STYLES) {
+          const result = await runCase(page, {
+            buttonLabel: demoCase.buttonLabel,
+            demoKey: demoCase.key,
+            style,
+            layoutMode,
+            overwriteExisting,
+          })
+          overwriteExisting = true
+          results.push(result)
+        }
       }
     }
 

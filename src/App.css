@@ -1963,6 +1963,7 @@
 }
 
 .pedal-apply-scope-section,
+.pedal-apply-layout-section,
 .pedal-apply-style-section {
   display: grid;
   gap: 0.72rem;
@@ -1990,13 +1991,15 @@
   font-size: 0.78rem;
 }
 
-.pedal-apply-scope-grid {
+.pedal-apply-scope-grid,
+.pedal-apply-layout-grid {
   display: flex;
   flex-wrap: wrap;
   gap: 0.56rem;
 }
 
-.pedal-apply-scope-chip {
+.pedal-apply-scope-chip,
+.pedal-apply-layout-chip {
   border: 1px solid #d6e3ee;
   border-radius: 999px;
   background: #ffffff;
@@ -2008,21 +2011,24 @@
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
 }
 
-.pedal-apply-scope-chip:hover:not(:disabled) {
+.pedal-apply-scope-chip:hover:not(:disabled),
+.pedal-apply-layout-chip:hover:not(:disabled) {
   background: #f4f9fd;
   border-color: #bfd3e0;
   color: #183c4d;
   transform: translateY(-1px);
 }
 
-.pedal-apply-scope-chip.is-active {
+.pedal-apply-scope-chip.is-active,
+.pedal-apply-layout-chip.is-active {
   background: #eaf4ff;
   border-color: #9ec3e4;
   color: #154a73;
   box-shadow: inset 0 0 0 1px rgba(33, 114, 176, 0.15);
 }
 
-.pedal-apply-scope-chip:disabled {
+.pedal-apply-scope-chip:disabled,
+.pedal-apply-layout-chip:disabled {
   opacity: 0.46;
   cursor: not-allowed;
 }

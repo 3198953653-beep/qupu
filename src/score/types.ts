@@ -18,6 +18,7 @@ export type ScoreSourceKind =
 export type StaffKind = 'treble' | 'bass'
 export type PedalStyle = 'text' | 'bracket' | 'mixed'
 export type PedalApplyScope = 'all' | 'segment' | 'chord'
+export type PedalLayoutMode = 'flexible' | 'uniform'
 export type BeamTag = 'begin' | 'continue' | 'end'
 export type BeamLevelTag = 'begin' | 'continue' | 'end' | 'forward hook' | 'backward hook'
 export type BeamTagByLevel = Record<number, BeamLevelTag>
@@ -118,6 +119,7 @@ export type SegmentRhythmTemplateBinding = {
 export type PedalSpan = {
   id: string
   style: PedalStyle
+  layoutMode: PedalLayoutMode
   staff: 'bass'
   startPairIndex: number
   startTick: number
@@ -198,6 +200,8 @@ export type NoteLayout = {
   anchorX: number
   visualLeftX: number
   visualRightX: number
+  visualTopY: number
+  visualBottomY: number
   rightX: number
   spacingRightX: number
   y: number

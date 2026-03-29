@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { parseTimelineSegmentScopeKey } from '../segmentRhythmTemplateEngine'
 import {
+  PEDAL_LAYOUT_MODE_LABELS,
   PEDAL_STYLE_LABELS,
   buildPedalSpansForScope,
   getDefaultPedalApplyScope,
@@ -11,6 +12,7 @@ import type { ChordRulerEntry } from '../chordRuler'
 import type {
   MeasurePair,
   PedalApplyScope,
+  PedalLayoutMode,
   PedalSpan,
   PedalStyle,
   TimeSignature,
@@ -85,6 +87,7 @@ export function usePedalApplyController(params: {
 
   const [isOpen, setIsOpen] = useState(false)
   const [selectedScope, setSelectedScope] = useState<PedalApplyScope>('all')
+  const [selectedLayoutMode, setSelectedLayoutMode] = useState<PedalLayoutMode>('flexible')
 
   const hasAnyChordEntries = useMemo(
     () => Boolean(chordRulerEntriesByPair?.some((entries) => entries.length > 0)),
@@ -188,6 +191,7 @@ export function usePedalApplyController(params: {
   const openModal = useCallback(() => {
     if (!hasAnyChordEntries) return
     setSelectedScope(defaultScope)
+    setSelectedLayoutMode('flexible')
     setIsOpen(true)
   }, [defaultScope, hasAnyChordEntries])
 
@@ -200,6 +204,7 @@ export function usePedalApplyController(params: {
     if (!scope) return
     const nextSpans = buildPedalSpansForScope({
       style,
+      layoutMode: selectedLayoutMode,
       scope,
       measurePairs,
       chordRulerEntriesByPair,
@@ -227,6 +232,7 @@ export function usePedalApplyController(params: {
     measureTimeSignaturesByMeasure,
     pedalSpans,
     resolveScopeRange,
+    selectedLayoutMode,
     selectedScope,
     setPedalSpans,
   ])
@@ -237,7 +243,12 @@ export function usePedalApplyController(params: {
     pedalApplyDialog: {
       isOpen,
       selectedScope,
+      selectedLayoutMode,
       scopeOptions,
+      layoutModeOptions: (Object.keys(PEDAL_LAYOUT_MODE_LABELS) as PedalLayoutMode[]).map((mode) => ({
+        mode,
+        label: PEDAL_LAYOUT_MODE_LABELS[mode],
+      })),
       scopeSummary,
       chordCountInScope: currentScopeChordCount,
       hasExistingSpansInScope,
@@ -247,6 +258,7 @@ export function usePedalApplyController(params: {
       })),
       closeModal,
       setSelectedScope,
+      setSelectedLayoutMode,
       applyStyle,
     },
   }

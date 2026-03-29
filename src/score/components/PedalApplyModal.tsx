@@ -1,13 +1,18 @@
 import { useEffect } from 'react'
-import type { PedalApplyScope, PedalStyle } from '../types'
+import type { PedalApplyScope, PedalLayoutMode, PedalStyle } from '../types'
 
 export function PedalApplyModal(props: {
   isOpen: boolean
   selectedScope: PedalApplyScope
+  selectedLayoutMode: PedalLayoutMode
   scopeOptions: Array<{
     scope: PedalApplyScope
     label: string
     disabled: boolean
+  }>
+  layoutModeOptions: Array<{
+    mode: PedalLayoutMode
+    label: string
   }>
   scopeSummary: string
   chordCountInScope: number
@@ -18,18 +23,22 @@ export function PedalApplyModal(props: {
   }>
   onClose: () => void
   onSelectScope: (scope: PedalApplyScope) => void
+  onSelectLayoutMode: (mode: PedalLayoutMode) => void
   onApplyStyle: (style: PedalStyle) => void
 }) {
   const {
     isOpen,
     selectedScope,
+    selectedLayoutMode,
     scopeOptions,
+    layoutModeOptions,
     scopeSummary,
     chordCountInScope,
     hasExistingSpansInScope,
     styleOptions,
     onClose,
     onSelectScope,
+    onSelectLayoutMode,
     onApplyStyle,
   } = props
 
@@ -98,6 +107,25 @@ export function PedalApplyModal(props: {
                 className={`pedal-apply-scope-chip${selectedScope === option.scope ? ' is-active' : ''}`}
                 disabled={option.disabled}
                 onClick={() => onSelectScope(option.scope)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="pedal-apply-layout-section">
+          <div className="pedal-apply-section-header">
+            <h4>水平线模式</h4>
+            <span>灵活按每段避让，统一按同系统共线</span>
+          </div>
+          <div className="pedal-apply-layout-grid">
+            {layoutModeOptions.map((option) => (
+              <button
+                key={option.mode}
+                type="button"
+                className={`pedal-apply-layout-chip${selectedLayoutMode === option.mode ? ' is-active' : ''}`}
+                onClick={() => onSelectLayoutMode(option.mode)}
               >
                 {option.label}
               </button>
