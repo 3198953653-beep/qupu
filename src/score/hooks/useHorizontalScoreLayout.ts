@@ -3,7 +3,6 @@ import { Renderer } from 'vexflow'
 import type { PlaybackTimelineEvent } from '../playbackTimeline'
 import type { ChordRulerEntry } from '../chordRuler'
 import {
-  estimatePedalLaneCount,
   getGrandStaffLayoutMetrics,
   type GrandStaffLayoutMetrics,
 } from '../grandStaffLayout'
@@ -120,10 +119,9 @@ export function useHorizontalScoreLayout(params: {
     importedChordRulerEntriesByPairFromImport,
     measureTimeSignaturesFromImport,
   })
-  const pedalLaneCount = useMemo(() => estimatePedalLaneCount(pedalSpans), [pedalSpans])
   const grandStaffLayoutMetrics = useMemo(
-    () => getGrandStaffLayoutMetrics(staffInterGapPx, { pedalLaneCount }),
-    [pedalLaneCount, staffInterGapPx],
+    () => getGrandStaffLayoutMetrics(staffInterGapPx, { includePedalLane: pedalSpans.length > 0 }),
+    [pedalSpans.length, staffInterGapPx],
   )
 
   const measureFrameLayout = useHorizontalMeasureFrameLayout({

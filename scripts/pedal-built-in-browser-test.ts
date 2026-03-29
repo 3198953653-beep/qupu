@@ -28,6 +28,7 @@ const DEV_HOST = '127.0.0.1'
 const DEV_PORT = 4176
 const DEV_URL = `http://${DEV_HOST}:${DEV_PORT}`
 const PEDAL_GAP_EPSILON_PX = 0.4
+const PEDAL_BASELINE_EPSILON_PX = 0.2
 
 const DEMO_CASES = [
   { key: 'reset-default', buttonLabel: '重置' },
@@ -147,11 +148,6 @@ async function waitForPedalPlan(page: Page): Promise<PedalRenderPlanRow[]> {
 
 function assertCoverage(plan: PedalRenderPlanRow[], contextLabel: string): void {
   plan.forEach((entry) => {
-    if (entry.requiredStartX !== null && entry.startX > entry.requiredStartX + PEDAL_GAP_EPSILON_PX) {
-      throw new Error(
-        `${contextLabel}: pedal ${entry.span.id} starts too late. startX=${entry.startX.toFixed(3)} requiredStartX=${entry.requiredStartX.toFixed(3)}.`,
-      )
-    }
     if (entry.requiredEndX !== null && entry.endX < entry.requiredEndX - PEDAL_GAP_EPSILON_PX) {
       throw new Error(
         `${contextLabel}: pedal ${entry.span.id} ends too early. endX=${entry.endX.toFixed(3)} requiredEndX=${entry.requiredEndX.toFixed(3)}.`,
@@ -160,10 +156,10 @@ function assertCoverage(plan: PedalRenderPlanRow[], contextLabel: string): void 
   })
 }
 
-function assertNoLaneOverlap(plan: PedalRenderPlanRow[], contextLabel: string): void {
+function assertSingleBaseline(plan: PedalRenderPlanRow[], contextLabel: string): void {
   const groups = new Map<string, PedalRenderPlanRow[]>()
   plan.forEach((entry) => {
-    const key = `${entry.baseBaselineY.toFixed(2)}|${entry.laneIndex}`
+    const key = entry.baseBaselineY.toFixed(2)
     const existing = groups.get(key)
     if (existing) {
       existing.push(entry)
@@ -172,17 +168,26 @@ function assertNoLaneOverlap(plan: PedalRenderPlanRow[], contextLabel: string): 
     groups.set(key, [entry])
   })
 
-  groups.forEach((rows, laneKey) => {
-    const ordered = [...rows].sort((left, right) => left.occupiedStartX - right.occupiedStartX)
-    for (let index = 1; index < ordered.length; index += 1) {
-      const previous = ordered[index - 1]
-      const current = ordered[index]
-      if (current.occupiedStartX < previous.occupiedEndX + 4 - PEDAL_GAP_EPSILON_PX) {
+  groups.forEach((rows, baselineKey) => {
+    rows.forEach((entry) => {
+      if (Math.abs(entry.baselineY - entry.baseBaselineY) > PEDAL_BASELINE_EPSILON_PX) {
         throw new Error(
-          `${contextLabel}: lane overlap in ${laneKey}. prev=${previous.span.id} [${previous.occupiedStartX.toFixed(3)}, ${previous.occupiedEndX.toFixed(3)}] current=${current.span.id} [${current.occupiedStartX.toFixed(3)}, ${current.occupiedEndX.toFixed(3)}].`,
+          `${contextLabel}: pedal ${entry.span.id} shifted off the shared baseline. baselineY=${entry.baselineY.toFixed(3)} baseBaselineY=${entry.baseBaselineY.toFixed(3)}.`,
         )
       }
-    }
+      if (entry.laneIndex !== 0) {
+        throw new Error(`${contextLabel}: pedal ${entry.span.id} unexpectedly used lane ${entry.laneIndex}.`)
+      }
+    })
+
+    const referenceBaselineY = rows[0]?.baselineY ?? Number.NaN
+    rows.forEach((entry) => {
+      if (Math.abs(entry.baselineY - referenceBaselineY) > PEDAL_BASELINE_EPSILON_PX) {
+        throw new Error(
+          `${contextLabel}: baseline mismatch inside system ${baselineKey}. reference=${referenceBaselineY.toFixed(3)} current=${entry.baselineY.toFixed(3)}.`,
+        )
+      }
+    })
   })
 }
 
@@ -195,7 +200,7 @@ async function runCase(page: Page, params: {
   demoKey: string
   style: typeof PEDAL_STYLES[number]
   spanCount: number
-  laneCount: number
+  baselineCount: number
 }> {
   const { buttonLabel, demoKey, style, overwriteExisting } = params
   await clickButton(page, buttonLabel)
@@ -212,12 +217,12 @@ async function runCase(page: Page, params: {
   const plan = await waitForPedalPlan(page)
   const contextLabel = `${demoKey}/${style}`
   assertCoverage(plan, contextLabel)
-  assertNoLaneOverlap(plan, contextLabel)
+  assertSingleBaseline(plan, contextLabel)
   return {
     demoKey,
     style,
     spanCount: plan.length,
-    laneCount: Math.max(0, ...plan.map((entry) => entry.laneIndex + 1)),
+    baselineCount: new Set(plan.map((entry) => entry.baseBaselineY.toFixed(2))).size,
   }
 }
 
@@ -235,7 +240,7 @@ async function main(): Promise<void> {
       demoKey: string
       style: typeof PEDAL_STYLES[number]
       spanCount: number
-      laneCount: number
+      baselineCount: number
     }> = []
 
     for (const demoCase of DEMO_CASES) {

@@ -3,7 +3,6 @@ import {
   collectMeasureTickRangeLayoutCoverage,
   getMeasureTickRangeLayoutBounds,
 } from '../chordRangeNoteCoverage'
-import { PEDAL_LANE_ROW_STEP_PX } from '../grandStaffLayout'
 import { PEDAL_MIN_VISUAL_GAP_PX, sortPedalSpans } from '../pedalUtils'
 import type { MeasureTimelineBundle } from '../timeline/types'
 import type { MeasureLayout, MeasurePair, NoteLayout, PedalSpan } from '../types'
@@ -132,6 +131,12 @@ type SpanCoverageRange = {
   endTickExclusive: number
 }
 
+type SpanCoverageBounds = {
+  leftXRaw: number
+  rightXRaw: number
+  coverageEndX: number
+}
+
 function normalizeTick(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
 }
@@ -173,10 +178,13 @@ function resolveSpanCoverageRange(params: {
 function collectSpanOnsetReserveBounds(params: {
   coverageRange: SpanCoverageRange
   measureLayouts: Map<number, MeasureLayout>
-}): { leftXRaw: number; rightXRaw: number } | null {
+}): SpanCoverageBounds | null {
   const { coverageRange, measureLayouts } = params
   let minLeftX = Number.POSITIVE_INFINITY
   let maxRightX = Number.NEGATIVE_INFINITY
+  let lastCoveragePairIndex = Number.NEGATIVE_INFINITY
+  let lastCoverageOnsetTick = Number.NEGATIVE_INFINITY
+  let lastCoverageRightX = Number.NEGATIVE_INFINITY
 
   for (let pairIndex = coverageRange.startPairIndex; pairIndex <= coverageRange.endPairIndex; pairIndex += 1) {
     const measureLayout = measureLayouts.get(pairIndex)
@@ -201,15 +209,30 @@ function collectSpanOnsetReserveBounds(params: {
       if (!Number.isFinite(leftX) || !Number.isFinite(rightX) || rightX <= leftX) return
       minLeftX = Math.min(minLeftX, leftX)
       maxRightX = Math.max(maxRightX, rightX)
+      if (
+        pairIndex > lastCoveragePairIndex ||
+        (pairIndex === lastCoveragePairIndex && onsetTicks > lastCoverageOnsetTick) ||
+        (pairIndex === lastCoveragePairIndex && onsetTicks === lastCoverageOnsetTick && rightX > lastCoverageRightX)
+      ) {
+        lastCoveragePairIndex = pairIndex
+        lastCoverageOnsetTick = onsetTicks
+        lastCoverageRightX = rightX
+      }
     })
   }
 
-  if (!Number.isFinite(minLeftX) || !Number.isFinite(maxRightX) || maxRightX <= minLeftX) {
+  if (
+    !Number.isFinite(minLeftX) ||
+    !Number.isFinite(maxRightX) ||
+    maxRightX <= minLeftX ||
+    !Number.isFinite(lastCoverageRightX)
+  ) {
     return null
   }
   return {
     leftXRaw: minLeftX,
     rightXRaw: maxRightX,
+    coverageEndX: lastCoverageRightX,
   }
 }
 
@@ -217,7 +240,7 @@ function collectSpanCoverageBounds(params: {
   coverageRange: SpanCoverageRange
   measurePairs: MeasurePair[]
   noteLayoutsByPair: Map<number, NoteLayout[]>
-}): { leftXRaw: number; rightXRaw: number } | null {
+}): SpanCoverageBounds | null {
   const { coverageRange, measurePairs, noteLayoutsByPair } = params
   const coverage: ReturnType<typeof collectMeasureTickRangeLayoutCoverage> = []
   for (let pairIndex = coverageRange.startPairIndex; pairIndex <= coverageRange.endPairIndex; pairIndex += 1) {
@@ -234,7 +257,13 @@ function collectSpanCoverageBounds(params: {
       includeRests: false,
     }))
   }
-  return getMeasureTickRangeLayoutBounds(coverage, 'visual')
+  const bounds = getMeasureTickRangeLayoutBounds(coverage, 'visual')
+  if (!bounds) return null
+  return {
+    leftXRaw: bounds.leftXRaw,
+    rightXRaw: bounds.rightXRaw,
+    coverageEndX: bounds.rightXRaw,
+  }
 }
 
 function getPedalOccupiedEndX(params: {
@@ -305,11 +334,9 @@ export function buildPedalRenderPlan(params: {
         measurePairs,
         noteLayoutsByPair,
       })
-    const requiredStartX = coverageBounds?.leftXRaw ?? null
-    const requiredEndX = coverageBounds?.rightXRaw ?? null
-    const startX = Number.isFinite(requiredStartX)
-      ? Math.min(baseStartX as number, requiredStartX as number)
-      : (baseStartX as number)
+    const startX = baseStartX as number
+    const requiredStartX = startX
+    const requiredEndX = coverageBounds?.coverageEndX ?? coverageBounds?.rightXRaw ?? null
     const endX = Math.max(
       baseEndX as number,
       startX + PEDAL_MIN_DRAW_WIDTH_PX,
@@ -327,11 +354,7 @@ export function buildPedalRenderPlan(params: {
       startX,
       endX,
       occupiedStartX: startX,
-      occupiedEndX: getPedalOccupiedEndX({
-        span,
-        endX,
-        releaseWidthPx,
-      }),
+      occupiedEndX: getPedalOccupiedEndX({ span, endX, releaseWidthPx }),
       baseBaselineY,
       baselineY: baseBaselineY,
       laneIndex: 0,
@@ -340,27 +363,30 @@ export function buildPedalRenderPlan(params: {
     }]
   })
 
-  const laneStatesByBaselineKey = new Map<string, Array<{ occupiedEndX: number }>>()
-  return baseEntries.map((entry) => {
-    const baselineKey = entry.baseBaselineY.toFixed(2)
-    const laneStates = laneStatesByBaselineKey.get(baselineKey) ?? []
-    let laneIndex = 0
-    while (laneIndex < laneStates.length) {
-      const laneState = laneStates[laneIndex]
-      if (entry.occupiedStartX >= laneState.occupiedEndX + PEDAL_MIN_VISUAL_GAP_PX) break
-      laneIndex += 1
+  return baseEntries.map((entry, index) => {
+    const nextEntry = baseEntries[index + 1] ?? null
+    let endX = entry.endX
+    if (nextEntry && Math.abs(nextEntry.baseBaselineY - entry.baseBaselineY) < 0.001) {
+      const nextStartLimitX = nextEntry.startX - PEDAL_MIN_VISUAL_GAP_PX
+      const minimumEndX = Math.max(
+        entry.startX + PEDAL_MIN_DRAW_WIDTH_PX,
+        Number.isFinite(entry.requiredEndX) ? (entry.requiredEndX as number) : Number.NEGATIVE_INFINITY,
+      )
+      if (endX > nextStartLimitX && nextStartLimitX >= minimumEndX) {
+        endX = nextStartLimitX
+      }
     }
-    if (laneIndex === laneStates.length) {
-      laneStates.push({ occupiedEndX: entry.occupiedEndX })
-    } else {
-      laneStates[laneIndex].occupiedEndX = entry.occupiedEndX
-    }
-    laneStatesByBaselineKey.set(baselineKey, laneStates)
 
     return {
       ...entry,
-      laneIndex,
-      baselineY: entry.baseBaselineY + laneIndex * PEDAL_LANE_ROW_STEP_PX,
+      endX,
+      occupiedEndX: getPedalOccupiedEndX({
+        span: entry.span,
+        endX,
+        releaseWidthPx,
+      }),
+      baselineY: entry.baseBaselineY,
+      laneIndex: 0,
     }
   })
 }

@@ -5,7 +5,7 @@ import type { ChordRulerEntry } from './chordRuler'
 import type { MeasurePair, PedalApplyScope, PedalSpan, PedalStyle, TimeSignature } from './types'
 
 export const PEDAL_RETRACT_BEAT_RATIO = 0.1
-export const PEDAL_MIN_VISUAL_GAP_PX = 4
+export const PEDAL_MIN_VISUAL_GAP_PX = 2
 
 export const PEDAL_STYLE_LABELS: Record<PedalStyle, string> = {
   text: 'TEXT',
