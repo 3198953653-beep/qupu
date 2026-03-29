@@ -653,6 +653,37 @@ function getRenderedOccupiedBounds(refs: TimeAxisRenderedRef[]): { leftX: number
   return { leftX, rightX }
 }
 
+function getOccupiedBoundsFromOnsetReserves(
+  onsetReserves: TimeAxisSpacingOnsetReserve[],
+): { leftX: number; rightX: number } | null {
+  let leftX = Number.POSITIVE_INFINITY
+  let rightX = Number.NEGATIVE_INFINITY
+  let hasOccupiedGeometry = false
+
+  onsetReserves.forEach((reserve) => {
+    const finalX = reserve.finalX
+    if (typeof finalX !== 'number' || !Number.isFinite(finalX)) return
+    const leftOccupiedInsetPx =
+      typeof reserve.leftOccupiedInsetPx === 'number' && Number.isFinite(reserve.leftOccupiedInsetPx)
+        ? Math.max(0, reserve.leftOccupiedInsetPx)
+        : 0
+    const rightOccupiedTailPx =
+      typeof reserve.rightOccupiedTailPx === 'number' && Number.isFinite(reserve.rightOccupiedTailPx)
+        ? Math.max(0, reserve.rightOccupiedTailPx)
+        : 0
+
+    if (leftOccupiedInsetPx > 0 || rightOccupiedTailPx > 0) {
+      hasOccupiedGeometry = true
+    }
+
+    leftX = Math.min(leftX, finalX - leftOccupiedInsetPx)
+    rightX = Math.max(rightX, finalX + rightOccupiedTailPx)
+  })
+
+  if (!hasOccupiedGeometry || !Number.isFinite(leftX) || !Number.isFinite(rightX)) return null
+  return { leftX, rightX }
+}
+
 function buildStaffOnsetTicks(notes: ScoreNote[]): number[] {
   const onsetTicks: number[] = []
   let cursorTicks = 0
@@ -1905,7 +1936,9 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     return null
   }
 
-  const resolvedOccupiedBounds = getRenderedOccupiedBounds(renderedRefs)
+  const resolvedOccupiedBounds =
+    getOccupiedBoundsFromOnsetReserves(onsetReserves) ??
+    getRenderedOccupiedBounds(renderedRefs)
   const spacingOccupiedLeftX = resolvedOccupiedBounds?.leftX ?? resolvedFirstX
   const spacingOccupiedRightX = resolvedOccupiedBounds?.rightX ?? resolvedLastX
   const spacingAnchorGapFirstToLastPx = Math.max(0, resolvedLastX - resolvedFirstX)

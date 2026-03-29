@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { chromium, type Page } from 'playwright'
+import { getStepOctaveAlterFromPitch, toPitchFromStepAlter } from '../src/score/pitchMath'
 
 type DebugScaleConfig = {
   autoScaleEnabled: boolean
@@ -15,6 +16,7 @@ type DumpSpacingSegment = {
   baseGapPx: number | null
   extraReservePx?: number | null
   appliedGapPx?: number | null
+  accidentalRequestedExtraPx?: number | null
 }
 
 type DumpSpacingOnsetReserve = {
@@ -23,18 +25,36 @@ type DumpSpacingOnsetReserve = {
   rightReservePx?: number | null
 }
 
+type DumpNoteHead = {
+  keyIndex: number
+  x: number
+  y: number
+}
+
+type DumpAccidentalCoord = {
+  keyIndex: number
+  rightX: number
+}
+
 type DumpNoteRow = {
   staff: 'treble' | 'bass'
+  noteId?: string | null
+  noteIndex?: number | null
   pitch?: string | null
   duration?: string | null
   isRest?: boolean | null
   onsetTicksInMeasure?: number | null
+  spacingRightX?: number | null
+  noteHeads?: DumpNoteHead[] | null
+  accidentalCoords?: DumpAccidentalCoord[] | null
 }
 
 type MeasureDumpRow = {
   pairIndex: number
   rendered: boolean
   measureWidth?: number | null
+  measureEndBarX?: number | null
+  effectiveRightGapPx?: number | null
   leadingGapPx?: number | null
   trailingTailTicks?: number | null
   trailingGapPx?: number | null
@@ -49,6 +69,12 @@ type MeasureDump = {
   totalMeasureCount: number
   renderedMeasureCount: number
   rows: MeasureDumpRow[]
+}
+
+type DebugSelection = {
+  noteId: string
+  staff: 'treble' | 'bass'
+  keyIndex: number
 }
 
 type DemoKind = 'half-note' | 'whole-note'
@@ -80,10 +106,38 @@ type DemoReport = {
   rows: DemoRowReport[]
 }
 
+type DenseAccidentalMetrics = {
+  measureWidth: number | null
+  effectiveRightGapPx: number | null
+  trailingGapPx: number | null
+  measureEndBarX: number | null
+  lastSpacingRightX: number | null
+  barlineToLastSpacingGapPx: number | null
+  lastPitch: string | null
+  lastAccidentalCount: number
+  lastSegmentAccidentalRequestedExtraPx: number | null
+}
+
+type DenseAccidentalScenario = {
+  key: string
+  buttonLabel: string
+  expectedTrebleNoteCount: number
+}
+
+type DenseAccidentalReport = {
+  key: string
+  buttonLabel: string
+  before: DenseAccidentalMetrics
+  afterSharp: DenseAccidentalMetrics
+  passed: boolean
+  failureReasons: string[]
+}
+
 type FinalReport = {
   generatedAt: string
   scale: DebugScaleConfig
   demos: DemoReport[]
+  denseAccidentalScenarios: DenseAccidentalReport[]
 }
 
 const DEV_HOST = '127.0.0.1'
@@ -95,6 +149,16 @@ const EXPECTED_HALF_ANCHOR_TICKS = [0, 32]
 const EXPECTED_WHOLE_ANCHOR_TICKS = [0, 32]
 const EXPECTED_WHOLE_TAIL_TICKS = 32
 const LEGACY_MIN_MEASURE_WIDTH_PX = 120
+const DENSE_ACCIDENTAL_TRAILING_GAP_MAX_DELTA_PX = 24
+const DENSE_ACCIDENTAL_MEASURE_WIDTH_MAX_DELTA_PX = 24
+const DENSE_ACCIDENTAL_VISIBLE_GAP_MAX_DELTA_PX = 24
+const DENSE_ACCIDENTAL_SCENARIOS: DenseAccidentalScenario[] = [
+  {
+    key: 'four-sixteenth-last-note-sharp',
+    buttonLabel: '四连十六分型',
+    expectedTrebleNoteCount: 16,
+  },
+]
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -148,6 +212,7 @@ async function waitForDebugApi(page: Page): Promise<void> {
       return (
         !!api &&
         typeof api.dumpAllMeasureCoordinates === 'function' &&
+        typeof api.getActiveSelection === 'function' &&
         typeof api.getScaleConfig === 'function' &&
         typeof api.setAutoScaleEnabled === 'function' &&
         typeof api.setManualScalePercent === 'function'
@@ -201,12 +266,81 @@ async function dumpAllMeasureCoordinates(page: Page): Promise<MeasureDump> {
   })
 }
 
+async function getActiveSelection(page: Page): Promise<DebugSelection> {
+  return page.evaluate(() => {
+    const api = (window as unknown as {
+      __scoreDebug: { getActiveSelection: () => DebugSelection }
+    }).__scoreDebug
+    return api.getActiveSelection()
+  })
+}
+
 async function clickButton(page: Page, label: string): Promise<void> {
   const button = page.getByRole('button', { name: label }).first()
   await button.waitFor()
   await button.evaluate((element) => {
     ;(element as HTMLButtonElement).click()
   })
+}
+
+async function ensureNotationPaletteOpen(page: Page): Promise<void> {
+  const dialog = page.getByRole('dialog', { name: '记谱工具面板' })
+  const alreadyOpen = (await dialog.count()) > 0 && await dialog.first().isVisible()
+  if (alreadyOpen) return
+  await page.getByRole('button', { name: '记谱工具' }).click()
+  await page.waitForSelector('[aria-label="记谱工具面板"]', { state: 'visible', timeout: 2000 })
+}
+
+async function clickNotationPaletteButton(page: Page, label: string): Promise<void> {
+  await ensureNotationPaletteOpen(page)
+  await page.getByRole('button', { name: label, exact: true }).click()
+}
+
+async function toClientPoint(page: Page, logicalX: number, logicalY: number): Promise<{ x: number; y: number }> {
+  return page.evaluate(({ x, y }) => {
+    const canvas = document.querySelector('canvas.score-surface') as HTMLCanvasElement | null
+    if (!canvas) throw new Error('Canvas .score-surface not found.')
+    const rect = canvas.getBoundingClientRect()
+    const widthBase = canvas.width > 0 ? canvas.width : rect.width || 1
+    const heightBase = canvas.height > 0 ? canvas.height : rect.height || 1
+    const scaleX = rect.width / widthBase
+    const scaleY = rect.height / heightBase
+    return {
+      x: rect.left + x * scaleX,
+      y: rect.top + y * scaleY,
+    }
+  }, { x: logicalX, y: logicalY })
+}
+
+async function clickNoteHead(page: Page, note: DumpNoteRow, keyIndex = 0): Promise<void> {
+  const noteHeads = note.noteHeads ?? []
+  const head = noteHeads.find((entry) => entry.keyIndex === keyIndex) ?? noteHeads[0]
+  if (!head) {
+    throw new Error(`Unable to find note head for pair noteIndex=${note.noteIndex ?? 'unknown'}.`)
+  }
+  const clientPoint = await toClientPoint(page, head.x, head.y)
+  await page.mouse.move(clientPoint.x, clientPoint.y)
+  await page.mouse.down()
+  await page.mouse.up()
+  if (typeof note.noteId === 'string' && note.noteId.length > 0) {
+    await page.waitForFunction(
+      ({ noteId, staff, keyIndex: expectedKeyIndex }) => {
+        const api = (window as unknown as {
+          __scoreDebug: { getActiveSelection: () => DebugSelection }
+        }).__scoreDebug
+        const selection = api.getActiveSelection()
+        return (
+          selection.noteId === noteId &&
+          selection.staff === staff &&
+          selection.keyIndex === expectedKeyIndex
+        )
+      },
+      { noteId: note.noteId, staff: note.staff, keyIndex },
+      { timeout: 2000 },
+    )
+    return
+  }
+  await page.waitForTimeout(160)
 }
 
 async function waitForHalfNoteDemo(page: Page): Promise<void> {
@@ -261,6 +395,29 @@ async function waitForWholeNoteDemo(page: Page): Promise<void> {
   )
 }
 
+async function waitForDenseAccidentalScenario(page: Page, scenario: DenseAccidentalScenario): Promise<void> {
+  await page.waitForFunction(
+    (expectedTrebleNoteCount) => {
+      const api = (window as unknown as {
+        __scoreDebug: { dumpAllMeasureCoordinates: () => MeasureDump }
+      }).__scoreDebug
+      const firstRow = api.dumpAllMeasureCoordinates().rows[0]
+      if (!firstRow) return false
+      const notes = firstRow.notes ?? []
+      const trebleNotes = notes.filter((note) => note.staff === 'treble' && !note.isRest)
+      const bassNotes = notes.filter((note) => note.staff === 'bass' && !note.isRest)
+      return (
+        trebleNotes.length === expectedTrebleNoteCount &&
+        bassNotes.length === expectedTrebleNoteCount &&
+        trebleNotes.every((note) => note.duration === '16') &&
+        bassNotes.every((note) => note.duration === '16')
+      )
+    },
+    scenario.expectedTrebleNoteCount,
+    { timeout: 120000 },
+  )
+}
+
 async function waitForDemoRows(page: Page, expectedRowCount: number): Promise<void> {
   await page.waitForFunction(
     (targetRowCount) => {
@@ -293,10 +450,127 @@ function normalizeTicks(ticks: number[] | null | undefined): number[] {
   return Array.isArray(ticks) ? ticks.map((tick) => Math.round(tick)) : []
 }
 
+function getExpectedSharpPitch(pitch: string | null): string | null {
+  if (typeof pitch !== 'string' || pitch.length === 0) return null
+  const { step, alter, octave } = getStepOctaveAlterFromPitch(pitch)
+  return toPitchFromStepAlter(step, alter + 1, octave)
+}
+
 function hasAnyReserve(row: MeasureDumpRow): boolean {
   return (row.spacingOnsetReserves ?? []).some((entry) =>
     Math.abs(entry.leftReservePx ?? 0) > EPSILON_PX || Math.abs(entry.rightReservePx ?? 0) > EPSILON_PX,
   )
+}
+
+function getLastTrebleNote(row: MeasureDumpRow): DumpNoteRow | null {
+  return (row.notes ?? [])
+    .filter((note) => note.staff === 'treble' && note.isRest !== true && (note.noteHeads?.length ?? 0) > 0)
+    .slice()
+    .sort((left, right) => {
+      const leftIndex = typeof left.noteIndex === 'number' && Number.isFinite(left.noteIndex) ? left.noteIndex : Number.POSITIVE_INFINITY
+      const rightIndex = typeof right.noteIndex === 'number' && Number.isFinite(right.noteIndex) ? right.noteIndex : Number.POSITIVE_INFINITY
+      if (leftIndex !== rightIndex) return leftIndex - rightIndex
+      const leftTick =
+        typeof left.onsetTicksInMeasure === 'number' && Number.isFinite(left.onsetTicksInMeasure)
+          ? left.onsetTicksInMeasure
+          : Number.POSITIVE_INFINITY
+      const rightTick =
+        typeof right.onsetTicksInMeasure === 'number' && Number.isFinite(right.onsetTicksInMeasure)
+          ? right.onsetTicksInMeasure
+          : Number.POSITIVE_INFINITY
+      return leftTick - rightTick
+    })
+    .at(-1) ?? null
+}
+
+function buildDenseAccidentalMetrics(row: MeasureDumpRow): DenseAccidentalMetrics {
+  const lastTreble = getLastTrebleNote(row)
+  const measureEndBarX = roundFinite(row.measureEndBarX)
+  const lastSpacingRightX = roundFinite(lastTreble?.spacingRightX)
+  return {
+    measureWidth: roundFinite(row.measureWidth),
+    effectiveRightGapPx: roundFinite(row.effectiveRightGapPx),
+    trailingGapPx: roundFinite(row.trailingGapPx),
+    measureEndBarX,
+    lastSpacingRightX,
+    barlineToLastSpacingGapPx:
+      measureEndBarX !== null && lastSpacingRightX !== null ? roundFinite(measureEndBarX - lastSpacingRightX) : null,
+    lastPitch: lastTreble?.pitch ?? null,
+    lastAccidentalCount: lastTreble?.accidentalCoords?.length ?? 0,
+    lastSegmentAccidentalRequestedExtraPx: roundFinite((row.spacingSegments ?? []).at(-1)?.accidentalRequestedExtraPx),
+  }
+}
+
+function buildDenseAccidentalReport(params: {
+  scenario: DenseAccidentalScenario
+  beforeRow: MeasureDumpRow
+  afterRow: MeasureDumpRow
+}): DenseAccidentalReport {
+  const { scenario, beforeRow, afterRow } = params
+  const before = buildDenseAccidentalMetrics(beforeRow)
+  const afterSharp = buildDenseAccidentalMetrics(afterRow)
+  const expectedSharpPitch = getExpectedSharpPitch(before.lastPitch)
+  const failureReasons: string[] = []
+
+  if (before.measureWidth === null || afterSharp.measureWidth === null) {
+    failureReasons.push('missing-measure-width')
+  }
+  if (before.trailingGapPx === null || afterSharp.trailingGapPx === null) {
+    failureReasons.push('missing-trailing-gap')
+  }
+  if (before.barlineToLastSpacingGapPx === null || afterSharp.barlineToLastSpacingGapPx === null) {
+    failureReasons.push('missing-visible-tail-gap')
+  }
+  if (expectedSharpPitch === null) {
+    failureReasons.push(`missing-expected-sharp-pitch:${before.lastPitch ?? 'null'}`)
+  } else if (afterSharp.lastPitch !== expectedSharpPitch) {
+    failureReasons.push(
+      `unexpected-last-pitch:${afterSharp.lastPitch ?? 'null'}:expected:${expectedSharpPitch}`,
+    )
+  }
+  if (afterSharp.lastAccidentalCount < 1) {
+    failureReasons.push('missing-rendered-accidental')
+  }
+  if (
+    before.trailingGapPx !== null &&
+    afterSharp.trailingGapPx !== null &&
+    afterSharp.trailingGapPx - before.trailingGapPx > DENSE_ACCIDENTAL_TRAILING_GAP_MAX_DELTA_PX
+  ) {
+    failureReasons.push(`trailing-gap-blowup:${before.trailingGapPx}->${afterSharp.trailingGapPx}`)
+  }
+  if (
+    before.measureWidth !== null &&
+    afterSharp.measureWidth !== null &&
+    afterSharp.measureWidth - before.measureWidth > DENSE_ACCIDENTAL_MEASURE_WIDTH_MAX_DELTA_PX
+  ) {
+    failureReasons.push(`measure-width-blowup:${before.measureWidth}->${afterSharp.measureWidth}`)
+  }
+  if (
+    before.barlineToLastSpacingGapPx !== null &&
+    afterSharp.barlineToLastSpacingGapPx !== null &&
+    afterSharp.barlineToLastSpacingGapPx - before.barlineToLastSpacingGapPx > DENSE_ACCIDENTAL_VISIBLE_GAP_MAX_DELTA_PX
+  ) {
+    failureReasons.push(
+      `visible-tail-gap-blowup:${before.barlineToLastSpacingGapPx}->${afterSharp.barlineToLastSpacingGapPx}`,
+    )
+  }
+  if (
+    afterSharp.lastSegmentAccidentalRequestedExtraPx === null ||
+    afterSharp.lastSegmentAccidentalRequestedExtraPx <= EPSILON_PX
+  ) {
+    failureReasons.push(
+      `missing-accidental-extra:${afterSharp.lastSegmentAccidentalRequestedExtraPx ?? 'null'}`,
+    )
+  }
+
+  return {
+    key: scenario.key,
+    buttonLabel: scenario.buttonLabel,
+    before,
+    afterSharp,
+    passed: failureReasons.length === 0,
+    failureReasons,
+  }
 }
 
 function buildDemoRowReport(row: MeasureDumpRow, demo: DemoKind): DemoRowReport {
@@ -417,6 +691,42 @@ async function collectDemoReport(page: Page, params: {
   }
 }
 
+async function collectDenseAccidentalReport(page: Page, scenario: DenseAccidentalScenario): Promise<DenseAccidentalReport> {
+  await clickButton(page, scenario.buttonLabel)
+  await waitForDenseAccidentalScenario(page, scenario)
+  await waitForDemoRows(page, 1)
+  const beforeDump = await dumpAllMeasureCoordinates(page)
+  const beforeRow = beforeDump.rows[0]
+  if (!beforeRow) {
+    throw new Error(`[${scenario.key}] No rendered measures found before accidental edit.`)
+  }
+  const lastTrebleNote = getLastTrebleNote(beforeRow)
+  if (!lastTrebleNote) {
+    throw new Error(`[${scenario.key}] Could not find the last treble note.`)
+  }
+
+  await clickNoteHead(page, lastTrebleNote)
+  const activeSelection = await getActiveSelection(page)
+  if (activeSelection.noteId !== lastTrebleNote.noteId || activeSelection.staff !== 'treble' || activeSelection.keyIndex !== 0) {
+    throw new Error(
+      `[${scenario.key}] Failed to activate the target note before accidental edit: ${JSON.stringify(activeSelection)}`,
+    )
+  }
+  await clickNotationPaletteButton(page, '升记号')
+  await page.waitForTimeout(600)
+  const afterDump = await dumpAllMeasureCoordinates(page)
+  const afterRow = afterDump.rows[0]
+  if (!afterRow) {
+    throw new Error(`[${scenario.key}] No rendered measures found after accidental edit.`)
+  }
+
+  return buildDenseAccidentalReport({
+    scenario,
+    beforeRow,
+    afterRow,
+  })
+}
+
 async function main(): Promise<void> {
   const reportPath = process.argv[2] ?? path.resolve('debug', 'built-in-demo-spacing-browser-report.json')
   const server = startDevServer()
@@ -456,10 +766,16 @@ async function main(): Promise<void> {
       }),
     )
 
+    const denseAccidentalScenarios: DenseAccidentalReport[] = []
+    for (const scenario of DENSE_ACCIDENTAL_SCENARIOS) {
+      denseAccidentalScenarios.push(await collectDenseAccidentalReport(page, scenario))
+    }
+
     const report: FinalReport = {
       generatedAt: new Date().toISOString(),
       scale: appliedScale,
       demos,
+      denseAccidentalScenarios,
     }
 
     await mkdir(path.dirname(reportPath), { recursive: true })
@@ -479,6 +795,19 @@ async function main(): Promise<void> {
           failureReasons.push(`${demo.demo}:${row.pairIndex}:${row.failureReasons.join('|')}`)
         }
       })
+    })
+    denseAccidentalScenarios.forEach((scenario) => {
+      console.log(
+        `[built-in-demo-spacing] dense=${scenario.key} ` +
+          `width=${scenario.before.measureWidth}->${scenario.afterSharp.measureWidth} ` +
+          `tail=${scenario.before.trailingGapPx}->${scenario.afterSharp.trailingGapPx} ` +
+          `visibleGap=${scenario.before.barlineToLastSpacingGapPx}->${scenario.afterSharp.barlineToLastSpacingGapPx} ` +
+          `${scenario.passed ? 'PASS' : 'FAIL'}`,
+      )
+      if (!scenario.passed) {
+        console.log(`  reasons=${scenario.failureReasons.join(', ')}`)
+        failureReasons.push(`${scenario.key}:${scenario.failureReasons.join('|')}`)
+      }
     })
     console.log(`Generated: ${reportPath}`)
 
