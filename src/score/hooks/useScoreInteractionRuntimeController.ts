@@ -11,6 +11,7 @@ import { useScoreEditorRefs } from './useScoreEditorRefs'
 import { useHorizontalScoreLayout } from './useHorizontalScoreLayout'
 import { useScoreCoreEditingController } from './useScoreCoreEditingController'
 import { useSmartChordToneDialogController } from './useSmartChordToneDialogController'
+import { useImportedSegmentRhythmTemplateController } from './useImportedSegmentRhythmTemplateController'
 import type { Pitch, ScoreNote, Selection, TimeSignature } from '../types'
 
 export function useScoreInteractionRuntimeController(params: {
@@ -65,6 +66,17 @@ export function useScoreInteractionRuntimeController(params: {
     resetMidiStepChain: coreEditing.sessionHelpers.resetMidiStepChain,
   })
 
+  const importedSegmentRhythmTemplate = useImportedSegmentRhythmTemplateController({
+    scoreSourceKind: appState.scoreSourceKind,
+    measurePairsRef: editorRefs.measurePairsRef,
+    chordRulerEntriesByPair: appState.importedChordRulerEntriesByPairFromImport,
+    measureTimeSignaturesByMeasure: appState.measureTimeSignaturesFromImport,
+    measureKeyFifthsByMeasure: appState.measureKeyFifthsFromImport,
+    segmentRhythmTemplateBindings: appState.segmentRhythmTemplateBindings,
+    setSegmentRhythmTemplateBindings: appState.setSegmentRhythmTemplateBindings,
+    applyKeyboardEditResult: coreEditing.mutation.applyKeyboardEditResult,
+  })
+
   const workspaceRuntimeRefs: WorkspaceRuntimeRefs = {
     beginDragRef: useRef(null),
     endDragRef: useRef(null),
@@ -106,6 +118,7 @@ export function useScoreInteractionRuntimeController(params: {
     previewStartThresholdPx,
     workspacePlaybackHandlers: playbackBridge.workspacePlaybackHandlers,
     onTrebleSelectionDoubleTap: smartChordToneDialog.openSmartChordToneDialogForSelection,
+    onTimelineSegmentDoubleClick: importedSegmentRhythmTemplate.onTimelineSegmentDoubleClick,
   })
 
   playbackBridge.syncWorkspaceRuntimeRefs(workspace)
@@ -116,5 +129,6 @@ export function useScoreInteractionRuntimeController(params: {
     editorUi,
     playback: playbackBridge.playback,
     smartChordToneDialog: smartChordToneDialog.smartChordToneDialog,
+    rhythmTemplateLoadModal: importedSegmentRhythmTemplate.rhythmTemplateLoadModal,
   }
 }

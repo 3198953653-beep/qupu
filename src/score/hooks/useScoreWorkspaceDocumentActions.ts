@@ -1,8 +1,8 @@
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import { useScoreDocumentActionsController } from './useScoreDocumentActionsController'
 import { useScoreAppState } from './useScoreAppState'
 import { useScoreEditorRefs } from './useScoreEditorRefs'
-import type { ImportResult, Pitch, ScoreNote } from '../types'
+import type { ImportResult, Pitch, ScoreNote, ScoreSourceKind } from '../types'
 import type { PlaybackTimelineEvent } from '../playbackTimeline'
 import type { MeasurePair } from '../types'
 
@@ -35,17 +35,28 @@ export function useScoreWorkspaceDocumentActions(params: {
     requestPlaybackCursorReset,
     stopActivePlaybackSession,
     initialTrebleNotes,
-    initialBassNotes,
-    pitches,
+  initialBassNotes,
+  pitches,
   } = params
+  const pendingImportedScoreSourceKindRef =
+    useRef<Extract<ScoreSourceKind, 'musicxml-file' | 'musicxml-text' | 'sample-musicxml'> | null>(null)
   const handleImportedScoreApplied = useCallback((result: ImportResult) => {
     requestPlaybackCursorReset()
+    const nextSourceKind = pendingImportedScoreSourceKindRef.current ?? 'musicxml-text'
+    appState.setScoreSourceKind(nextSourceKind)
+    appState.setSegmentRhythmTemplateBindings({})
     appState.setTimelineSegmentOverlayMode(
       result.importedTimelineSegmentStartPairIndexes && result.importedTimelineSegmentStartPairIndexes.length > 0
         ? 'imported-last-part'
         : 'curated-two-measure',
     )
-  }, [appState.setTimelineSegmentOverlayMode, requestPlaybackCursorReset])
+    pendingImportedScoreSourceKindRef.current = null
+  }, [
+    appState.setScoreSourceKind,
+    appState.setSegmentRhythmTemplateBindings,
+    appState.setTimelineSegmentOverlayMode,
+    requestPlaybackCursorReset,
+  ])
 
   return useScoreDocumentActionsController({
     editorHandlers: {
@@ -99,7 +110,12 @@ export function useScoreWorkspaceDocumentActions(params: {
       clearActiveChordSelection,
       setActiveBuiltInDemo: appState.setActiveBuiltInDemo,
       setTimelineSegmentOverlayMode: appState.setTimelineSegmentOverlayMode,
+      setScoreSourceKind: appState.setScoreSourceKind,
+      setSegmentRhythmTemplateBindings: appState.setSegmentRhythmTemplateBindings,
       setFullMeasureRestCollapseScopeKeys: appState.setFullMeasureRestCollapseScopeKeys,
+      setPendingImportedScoreSourceKind: (kind) => {
+        pendingImportedScoreSourceKindRef.current = kind
+      },
     },
     stopPlayTimerRef: editorRefs.stopPlayTimerRef,
     playbackPointTimerIdsRef: editorRefs.playbackPointTimerIdsRef,

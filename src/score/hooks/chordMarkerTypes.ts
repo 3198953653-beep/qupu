@@ -13,6 +13,7 @@ export type ChordRulerMarker = {
 
 export type TimelineSegmentBlock = {
   key: string
+  scopeKey: string
   segmentNumber: number
   startPairIndex: number
   endPairIndexInclusive: number

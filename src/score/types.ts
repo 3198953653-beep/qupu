@@ -7,6 +7,14 @@ export type NoteDurationBase = 'w' | 'h' | 'q' | '8' | '16' | '32'
 export type RhythmPresetId = 'quarter' | 'twoEighth' | 'fourSixteenth' | 'eightSixteenth' | 'shortDotted'
 export type BuiltInDemoMode = 'none' | 'whole-note' | 'half-note'
 export type TimelineSegmentOverlayMode = 'none' | 'curated-two-measure' | 'imported-last-part'
+export type ScoreSourceKind =
+  | 'reset-default'
+  | 'musicxml-file'
+  | 'musicxml-text'
+  | 'sample-musicxml'
+  | 'built-in-demo'
+  | 'rhythm-preset'
+  | 'ai-draft'
 export type StaffKind = 'treble' | 'bass'
 export type BeamTag = 'begin' | 'continue' | 'end'
 export type BeamLevelTag = 'begin' | 'continue' | 'end' | 'forward hook' | 'backward hook'
@@ -76,6 +84,30 @@ export type ImportFeedback = {
   kind: 'idle' | 'loading' | 'success' | 'error'
   message: string
   progress?: number | null
+}
+
+export type SegmentRhythmTemplateDetail = {
+  notes: string
+  rhythm: string
+  pitchRange: string
+  structureType: string
+  octaveMode: string
+  spanRows: number | null
+  spanPos: number | null
+  groupDuration: number | null
+  melodyNotes: string
+  melodyRhythm: string
+}
+
+export type SegmentRhythmTemplateBinding = {
+  scopeKey: string
+  templateId: string
+  templateName: string
+  selectedDifficulty: string | null
+  selectedStyles: string[]
+  patternData: string
+  templDetails: SegmentRhythmTemplateDetail[]
+  durationCombo: string
 }
 
 export type NoteHeadLayout = {

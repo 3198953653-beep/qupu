@@ -1605,6 +1605,277 @@
   padding: 1rem;
 }
 
+.rhythm-template-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 29;
+  display: grid;
+  place-items: center;
+  background: rgba(8, 20, 34, 0.42);
+  backdrop-filter: blur(3px);
+  padding: 0.8rem;
+}
+
+.rhythm-template-modal-card {
+  width: min(1040px, calc(100vw - 1.6rem));
+  max-height: min(780px, calc(100vh - 1.6rem));
+  border-radius: 20px;
+  border: 1px solid #d6e2ec;
+  background: #ffffff;
+  box-shadow: 0 28px 60px -34px rgba(8, 24, 38, 0.98);
+  padding: 1rem 1.05rem;
+  display: grid;
+  gap: 0.9rem;
+  overflow: hidden;
+}
+
+.rhythm-template-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.rhythm-template-modal-header h3 {
+  margin: 0;
+  color: #16384b;
+  font-size: 1.08rem;
+}
+
+.rhythm-template-modal-header p {
+  margin: 0.28rem 0 0;
+  color: #4a6476;
+  font-size: 0.88rem;
+}
+
+.rhythm-template-modal-close {
+  border: 1px solid #d5e1ea;
+  border-radius: 999px;
+  background: #f7fbff;
+  color: #244a62;
+  font-weight: 600;
+  padding: 0.42rem 0.78rem;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.rhythm-template-modal-close:hover {
+  background: #eef6fb;
+  border-color: #bdd2df;
+  color: #16384b;
+}
+
+.rhythm-template-modal-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.rhythm-template-summary-card {
+  display: grid;
+  gap: 0.24rem;
+  padding: 0.78rem 0.84rem;
+  border-radius: 14px;
+  border: 1px solid #dce8f0;
+  background: #f8fbfe;
+}
+
+.rhythm-template-summary-card span {
+  color: #6a8191;
+  font-size: 0.76rem;
+}
+
+.rhythm-template-summary-card strong {
+  color: #16384b;
+  font-size: 0.96rem;
+}
+
+.rhythm-template-modal-layout {
+  display: grid;
+  grid-template-columns: 220px 260px minmax(0, 1fr);
+  gap: 0.85rem;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.rhythm-template-filter-panel,
+.rhythm-template-template-panel {
+  display: grid;
+  gap: 0.65rem;
+  min-height: 0;
+  border: 1px solid #d9e5ee;
+  border-radius: 16px;
+  background: #fbfdff;
+  padding: 0.84rem;
+}
+
+.rhythm-template-panel-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.rhythm-template-panel-title h4 {
+  margin: 0;
+  color: #173c4d;
+  font-size: 0.92rem;
+}
+
+.rhythm-template-panel-title span {
+  color: #6a8191;
+  font-size: 0.78rem;
+}
+
+.rhythm-template-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-content: flex-start;
+}
+
+.rhythm-template-chip {
+  border: 1px solid #d6e3ee;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #21495f;
+  padding: 0.42rem 0.76rem;
+  font-size: 0.83rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.rhythm-template-chip:hover {
+  background: #f4f9fd;
+  border-color: #bdd2df;
+  color: #173c4d;
+}
+
+.rhythm-template-chip.is-active {
+  background: #eaf4ff;
+  border-color: #9ec3e4;
+  color: #154a73;
+  box-shadow: inset 0 0 0 1px rgba(33, 114, 176, 0.14);
+}
+
+.rhythm-template-inline-empty {
+  color: #6a8191;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.rhythm-template-list {
+  display: grid;
+  gap: 0.55rem;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+.rhythm-template-row {
+  display: grid;
+  gap: 0.34rem;
+  width: 100%;
+  text-align: left;
+  border: 1px solid #d6e3ee;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #173c4d;
+  padding: 0.78rem 0.84rem;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.rhythm-template-row:hover {
+  background: #f7fbff;
+  border-color: #bdd2df;
+  transform: translateY(-1px);
+}
+
+.rhythm-template-row.is-active {
+  background: #eef6ff;
+  border-color: #98bfe0;
+  box-shadow: inset 0 0 0 1px rgba(33, 114, 176, 0.16);
+}
+
+.rhythm-template-row-main,
+.rhythm-template-row-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.rhythm-template-row-main strong {
+  color: #16384b;
+  font-size: 0.94rem;
+}
+
+.rhythm-template-row-main span,
+.rhythm-template-row-meta span {
+  color: #5f7788;
+  font-size: 0.8rem;
+}
+
+.rhythm-template-row-meta {
+  align-items: flex-start;
+}
+
+.rhythm-template-empty-state {
+  border: 1px dashed #ccdae5;
+  border-radius: 14px;
+  background: #f8fbfe;
+  color: #486173;
+  padding: 0.95rem;
+  line-height: 1.48;
+}
+
+.rhythm-template-empty-state.is-error {
+  border-style: solid;
+  border-color: #f0c0c0;
+  background: #fff6f6;
+  color: #8a3641;
+}
+
+.rhythm-template-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-top: 1px solid #e2ebf2;
+  padding-top: 0.85rem;
+}
+
+.rhythm-template-modal-footer p {
+  margin: 0;
+  color: #5f7788;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.rhythm-template-apply-button {
+  border: none;
+  border-radius: 999px;
+  background: #1f66d1;
+  color: #ffffff;
+  font-weight: 700;
+  padding: 0.58rem 1.12rem;
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease, background 140ms ease;
+}
+
+.rhythm-template-apply-button:hover:not(:disabled) {
+  background: #1a58b6;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px -18px rgba(31, 102, 209, 0.7);
+}
+
+.rhythm-template-apply-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 @media (max-width: 1180px) {
   .osmd-preview-card {
     width: min(1100px, calc(100vw - 1rem));
@@ -1640,6 +1911,25 @@
 
   .smart-chord-modal-header,
   .smart-chord-option-header {
+    display: grid;
+    gap: 0.35rem;
+  }
+
+  .rhythm-template-modal-card {
+    width: min(1040px, calc(100vw - 1rem));
+    max-height: min(780px, calc(100vh - 1rem));
+    padding: 0.9rem;
+  }
+
+  .rhythm-template-modal-summary,
+  .rhythm-template-modal-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rhythm-template-row-main,
+  .rhythm-template-row-meta,
+  .rhythm-template-modal-footer,
+  .rhythm-template-panel-title {
     display: grid;
     gap: 0.35rem;
   }

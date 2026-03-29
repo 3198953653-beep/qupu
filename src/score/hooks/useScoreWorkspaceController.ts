@@ -36,6 +36,7 @@ export function useScoreWorkspaceController(params: {
   onAfterScoreRender: () => void
   clearActiveChordSelection: () => void
   onTrebleSelectionDoubleTap?: (selection: Selection) => void
+  onTimelineSegmentDoubleClick?: (scopeKey: string) => void
   pushUndoSnapshot: (sourcePairs: import('../types').MeasurePair[]) => void
   handlePreviewScoreNote: ReturnType<typeof import('./useScoreAudioPreviewController').useScoreAudioPreviewController>['handlePreviewScoreNote']
   handlePlaybackStart: Parameters<typeof import('./useScoreDocumentActionsController').useScoreDocumentActionsController>[0]['editorHandlers']['onPlaybackStart']
@@ -65,6 +66,7 @@ export function useScoreWorkspaceController(params: {
     onAfterScoreRender,
     clearActiveChordSelection,
     onTrebleSelectionDoubleTap,
+    onTimelineSegmentDoubleClick,
     pushUndoSnapshot,
     handlePreviewScoreNote,
     handlePlaybackStart,
@@ -127,6 +129,7 @@ export function useScoreWorkspaceController(params: {
     onSurfacePointerMove,
     endDrag,
     beginDrag,
+    onTimelineSegmentDoubleClick: onTimelineSegmentDoubleClick ?? (() => {}),
     ...documentActions,
   }
 }

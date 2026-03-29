@@ -77,6 +77,7 @@ export function buildTimelineSegmentBlocks(params: {
     const segmentNumber = segmentBlocks.length + 1
     segmentBlocks.push({
       key: `timeline-segment-${startPairIndex}-${endPairIndexInclusive}`,
+      scopeKey: `${startPairIndex}:${endPairIndexInclusive}`,
       segmentNumber,
       startPairIndex,
       endPairIndexInclusive,

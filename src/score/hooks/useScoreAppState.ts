@@ -24,8 +24,10 @@ import type {
   MeasurePair,
   MusicXmlMetadata,
   RhythmPresetId,
+  ScoreSourceKind,
   ScoreNote,
   Selection,
+  SegmentRhythmTemplateBinding,
   TieSelection,
   TimelineSegmentOverlayMode,
   TimeSignature,
@@ -38,6 +40,7 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
   const [activeBuiltInDemo, setActiveBuiltInDemo] = useState<BuiltInDemoMode>('none')
   const [timelineSegmentOverlayMode, setTimelineSegmentOverlayMode] =
     useState<TimelineSegmentOverlayMode>('curated-two-measure')
+  const [scoreSourceKind, setScoreSourceKind] = useState<ScoreSourceKind>('reset-default')
   const [activeSelection, setActiveSelection] = useState<Selection>({
     noteId: INITIAL_NOTES[0].id,
     staff: 'treble',
@@ -75,6 +78,8 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
     useState<ChordRulerEntry[][] | null>(null)
   const [importedTimelineSegmentStartPairIndexesFromImport, setImportedTimelineSegmentStartPairIndexesFromImport] =
     useState<number[] | null>(null)
+  const [segmentRhythmTemplateBindings, setSegmentRhythmTemplateBindings] =
+    useState<Record<string, SegmentRhythmTemplateBinding>>({})
   const [, setDragDebugReport] = useState<string>('')
   const [autoScaleEnabled, setAutoScaleEnabled] = useState(false)
   const [manualScalePercent, setManualScalePercent] = useState(100)
@@ -106,6 +111,8 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
     setActiveBuiltInDemo,
     timelineSegmentOverlayMode,
     setTimelineSegmentOverlayMode,
+    scoreSourceKind,
+    setScoreSourceKind,
     activeSelection,
     setActiveSelection,
     activeAccidentalSelection,
@@ -154,6 +161,8 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
     setImportedChordRulerEntriesByPairFromImport,
     importedTimelineSegmentStartPairIndexesFromImport,
     setImportedTimelineSegmentStartPairIndexesFromImport,
+    segmentRhythmTemplateBindings,
+    setSegmentRhythmTemplateBindings,
     setDragDebugReport,
     autoScaleEnabled,
     setAutoScaleEnabled,

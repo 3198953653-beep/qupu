@@ -21,6 +21,7 @@ import {
 import { buildSelectionsForMeasureStaff } from './score/selectionBuilders'
 import { ImportProgressModal } from './score/components/ImportProgressModal'
 import { OsmdPreviewModal } from './score/components/OsmdPreviewModal'
+import { RhythmTemplateLoadModal } from './score/components/RhythmTemplateLoadModal'
 import { SmartChordToneModal } from './score/components/SmartChordToneModal'
 import type { Pitch, ScoreNote } from './score/types'
 import { Renderer } from 'vexflow'
@@ -88,7 +89,7 @@ function App() {
     previewDefaultAccidentalOffsetPx: PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX,
     previewStartThresholdPx: PREVIEW_START_THRESHOLD_PX,
   })
-  const { workspace, editorUi, playback, smartChordToneDialog } = runtime
+  const { workspace, editorUi, playback, smartChordToneDialog, rhythmTemplateLoadModal } = runtime
 
   const { scoreControlsProps, scoreBoardProps } = useScoreViewProps({
     appState,
@@ -160,6 +161,29 @@ function App() {
         onToggleFilterOption={smartChordToneDialog.toggleFilterOption}
         onPreviewCandidate={smartChordToneDialog.previewCandidate}
         onApplyCandidate={smartChordToneDialog.applyCandidate}
+      />
+
+      <RhythmTemplateLoadModal
+        isOpen={rhythmTemplateLoadModal.isOpen}
+        scope={rhythmTemplateLoadModal.scope}
+        durationCombo={rhythmTemplateLoadModal.durationCombo}
+        isLoading={rhythmTemplateLoadModal.isLoading}
+        isApplying={rhythmTemplateLoadModal.isApplying}
+        errorMessage={rhythmTemplateLoadModal.errorMessage}
+        difficultyOptions={rhythmTemplateLoadModal.difficultyOptions}
+        styleOptions={rhythmTemplateLoadModal.styleOptions}
+        filteredTemplateRows={rhythmTemplateLoadModal.filteredTemplateRows}
+        selectedDifficulty={rhythmTemplateLoadModal.selectedDifficulty}
+        selectedStyles={rhythmTemplateLoadModal.selectedStyles}
+        selectedTemplateId={rhythmTemplateLoadModal.selectedTemplateId}
+        onClose={rhythmTemplateLoadModal.closeModal}
+        onSelectDifficulty={rhythmTemplateLoadModal.setSelectedDifficulty}
+        onToggleStyle={rhythmTemplateLoadModal.toggleStyleFilter}
+        onSelectTemplate={rhythmTemplateLoadModal.setSelectedTemplateId}
+        onApplyTemplate={() => {
+          void rhythmTemplateLoadModal.applySelectedTemplate()
+        }}
+        onTemplateDoubleClick={rhythmTemplateLoadModal.handleTemplateDoubleClick}
       />
     </main>
   )

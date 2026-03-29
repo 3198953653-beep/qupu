@@ -30,6 +30,7 @@ export function ScoreBoard(props: {
   }>
   timelineSegmentBlocks: Array<{
     key: string
+    scopeKey: string
     segmentNumber: number
     startPairIndex: number
     endPairIndexInclusive: number
@@ -52,6 +53,7 @@ export function ScoreBoard(props: {
   }>
   showChordMarkerBackgroundEnabled: boolean
   onTimelineSegmentClick: (segmentKey: string) => void
+  onTimelineSegmentDoubleClick: (scopeKey: string) => void
   onChordRulerMarkerClick: (markerKey: string) => void
   playheadRectPx?: { x: number; y: number; width: number; height: number } | null
   playheadStatus: 'idle' | 'playing'
@@ -89,6 +91,7 @@ export function ScoreBoard(props: {
     chordRulerMarkers,
     showChordMarkerBackgroundEnabled,
     onTimelineSegmentClick,
+    onTimelineSegmentDoubleClick,
     onChordRulerMarkerClick,
     playheadRectPx = null,
     playheadStatus,
@@ -165,6 +168,7 @@ export function ScoreBoard(props: {
                   width: `${segment.widthPx}px`,
                 }}
                 onClick={() => onTimelineSegmentClick(segment.key)}
+                onDoubleClick={() => onTimelineSegmentDoubleClick(segment.scopeKey)}
                 title={`第 ${segment.segmentNumber} 段（第 ${segment.measureStartNumber}-${segment.measureEndNumber} 小节）`}
                 aria-label={`第 ${segment.segmentNumber} 段，第 ${segment.measureStartNumber} 到第 ${segment.measureEndNumber} 小节`}
                 aria-pressed={segment.isActive}

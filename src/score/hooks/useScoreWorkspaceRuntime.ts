@@ -26,6 +26,7 @@ export function useScoreWorkspaceRuntime(params: {
   previewStartThresholdPx: number
   workspacePlaybackHandlers: ReturnType<typeof useScorePlaybackRuntimeBridge>['workspacePlaybackHandlers']
   onTrebleSelectionDoubleTap?: (selection: Selection) => void
+  onTimelineSegmentDoubleClick?: (scopeKey: string) => void
 }) {
   const {
     appState,
@@ -42,6 +43,7 @@ export function useScoreWorkspaceRuntime(params: {
     previewStartThresholdPx,
     workspacePlaybackHandlers,
     onTrebleSelectionDoubleTap,
+    onTimelineSegmentDoubleClick,
   } = params
 
   return useScoreWorkspaceController({
@@ -73,6 +75,7 @@ export function useScoreWorkspaceRuntime(params: {
     onAfterScoreRender: coreEditing.chordMarker.onAfterScoreRender,
     clearActiveChordSelection: coreEditing.chordMarker.clearActiveChordSelection,
     onTrebleSelectionDoubleTap,
+    onTimelineSegmentDoubleClick,
     pushUndoSnapshot: coreEditing.mutation.pushUndoSnapshot,
     handlePreviewScoreNote: audioPreview.handlePreviewScoreNote,
     handlePlaybackStart: workspacePlaybackHandlers.handlePlaybackStart,
