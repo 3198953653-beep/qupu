@@ -1,5 +1,6 @@
 import { useLayoutEffect, type MutableRefObject } from 'react'
 import { Renderer } from 'vexflow'
+import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
 import { buildHitGridIndex, type HitGridIndex } from '../layout/hitTest'
 import type { SystemMeasureRange } from '../layout/demand'
 import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
@@ -52,6 +53,7 @@ export function useScoreRenderEffect(params: {
   measureTimelineBundlesRef: MutableRefObject<Map<number, MeasureTimelineBundle>>
   backend: number
   pagePaddingX?: number
+  grandStaffLayoutMetrics: GrandStaffLayoutMetrics
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
   spacingLayoutMode?: SpacingLayoutMode
   showInScoreMeasureNumbers?: boolean
@@ -98,6 +100,7 @@ export function useScoreRenderEffect(params: {
     measureTimelineBundlesRef,
     backend,
     pagePaddingX,
+    grandStaffLayoutMetrics,
     timeAxisSpacingConfig,
     spacingLayoutMode = 'custom',
     showInScoreMeasureNumbers = false,
@@ -193,6 +196,7 @@ export function useScoreRenderEffect(params: {
         previousMeasureLayouts,
         allowSelectionFreezeWhenNotDragging: false,
         pagePaddingX,
+        grandStaffLayoutMetrics,
         timeAxisSpacingConfig,
         spacingLayoutMode,
         showInScoreMeasureNumbers,
@@ -241,6 +245,7 @@ export function useScoreRenderEffect(params: {
     measureTimelineBundlesRef,
     backend,
     pagePaddingX,
+    grandStaffLayoutMetrics,
     timeAxisSpacingConfig,
     spacingLayoutMode,
     showInScoreMeasureNumbers,

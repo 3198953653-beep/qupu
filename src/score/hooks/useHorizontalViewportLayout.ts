@@ -1,5 +1,6 @@
 import { useMemo, type MutableRefObject } from 'react'
 import type { MeasureFrame } from '../types'
+import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
 import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
 import {
   applyChordMarkerVisualZoom,
@@ -14,7 +15,7 @@ import { A4_PAGE_WIDTH } from '../constants'
 import {
   HORIZONTAL_RENDER_BUFFER_PX,
   HORIZONTAL_RENDER_EDGE_BUFFER_MEASURES,
-  HORIZONTAL_VIEW_HEIGHT_PX,
+  getHorizontalViewHeightPx,
   MANUAL_SCALE_BASELINE,
   MAX_CANVAS_RENDER_DIM_PX,
   type HorizontalRenderWindow,
@@ -28,6 +29,7 @@ export function useHorizontalViewportLayout(params: {
   autoScaleEnabled: boolean
   manualScalePercent: number
   canvasHeightPercent: number
+  grandStaffLayoutMetrics: GrandStaffLayoutMetrics
   chordMarkerUiScalePercent: number
   chordMarkerPaddingPx: number
   horizontalEstimatedMeasureWidthTotal: number
@@ -42,6 +44,7 @@ export function useHorizontalViewportLayout(params: {
     autoScaleEnabled,
     manualScalePercent,
     canvasHeightPercent,
+    grandStaffLayoutMetrics,
     chordMarkerUiScalePercent,
     chordMarkerPaddingPx,
     horizontalEstimatedMeasureWidthTotal,
@@ -71,7 +74,8 @@ export function useHorizontalViewportLayout(params: {
   }, [horizontalDisplayScale, horizontalEstimatedMeasureWidthTotal, pageHorizontalPaddingPx])
 
   const baseScoreScale = relativeScale * MANUAL_SCALE_BASELINE
-  const minScaleForCanvasHeight = HORIZONTAL_VIEW_HEIGHT_PX / MAX_CANVAS_RENDER_DIM_PX
+  const horizontalViewHeightPx = getHorizontalViewHeightPx(grandStaffLayoutMetrics.systemHeightPx)
+  const minScaleForCanvasHeight = horizontalViewHeightPx / MAX_CANVAS_RENDER_DIM_PX
   const scoreScaleX = baseScoreScale
   const scoreScaleY = Math.max(baseScoreScale, minScaleForCanvasHeight)
   const chordMarkerStyleMetrics = useMemo(
@@ -103,7 +107,7 @@ export function useHorizontalViewportLayout(params: {
     () => [{ startPairIndex: 0, endPairIndexExclusive: measurePairsLength }],
     [measurePairsLength],
   )
-  const scaledScoreContentHeight = Math.max(1, HORIZONTAL_VIEW_HEIGHT_PX * viewportHeightScaleByZoom)
+  const scaledScoreContentHeight = Math.max(1, horizontalViewHeightPx * viewportHeightScaleByZoom)
   const displayScoreHeight = Math.max(1, Math.round(scaledScoreContentHeight * canvasHeightScale))
   const scoreHeight = Math.max(1, Math.round(scaledScoreContentHeight / scoreScaleY))
   const scoreSurfaceOffsetXPx = horizontalRenderOffsetX * scoreScaleX
@@ -192,6 +196,7 @@ export function useHorizontalViewportLayout(params: {
       timeAxisSpacingConfig.durationGapRatios.quarter,
       timeAxisSpacingConfig.durationGapRatios.half,
       timeAxisSpacingConfig.durationGapRatios.whole,
+      grandStaffLayoutMetrics.staffInterGapPx,
       spacingLayoutMode,
     ].join(',')
     return `${scoreWidth}|${scoreHeight}|${pageHorizontalPaddingPx}|${systemRangeKey}|${spacingKey}`
@@ -208,6 +213,7 @@ export function useHorizontalViewportLayout(params: {
     timeAxisSpacingConfig.durationGapRatios.sixteenth,
     timeAxisSpacingConfig.durationGapRatios.thirtySecond,
     timeAxisSpacingConfig.durationGapRatios.whole,
+    grandStaffLayoutMetrics.staffInterGapPx,
     timeAxisSpacingConfig.leadingBarlineGapPx,
     timeAxisSpacingConfig.secondChordSafeGapPx,
   ])

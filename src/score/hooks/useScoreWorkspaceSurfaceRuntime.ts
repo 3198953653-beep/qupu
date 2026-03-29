@@ -3,6 +3,7 @@ import { useScoreAppState } from './useScoreAppState'
 import { useScoreEditorRefs } from './useScoreEditorRefs'
 import { useHorizontalScoreLayout } from './useHorizontalScoreLayout'
 import { useScoreWorkspaceSelectionBindings } from './useScoreWorkspaceSelectionBindings'
+import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
 import type { Pitch, ScoreNote } from '../types'
 import type { MeasurePair } from '../types'
 import type { useScoreAudioPreviewController } from './useScoreAudioPreviewController'
@@ -27,6 +28,7 @@ export function useScoreWorkspaceSurfaceRuntime(params: {
     renderQualityScale: ReturnType<typeof useHorizontalScoreLayout>['renderQualityScale']
     supplementalSpacingTicksByPair: ReturnType<typeof useHorizontalScoreLayout>['supplementalSpacingTicksByPair']
     spacingLayoutMode: ReturnType<typeof useHorizontalScoreLayout>['spacingLayoutMode']
+    grandStaffLayoutMetrics: GrandStaffLayoutMetrics
     trebleNoteById: Map<string, ScoreNote>
     bassNoteById: Map<string, ScoreNote>
   }
@@ -121,6 +123,7 @@ export function useScoreWorkspaceSurfaceRuntime(params: {
       measureTimelineBundlesRef: editorRefs.measureTimelineBundlesRef,
       backend,
       pagePaddingX: appState.pageHorizontalPaddingPx,
+      grandStaffLayoutMetrics: layout.grandStaffLayoutMetrics,
       timeAxisSpacingConfig: appState.timeAxisSpacingConfig,
       spacingLayoutMode: layout.spacingLayoutMode,
       showInScoreMeasureNumbers: appState.showInScoreMeasureNumbers,

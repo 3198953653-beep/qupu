@@ -1,13 +1,15 @@
 import type { NoteDuration, Pitch, RhythmPresetId, ScoreNote } from './types'
+import { DEFAULT_STAFF_INTER_GAP_PX, getGrandStaffLayoutMetrics } from './grandStaffLayout'
 
 export const A4_PAGE_WIDTH = 794
 export const A4_PAGE_HEIGHT = 1123
 export const SCORE_PAGE_PADDING_X = 24
 export const SCORE_TOP_PADDING = 44
-export const SYSTEM_TREBLE_OFFSET_Y = 22
-export const SYSTEM_BASS_OFFSET_Y = 108
+const DEFAULT_GRAND_STAFF_LAYOUT = getGrandStaffLayoutMetrics(DEFAULT_STAFF_INTER_GAP_PX)
+export const SYSTEM_TREBLE_OFFSET_Y = DEFAULT_GRAND_STAFF_LAYOUT.trebleOffsetY
+export const SYSTEM_BASS_OFFSET_Y = DEFAULT_GRAND_STAFF_LAYOUT.bassOffsetY
 export const SYSTEM_GAP_Y = 44
-export const SYSTEM_HEIGHT = 208
+export const SYSTEM_HEIGHT = DEFAULT_GRAND_STAFF_LAYOUT.systemHeightPx
 export const STAFF_X = SCORE_PAGE_PADDING_X
 export const QUARTER_NOTE_SECONDS = 0.5
 export const PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX = -8

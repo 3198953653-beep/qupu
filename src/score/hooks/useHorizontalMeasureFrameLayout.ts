@@ -3,6 +3,7 @@ import { Renderer } from 'vexflow'
 import { resolveActualStartDecorationWidths, resolveStartDecorationDisplayMetas } from '../layout/startDecorationReserve'
 import { solveHorizontalMeasureWidths } from '../layout/horizontalMeasureWidthSolver'
 import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
+import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
 import type { MeasureFrame, MeasurePair, TimeSignature } from '../types'
 import {
   HORIZONTAL_VIEW_MEASURE_WIDTH_PX,
@@ -16,6 +17,7 @@ export function useHorizontalMeasureFrameLayout(params: {
   measureTimeSignaturesFromImport: TimeSignature[] | null
   supplementalSpacingTicksByPair: number[][] | null
   timeAxisSpacingConfig: TimeAxisSpacingConfig
+  grandStaffLayoutMetrics: GrandStaffLayoutMetrics
   pageHorizontalPaddingPx: number
   widthProbeRendererRef: MutableRefObject<Renderer | null>
   horizontalMeasureWidthCacheRef: MutableRefObject<Map<string, number>>
@@ -26,6 +28,7 @@ export function useHorizontalMeasureFrameLayout(params: {
     measureTimeSignaturesFromImport,
     supplementalSpacingTicksByPair,
     timeAxisSpacingConfig,
+    grandStaffLayoutMetrics,
     pageHorizontalPaddingPx,
     widthProbeRendererRef,
     horizontalMeasureWidthCacheRef,
@@ -56,8 +59,9 @@ export function useHorizontalMeasureFrameLayout(params: {
     })
     return resolveActualStartDecorationWidths({
       metas: displayMetas,
+      grandStaffLayoutMetrics,
     }).actualStartDecorationWidthPxByPair
-  }, [measureKeyFifthsFromImport, measurePairs.length, measureTimeSignaturesFromImport])
+  }, [grandStaffLayoutMetrics, measureKeyFifthsFromImport, measurePairs.length, measureTimeSignaturesFromImport])
 
   const horizontalContentMeasureWidths = useMemo(() => {
     if (measurePairs.length === 0) return []
@@ -76,6 +80,7 @@ export function useHorizontalMeasureFrameLayout(params: {
       measureTimeSignaturesByPair: measureTimeSignaturesFromImport,
       supplementalSpacingTicksByPair,
       spacingConfig: timeAxisSpacingConfig,
+      grandStaffLayoutMetrics,
       maxIterations: solverMaxIterations,
       eagerProbeMeasureLimit,
       widthCache: horizontalMeasureWidthCacheRef.current,
@@ -88,6 +93,7 @@ export function useHorizontalMeasureFrameLayout(params: {
     measureTimeSignaturesFromImport,
     supplementalSpacingTicksByPair,
     timeAxisSpacingConfig,
+    grandStaffLayoutMetrics,
   ])
 
   const horizontalRenderedMeasureWidths = useMemo(

@@ -13,6 +13,8 @@ export type ScoreControlsProps = {
   onToggleChordDegreeDisplay: () => void
   showChordMarkerBackgroundEnabled: boolean
   onToggleChordMarkerBackgroundDisplay: () => void
+  staffInterGapPx: number
+  onStaffInterGapPxChange: (nextValue: number) => void
   showInScoreMeasureNumbers: boolean
   onToggleInScoreMeasureNumbers: () => void
   showNoteHeadJianpuEnabled: boolean

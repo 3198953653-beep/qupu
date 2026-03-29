@@ -16,6 +16,8 @@ export function ScoreControls(props: ScoreControlsProps) {
     onToggleChordDegreeDisplay,
     showChordMarkerBackgroundEnabled,
     onToggleChordMarkerBackgroundDisplay,
+    staffInterGapPx,
+    onStaffInterGapPxChange,
     showInScoreMeasureNumbers,
     onToggleInScoreMeasureNumbers,
     showNoteHeadJianpuEnabled,
@@ -120,6 +122,7 @@ export function ScoreControls(props: ScoreControlsProps) {
         pageHorizontalPaddingPx={pageHorizontalPaddingPx}
         chordMarkerUiScalePercent={chordMarkerUiScalePercent}
         chordMarkerPaddingPx={chordMarkerPaddingPx}
+        staffInterGapPx={staffInterGapPx}
         baseMinGap32Px={baseMinGap32Px}
         leadingBarlineGapPx={leadingBarlineGapPx}
         secondChordSafeGapPx={secondChordSafeGapPx}
@@ -132,6 +135,7 @@ export function ScoreControls(props: ScoreControlsProps) {
         onPageHorizontalPaddingPxChange={onPageHorizontalPaddingPxChange}
         onChordMarkerUiScalePercentChange={onChordMarkerUiScalePercentChange}
         onChordMarkerPaddingPxChange={onChordMarkerPaddingPxChange}
+        onStaffInterGapPxChange={onStaffInterGapPxChange}
         onBaseMinGap32PxChange={onBaseMinGap32PxChange}
         onLeadingBarlineGapPxChange={onLeadingBarlineGapPxChange}
         onSecondChordSafeGapPxChange={onSecondChordSafeGapPxChange}

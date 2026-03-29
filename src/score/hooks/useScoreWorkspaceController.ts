@@ -4,6 +4,7 @@ import { useScoreEditingSessionHelpers } from './useScoreEditingSessionHelpers'
 import { useScoreWorkspaceDocumentActions } from './useScoreWorkspaceDocumentActions'
 import { useScoreWorkspaceSelectionBindings } from './useScoreWorkspaceSelectionBindings'
 import { useScoreWorkspaceSurfaceRuntime } from './useScoreWorkspaceSurfaceRuntime'
+import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
 import type { Pitch, ScoreNote, Selection, TimeSignature } from '../types'
 
 export function useScoreWorkspaceController(params: {
@@ -28,6 +29,7 @@ export function useScoreWorkspaceController(params: {
     renderQualityScale: { x: number; y: number }
     supplementalSpacingTicksByPair: number[][] | null
     spacingLayoutMode: import('../types').SpacingLayoutMode
+    grandStaffLayoutMetrics: GrandStaffLayoutMetrics
     trebleNoteById: Map<string, ScoreNote>
     bassNoteById: Map<string, ScoreNote>
   }

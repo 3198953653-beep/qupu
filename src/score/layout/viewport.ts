@@ -13,10 +13,11 @@ export function getVisibleSystemRange(
   scrollTop: number,
   viewportHeight: number,
   systemCount: number,
+  systemHeightPx: number = SYSTEM_HEIGHT,
 ): { start: number; end: number } {
   if (systemCount <= 1) return { start: 0, end: 0 }
 
-  const systemStride = SYSTEM_HEIGHT + SYSTEM_GAP_Y
+  const systemStride = Math.max(1, systemHeightPx) + SYSTEM_GAP_Y
   const startOffset = Math.max(0, scrollTop - SCORE_TOP_PADDING)
   const endOffset = Math.max(0, scrollTop + viewportHeight - SCORE_TOP_PADDING)
   const bufferSystems = systemCount > 12 ? 0 : 1
@@ -37,6 +38,7 @@ export function buildMeasureOverlayRect(
   scoreHeight: number,
   isSystemStart: boolean,
   includeMeasureStartDecorations: boolean,
+  systemHeightPx: number = SYSTEM_HEIGHT,
 ): MeasureLayout['overlayRect'] {
   const leftPad = 56
   const rightPad = 42
@@ -61,6 +63,6 @@ export function buildMeasureOverlayRect(
   const maxWidth = scoreWidth - x
   const maxHeight = scoreHeight - y
   const width = clamp(right - x, 0, maxWidth)
-  const height = clamp(SYSTEM_HEIGHT + topPad + bottomPad, 0, maxHeight)
+  const height = clamp(Math.max(1, systemHeightPx) + topPad + bottomPad, 0, maxHeight)
   return { x, y, width, height }
 }

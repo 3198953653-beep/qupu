@@ -66,6 +66,7 @@ export function useScoreWorkspaceRuntime(params: {
       renderQualityScale: layout.renderQualityScale,
       supplementalSpacingTicksByPair: layout.supplementalSpacingTicksByPair,
       spacingLayoutMode: layout.spacingLayoutMode,
+      grandStaffLayoutMetrics: layout.grandStaffLayoutMetrics,
       trebleNoteById: layout.trebleNoteById,
       bassNoteById: layout.bassNoteById,
     },

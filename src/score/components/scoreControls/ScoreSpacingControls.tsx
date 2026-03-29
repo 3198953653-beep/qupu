@@ -9,6 +9,7 @@ export function ScoreSpacingControls(props: ScoreSpacingControlsProps) {
     pageHorizontalPaddingPx,
     chordMarkerUiScalePercent,
     chordMarkerPaddingPx,
+    staffInterGapPx,
     baseMinGap32Px,
     leadingBarlineGapPx,
     secondChordSafeGapPx,
@@ -21,6 +22,7 @@ export function ScoreSpacingControls(props: ScoreSpacingControlsProps) {
     onPageHorizontalPaddingPxChange,
     onChordMarkerUiScalePercentChange,
     onChordMarkerPaddingPxChange,
+    onStaffInterGapPxChange,
     onBaseMinGap32PxChange,
     onLeadingBarlineGapPxChange,
     onSecondChordSafeGapPxChange,
@@ -65,11 +67,13 @@ export function ScoreSpacingControls(props: ScoreSpacingControlsProps) {
         <ScoreSpacingGlobalGapSection
           chordMarkerUiScalePercent={chordMarkerUiScalePercent}
           chordMarkerPaddingPx={chordMarkerPaddingPx}
+          staffInterGapPx={staffInterGapPx}
           baseMinGap32Px={baseMinGap32Px}
           leadingBarlineGapPx={leadingBarlineGapPx}
           secondChordSafeGapPx={secondChordSafeGapPx}
           onChordMarkerUiScalePercentChange={onChordMarkerUiScalePercentChange}
           onChordMarkerPaddingPxChange={onChordMarkerPaddingPxChange}
+          onStaffInterGapPxChange={onStaffInterGapPxChange}
           onBaseMinGap32PxChange={onBaseMinGap32PxChange}
           onLeadingBarlineGapPxChange={onLeadingBarlineGapPxChange}
           onSecondChordSafeGapPxChange={onSecondChordSafeGapPxChange}

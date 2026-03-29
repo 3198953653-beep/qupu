@@ -5,6 +5,7 @@ import {
   getInitialChordDegreeDisplayEnabled,
   getInitialChordMarkerBackgroundEnabled,
   getInitialPlayheadFollowEnabled,
+  getInitialStaffInterGapPx,
 } from './useEditorPreferencePersistence'
 import {
   getDefaultNotationPaletteSelection,
@@ -82,6 +83,7 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
   const [showChordDegreeEnabled, setShowChordDegreeEnabled] = useState(() => getInitialChordDegreeDisplayEnabled())
   const [showChordMarkerBackgroundEnabled, setShowChordMarkerBackgroundEnabled] =
     useState(() => getInitialChordMarkerBackgroundEnabled())
+  const [staffInterGapPx, setStaffInterGapPx] = useState(() => getInitialStaffInterGapPx())
   const [showInScoreMeasureNumbers, setShowInScoreMeasureNumbers] = useState(false)
   const [showNoteHeadJianpuEnabled, setShowNoteHeadJianpuEnabled] = useState(false)
   const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
@@ -165,6 +167,8 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
     setShowChordDegreeEnabled,
     showChordMarkerBackgroundEnabled,
     setShowChordMarkerBackgroundEnabled,
+    staffInterGapPx,
+    setStaffInterGapPx,
     showInScoreMeasureNumbers,
     setShowInScoreMeasureNumbers,
     showNoteHeadJianpuEnabled,

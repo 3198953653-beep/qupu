@@ -8,6 +8,7 @@ import {
   SYSTEM_TREBLE_OFFSET_Y,
   TICKS_PER_BEAT,
 } from '../constants'
+import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
 import { type SystemMeasureRange } from '../layout/demand'
 import { getLayoutNoteKey } from '../layout/renderPosition'
 import { buildMeasureOverlayRect } from '../layout/viewport'
@@ -320,6 +321,7 @@ export function renderVisibleSystems(params: {
   layoutReflowHint?: LayoutReflowHint | null
   layoutStabilityKey?: string
   pagePaddingX?: number
+  grandStaffLayoutMetrics: GrandStaffLayoutMetrics
   timeAxisSpacingConfig?: TimeAxisSpacingConfig
   spacingLayoutMode?: SpacingLayoutMode
   showInScoreMeasureNumbers?: boolean
@@ -361,6 +363,7 @@ export function renderVisibleSystems(params: {
     layoutReflowHint = null,
     layoutStabilityKey = '',
     pagePaddingX = SCORE_PAGE_PADDING_X,
+    grandStaffLayoutMetrics,
     timeAxisSpacingConfig,
     spacingLayoutMode = 'custom',
     showInScoreMeasureNumbers = false,
@@ -371,6 +374,9 @@ export function renderVisibleSystems(params: {
   const canCollapseFullMeasureRest = (pairIndex: number, staff: StaffKind): boolean =>
     collapseScopeKeySet.has(`${pairIndex}:${staff}`)
   const spacingConfig = timeAxisSpacingConfig ?? DEFAULT_TIME_AXIS_SPACING_CONFIG
+  const systemHeightPx = grandStaffLayoutMetrics?.systemHeightPx ?? SYSTEM_HEIGHT
+  const trebleOffsetY = grandStaffLayoutMetrics?.trebleOffsetY ?? SYSTEM_TREBLE_OFFSET_Y
+  const bassOffsetY = grandStaffLayoutMetrics?.bassOffsetY ?? SYSTEM_BASS_OFFSET_Y
   const {
     previewNotesByPair: dragPreviewOverridesByPair,
     previewPitchByTargetKey: dragPreviewPitchByTargetKey,
@@ -470,6 +476,7 @@ export function renderVisibleSystems(params: {
   })
   const { actualStartDecorationWidthPxByPair } = resolveActualStartDecorationWidths({
     metas: globalStartDecorationDisplayMetas,
+    grandStaffLayoutMetrics,
   })
   const globalSystemMetaByPair: Array<RenderableSystemMeasureMeta | null> = globalStartDecorationDisplayMetas.map(
     (displayMeta) => {
@@ -528,9 +535,9 @@ export function renderVisibleSystems(params: {
       : systemEndPairIndexExclusive
     if (renderEndPairIndexExclusive <= renderStartPairIndex) continue
 
-    const systemTop = SCORE_TOP_PADDING + (systemIndex - renderOriginSystemIndex) * (SYSTEM_HEIGHT + SYSTEM_GAP_Y)
-    const trebleY = systemTop + SYSTEM_TREBLE_OFFSET_Y
-    const bassY = systemTop + SYSTEM_BASS_OFFSET_Y
+    const systemTop = SCORE_TOP_PADDING + (systemIndex - renderOriginSystemIndex) * (systemHeightPx + SYSTEM_GAP_Y)
+    const trebleY = systemTop + trebleOffsetY
+    const bassY = systemTop + bassOffsetY
     const systemUsableWidth = Math.max(1, scoreWidth - pagePaddingX * 2)
 
     const systemMeta: RenderableSystemMeasureMeta[] = []
@@ -894,6 +901,7 @@ export function renderVisibleSystems(params: {
           scoreHeight,
           entry.isSystemStart,
           entry.includeMeasureStartDecorations,
+          systemHeightPx,
         )
         const effectiveLayoutMetrics = resolveEffectiveLayoutMetrics({
           measureX,
@@ -1124,6 +1132,7 @@ export function renderVisibleSystems(params: {
           scoreHeight,
           entry.isSystemStart,
           entry.includeMeasureStartDecorations,
+          systemHeightPx,
         )
         const effectiveLayoutMetrics = resolveEffectiveLayoutMetrics({
           measureX,
@@ -1499,6 +1508,7 @@ export function renderVisibleSystems(params: {
         scoreHeight,
         entry.isSystemStart,
         entry.includeMeasureStartDecorations,
+        systemHeightPx,
       )
       const effectiveLayoutMetrics = resolveEffectiveLayoutMetrics({
         measureX,

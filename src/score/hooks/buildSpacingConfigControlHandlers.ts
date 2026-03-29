@@ -11,6 +11,7 @@ import {
   clampPageHorizontalPaddingPx,
   clampSecondChordSafeGapPx,
 } from '../scorePresentation'
+import { DEFAULT_STAFF_INTER_GAP_PX, clampStaffInterGapPx } from '../grandStaffLayout'
 import type { ScoreViewAdapterParams } from './scoreViewAdapterTypes'
 
 export function buildSpacingConfigControlHandlers(params: {
@@ -21,6 +22,7 @@ export function buildSpacingConfigControlHandlers(params: {
     setPageHorizontalPaddingPx,
     setChordMarkerUiScalePercent,
     setChordMarkerPaddingPx,
+    setStaffInterGapPx,
     setTimeAxisSpacingConfig,
   } = appState
 
@@ -31,6 +33,8 @@ export function buildSpacingConfigControlHandlers(params: {
       setChordMarkerUiScalePercent(clampChordMarkerUiScalePercent(nextValue)),
     onChordMarkerPaddingPxChange: (nextValue: number) =>
       setChordMarkerPaddingPx(clampChordMarkerPaddingPx(nextValue)),
+    onStaffInterGapPxChange: (nextValue: number) =>
+      setStaffInterGapPx(clampStaffInterGapPx(nextValue)),
     onBaseMinGap32PxChange: (nextValue: number) =>
       setTimeAxisSpacingConfig((current) => ({
         ...current,
@@ -102,6 +106,7 @@ export function buildSpacingConfigControlHandlers(params: {
       setPageHorizontalPaddingPx(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
       setChordMarkerUiScalePercent(DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT)
       setChordMarkerPaddingPx(DEFAULT_CHORD_MARKER_PADDING_PX)
+      setStaffInterGapPx(DEFAULT_STAFF_INTER_GAP_PX)
     },
   }
 }

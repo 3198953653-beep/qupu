@@ -1,6 +1,7 @@
 import { BarlineType, Stave } from 'vexflow'
 import { getKeySignatureSpecFromFifths } from '../accidentals'
 import { SYSTEM_BASS_OFFSET_Y, SYSTEM_TREBLE_OFFSET_Y } from '../constants'
+import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
 import type { TimeSignature } from '../types'
 
 const START_DECORATION_PROBE_WIDTH_PX = 1024
@@ -45,13 +46,16 @@ export function applyMeasureStartDecorationsToStave(
 
 export function measureActualStartDecorationWidthPx(
   meta: Pick<StartDecorationDisplayMeta, 'isSystemStart' | 'keyFifths' | 'showKeySignature' | 'timeSignature' | 'showTimeSignature'>,
+  grandStaffLayoutMetrics?: GrandStaffLayoutMetrics,
 ): number {
   if (!hasVisibleStartDecorations(meta)) {
     return 0
   }
 
-  const trebleStave = new Stave(0, SYSTEM_TREBLE_OFFSET_Y, START_DECORATION_PROBE_WIDTH_PX)
-  const bassStave = new Stave(0, SYSTEM_BASS_OFFSET_Y, START_DECORATION_PROBE_WIDTH_PX)
+  const trebleOffsetY = grandStaffLayoutMetrics?.trebleOffsetY ?? SYSTEM_TREBLE_OFFSET_Y
+  const bassOffsetY = grandStaffLayoutMetrics?.bassOffsetY ?? SYSTEM_BASS_OFFSET_Y
+  const trebleStave = new Stave(0, trebleOffsetY, START_DECORATION_PROBE_WIDTH_PX)
+  const bassStave = new Stave(0, bassOffsetY, START_DECORATION_PROBE_WIDTH_PX)
   applyMeasureStartDecorationsToStave(trebleStave, 'treble', meta)
   applyMeasureStartDecorationsToStave(bassStave, 'bass', meta)
 
@@ -97,11 +101,12 @@ export function resolveStartDecorationDisplayMetas(params: {
 
 export function resolveActualStartDecorationWidths(params: {
   metas: readonly StartDecorationDisplayMeta[]
+  grandStaffLayoutMetrics?: GrandStaffLayoutMetrics
 }): {
   actualStartDecorationWidthPxByPair: number[]
 } {
   const actualStartDecorationWidthPxByPair = params.metas.map((meta) =>
-    Number(measureActualStartDecorationWidthPx(meta).toFixed(3)),
+    Number(measureActualStartDecorationWidthPx(meta, params.grandStaffLayoutMetrics).toFixed(3)),
   )
 
   return {

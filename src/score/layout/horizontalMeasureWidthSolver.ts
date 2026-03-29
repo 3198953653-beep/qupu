@@ -1,5 +1,6 @@
 import { Renderer, Stave } from 'vexflow'
-import { SYSTEM_BASS_OFFSET_Y, SYSTEM_TREBLE_OFFSET_Y, TICKS_PER_BEAT } from '../constants'
+import { TICKS_PER_BEAT } from '../constants'
+import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
 import { drawMeasureToContext } from '../render/drawMeasure'
 import type { MeasurePair, ScoreNote, TimeSignature } from '../types'
 import type { AppliedTimeAxisSpacingMetrics, TimeAxisSpacingConfig } from './timeAxisSpacing'
@@ -45,6 +46,7 @@ export type SolveHorizontalMeasureWidthsParams = {
   measureTimeSignaturesByPair: TimeSignature[] | null
   supplementalSpacingTicksByPair?: number[][] | null
   spacingConfig: TimeAxisSpacingConfig
+  grandStaffLayoutMetrics: GrandStaffLayoutMetrics
   maxIterations?: number
   eagerProbeMeasureLimit?: number
   widthCache?: Map<string, number>
@@ -138,8 +140,9 @@ function resolveMeasureMeta(params: {
   measurePairs: MeasurePair[]
   keyFifthsByPair: number[] | null
   timeSignaturesByPair: TimeSignature[] | null
+  grandStaffLayoutMetrics: GrandStaffLayoutMetrics
 }): SolverMeasureMeta[] {
-  const { measurePairs, keyFifthsByPair, timeSignaturesByPair } = params
+  const { measurePairs, keyFifthsByPair, timeSignaturesByPair, grandStaffLayoutMetrics } = params
   const displayMetas = resolveStartDecorationDisplayMetas({
     measureCount: measurePairs.length,
     keyFifthsByPair,
@@ -147,6 +150,7 @@ function resolveMeasureMeta(params: {
   })
   const { actualStartDecorationWidthPxByPair } = resolveActualStartDecorationWidths({
     metas: displayMetas,
+    grandStaffLayoutMetrics,
   })
 
   return displayMetas.map((displayMeta) => {
@@ -210,8 +214,9 @@ function buildMeasureWidthCacheKey(params: {
   meta: SolverMeasureMeta
   spacingConfig: TimeAxisSpacingConfig
   supplementalSpacingTicksSignature: string
+  grandStaffLayoutMetrics: GrandStaffLayoutMetrics
 }): string {
-  const { meta, spacingConfig, supplementalSpacingTicksSignature } = params
+  const { meta, spacingConfig, supplementalSpacingTicksSignature, grandStaffLayoutMetrics } = params
   const ratios = spacingConfig.durationGapRatios
   return [
     SOLVER_CACHE_VERSION,
@@ -235,16 +240,21 @@ function buildMeasureWidthCacheKey(params: {
     `r4=${ratios.quarter}`,
     `r2=${ratios.half}`,
     `r1=${ratios.whole}`,
+    `staffGap=${grandStaffLayoutMetrics.staffInterGapPx}`,
     `spacingTicks=${supplementalSpacingTicksSignature}`,
     `treble=${serializeStaffNotesForWidthCache(meta.measure.treble)}`,
     `bass=${serializeStaffNotesForWidthCache(meta.measure.bass)}`,
   ].join('||')
 }
 
-function buildMeasureProbeGeometry(meta: SolverMeasureMeta, contentMeasureWidth: number): MeasureProbeGeometry {
+function buildMeasureProbeGeometry(
+  meta: SolverMeasureMeta,
+  contentMeasureWidth: number,
+  grandStaffLayoutMetrics: GrandStaffLayoutMetrics,
+): MeasureProbeGeometry {
   const safeContentWidth = Math.max(1, Number(contentMeasureWidth.toFixed(3)))
   const renderedMeasureWidth = Math.max(1, Number((safeContentWidth + meta.actualStartDecorationWidthPx).toFixed(3)))
-  const probeStave = new Stave(PROBE_MEASURE_X, SYSTEM_TREBLE_OFFSET_Y, renderedMeasureWidth)
+  const probeStave = new Stave(PROBE_MEASURE_X, grandStaffLayoutMetrics.trebleOffsetY, renderedMeasureWidth)
   applyMeasureStartDecorationsToStave(probeStave, 'treble', meta)
   if (meta.showEndTimeSignature) {
     probeStave.setEndTimeSignature(toTimeSignatureKey(meta.timeSignature))
@@ -268,8 +278,9 @@ function probeMeasureSpacing(
   contentMeasureWidth: number,
   spacingConfig: TimeAxisSpacingConfig,
   supplementalSpacingTicks: readonly number[] | null,
+  grandStaffLayoutMetrics: GrandStaffLayoutMetrics,
 ): MeasureSpacingProbe | null {
-  const geometry = buildMeasureProbeGeometry(meta, contentMeasureWidth)
+  const geometry = buildMeasureProbeGeometry(meta, contentMeasureWidth, grandStaffLayoutMetrics)
   const baseTimelineBundle = buildMeasureTimelineBundle({
     measure: meta.measure,
     measureIndex: meta.pairIndex,
@@ -303,8 +314,8 @@ function probeMeasureSpacing(
     pairIndex: meta.pairIndex,
     measureX: PROBE_MEASURE_X,
     measureWidth: geometry.renderedMeasureWidth,
-    trebleY: SYSTEM_TREBLE_OFFSET_Y,
-    bassY: SYSTEM_BASS_OFFSET_Y,
+    trebleY: grandStaffLayoutMetrics.trebleOffsetY,
+    bassY: grandStaffLayoutMetrics.bassOffsetY,
     isSystemStart: meta.isSystemStart,
     keyFifths: meta.keyFifths,
     showKeySignature: meta.showKeySignature,
@@ -456,6 +467,7 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
     measureTimeSignaturesByPair,
     supplementalSpacingTicksByPair = null,
     spacingConfig,
+    grandStaffLayoutMetrics,
     maxIterations = 20,
     eagerProbeMeasureLimit = Number.POSITIVE_INFINITY,
     widthCache,
@@ -470,6 +482,7 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
     measurePairs,
     keyFifthsByPair: measureKeyFifthsByPair,
     timeSignaturesByPair: measureTimeSignaturesByPair,
+    grandStaffLayoutMetrics,
   })
 
   return metas.map((meta) => {
@@ -483,6 +496,7 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
             meta,
             spacingConfig,
             supplementalSpacingTicksSignature,
+            grandStaffLayoutMetrics,
           })
         : null
     if (cacheKey && widthCache) {
@@ -526,7 +540,14 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
     }
 
     for (let iteration = 0; iteration < maxIterations; iteration += 1) {
-      const probe = probeMeasureSpacing(context, meta, width, spacingConfig, supplementalSpacingTicks)
+      const probe = probeMeasureSpacing(
+        context,
+        meta,
+        width,
+        spacingConfig,
+        supplementalSpacingTicks,
+        grandStaffLayoutMetrics,
+      )
       if (!probe) break
       // Growing the measure width only extends the trailing edge. It cannot
       // increase the first-anchor gap, so leading-side deficits must be

@@ -1,10 +1,12 @@
 import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
+import { DEFAULT_STAFF_INTER_GAP_PX, clampStaffInterGapPx } from '../grandStaffLayout'
 
 const LOCAL_STORAGE_EDITOR_MEASURE_NUMBER_KEY = 'score.editor.showInScoreMeasureNumbers'
 const LOCAL_STORAGE_NOTEHEAD_JIANPU_DISPLAY_KEY = 'score.editor.showNoteHeadJianpu'
 const LOCAL_STORAGE_PLAYHEAD_FOLLOW_KEY = 'score.playhead.followEnabled'
 const LOCAL_STORAGE_CHORD_DEGREE_DISPLAY_KEY = 'score.chordDegree.enabled'
 const LOCAL_STORAGE_CHORD_MARKER_BACKGROUND_KEY = 'score.chordMarkerBackground.enabled'
+const LOCAL_STORAGE_STAFF_INTER_GAP_KEY = 'score.staffInterGapPx'
 
 function readStoredBoolean(key: string, fallback: boolean): boolean {
   if (typeof window === 'undefined') return fallback
@@ -12,6 +14,14 @@ function readStoredBoolean(key: string, fallback: boolean): boolean {
   if (storedValue === '1' || storedValue === 'true') return true
   if (storedValue === '0' || storedValue === 'false') return false
   return fallback
+}
+
+function readStoredNumber(key: string, fallback: number): number {
+  if (typeof window === 'undefined') return fallback
+  const storedValue = window.localStorage.getItem(key)
+  if (storedValue === null) return fallback
+  const parsed = Number(storedValue)
+  return Number.isFinite(parsed) ? parsed : fallback
 }
 
 export function getInitialPlayheadFollowEnabled(): boolean {
@@ -26,10 +36,15 @@ export function getInitialChordMarkerBackgroundEnabled(): boolean {
   return readStoredBoolean(LOCAL_STORAGE_CHORD_MARKER_BACKGROUND_KEY, true)
 }
 
+export function getInitialStaffInterGapPx(): number {
+  return clampStaffInterGapPx(readStoredNumber(LOCAL_STORAGE_STAFF_INTER_GAP_KEY, DEFAULT_STAFF_INTER_GAP_PX))
+}
+
 export function useEditorPreferencePersistence(params: {
   playheadFollowEnabled: boolean
   showChordDegreeEnabled: boolean
   showChordMarkerBackgroundEnabled: boolean
+  staffInterGapPx: number
   showInScoreMeasureNumbers: boolean
   setShowInScoreMeasureNumbers: Dispatch<SetStateAction<boolean>>
   showNoteHeadJianpuEnabled: boolean
@@ -39,6 +54,7 @@ export function useEditorPreferencePersistence(params: {
     playheadFollowEnabled,
     showChordDegreeEnabled,
     showChordMarkerBackgroundEnabled,
+    staffInterGapPx,
     showInScoreMeasureNumbers,
     setShowInScoreMeasureNumbers,
     showNoteHeadJianpuEnabled,
@@ -48,6 +64,7 @@ export function useEditorPreferencePersistence(params: {
   const playheadFollowHydratedRef = useRef(false)
   const chordDegreeDisplayHydratedRef = useRef(false)
   const chordMarkerBackgroundHydratedRef = useRef(false)
+  const staffInterGapHydratedRef = useRef(false)
   const showInScoreMeasureNumbersHydratedRef = useRef(false)
   const showNoteHeadJianpuHydratedRef = useRef(false)
 
@@ -92,6 +109,20 @@ export function useEditorPreferencePersistence(params: {
       showChordMarkerBackgroundEnabled ? '1' : '0',
     )
   }, [showChordMarkerBackgroundEnabled])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    staffInterGapHydratedRef.current = true
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!staffInterGapHydratedRef.current) return
+    window.localStorage.setItem(
+      LOCAL_STORAGE_STAFF_INTER_GAP_KEY,
+      String(clampStaffInterGapPx(staffInterGapPx)),
+    )
+  }, [staffInterGapPx])
 
   useEffect(() => {
     if (typeof window === 'undefined') {

@@ -4,6 +4,7 @@ import {
   SYSTEM_BASS_OFFSET_Y,
   SYSTEM_TREBLE_OFFSET_Y,
 } from '../constants'
+import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
 import type { MeasureTimelineBundle } from '../timeline/types'
 import type {
   MeasureFrame,
@@ -38,6 +39,7 @@ export function usePlaybackCursorLayout(params: {
   horizontalRenderOffsetX: number
   layoutStabilityKey: string
   chordMarkerLayoutRevision: number
+  grandStaffLayoutMetrics: GrandStaffLayoutMetrics
   scoreScaleX: number
   scoreScaleY: number
   scoreSurfaceOffsetYPx: number
@@ -57,6 +59,7 @@ export function usePlaybackCursorLayout(params: {
     horizontalRenderOffsetX,
     layoutStabilityKey,
     chordMarkerLayoutRevision,
+    grandStaffLayoutMetrics,
     scoreScaleX,
     scoreScaleY,
     scoreSurfaceOffsetYPx,
@@ -134,22 +137,25 @@ export function usePlaybackCursorLayout(params: {
       measureLayoutsRef.current.get(playbackCursorPoint.pairIndex) ??
       [...measureLayoutsRef.current.values()][0] ??
       null
+    const fallbackTrebleOffsetY = grandStaffLayoutMetrics?.trebleOffsetY ?? SYSTEM_TREBLE_OFFSET_Y
+    const fallbackBassOffsetY = grandStaffLayoutMetrics?.bassOffsetY ?? SYSTEM_BASS_OFFSET_Y
+    const fallbackStaffLineSpanPx = grandStaffLayoutMetrics?.staffLineSpanPx ?? 40
     const trebleTopRaw =
       measureLayout !== null && Number.isFinite(measureLayout.trebleLineTopY)
         ? measureLayout.trebleLineTopY
-        : SCORE_TOP_PADDING + SYSTEM_TREBLE_OFFSET_Y
+        : SCORE_TOP_PADDING + fallbackTrebleOffsetY
     const trebleBottomRaw =
       measureLayout !== null && Number.isFinite(measureLayout.trebleLineBottomY)
         ? measureLayout.trebleLineBottomY
-        : SCORE_TOP_PADDING + SYSTEM_TREBLE_OFFSET_Y + 40
+        : SCORE_TOP_PADDING + fallbackTrebleOffsetY + fallbackStaffLineSpanPx
     const bassTopRaw =
       measureLayout !== null && Number.isFinite(measureLayout.bassLineTopY)
         ? measureLayout.bassLineTopY
-        : SCORE_TOP_PADDING + SYSTEM_BASS_OFFSET_Y
+        : SCORE_TOP_PADDING + fallbackBassOffsetY
     const bassBottomRaw =
       measureLayout !== null && Number.isFinite(measureLayout.bassLineBottomY)
         ? measureLayout.bassLineBottomY
-        : SCORE_TOP_PADDING + SYSTEM_BASS_OFFSET_Y + 40
+        : SCORE_TOP_PADDING + fallbackBassOffsetY + fallbackStaffLineSpanPx
     const lineTopRaw = Math.min(trebleTopRaw, trebleBottomRaw, bassTopRaw, bassBottomRaw)
     const lineBottomRaw = Math.max(trebleTopRaw, trebleBottomRaw, bassTopRaw, bassBottomRaw)
     const x = globalHeadLeftX * scoreScaleX + SCORE_STAGE_BORDER_PX - PLAYHEAD_OFFSET_PX
@@ -176,6 +182,7 @@ export function usePlaybackCursorLayout(params: {
     noteLayoutsByPairRef,
     playbackCursorPoint,
     playbackTimelineEventByPointKey,
+    grandStaffLayoutMetrics,
     scoreScaleX,
     scoreScaleY,
     scoreSurfaceOffsetYPx,

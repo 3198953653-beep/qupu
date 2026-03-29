@@ -4,11 +4,13 @@ type ScoreSpacingGlobalGapSectionProps = Pick<
   ScoreSpacingControlsProps,
   | 'chordMarkerUiScalePercent'
   | 'chordMarkerPaddingPx'
+  | 'staffInterGapPx'
   | 'baseMinGap32Px'
   | 'leadingBarlineGapPx'
   | 'secondChordSafeGapPx'
   | 'onChordMarkerUiScalePercentChange'
   | 'onChordMarkerPaddingPxChange'
+  | 'onStaffInterGapPxChange'
   | 'onBaseMinGap32PxChange'
   | 'onLeadingBarlineGapPxChange'
   | 'onSecondChordSafeGapPxChange'
@@ -18,11 +20,13 @@ export function ScoreSpacingGlobalGapSection(props: ScoreSpacingGlobalGapSection
   const {
     chordMarkerUiScalePercent,
     chordMarkerPaddingPx,
+    staffInterGapPx,
     baseMinGap32Px,
     leadingBarlineGapPx,
     secondChordSafeGapPx,
     onChordMarkerUiScalePercentChange,
     onChordMarkerPaddingPxChange,
+    onStaffInterGapPxChange,
     onBaseMinGap32PxChange,
     onLeadingBarlineGapPxChange,
     onSecondChordSafeGapPxChange,
@@ -80,6 +84,32 @@ export function ScoreSpacingGlobalGapSection(props: ScoreSpacingGlobalGapSection
           handleFloatValue((event.target as HTMLInputElement).value, onChordMarkerPaddingPxChange)
         }
         onChange={(event) => handleFloatValue(event.target.value, onChordMarkerPaddingPxChange)}
+      />
+
+      <label htmlFor="staff-inter-gap-range">上下谱表距离</label>
+      <input
+        id="staff-inter-gap-range"
+        type="range"
+        min={24}
+        max={140}
+        step={1}
+        value={staffInterGapPx}
+        onInput={(event) =>
+          handleFloatValue((event.target as HTMLInputElement).value, onStaffInterGapPxChange)
+        }
+        onChange={(event) => handleFloatValue(event.target.value, onStaffInterGapPxChange)}
+      />
+      <input
+        id="staff-inter-gap-input"
+        type="number"
+        min={24}
+        max={140}
+        step={1}
+        value={staffInterGapPx}
+        onInput={(event) =>
+          handleFloatValue((event.target as HTMLInputElement).value, onStaffInterGapPxChange)
+        }
+        onChange={(event) => handleFloatValue(event.target.value, onStaffInterGapPxChange)}
       />
 
       <label htmlFor="duration-base-gap-32">全局间距大小</label>

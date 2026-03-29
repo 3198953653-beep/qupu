@@ -51,6 +51,7 @@ export function useScorePlaybackRuntimeBridge(params: {
         horizontalRenderOffsetX: layout.horizontalRenderOffsetX,
         layoutStabilityKey: layout.layoutStabilityKey,
         chordMarkerLayoutRevision: coreEditing.chordMarker.chordMarkerLayoutRevision,
+        grandStaffLayoutMetrics: layout.grandStaffLayoutMetrics,
         scoreScaleX: layout.scoreScaleX,
         scoreScaleY: layout.scoreScaleY,
         scoreSurfaceOffsetYPx: layout.scoreSurfaceOffsetYPx,

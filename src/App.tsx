@@ -55,6 +55,7 @@ function App() {
     autoScaleEnabled: appState.autoScaleEnabled,
     manualScalePercent: appState.manualScalePercent,
     canvasHeightPercent: appState.canvasHeightPercent,
+    staffInterGapPx: appState.staffInterGapPx,
     pageHorizontalPaddingPx: appState.pageHorizontalPaddingPx,
     chordMarkerUiScalePercent: appState.chordMarkerUiScalePercent,
     chordMarkerPaddingPx: appState.chordMarkerPaddingPx,

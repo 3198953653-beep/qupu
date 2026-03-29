@@ -1,7 +1,8 @@
-import type { MutableRefObject } from 'react'
+import { useMemo, type MutableRefObject } from 'react'
 import { Renderer } from 'vexflow'
 import type { PlaybackTimelineEvent } from '../playbackTimeline'
 import type { ChordRulerEntry } from '../chordRuler'
+import { getGrandStaffLayoutMetrics, type GrandStaffLayoutMetrics } from '../grandStaffLayout'
 import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
 import type { ChordMarkerStyleMetrics } from '../scorePresentation'
 import { useHorizontalMeasureFrameLayout } from './useHorizontalMeasureFrameLayout'
@@ -27,6 +28,7 @@ export function useHorizontalScoreLayout(params: {
   autoScaleEnabled: boolean
   manualScalePercent: number
   canvasHeightPercent: number
+  staffInterGapPx: number
   pageHorizontalPaddingPx: number
   chordMarkerUiScalePercent: number
   chordMarkerPaddingPx: number
@@ -81,6 +83,7 @@ export function useHorizontalScoreLayout(params: {
     endX: number
   }
   layoutStabilityKey: string
+  grandStaffLayoutMetrics: GrandStaffLayoutMetrics
 } {
   const {
     notes,
@@ -92,6 +95,7 @@ export function useHorizontalScoreLayout(params: {
     autoScaleEnabled,
     manualScalePercent,
     canvasHeightPercent,
+    staffInterGapPx,
     pageHorizontalPaddingPx,
     chordMarkerUiScalePercent,
     chordMarkerPaddingPx,
@@ -109,6 +113,10 @@ export function useHorizontalScoreLayout(params: {
     importedChordRulerEntriesByPairFromImport,
     measureTimeSignaturesFromImport,
   })
+  const grandStaffLayoutMetrics = useMemo(
+    () => getGrandStaffLayoutMetrics(staffInterGapPx),
+    [staffInterGapPx],
+  )
 
   const measureFrameLayout = useHorizontalMeasureFrameLayout({
     measurePairs: timelineData.measurePairs,
@@ -116,6 +124,7 @@ export function useHorizontalScoreLayout(params: {
     measureTimeSignaturesFromImport,
     supplementalSpacingTicksByPair: timelineData.supplementalSpacingTicksByPair,
     timeAxisSpacingConfig,
+    grandStaffLayoutMetrics,
     pageHorizontalPaddingPx,
     widthProbeRendererRef,
     horizontalMeasureWidthCacheRef,
@@ -127,6 +136,7 @@ export function useHorizontalScoreLayout(params: {
     autoScaleEnabled,
     manualScalePercent,
     canvasHeightPercent,
+    grandStaffLayoutMetrics,
     chordMarkerUiScalePercent,
     chordMarkerPaddingPx,
     horizontalEstimatedMeasureWidthTotal: measureFrameLayout.horizontalEstimatedMeasureWidthTotal,
@@ -139,6 +149,7 @@ export function useHorizontalScoreLayout(params: {
   return {
     ...timelineData,
     ...viewportLayout,
+    grandStaffLayoutMetrics,
     horizontalMeasureFramesByPair: measureFrameLayout.horizontalMeasureFramesByPair,
     getMeasureFrameContentGeometry: measureFrameLayout.getMeasureFrameContentGeometry,
   }
