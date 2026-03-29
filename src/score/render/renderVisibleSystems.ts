@@ -15,6 +15,7 @@ import { buildMeasureOverlayRect } from '../layout/viewport'
 import { clamp } from '../math'
 import { drawMeasureToContext } from './drawMeasure'
 import { drawCrossMeasureTies } from './drawCrossMeasureTies'
+import { drawPedalSpans } from './drawPedalSpans'
 import { buildDragPreviewOverrides } from './dragPreviewOverrides'
 import {
   DEFAULT_TIME_AXIS_SPACING_CONFIG,
@@ -42,6 +43,7 @@ import type {
   MeasureLayout,
   MeasurePair,
   NoteLayout,
+  PedalSpan,
   ScoreNote,
   Selection,
   SpacingLayoutMode,
@@ -295,6 +297,7 @@ function getMeasureSpacingRightEdge(params: {
 export function renderVisibleSystems(params: {
   context: ReturnType<Renderer['getContext']>
   measurePairs: MeasurePair[]
+  pedalSpans?: PedalSpan[]
   scoreWidth: number
   scoreHeight: number
   systemRanges: SystemMeasureRange[]
@@ -337,6 +340,7 @@ export function renderVisibleSystems(params: {
   const {
     context,
     measurePairs,
+    pedalSpans = [],
     scoreWidth,
     scoreHeight,
     systemRanges,
@@ -1571,6 +1575,14 @@ export function renderVisibleSystems(params: {
     })
     drawCrossMeasureTiesForSystem()
   }
+
+  const context2D = (context as unknown as { context2D?: CanvasRenderingContext2D }).context2D
+  drawPedalSpans({
+    context2D,
+    pedalSpans,
+    measureLayouts: nextMeasureLayouts,
+    measureTimelineBundles: nextTimelineBundlesByPair,
+  })
 
   return {
     nextLayouts,

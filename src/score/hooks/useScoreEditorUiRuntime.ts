@@ -65,6 +65,7 @@ export function useScoreEditorUiRuntime(params: {
     },
     osmdPreviewController: {
       measurePairs: layout.measurePairs,
+      pedalSpans: appState.pedalSpans,
       measurePairsRef: editorRefs.measurePairsRef,
       measureKeyFifthsFromImportRef: editorRefs.measureKeyFifthsFromImportRef,
       measureDivisionsFromImportRef: editorRefs.measureDivisionsFromImportRef,

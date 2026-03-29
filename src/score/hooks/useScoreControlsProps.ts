@@ -4,7 +4,7 @@ import { buildSpacingConfigControlHandlers } from './buildSpacingConfigControlHa
 import type { ScoreControlsProps, ScoreViewAdapterParams } from './scoreViewAdapterTypes'
 
 export function useScoreControlsProps(params: ScoreViewAdapterParams): ScoreControlsProps {
-  const { appState, editorRefs, layout, workspace, editorUi, playback } = params
+  const { appState, editorRefs, layout, workspace, editorUi, playback, canOpenPedalModal, openPedalModal } = params
   const spacingConfigHandlers = useMemo(
     () => buildSpacingConfigControlHandlers({ appState }),
     [
@@ -61,6 +61,8 @@ export function useScoreControlsProps(params: ScoreViewAdapterParams): ScoreCont
     onExportMusicXmlFile: workspace.exportMusicXmlFile,
     onOpenOsmdPreview: editorUi.openOsmdPreview,
     onOpenBeamGroupingTool: editorUi.openBeamGroupingTool,
+    canOpenPedalModal,
+    onOpenPedalModal: openPedalModal,
     isNotationPaletteOpen: appState.isNotationPaletteOpen,
     onToggleNotationPalette: editorUi.toggleNotationPalette,
     onCloseNotationPalette: editorUi.closeNotationPalette,
@@ -125,6 +127,7 @@ export function useScoreControlsProps(params: ScoreViewAdapterParams): ScoreCont
     editorUi.selectedMidiInputId,
     editorUi.setSelectedMidiInputId,
     editorUi.toggleNotationPalette,
+    canOpenPedalModal,
     layout.autoScalePercent,
     layout.safeCanvasHeightPercent,
     layout.safeChordMarkerPaddingPx,
@@ -142,5 +145,6 @@ export function useScoreControlsProps(params: ScoreViewAdapterParams): ScoreCont
     workspace.openMusicXmlFilePicker,
     workspace.playScore,
     workspace.resetScoreWithCollapseReset,
+    openPedalModal,
   ])
 }

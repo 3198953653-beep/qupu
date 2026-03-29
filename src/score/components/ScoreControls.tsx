@@ -65,6 +65,8 @@ export function ScoreControls(props: ScoreControlsProps) {
     onExportMusicXmlFile,
     onOpenOsmdPreview,
     onOpenBeamGroupingTool,
+    canOpenPedalModal,
+    onOpenPedalModal,
     isNotationPaletteOpen,
     onToggleNotationPalette,
     onCloseNotationPalette,
@@ -154,6 +156,8 @@ export function ScoreControls(props: ScoreControlsProps) {
         onExportMusicXmlFile={onExportMusicXmlFile}
         onOpenOsmdPreview={onOpenOsmdPreview}
         onOpenBeamGroupingTool={onOpenBeamGroupingTool}
+        canOpenPedalModal={canOpenPedalModal}
+        onOpenPedalModal={onOpenPedalModal}
         isNotationPaletteOpen={isNotationPaletteOpen}
         onToggleNotationPalette={onToggleNotationPalette}
         onCloseNotationPalette={onCloseNotationPalette}

@@ -22,6 +22,7 @@ import type {
   ImportedNoteLocation,
   MeasurePair,
   MusicXmlMetadata,
+  PedalSpan,
   Pitch,
   RhythmPresetId,
   ScoreNote,
@@ -60,6 +61,7 @@ export function useEditorHandlers(params: {
   musicXmlMetadataFromImportRef: MutableRefObject<MusicXmlMetadata | null>
   setImportedChordRulerEntriesByPairFromImport: StateSetter<ChordRulerEntry[][] | null>
   setImportedTimelineSegmentStartPairIndexesFromImport: StateSetter<number[] | null>
+  setPedalSpans: StateSetter<PedalSpan[]>
   setFullMeasureRestCollapseScopeKeys: StateSetter<string[]>
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
   dragRef: MutableRefObject<DragState | null>
@@ -74,6 +76,7 @@ export function useEditorHandlers(params: {
   fileInputRef: MutableRefObject<HTMLInputElement | null>
 
   measurePairs: MeasurePair[]
+  pedalSpans: PedalSpan[]
   setRhythmPreset: StateSetter<RhythmPresetId>
   pitches: Pitch[]
   initialTrebleNotes: ScoreNote[]
@@ -122,6 +125,7 @@ export function useEditorHandlers(params: {
     musicXmlMetadataFromImportRef,
     setImportedChordRulerEntriesByPairFromImport,
     setImportedTimelineSegmentStartPairIndexesFromImport,
+    setPedalSpans,
     setFullMeasureRestCollapseScopeKeys,
     importedNoteLookupRef,
     dragRef,
@@ -134,6 +138,7 @@ export function useEditorHandlers(params: {
     setMusicXmlInput,
     fileInputRef,
     measurePairs,
+    pedalSpans,
     setRhythmPreset,
     pitches,
     initialTrebleNotes,
@@ -184,6 +189,7 @@ export function useEditorHandlers(params: {
       musicXmlMetadataFromImportRef,
       setImportedChordRulerEntriesByPairFromImport,
       setImportedTimelineSegmentStartPairIndexesFromImport,
+      setPedalSpans,
       setFullMeasureRestCollapseScopeKeys,
       importedNoteLookupRef,
       dragRef,
@@ -233,6 +239,7 @@ export function useEditorHandlers(params: {
   const exportMusicXmlFile = () => {
     exportMusicXmlFileAction({
       measurePairs,
+      pedalSpans,
       keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
       divisionsByMeasure: measureDivisionsFromImportRef.current,
       timeSignaturesByMeasure: measureTimeSignaturesFromImportRef.current,

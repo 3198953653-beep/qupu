@@ -11,6 +11,13 @@ import {
 import type { ChordRulerEntry } from './chordRuler'
 import { normalizeKeyMode } from './chordDegree'
 import { buildMeasureRestNotes, resolvePairTimeSignature } from './measureRestUtils'
+import {
+  createPedalSpanId,
+  getMusicXmlPedalStyleAttributes,
+  getPedalStyleFromMusicXmlAttributes,
+  normalizePedalSpan,
+  sortPedalSpans,
+} from './pedalUtils'
 import { getKeySignatureAlterForStep, getStepOctaveAlterFromPitch, toPitchFromStepAlter } from './pitchMath'
 import {
   beatsToTicks,
@@ -30,6 +37,8 @@ import type {
   MusicXmlCreator,
   MusicXmlMetadata,
   NoteDuration,
+  PedalSpan,
+  PedalStyle,
   Pitch,
   ScoreNote,
   StaffKind,
@@ -262,6 +271,16 @@ type ImportedChordPartAnalysis = {
   entriesByMeasureIndex: ChordRulerEntry[][]
 }
 
+type ImportedPedalMeasureSpan = {
+  id: string
+  style: PedalStyle
+  staff: 'bass'
+  startMeasureIndex: number
+  startTick: number
+  endMeasureIndex: number
+  endTick: number
+}
+
 function getPartMeasureElements(partEl: Element, measureLimit: number): Element[] {
   const measureEls = Array.from(partEl.getElementsByTagName('measure'))
   if (!Number.isFinite(measureLimit)) return measureEls
@@ -448,6 +467,229 @@ function analyzeImportedTimelineSegmentPart(partEl: Element, measureLimit: numbe
     normalizedStarts.unshift(0)
   }
   return normalizedStarts
+}
+
+function appendImportedPedalMeasureSpan(params: {
+  destination: ImportedPedalMeasureSpan[]
+  style: PedalStyle
+  startMeasureIndex: number
+  startTick: number
+  endMeasureIndex: number
+  endTick: number
+}): void {
+  const {
+    destination,
+    style,
+    startMeasureIndex: rawStartMeasureIndex,
+    startTick: rawStartTick,
+    endMeasureIndex: rawEndMeasureIndex,
+    endTick: rawEndTick,
+  } = params
+  const startMeasureIndex = Math.max(0, Math.trunc(rawStartMeasureIndex))
+  const endMeasureIndex = Math.max(startMeasureIndex, Math.trunc(rawEndMeasureIndex))
+  const startTick = Math.max(0, Math.round(rawStartTick))
+  let endTick = Math.max(0, Math.round(rawEndTick))
+  if (endMeasureIndex === startMeasureIndex && endTick <= startTick) {
+    endTick = startTick + 1
+  }
+  destination.push({
+    id: createPedalSpanId(),
+    style,
+    staff: 'bass',
+    startMeasureIndex,
+    startTick,
+    endMeasureIndex,
+    endTick,
+  })
+}
+
+function analyzeImportedPedalParts(partEls: Element[], measureLimit: number): ImportedPedalMeasureSpan[] {
+  const importedSpans: ImportedPedalMeasureSpan[] = []
+
+  partEls.forEach((partEl) => {
+    const measureEls = getPartMeasureElements(partEl, measureLimit)
+    if (measureEls.length === 0) return
+
+    let divisions = 1
+    let currentTime: TimeSignature = { beats: 4, beatType: 4 }
+    const measureTicksByIndex: number[] = []
+    let openPedal:
+      | {
+          style: PedalStyle
+          startMeasureIndex: number
+          startTick: number
+        }
+      | null = null
+
+    for (let measureIndex = 0; measureIndex < measureEls.length; measureIndex += 1) {
+      const measureEl = measureEls[measureIndex]
+      const divisionsText = getFirstTagText(measureEl, 'divisions')
+      const maybeDivisions = divisionsText ? Number(divisionsText) : Number.NaN
+      if (Number.isFinite(maybeDivisions) && maybeDivisions > 0) {
+        divisions = maybeDivisions
+      }
+
+      const beatsText = getFirstTagText(measureEl, 'beats')
+      const beatTypeText = getFirstTagText(measureEl, 'beat-type')
+      const maybeBeats = beatsText ? Number(beatsText) : Number.NaN
+      const maybeBeatType = beatTypeText ? Number(beatTypeText) : Number.NaN
+      currentTime = {
+        beats: Number.isFinite(maybeBeats) && maybeBeats > 0 ? Math.round(maybeBeats) : currentTime.beats,
+        beatType:
+          Number.isFinite(maybeBeatType) && maybeBeatType > 0 ? Math.round(maybeBeatType) : currentTime.beatType,
+      }
+
+      const measureTicks = getMeasureTicksByTime(currentTime)
+      measureTicksByIndex[measureIndex] = measureTicks
+      let currentTimeRaw = 0
+
+      const children = measureEl.children
+      for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
+        const child = children[childIndex]
+        const tag = child.tagName.toLowerCase()
+
+        if (tag === 'backup' || tag === 'forward') {
+          const durationText = child.getElementsByTagName('duration')[0]?.textContent?.trim()
+          const durationValue = durationText ? Number(durationText) : Number.NaN
+          if (Number.isFinite(durationValue)) {
+            currentTimeRaw += tag === 'backup' ? -durationValue : durationValue
+          }
+          continue
+        }
+
+        if (tag === 'note') {
+          const noteData = collectFastNoteData(child)
+          if (!noteData.isGrace && !noteData.isChord) {
+            currentTimeRaw += noteData.durationValue ?? 0
+          }
+          continue
+        }
+
+        if (tag !== 'direction') continue
+
+        const directionStaffText = getFirstTagText(child, 'staff')?.trim() ?? ''
+        if (directionStaffText && directionStaffText !== '2') continue
+
+        const offsetText = getFirstTagText(child, 'offset')
+        const offsetValue = offsetText ? Number(offsetText) : Number.NaN
+        const eventRawTime = currentTimeRaw + (Number.isFinite(offsetValue) ? offsetValue : 0)
+        const eventTick = Math.max(
+          0,
+          Math.min(measureTicks, toInternalTicksFromXmlDuration(eventRawTime, divisions)),
+        )
+
+        const directionTypeEls = child.getElementsByTagName('direction-type')
+        for (let directionTypeIndex = 0; directionTypeIndex < directionTypeEls.length; directionTypeIndex += 1) {
+          const directionTypeEl = directionTypeEls[directionTypeIndex]
+          const pedalEls = directionTypeEl.getElementsByTagName('pedal')
+          for (let pedalIndex = 0; pedalIndex < pedalEls.length; pedalIndex += 1) {
+            const pedalEl = pedalEls[pedalIndex]
+            const pedalType = pedalEl.getAttribute('type')?.trim().toLowerCase() ?? 'start'
+            const pedalStyle = getPedalStyleFromMusicXmlAttributes({
+              signAttr: pedalEl.getAttribute('sign'),
+              lineAttr: pedalEl.getAttribute('line'),
+            })
+
+            if (pedalType === 'start') {
+              if (
+                openPedal &&
+                (measureIndex > openPedal.startMeasureIndex || eventTick > openPedal.startTick)
+              ) {
+                appendImportedPedalMeasureSpan({
+                  destination: importedSpans,
+                  style: openPedal.style,
+                  startMeasureIndex: openPedal.startMeasureIndex,
+                  startTick: openPedal.startTick,
+                  endMeasureIndex: measureIndex,
+                  endTick: eventTick,
+                })
+              }
+              openPedal = {
+                style: pedalStyle,
+                startMeasureIndex: measureIndex,
+                startTick: eventTick,
+              }
+              continue
+            }
+
+            if (pedalType === 'change') {
+              if (openPedal) {
+                appendImportedPedalMeasureSpan({
+                  destination: importedSpans,
+                  style: openPedal.style,
+                  startMeasureIndex: openPedal.startMeasureIndex,
+                  startTick: openPedal.startTick,
+                  endMeasureIndex: measureIndex,
+                  endTick: eventTick,
+                })
+              }
+              openPedal = {
+                style: pedalStyle,
+                startMeasureIndex: measureIndex,
+                startTick: eventTick,
+              }
+              continue
+            }
+
+            if (pedalType !== 'stop') continue
+            if (!openPedal) continue
+            appendImportedPedalMeasureSpan({
+              destination: importedSpans,
+              style: openPedal.style,
+              startMeasureIndex: openPedal.startMeasureIndex,
+              startTick: openPedal.startTick,
+              endMeasureIndex: measureIndex,
+              endTick: eventTick,
+            })
+            openPedal = null
+          }
+        }
+      }
+    }
+
+    if (openPedal) {
+      const lastMeasureIndex = measureEls.length - 1
+      appendImportedPedalMeasureSpan({
+        destination: importedSpans,
+        style: openPedal.style,
+        startMeasureIndex: openPedal.startMeasureIndex,
+        startTick: openPedal.startTick,
+        endMeasureIndex: lastMeasureIndex,
+        endTick: measureTicksByIndex[lastMeasureIndex] ?? MEASURE_TICKS,
+      })
+    }
+  })
+
+  const sortedSpans = [...importedSpans].sort((left, right) => {
+    if (left.startMeasureIndex !== right.startMeasureIndex) {
+      return left.startMeasureIndex - right.startMeasureIndex
+    }
+    if (left.startTick !== right.startTick) return left.startTick - right.startTick
+    if (left.endMeasureIndex !== right.endMeasureIndex) {
+      return left.endMeasureIndex - right.endMeasureIndex
+    }
+    if (left.endTick !== right.endTick) return left.endTick - right.endTick
+    if (left.style !== right.style) return left.style.localeCompare(right.style)
+    return left.id.localeCompare(right.id)
+  })
+
+  const dedupedSpans: ImportedPedalMeasureSpan[] = []
+  for (const span of sortedSpans) {
+    const previous = dedupedSpans[dedupedSpans.length - 1]
+    if (
+      previous &&
+      previous.style === span.style &&
+      previous.startMeasureIndex === span.startMeasureIndex &&
+      previous.startTick === span.startTick &&
+      previous.endMeasureIndex === span.endMeasureIndex &&
+      previous.endTick === span.endTick
+    ) {
+      continue
+    }
+    dedupedSpans.push(span)
+  }
+
+  return dedupedSpans
 }
 
 function parseVisibleMusicXmlParts(params: {
@@ -679,12 +921,14 @@ function finalizeImportResult(params: {
   metadata: MusicXmlMetadata
   importedChordRulerEntriesByMeasureIndex?: ChordRulerEntry[][] | null
   importedTimelineSegmentStartMeasureIndexes?: number[] | null
+  importedPedalMeasureSpans?: ImportedPedalMeasureSpan[] | null
 }): ImportResult {
   const {
     parsedData,
     metadata,
     importedChordRulerEntriesByMeasureIndex = null,
     importedTimelineSegmentStartMeasureIndexes = null,
+    importedPedalMeasureSpans = null,
   } = params
   const { measureSlots, measureKeyFifths, measureKeyModes, measureDivisions, measureTimeSignatures } = parsedData
 
@@ -766,6 +1010,7 @@ function finalizeImportResult(params: {
       trebleNotes: fallbackPairs.flatMap((pair) => pair.treble),
       bassNotes: fallbackPairs.flatMap((pair) => pair.bass),
       measurePairs: fallbackPairs,
+      pedalSpans: [],
       measureKeyFifths: new Array(fallbackPairs.length).fill(0),
       measureKeyModes: new Array(fallbackPairs.length).fill('major'),
       measureDivisions: new Array(fallbackPairs.length).fill(16),
@@ -813,11 +1058,32 @@ function finalizeImportResult(params: {
           ? importedTimelineSegmentStartPairIndexes
           : [0, ...importedTimelineSegmentStartPairIndexes])
       : null
+  const importedPedalSpans: PedalSpan[] = importedPedalMeasureSpans
+    ? sortPedalSpans(
+        importedPedalMeasureSpans.flatMap((span) => {
+          const startPairIndex = measureIndexToPairIndex.get(span.startMeasureIndex)
+          const endPairIndex = measureIndexToPairIndex.get(span.endMeasureIndex)
+          if (startPairIndex === undefined || endPairIndex === undefined) return []
+          return [
+            normalizePedalSpan({
+              id: span.id || createPedalSpanId(),
+              style: span.style,
+              staff: 'bass',
+              startPairIndex,
+              startTick: span.startTick,
+              endPairIndex,
+              endTick: span.endTick,
+            }),
+          ]
+        }),
+      )
+    : []
 
   return {
     trebleNotes: importedTrebleNotes,
     bassNotes: importedBassNotes,
     measurePairs: importedPairs,
+    pedalSpans: importedPedalSpans,
     measureKeyFifths: alignedKeyFifths,
     measureKeyModes: alignedKeyModes,
     measureDivisions: alignedDivisions,
@@ -976,6 +1242,12 @@ function getDurationValueByDivisions(duration: NoteDuration, divisions: number):
   return Math.max(1, value)
 }
 
+function getXmlDurationValueFromTicks(ticks: number, divisions: number): number {
+  if (!Number.isFinite(ticks) || ticks <= 0) return 0
+  const safeDivisions = Number.isFinite(divisions) && divisions > 0 ? divisions : 1
+  return Math.max(0, Math.round((ticks / TICKS_PER_BEAT) * safeDivisions))
+}
+
 function getMusicXmlDoctype(version: string): string {
   if (version.startsWith('3.0')) {
     return '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">'
@@ -988,12 +1260,13 @@ function getMusicXmlDoctype(version: string): string {
 
 export function buildMusicXmlFromMeasurePairs(params: {
   measurePairs: MeasurePair[]
+  pedalSpans?: PedalSpan[]
   keyFifthsByMeasure?: number[] | null
   divisionsByMeasure?: number[] | null
   timeSignaturesByMeasure?: TimeSignature[] | null
   metadata?: MusicXmlMetadata | null
 }): string {
-  const { measurePairs, keyFifthsByMeasure, divisionsByMeasure, timeSignaturesByMeasure, metadata } = params
+  const { measurePairs, pedalSpans = [], keyFifthsByMeasure, divisionsByMeasure, timeSignaturesByMeasure, metadata } = params
   const meta = metadata ?? getDefaultMusicXmlMetadata()
   const version = meta.version || '3.1'
   const lines: string[] = []
@@ -1022,6 +1295,72 @@ export function buildMusicXmlFromMeasurePairs(params: {
     if (!Number.isFinite(numeric)) return 0
     return Math.trunc(numeric)
   }
+
+  const appendForward = (destination: string[], durationValue: number) => {
+    if (!Number.isFinite(durationValue) || durationValue <= 0) return
+    destination.push('   <forward>')
+    destination.push(`    <duration>${Math.max(1, Math.round(durationValue))}</duration>`)
+    destination.push('   </forward>')
+  }
+
+  const appendBackup = (destination: string[], durationValue: number) => {
+    if (!Number.isFinite(durationValue) || durationValue <= 0) return
+    destination.push('   <backup>')
+    destination.push(`    <duration>${Math.max(1, Math.round(durationValue))}</duration>`)
+    destination.push('   </backup>')
+  }
+
+  const appendPedalDirection = (params: {
+    destination: string[]
+    kind: 'start' | 'stop'
+    style: PedalStyle
+  }) => {
+    const { destination, kind, style } = params
+    const attributes = getMusicXmlPedalStyleAttributes(style)
+    destination.push('   <direction placement="below">')
+    destination.push('    <direction-type>')
+    destination.push(
+      `     <pedal type="${kind}" line="${attributes.line}" sign="${attributes.sign}"/>`,
+    )
+    destination.push('    </direction-type>')
+    destination.push('    <voice>1</voice>')
+    destination.push('    <staff>2</staff>')
+    destination.push('   </direction>')
+  }
+
+  const pedalEventsByMeasure = new Map<number, Array<{
+    tick: number
+    kind: 'start' | 'stop'
+    style: PedalStyle
+  }>>()
+
+  pedalSpans.forEach((span) => {
+    if (span.staff !== 'bass') return
+    const startMeasureIndex = Math.max(0, Math.trunc(span.startPairIndex))
+    const endMeasureIndex = Math.max(startMeasureIndex, Math.trunc(span.endPairIndex))
+    if (!measurePairs[startMeasureIndex] || !measurePairs[endMeasureIndex]) return
+
+    const startMeasureTicks = getMeasureTicksByTime(pickTime(startMeasureIndex))
+    const endMeasureTicks = getMeasureTicksByTime(pickTime(endMeasureIndex))
+    const startTick = Math.max(0, Math.min(startMeasureTicks, Math.round(span.startTick)))
+    const endTick = Math.max(0, Math.min(endMeasureTicks, Math.round(span.endTick)))
+
+    const startEvents = pedalEventsByMeasure.get(startMeasureIndex) ?? []
+    startEvents.push({ tick: startTick, kind: 'start', style: span.style })
+    pedalEventsByMeasure.set(startMeasureIndex, startEvents)
+
+    const stopEvents = pedalEventsByMeasure.get(endMeasureIndex) ?? []
+    stopEvents.push({ tick: endTick, kind: 'stop', style: span.style })
+    pedalEventsByMeasure.set(endMeasureIndex, stopEvents)
+  })
+
+  pedalEventsByMeasure.forEach((events) => {
+    events.sort((left, right) => {
+      if (left.tick !== right.tick) return left.tick - right.tick
+      if (left.kind !== right.kind) return left.kind === 'stop' ? -1 : 1
+      return left.style.localeCompare(right.style)
+    })
+  })
 
   const appendNote = (noteParams: {
     destination: string[]
@@ -1260,9 +1599,25 @@ export function buildMusicXmlFromMeasurePairs(params: {
     })
 
     const backupDuration = Math.max(1, Math.round(divisions * time.beats * (4 / time.beatType)))
-    lines.push('   <backup>')
-    lines.push(`    <duration>${backupDuration}</duration>`)
-    lines.push('   </backup>')
+    appendBackup(lines, backupDuration)
+
+    const pedalEvents = pedalEventsByMeasure.get(measureIndex) ?? []
+    if (pedalEvents.length > 0) {
+      let pedalCursorDuration = 0
+      pedalEvents.forEach((event) => {
+        const eventDuration = getXmlDurationValueFromTicks(event.tick, divisions)
+        if (eventDuration > pedalCursorDuration) {
+          appendForward(lines, eventDuration - pedalCursorDuration)
+          pedalCursorDuration = eventDuration
+        }
+        appendPedalDirection({
+          destination: lines,
+          kind: event.kind,
+          style: event.style,
+        })
+      })
+      appendBackup(lines, pedalCursorDuration)
+    }
 
     appendStaffNotes({
       destination: lines,
@@ -1316,6 +1671,10 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
     firstPart !== null &&
     chordPartAnalysis !== null &&
     chordPartAnalysis.looksLikeChordPart
+  const pedalImportPartNodes = shouldUseDedicatedChordImportPath && firstPart
+    ? [firstPart as Element]
+    : visiblePartNodes
+  const importedPedalMeasureSpans = analyzeImportedPedalParts(pedalImportPartNodes, measureLimit)
 
   const parsedVisibleData = parseVisibleMusicXmlParts({
     partContexts: shouldUseDedicatedChordImportPath
@@ -1334,5 +1693,6 @@ export function parseMusicXml(xml: string, options?: { measureLimit?: number }):
       ? chordPartAnalysis?.entriesByMeasureIndex ?? null
       : null,
     importedTimelineSegmentStartMeasureIndexes,
+    importedPedalMeasureSpans,
   })
 }

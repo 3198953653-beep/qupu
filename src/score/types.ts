@@ -16,6 +16,8 @@ export type ScoreSourceKind =
   | 'rhythm-preset'
   | 'ai-draft'
 export type StaffKind = 'treble' | 'bass'
+export type PedalStyle = 'text' | 'bracket' | 'mixed'
+export type PedalApplyScope = 'all' | 'segment' | 'chord'
 export type BeamTag = 'begin' | 'continue' | 'end'
 export type BeamLevelTag = 'begin' | 'continue' | 'end' | 'forward hook' | 'backward hook'
 export type BeamTagByLevel = Record<number, BeamLevelTag>
@@ -70,6 +72,7 @@ export type ImportResult = {
   trebleNotes: ScoreNote[]
   bassNotes: ScoreNote[]
   measurePairs: MeasurePair[]
+  pedalSpans: PedalSpan[]
   measureKeyFifths: number[]
   measureKeyModes: string[]
   measureDivisions: number[]
@@ -110,6 +113,16 @@ export type SegmentRhythmTemplateBinding = {
   patternData: string
   templDetails: SegmentRhythmTemplateDetail[]
   durationCombo: string
+}
+
+export type PedalSpan = {
+  id: string
+  style: PedalStyle
+  staff: 'bass'
+  startPairIndex: number
+  startTick: number
+  endPairIndex: number
+  endTick: number
 }
 
 export type NoteHeadLayout = {

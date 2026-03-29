@@ -26,6 +26,8 @@ export type ScoreControlsProps = {
   onExportMusicXmlFile: () => void
   onOpenOsmdPreview: () => void
   onOpenBeamGroupingTool: () => void
+  canOpenPedalModal: boolean
+  onOpenPedalModal: () => void
   isNotationPaletteOpen: boolean
   onToggleNotationPalette: () => void
   onCloseNotationPalette: () => void

@@ -23,6 +23,7 @@ import { ImportProgressModal } from './score/components/ImportProgressModal'
 import { OsmdPreviewModal } from './score/components/OsmdPreviewModal'
 import { RhythmTemplateLoadModal } from './score/components/RhythmTemplateLoadModal'
 import { SmartChordToneModal } from './score/components/SmartChordToneModal'
+import { PedalApplyModal } from './score/components/PedalApplyModal'
 import type { Pitch, ScoreNote } from './score/types'
 import { Renderer } from 'vexflow'
 
@@ -53,6 +54,7 @@ function App() {
     importedChordRulerEntriesByPairFromImport: appState.importedChordRulerEntriesByPairFromImport,
     measureKeyFifthsFromImport: appState.measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport: appState.measureTimeSignaturesFromImport,
+    pedalSpans: appState.pedalSpans,
     autoScaleEnabled: appState.autoScaleEnabled,
     manualScalePercent: appState.manualScalePercent,
     canvasHeightPercent: appState.canvasHeightPercent,
@@ -89,7 +91,16 @@ function App() {
     previewDefaultAccidentalOffsetPx: PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX,
     previewStartThresholdPx: PREVIEW_START_THRESHOLD_PX,
   })
-  const { workspace, editorUi, playback, smartChordToneDialog, rhythmTemplateLoadModal } = runtime
+  const {
+    workspace,
+    editorUi,
+    playback,
+    smartChordToneDialog,
+    rhythmTemplateLoadModal,
+    pedalApplyDialog,
+    canOpenPedalModal,
+    openPedalModal,
+  } = runtime
 
   const { scoreControlsProps, scoreBoardProps } = useScoreViewProps({
     appState,
@@ -99,6 +110,9 @@ function App() {
     workspace,
     editorUi,
     playback,
+    pedalApplyDialog,
+    canOpenPedalModal,
+    openPedalModal,
   })
 
   return (
@@ -184,6 +198,19 @@ function App() {
           void rhythmTemplateLoadModal.applySelectedTemplate()
         }}
         onTemplateDoubleClick={rhythmTemplateLoadModal.handleTemplateDoubleClick}
+      />
+
+      <PedalApplyModal
+        isOpen={pedalApplyDialog.isOpen}
+        selectedScope={pedalApplyDialog.selectedScope}
+        scopeOptions={pedalApplyDialog.scopeOptions}
+        scopeSummary={pedalApplyDialog.scopeSummary}
+        chordCountInScope={pedalApplyDialog.chordCountInScope}
+        hasExistingSpansInScope={pedalApplyDialog.hasExistingSpansInScope}
+        styleOptions={pedalApplyDialog.styleOptions}
+        onClose={pedalApplyDialog.closeModal}
+        onSelectScope={pedalApplyDialog.setSelectedScope}
+        onApplyStyle={pedalApplyDialog.applyStyle}
       />
     </main>
   )

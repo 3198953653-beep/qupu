@@ -1,5 +1,6 @@
 import { useCallback, type ChangeEvent, type Dispatch, type SetStateAction } from 'react'
 import type {
+  PedalSpan,
   RhythmPresetId,
   ScoreSourceKind,
   SegmentRhythmTemplateBinding,
@@ -14,6 +15,7 @@ export function useEditorActionWrappers(params: {
   setTimelineSegmentOverlayMode: Dispatch<SetStateAction<TimelineSegmentOverlayMode>>
   setScoreSourceKind: Dispatch<SetStateAction<ScoreSourceKind>>
   setSegmentRhythmTemplateBindings: Dispatch<SetStateAction<Record<string, SegmentRhythmTemplateBinding>>>
+  setPedalSpans: Dispatch<SetStateAction<PedalSpan[]>>
   setFullMeasureRestCollapseScopeKeys: Dispatch<SetStateAction<string[]>>
   setPendingImportedScoreSourceKind: (kind: Extract<ScoreSourceKind, 'musicxml-file' | 'musicxml-text' | 'sample-musicxml'> | null) => void
   importMusicXmlText: (xmlText: string) => void
@@ -45,6 +47,7 @@ export function useEditorActionWrappers(params: {
     setTimelineSegmentOverlayMode,
     setScoreSourceKind,
     setSegmentRhythmTemplateBindings,
+    setPedalSpans,
     setFullMeasureRestCollapseScopeKeys,
     setPendingImportedScoreSourceKind,
     importMusicXmlText,
@@ -65,6 +68,10 @@ export function useEditorActionWrappers(params: {
   const clearSegmentRhythmTemplateBindings = useCallback(() => {
     setSegmentRhythmTemplateBindings({})
   }, [setSegmentRhythmTemplateBindings])
+
+  const clearPedalSpans = useCallback(() => {
+    setPedalSpans([])
+  }, [setPedalSpans])
 
   const importMusicXmlTextWithCollapseReset = useCallback((xmlText: string) => {
     stopActivePlaybackSession()
@@ -136,6 +143,7 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     clearSegmentRhythmTemplateBindings()
+    clearPedalSpans()
     setPendingImportedScoreSourceKind(null)
     setActiveBuiltInDemo('whole-note')
     setScoreSourceKind('built-in-demo')
@@ -144,6 +152,7 @@ export function useEditorActionWrappers(params: {
   }, [
     clearActiveChordSelection,
     clearFullMeasureRestCollapseScopes,
+    clearPedalSpans,
     clearSegmentRhythmTemplateBindings,
     loadWholeNoteDemo,
     requestPlaybackCursorReset,
@@ -160,6 +169,7 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     clearSegmentRhythmTemplateBindings()
+    clearPedalSpans()
     setPendingImportedScoreSourceKind(null)
     setActiveBuiltInDemo('half-note')
     setScoreSourceKind('built-in-demo')
@@ -168,6 +178,7 @@ export function useEditorActionWrappers(params: {
   }, [
     clearActiveChordSelection,
     clearFullMeasureRestCollapseScopes,
+    clearPedalSpans,
     clearSegmentRhythmTemplateBindings,
     loadHalfNoteDemo,
     requestPlaybackCursorReset,
@@ -184,6 +195,7 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     clearSegmentRhythmTemplateBindings()
+    clearPedalSpans()
     setPendingImportedScoreSourceKind(null)
     setActiveBuiltInDemo('none')
     setScoreSourceKind('reset-default')
@@ -192,6 +204,7 @@ export function useEditorActionWrappers(params: {
   }, [
     clearActiveChordSelection,
     clearFullMeasureRestCollapseScopes,
+    clearPedalSpans,
     clearSegmentRhythmTemplateBindings,
     requestPlaybackCursorReset,
     resetScore,
@@ -208,6 +221,7 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     clearSegmentRhythmTemplateBindings()
+    clearPedalSpans()
     setPendingImportedScoreSourceKind(null)
     setActiveBuiltInDemo('none')
     setScoreSourceKind('ai-draft')
@@ -216,6 +230,7 @@ export function useEditorActionWrappers(params: {
   }, [
     clearActiveChordSelection,
     clearFullMeasureRestCollapseScopes,
+    clearPedalSpans,
     clearSegmentRhythmTemplateBindings,
     requestPlaybackCursorReset,
     runAiDraft,
@@ -232,6 +247,7 @@ export function useEditorActionWrappers(params: {
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
     clearSegmentRhythmTemplateBindings()
+    clearPedalSpans()
     setPendingImportedScoreSourceKind(null)
     setActiveBuiltInDemo('none')
     setScoreSourceKind('rhythm-preset')
@@ -241,6 +257,7 @@ export function useEditorActionWrappers(params: {
     applyRhythmPreset,
     clearActiveChordSelection,
     clearFullMeasureRestCollapseScopes,
+    clearPedalSpans,
     clearSegmentRhythmTemplateBindings,
     requestPlaybackCursorReset,
     setActiveBuiltInDemo,

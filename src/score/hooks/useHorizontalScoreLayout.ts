@@ -12,6 +12,7 @@ import { useScoreMeasureTimelineData } from './useScoreMeasureTimelineData'
 import type {
   MeasureFrame,
   MeasurePair,
+  PedalSpan,
   PlaybackPoint,
   ScoreNote,
   SpacingLayoutMode,
@@ -25,6 +26,7 @@ export function useHorizontalScoreLayout(params: {
   importedChordRulerEntriesByPairFromImport: ChordRulerEntry[][] | null
   measureKeyFifthsFromImport: number[] | null
   measureTimeSignaturesFromImport: TimeSignature[] | null
+  pedalSpans: PedalSpan[]
   autoScaleEnabled: boolean
   manualScalePercent: number
   canvasHeightPercent: number
@@ -92,6 +94,7 @@ export function useHorizontalScoreLayout(params: {
     importedChordRulerEntriesByPairFromImport,
     measureKeyFifthsFromImport,
     measureTimeSignaturesFromImport,
+    pedalSpans,
     autoScaleEnabled,
     manualScalePercent,
     canvasHeightPercent,
@@ -114,8 +117,8 @@ export function useHorizontalScoreLayout(params: {
     measureTimeSignaturesFromImport,
   })
   const grandStaffLayoutMetrics = useMemo(
-    () => getGrandStaffLayoutMetrics(staffInterGapPx),
-    [staffInterGapPx],
+    () => getGrandStaffLayoutMetrics(staffInterGapPx, { includePedalLane: pedalSpans.length > 0 }),
+    [pedalSpans.length, staffInterGapPx],
   )
 
   const measureFrameLayout = useHorizontalMeasureFrameLayout({

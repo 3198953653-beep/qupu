@@ -92,6 +92,7 @@ export function useScoreWorkspaceSurfaceRuntime(params: {
       scoreWidth: layout.scoreWidth,
       scoreHeight: layout.scoreHeight,
       measurePairs,
+      pedalSpans: appState.pedalSpans,
       systemRanges: layout.systemRanges,
       visibleSystemRange: layout.visibleSystemRange,
       renderOriginSystemIndex: layout.visibleSystemRange.start,

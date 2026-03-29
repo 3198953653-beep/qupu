@@ -1,12 +1,13 @@
 import { useCallback, useEffect, type ChangeEvent, type MutableRefObject } from 'react'
 import { buildMusicXmlExportPayload } from '../musicXmlActions'
-import type { MeasurePair } from '../types'
+import type { MeasurePair, PedalSpan } from '../types'
 import { sanitizeMusicXmlForOsmdPreview } from './osmdPreviewUtils'
 import { useOsmdPreviewNavigation } from './useOsmdPreviewNavigation'
 import { useOsmdPreviewSettings } from './useOsmdPreviewSettings'
 
 export function useOsmdPreviewLifecycle(params: {
   measurePairs: MeasurePair[]
+  pedalSpans: PedalSpan[]
   measureKeyFifthsFromImportRef: Parameters<typeof buildMusicXmlExportPayload>[0]['keyFifthsByMeasure'] extends infer T
     ? MutableRefObject<T>
     : never
@@ -25,6 +26,7 @@ export function useOsmdPreviewLifecycle(params: {
 }) {
   const {
     measurePairs,
+    pedalSpans,
     measureKeyFifthsFromImportRef,
     measureDivisionsFromImportRef,
     measureTimeSignaturesFromImportRef,
@@ -85,6 +87,7 @@ export function useOsmdPreviewLifecycle(params: {
   const openOsmdPreview = useCallback(() => {
     const { xmlText } = buildMusicXmlExportPayload({
       measurePairs,
+      pedalSpans,
       keyFifthsByMeasure: measureKeyFifthsFromImportRef.current,
       divisionsByMeasure: measureDivisionsFromImportRef.current,
       timeSignaturesByMeasure: measureTimeSignaturesFromImportRef.current,
@@ -96,6 +99,7 @@ export function useOsmdPreviewLifecycle(params: {
     measureDivisionsFromImportRef,
     measureKeyFifthsFromImportRef,
     measurePairs,
+    pedalSpans,
     measureTimeSignaturesFromImportRef,
     musicXmlMetadataFromImportRef,
     openOsmdPreviewWithXml,

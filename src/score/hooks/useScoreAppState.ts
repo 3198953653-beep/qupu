@@ -23,6 +23,7 @@ import type {
   ImportFeedback,
   MeasurePair,
   MusicXmlMetadata,
+  PedalSpan,
   RhythmPresetId,
   ScoreSourceKind,
   ScoreNote,
@@ -80,6 +81,7 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
     useState<number[] | null>(null)
   const [segmentRhythmTemplateBindings, setSegmentRhythmTemplateBindings] =
     useState<Record<string, SegmentRhythmTemplateBinding>>({})
+  const [pedalSpans, setPedalSpans] = useState<PedalSpan[]>([])
   const [, setDragDebugReport] = useState<string>('')
   const [autoScaleEnabled, setAutoScaleEnabled] = useState(false)
   const [manualScalePercent, setManualScalePercent] = useState(100)
@@ -163,6 +165,8 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
     setImportedTimelineSegmentStartPairIndexesFromImport,
     segmentRhythmTemplateBindings,
     setSegmentRhythmTemplateBindings,
+    pedalSpans,
+    setPedalSpans,
     setDragDebugReport,
     autoScaleEnabled,
     setAutoScaleEnabled,

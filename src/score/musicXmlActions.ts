@@ -12,6 +12,7 @@ import type {
   ImportedNoteLocation,
   MeasurePair,
   MusicXmlMetadata,
+  PedalSpan,
   ScoreNote,
   Selection,
   TimeSignature,
@@ -191,6 +192,7 @@ export function applyImportedScoreState(params: {
   musicXmlMetadataFromImportRef: MutableRefObject<MusicXmlMetadata | null>
   setImportedChordRulerEntriesByPairFromImport: StateSetter<ChordRulerEntry[][] | null>
   setImportedTimelineSegmentStartPairIndexesFromImport: StateSetter<number[] | null>
+  setPedalSpans: StateSetter<PedalSpan[]>
   setFullMeasureRestCollapseScopeKeys: StateSetter<string[]>
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
   dragRef: MutableRefObject<DragState | null>
@@ -216,6 +218,7 @@ export function applyImportedScoreState(params: {
     musicXmlMetadataFromImportRef,
     setImportedChordRulerEntriesByPairFromImport,
     setImportedTimelineSegmentStartPairIndexesFromImport,
+    setPedalSpans,
     setFullMeasureRestCollapseScopeKeys,
     importedNoteLookupRef,
     dragRef,
@@ -240,6 +243,7 @@ export function applyImportedScoreState(params: {
   musicXmlMetadataFromImportRef.current = result.metadata
   setImportedChordRulerEntriesByPairFromImport(result.importedChordRulerEntriesByPair ?? null)
   setImportedTimelineSegmentStartPairIndexesFromImport(result.importedTimelineSegmentStartPairIndexes ?? null)
+  setPedalSpans(result.pedalSpans ?? [])
   setFullMeasureRestCollapseScopeKeys(
     collectFullMeasureRestCollapseScopeKeys({
       measurePairs: result.measurePairs,
@@ -340,14 +344,16 @@ export function importMusicXmlTextAndApply(params: {
 
 export function buildMusicXmlExportPayload(params: {
   measurePairs: MeasurePair[]
+  pedalSpans: PedalSpan[]
   keyFifthsByMeasure: number[] | null
   divisionsByMeasure: number[] | null
   timeSignaturesByMeasure: TimeSignature[] | null
   metadata: MusicXmlMetadata | null
 }): { xmlText: string; safeName: string } {
-  const { measurePairs, keyFifthsByMeasure, divisionsByMeasure, timeSignaturesByMeasure, metadata } = params
+  const { measurePairs, pedalSpans, keyFifthsByMeasure, divisionsByMeasure, timeSignaturesByMeasure, metadata } = params
   const xmlText = buildMusicXmlFromMeasurePairs({
     measurePairs,
+    pedalSpans,
     keyFifthsByMeasure,
     divisionsByMeasure,
     timeSignaturesByMeasure,

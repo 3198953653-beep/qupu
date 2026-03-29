@@ -87,6 +87,7 @@ export function useScoreWorkspaceDocumentActions(params: {
       musicXmlMetadataFromImportRef: editorRefs.musicXmlMetadataFromImportRef,
       setImportedChordRulerEntriesByPairFromImport: appState.setImportedChordRulerEntriesByPairFromImport,
       setImportedTimelineSegmentStartPairIndexesFromImport: appState.setImportedTimelineSegmentStartPairIndexesFromImport,
+      setPedalSpans: appState.setPedalSpans,
       setFullMeasureRestCollapseScopeKeys: appState.setFullMeasureRestCollapseScopeKeys,
       importedNoteLookupRef: editorRefs.importedNoteLookupRef,
       dragRef: editorRefs.dragRef,
@@ -99,6 +100,7 @@ export function useScoreWorkspaceDocumentActions(params: {
       setMusicXmlInput: appState.setMusicXmlInput,
       fileInputRef: editorRefs.fileInputRef,
       measurePairs,
+      pedalSpans: appState.pedalSpans,
       setRhythmPreset: appState.setRhythmPreset,
       pitches,
       initialTrebleNotes,
@@ -112,6 +114,7 @@ export function useScoreWorkspaceDocumentActions(params: {
       setTimelineSegmentOverlayMode: appState.setTimelineSegmentOverlayMode,
       setScoreSourceKind: appState.setScoreSourceKind,
       setSegmentRhythmTemplateBindings: appState.setSegmentRhythmTemplateBindings,
+      setPedalSpans: appState.setPedalSpans,
       setFullMeasureRestCollapseScopeKeys: appState.setFullMeasureRestCollapseScopeKeys,
       setPendingImportedScoreSourceKind: (kind) => {
         pendingImportedScoreSourceKindRef.current = kind

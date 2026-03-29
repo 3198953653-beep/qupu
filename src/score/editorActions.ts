@@ -15,6 +15,7 @@ import type {
   ImportFeedback,
   MeasurePair,
   MusicXmlMetadata,
+  PedalSpan,
   Pitch,
   RhythmPresetId,
   ScoreNote,
@@ -268,6 +269,7 @@ export function loadHalfNoteDemoAction(params: {
 
 export function exportMusicXmlFileAction(params: {
   measurePairs: MeasurePair[]
+  pedalSpans: PedalSpan[]
   keyFifthsByMeasure: number[] | null
   divisionsByMeasure: number[] | null
   timeSignaturesByMeasure: TimeSignature[] | null
@@ -276,6 +278,7 @@ export function exportMusicXmlFileAction(params: {
 }): void {
   const {
     measurePairs,
+    pedalSpans,
     keyFifthsByMeasure,
     divisionsByMeasure,
     timeSignaturesByMeasure,
@@ -284,6 +287,7 @@ export function exportMusicXmlFileAction(params: {
   } = params
   const { xmlText, safeName } = buildMusicXmlExportPayload({
     measurePairs,
+    pedalSpans,
     keyFifthsByMeasure,
     divisionsByMeasure,
     timeSignaturesByMeasure,

@@ -18,4 +18,7 @@ export type ScoreViewAdapterParams = {
   workspace: ReturnType<typeof useScoreInteractionRuntimeController>['workspace']
   editorUi: ReturnType<typeof useScoreInteractionRuntimeController>['editorUi']
   playback: ReturnType<typeof useScoreInteractionRuntimeController>['playback']
+  pedalApplyDialog: ReturnType<typeof useScoreInteractionRuntimeController>['pedalApplyDialog']
+  canOpenPedalModal: ReturnType<typeof useScoreInteractionRuntimeController>['canOpenPedalModal']
+  openPedalModal: ReturnType<typeof useScoreInteractionRuntimeController>['openPedalModal']
 }

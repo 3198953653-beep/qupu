@@ -12,6 +12,7 @@ import type {
   MeasurePair,
   MusicXmlMetadata,
   NoteLayout,
+  PedalSpan,
   Selection,
   TimeSignature,
 } from '../types'
@@ -34,6 +35,7 @@ type StateSetter<T> = Dispatch<SetStateAction<T>>
 
 export function useOsmdPreviewController(params: {
   measurePairs: MeasurePair[]
+  pedalSpans: PedalSpan[]
   measurePairsRef: MutableRefObject<MeasurePair[]>
   measureKeyFifthsFromImportRef: MutableRefObject<number[] | null>
   measureDivisionsFromImportRef: MutableRefObject<number[] | null>
@@ -97,6 +99,7 @@ export function useOsmdPreviewController(params: {
 } {
   const {
     measurePairs,
+    pedalSpans,
     measurePairsRef,
     measureKeyFifthsFromImportRef,
     measureDivisionsFromImportRef,
@@ -144,6 +147,7 @@ export function useOsmdPreviewController(params: {
   })
   const lifecycle = useOsmdPreviewLifecycle({
     measurePairs,
+    pedalSpans,
     measureKeyFifthsFromImportRef,
     measureDivisionsFromImportRef,
     measureTimeSignaturesFromImportRef,

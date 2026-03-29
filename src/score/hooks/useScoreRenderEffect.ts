@@ -13,6 +13,7 @@ import type {
   MeasureLayout,
   MeasurePair,
   NoteLayout,
+  PedalSpan,
   Selection,
   SpacingLayoutMode,
   TimeSignature,
@@ -25,6 +26,7 @@ export function useScoreRenderEffect(params: {
   scoreWidth: number
   scoreHeight: number
   measurePairs: MeasurePair[]
+  pedalSpans?: PedalSpan[]
   systemRanges: SystemMeasureRange[]
   visibleSystemRange: { start: number; end: number }
   renderOriginSystemIndex: number
@@ -72,6 +74,7 @@ export function useScoreRenderEffect(params: {
     scoreWidth,
     scoreHeight,
     measurePairs,
+    pedalSpans = [],
     systemRanges,
     visibleSystemRange,
     renderOriginSystemIndex,
@@ -170,6 +173,7 @@ export function useScoreRenderEffect(params: {
       renderVisibleSystems({
         context,
         measurePairs,
+        pedalSpans,
         scoreWidth,
         scoreHeight,
         systemRanges,
@@ -217,6 +221,7 @@ export function useScoreRenderEffect(params: {
     scoreWidth,
     scoreHeight,
     measurePairs,
+    pedalSpans,
     systemRanges,
     visibleSystemRange,
     renderOriginSystemIndex,

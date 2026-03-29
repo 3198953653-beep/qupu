@@ -12,6 +12,7 @@ import { useHorizontalScoreLayout } from './useHorizontalScoreLayout'
 import { useScoreCoreEditingController } from './useScoreCoreEditingController'
 import { useSmartChordToneDialogController } from './useSmartChordToneDialogController'
 import { useImportedSegmentRhythmTemplateController } from './useImportedSegmentRhythmTemplateController'
+import { usePedalApplyController } from './usePedalApplyController'
 import type { Pitch, ScoreNote, Selection, TimeSignature } from '../types'
 
 export function useScoreInteractionRuntimeController(params: {
@@ -77,6 +78,16 @@ export function useScoreInteractionRuntimeController(params: {
     applyKeyboardEditResult: coreEditing.mutation.applyKeyboardEditResult,
   })
 
+  const pedalApply = usePedalApplyController({
+    chordRulerEntriesByPair: layout.chordRulerEntriesByPair,
+    measureTimeSignaturesByMeasure: appState.measureTimeSignaturesFromImport,
+    chordRulerMarkerMetaByKey: coreEditing.chordMarker.chordRulerMarkerMetaByKey,
+    activeChordSelection: coreEditing.chordMarker.activeChordSelection,
+    timelineSegmentBlocks: coreEditing.chordMarker.timelineSegmentBlocks,
+    pedalSpans: appState.pedalSpans,
+    setPedalSpans: appState.setPedalSpans,
+  })
+
   const workspaceRuntimeRefs: WorkspaceRuntimeRefs = {
     beginDragRef: useRef(null),
     endDragRef: useRef(null),
@@ -130,5 +141,8 @@ export function useScoreInteractionRuntimeController(params: {
     playback: playbackBridge.playback,
     smartChordToneDialog: smartChordToneDialog.smartChordToneDialog,
     rhythmTemplateLoadModal: importedSegmentRhythmTemplate.rhythmTemplateLoadModal,
+    pedalApplyDialog: pedalApply.pedalApplyDialog,
+    canOpenPedalModal: pedalApply.canOpenPedalModal,
+    openPedalModal: pedalApply.openPedalModal,
   }
 }
