@@ -13,6 +13,7 @@ import { useScoreCoreEditingController } from './useScoreCoreEditingController'
 import { useSmartChordToneDialogController } from './useSmartChordToneDialogController'
 import { useImportedSegmentRhythmTemplateController } from './useImportedSegmentRhythmTemplateController'
 import { usePedalApplyController } from './usePedalApplyController'
+import { usePlaybackVolumeController } from './usePlaybackVolumeController'
 import type { Pitch, ScoreNote, Selection, TimeSignature } from '../types'
 
 export function useScoreInteractionRuntimeController(params: {
@@ -89,6 +90,11 @@ export function useScoreInteractionRuntimeController(params: {
     setPedalSpans: appState.setPedalSpans,
   })
 
+  const playbackVolume = usePlaybackVolumeController({
+    setPlaybackTrebleVolumePercent: appState.setPlaybackTrebleVolumePercent,
+    setPlaybackBassVolumePercent: appState.setPlaybackBassVolumePercent,
+  })
+
   const workspaceRuntimeRefs: WorkspaceRuntimeRefs = {
     beginDragRef: useRef(null),
     endDragRef: useRef(null),
@@ -145,5 +151,7 @@ export function useScoreInteractionRuntimeController(params: {
     pedalApplyDialog: pedalApply.pedalApplyDialog,
     canOpenPedalModal: pedalApply.canOpenPedalModal,
     openPedalModal: pedalApply.openPedalModal,
+    playbackVolumeDialog: playbackVolume.playbackVolumeDialog,
+    openPlaybackVolumeModal: playbackVolume.openPlaybackVolumeModal,
   }
 }

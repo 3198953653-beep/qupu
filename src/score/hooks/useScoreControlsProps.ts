@@ -4,7 +4,17 @@ import { buildSpacingConfigControlHandlers } from './buildSpacingConfigControlHa
 import type { ScoreControlsProps, ScoreViewAdapterParams } from './scoreViewAdapterTypes'
 
 export function useScoreControlsProps(params: ScoreViewAdapterParams): ScoreControlsProps {
-  const { appState, editorRefs, layout, workspace, editorUi, playback, canOpenPedalModal, openPedalModal } = params
+  const {
+    appState,
+    editorRefs,
+    layout,
+    workspace,
+    editorUi,
+    playback,
+    canOpenPedalModal,
+    openPedalModal,
+    openPlaybackVolumeModal,
+  } = params
   const spacingConfigHandlers = useMemo(
     () => buildSpacingConfigControlHandlers({ appState }),
     [
@@ -20,6 +30,7 @@ export function useScoreControlsProps(params: ScoreViewAdapterParams): ScoreCont
     isPlaying: appState.isPlaying,
     onPlayScore: workspace.playScore,
     onStopScore: playback.stopActivePlaybackSession,
+    onOpenPlaybackVolumeModal: openPlaybackVolumeModal,
     onReset: workspace.resetScoreWithCollapseReset,
     playheadFollowEnabled: appState.playheadFollowEnabled,
     onTogglePlayheadFollow: () => appState.setPlayheadFollowEnabled((enabled) => !enabled),
@@ -135,6 +146,7 @@ export function useScoreControlsProps(params: ScoreViewAdapterParams): ScoreCont
     layout.safeManualScalePercent,
     playback.stopActivePlaybackSession,
     spacingConfigHandlers,
+    openPlaybackVolumeModal,
     workspace.applyRhythmPresetWithCollapseReset,
     workspace.exportMusicXmlFile,
     workspace.importMusicXmlFromTextareaWithCollapseReset,

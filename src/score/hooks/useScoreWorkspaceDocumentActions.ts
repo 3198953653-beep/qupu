@@ -35,8 +35,8 @@ export function useScoreWorkspaceDocumentActions(params: {
     requestPlaybackCursorReset,
     stopActivePlaybackSession,
     initialTrebleNotes,
-  initialBassNotes,
-  pitches,
+    initialBassNotes,
+    pitches,
   } = params
   const pendingImportedScoreSourceKindRef =
     useRef<Extract<ScoreSourceKind, 'musicxml-file' | 'musicxml-text' | 'sample-musicxml'> | null>(null)
@@ -63,6 +63,8 @@ export function useScoreWorkspaceDocumentActions(params: {
       synthRef: editorRefs.synthRef,
       notes: appState.notes,
       playbackTimelineEvents,
+      playbackTrebleVolumePercent: appState.playbackTrebleVolumePercent,
+      playbackBassVolumePercent: appState.playbackBassVolumePercent,
       stopPlayTimerRef: editorRefs.stopPlayTimerRef,
       playbackPointTimerIdsRef: editorRefs.playbackPointTimerIdsRef,
       playbackSessionIdRef: editorRefs.playbackSessionIdRef,

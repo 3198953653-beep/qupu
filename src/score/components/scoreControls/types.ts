@@ -6,6 +6,7 @@ export type ScoreControlsProps = {
   isPlaying: boolean
   onPlayScore: () => void
   onStopScore: () => void
+  onOpenPlaybackVolumeModal: () => void
   onReset: () => void
   playheadFollowEnabled: boolean
   onTogglePlayheadFollow: () => void

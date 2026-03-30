@@ -9,6 +9,7 @@ export function ScoreControls(props: ScoreControlsProps) {
     isPlaying,
     onPlayScore,
     onStopScore,
+    onOpenPlaybackVolumeModal,
     onReset,
     playheadFollowEnabled,
     onTogglePlayheadFollow,
@@ -93,6 +94,7 @@ export function ScoreControls(props: ScoreControlsProps) {
       isPlaying={isPlaying}
       onPlayScore={onPlayScore}
       onStopScore={onStopScore}
+      onOpenPlaybackVolumeModal={onOpenPlaybackVolumeModal}
       onReset={onReset}
       playheadFollowEnabled={playheadFollowEnabled}
       onTogglePlayheadFollow={onTogglePlayheadFollow}

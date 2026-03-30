@@ -7,6 +7,7 @@ type ScorePlaybackControlsProps = PropsWithChildren<Pick<
   | 'isPlaying'
   | 'onPlayScore'
   | 'onStopScore'
+  | 'onOpenPlaybackVolumeModal'
   | 'onReset'
   | 'playheadFollowEnabled'
   | 'onTogglePlayheadFollow'
@@ -33,6 +34,7 @@ export function ScorePlaybackControls(props: ScorePlaybackControlsProps) {
     isPlaying,
     onPlayScore,
     onStopScore,
+    onOpenPlaybackVolumeModal,
     onReset,
     playheadFollowEnabled,
     onTogglePlayheadFollow,
@@ -62,6 +64,7 @@ export function ScorePlaybackControls(props: ScorePlaybackControlsProps) {
           {isPlaying ? '播放中...' : '播放小节'}
         </button>
         <button type="button" onClick={onStopScore} disabled={!isPlaying}>停止</button>
+        <button type="button" onClick={onOpenPlaybackVolumeModal}>音量调节</button>
         <button type="button" onClick={onReset}>重置</button>
         <button type="button" onClick={onTogglePlayheadFollow}>
           {playheadFollowEnabled ? '播放线跟踪：开' : '播放线跟踪：关'}

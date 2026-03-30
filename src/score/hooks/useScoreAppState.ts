@@ -4,6 +4,8 @@ import { DEFAULT_TIME_AXIS_SPACING_CONFIG } from '../layout/timeAxisSpacing'
 import {
   getInitialChordDegreeDisplayEnabled,
   getInitialChordMarkerBackgroundEnabled,
+  getInitialPlaybackBassVolumePercent,
+  getInitialPlaybackTrebleVolumePercent,
   getInitialPlayheadFollowEnabled,
   getInitialStaffInterGapPx,
 } from './useEditorPreferencePersistence'
@@ -91,6 +93,10 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
   const [showChordMarkerBackgroundEnabled, setShowChordMarkerBackgroundEnabled] =
     useState(() => getInitialChordMarkerBackgroundEnabled())
   const [staffInterGapPx, setStaffInterGapPx] = useState(() => getInitialStaffInterGapPx())
+  const [playbackTrebleVolumePercent, setPlaybackTrebleVolumePercent] =
+    useState(() => getInitialPlaybackTrebleVolumePercent())
+  const [playbackBassVolumePercent, setPlaybackBassVolumePercent] =
+    useState(() => getInitialPlaybackBassVolumePercent())
   const [showInScoreMeasureNumbers, setShowInScoreMeasureNumbers] = useState(false)
   const [showNoteHeadJianpuEnabled, setShowNoteHeadJianpuEnabled] = useState(false)
   const [pageHorizontalPaddingPx, setPageHorizontalPaddingPx] = useState(DEFAULT_PAGE_HORIZONTAL_PADDING_PX)
@@ -182,6 +188,10 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
     setShowChordMarkerBackgroundEnabled,
     staffInterGapPx,
     setStaffInterGapPx,
+    playbackTrebleVolumePercent,
+    setPlaybackTrebleVolumePercent,
+    playbackBassVolumePercent,
+    setPlaybackBassVolumePercent,
     showInScoreMeasureNumbers,
     setShowInScoreMeasureNumbers,
     showNoteHeadJianpuEnabled,

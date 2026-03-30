@@ -59,6 +59,8 @@ export function useScoreRuntimeDebugController(params: {
   selectedMeasureHighlightRectPx: { x: number; y: number; width: number; height: number } | null
   chordRulerMarkerMetaByKey: Map<string, ChordRulerMarkerMeta>
   playbackTimelineEvents: PlaybackTimelineEvent[]
+  playbackTrebleVolumePercent: number
+  playbackBassVolumePercent: number
   safeCurrentPage: number
   pageCount: number
   systemsPerPage: number
@@ -118,6 +120,8 @@ export function useScoreRuntimeDebugController(params: {
     selectedMeasureHighlightRectPx,
     chordRulerMarkerMetaByKey,
     playbackTimelineEvents,
+    playbackTrebleVolumePercent,
+    playbackBassVolumePercent,
     safeCurrentPage,
     pageCount,
     systemsPerPage,
@@ -203,6 +207,8 @@ export function useScoreRuntimeDebugController(params: {
     selectedMeasureHighlightRectPx,
     chordRulerMarkerMetaByKey,
     playbackTimelineEvents,
+    playbackTrebleVolumePercent,
+    playbackBassVolumePercent,
     dragRef,
     scoreOverlayRef,
     scoreRef,
@@ -246,6 +252,8 @@ export function useScoreRuntimeDebugController(params: {
     playbackCursorState,
     playbackSessionId,
     playbackTimelineEvents,
+    playbackTrebleVolumePercent,
+    playbackBassVolumePercent,
     playScore,
     playheadDebugLogRowsRef,
     playheadDebugSequenceRef,

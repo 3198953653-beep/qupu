@@ -68,6 +68,8 @@ export function buildScoreRuntimeDebugApi(params: {
   selectedMeasureHighlightRectPx: { x: number; y: number; width: number; height: number } | null
   chordRulerMarkerMetaByKey: Map<string, ChordRulerMarkerMeta>
   playbackTimelineEvents: PlaybackTimelineEvent[]
+  playbackTrebleVolumePercent: number
+  playbackBassVolumePercent: number
   dragRef: MutableRefObject<DragState | null>
   scoreOverlayRef: MutableRefObject<HTMLCanvasElement | null>
   scoreRef: MutableRefObject<HTMLCanvasElement | null>
@@ -130,6 +132,8 @@ export function buildScoreRuntimeDebugApi(params: {
       latestPlayheadDebugSnapshotRef: params.latestPlayheadDebugSnapshotRef,
       playheadDebugSequenceRef: params.playheadDebugSequenceRef,
       playbackTimelineEvents: params.playbackTimelineEvents,
+      playbackTrebleVolumePercent: params.playbackTrebleVolumePercent,
+      playbackBassVolumePercent: params.playbackBassVolumePercent,
     }),
     ...buildRuntimeDebugSelectionApi({
       applyChordSelectionRange: params.applyChordSelectionRange,

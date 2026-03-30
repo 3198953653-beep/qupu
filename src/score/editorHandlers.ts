@@ -36,6 +36,8 @@ export function useEditorHandlers(params: {
   synthRef: MutableRefObject<import('tone').PolySynth | import('tone').Sampler | null>
   notes: ScoreNote[]
   playbackTimelineEvents: PlaybackTimelineEvent[]
+  playbackTrebleVolumePercent: number
+  playbackBassVolumePercent: number
   stopPlayTimerRef: MutableRefObject<number | null>
   playbackPointTimerIdsRef: MutableRefObject<number[]>
   playbackSessionIdRef: MutableRefObject<number>
@@ -101,6 +103,8 @@ export function useEditorHandlers(params: {
     synthRef,
     notes,
     playbackTimelineEvents,
+    playbackTrebleVolumePercent,
+    playbackBassVolumePercent,
     stopPlayTimerRef,
     playbackPointTimerIdsRef,
     playbackSessionIdRef,
@@ -150,6 +154,8 @@ export function useEditorHandlers(params: {
     await playScoreAction({
       synthRef,
       playbackTimelineEvents,
+      playbackTrebleVolumePercent,
+      playbackBassVolumePercent,
       stopPlayTimerRef,
       playbackPointTimerIdsRef,
       playbackSessionIdRef,

@@ -10,6 +10,7 @@ import { buildMusicXmlExportPayload } from './musicXmlActions'
 import { ensureToneStarted, type PlaybackSynth } from './notePreview'
 import type { PlaybackTimelineEvent } from './playbackTimeline'
 import { toTonePitch } from './pitchUtils'
+import { resolvePlaybackVelocityForStaff } from './playbackVolume'
 import { buildBassMockNotes, buildHalfNoteDemoNotes, buildNotesFromPattern, buildWholeNoteDemoNotes } from './scoreOps'
 import type {
   ImportFeedback,
@@ -25,10 +26,6 @@ import type {
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>
 const MUSIC_XML_TEXTAREA_MAX_CHARS = 2000
-const PLAYBACK_VELOCITY_BY_STAFF = {
-  treble: 0.92,
-  bass: 0.72,
-} as const
 
 function clearPlaybackTimeouts(params: {
   stopPlayTimerRef: MutableRefObject<number | null>
@@ -55,6 +52,8 @@ function formatMusicXmlTextareaPreview(xmlText: string): string {
 export async function playScoreAction(params: {
   synthRef: MutableRefObject<PlaybackSynth | null>
   playbackTimelineEvents: PlaybackTimelineEvent[]
+  playbackTrebleVolumePercent: number
+  playbackBassVolumePercent: number
   stopPlayTimerRef: MutableRefObject<number | null>
   playbackPointTimerIdsRef: MutableRefObject<number[]>
   playbackSessionIdRef: MutableRefObject<number>
@@ -66,6 +65,8 @@ export async function playScoreAction(params: {
   const {
     synthRef,
     playbackTimelineEvents,
+    playbackTrebleVolumePercent,
+    playbackBassVolumePercent,
     stopPlayTimerRef,
     playbackPointTimerIdsRef,
     playbackSessionIdRef,
@@ -97,11 +98,17 @@ export async function playScoreAction(params: {
     const synth = synthRef.current
     if (!synth) return
     event.targets.forEach((target) => {
+      const { resolvedVelocity } = resolvePlaybackVelocityForStaff({
+        staff: target.staff,
+        volumePercent: target.staff === 'treble'
+          ? playbackTrebleVolumePercent
+          : playbackBassVolumePercent,
+      })
       synth.triggerAttackRelease(
         toTonePitch(target.pitch),
         target.durationSeconds,
         undefined,
-        PLAYBACK_VELOCITY_BY_STAFF[target.staff],
+        resolvedVelocity,
       )
     })
     onPlaybackPoint?.({

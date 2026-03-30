@@ -1,6 +1,7 @@
 import type { MutableRefObject } from 'react'
 import type { PlaybackTimelineEvent } from '../playbackTimeline'
 import type { PlaybackCursorState } from '../types'
+import { resolvePlaybackVelocityForStaff } from '../playbackVolume'
 import type { PlaybackCursorDebugEvent, PlayheadDebugLogRow } from './usePlaybackController'
 import type { NotePreviewDebugEvent } from './useScoreAudioPreviewController'
 
@@ -15,6 +16,8 @@ export function buildRuntimeDebugPlaybackApi(params: {
   latestPlayheadDebugSnapshotRef: MutableRefObject<PlayheadDebugLogRow | null>
   playheadDebugSequenceRef: MutableRefObject<number>
   playbackTimelineEvents: PlaybackTimelineEvent[]
+  playbackTrebleVolumePercent: number
+  playbackBassVolumePercent: number
 }) {
   const {
     notePreviewEventsRef,
@@ -27,6 +30,8 @@ export function buildRuntimeDebugPlaybackApi(params: {
     latestPlayheadDebugSnapshotRef,
     playheadDebugSequenceRef,
     playbackTimelineEvents,
+    playbackTrebleVolumePercent,
+    playbackBassVolumePercent,
   } = params
 
   return {
@@ -65,9 +70,19 @@ export function buildRuntimeDebugPlaybackApi(params: {
         latestReleaseAbsoluteTick: event.latestReleaseAbsoluteTick,
         latestReleaseAtSeconds: event.latestReleaseAtSeconds,
       })),
+    getPlaybackVolumeConfig: () => ({
+      trebleVolumePercent: playbackTrebleVolumePercent,
+      bassVolumePercent: playbackBassVolumePercent,
+    }),
     getPlaybackTimelineTargets: () =>
       playbackTimelineEvents.flatMap((event) =>
         event.targets.map((target) => ({
+          ...resolvePlaybackVelocityForStaff({
+            staff: target.staff,
+            volumePercent: target.staff === 'treble'
+              ? playbackTrebleVolumePercent
+              : playbackBassVolumePercent,
+          }),
           pairIndex: event.pairIndex,
           onsetTick: event.onsetTick,
           absoluteTick: event.absoluteTick,

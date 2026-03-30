@@ -55,6 +55,8 @@ export function useScoreEditorUiRuntime(params: {
       showChordDegreeEnabled: appState.showChordDegreeEnabled,
       showChordMarkerBackgroundEnabled: appState.showChordMarkerBackgroundEnabled,
       staffInterGapPx: appState.staffInterGapPx,
+      playbackTrebleVolumePercent: appState.playbackTrebleVolumePercent,
+      playbackBassVolumePercent: appState.playbackBassVolumePercent,
       showInScoreMeasureNumbers: appState.showInScoreMeasureNumbers,
       setShowInScoreMeasureNumbers: appState.setShowInScoreMeasureNumbers,
       showNoteHeadJianpuEnabled: appState.showNoteHeadJianpuEnabled,

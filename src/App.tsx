@@ -24,6 +24,8 @@ import { OsmdPreviewModal } from './score/components/OsmdPreviewModal'
 import { RhythmTemplateLoadModal } from './score/components/RhythmTemplateLoadModal'
 import { SmartChordToneModal } from './score/components/SmartChordToneModal'
 import { PedalApplyModal } from './score/components/PedalApplyModal'
+import { PlaybackVolumeModal } from './score/components/PlaybackVolumeModal'
+import { clampPlaybackVolumePercent } from './score/playbackVolume'
 import type { Pitch, ScoreNote } from './score/types'
 import { Renderer } from 'vexflow'
 
@@ -100,6 +102,8 @@ function App() {
     pedalApplyDialog,
     canOpenPedalModal,
     openPedalModal,
+    playbackVolumeDialog,
+    openPlaybackVolumeModal,
   } = runtime
 
   const { scoreControlsProps, scoreBoardProps } = useScoreViewProps({
@@ -113,6 +117,8 @@ function App() {
     pedalApplyDialog,
     canOpenPedalModal,
     openPedalModal,
+    playbackVolumeDialog,
+    openPlaybackVolumeModal,
   })
 
   return (
@@ -214,6 +220,20 @@ function App() {
         onSelectScope={pedalApplyDialog.setSelectedScope}
         onSelectLayoutMode={pedalApplyDialog.setSelectedLayoutMode}
         onApplyStyle={pedalApplyDialog.applyStyle}
+      />
+
+      <PlaybackVolumeModal
+        isOpen={playbackVolumeDialog.isOpen}
+        trebleVolumePercent={appState.playbackTrebleVolumePercent}
+        bassVolumePercent={appState.playbackBassVolumePercent}
+        onTrebleVolumePercentChange={(nextValue) => {
+          appState.setPlaybackTrebleVolumePercent(clampPlaybackVolumePercent(nextValue))
+        }}
+        onBassVolumePercentChange={(nextValue) => {
+          appState.setPlaybackBassVolumePercent(clampPlaybackVolumePercent(nextValue))
+        }}
+        onReset={playbackVolumeDialog.resetVolumes}
+        onClose={playbackVolumeDialog.closeModal}
       />
     </main>
   )

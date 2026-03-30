@@ -15,6 +15,7 @@
     "test:notehead:jianpu:browser": "tsx scripts/notehead-jianpu-browser-test.ts",
     "test:preview:browser": "tsx scripts/note-preview-browser-test.ts",
     "test:playhead:browser": "tsx scripts/playhead-browser-test.ts",
+    "test:playback-volume:browser": "tsx scripts/playback-volume-browser-test.ts",
     "test:chord-marker:browser": "tsx scripts/chord-marker-browser-test.ts",
     "test:quarter-pulse:spacing:browser": "tsx scripts/quarter-pulse-spacing-browser-test.ts",
     "test:note-rest-flag:spacing:browser": "tsx scripts/note-rest-flag-spacing-browser-test.ts",

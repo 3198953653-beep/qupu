@@ -84,6 +84,8 @@ export function useScorePlaybackRuntimeBridge(params: {
         selectedMeasureHighlightRectPx: coreEditing.chordMarker.selectedMeasureHighlightRectPx,
         chordRulerMarkerMetaByKey: coreEditing.chordMarker.chordRulerMarkerMetaByKey,
         playbackTimelineEvents: layout.playbackTimelineEvents,
+        playbackTrebleVolumePercent: appState.playbackTrebleVolumePercent,
+        playbackBassVolumePercent: appState.playbackBassVolumePercent,
         safeCurrentPage: layout.safeCurrentPage,
         pageCount: layout.pageCount,
         systemsPerPage: layout.systemsPerPage,
