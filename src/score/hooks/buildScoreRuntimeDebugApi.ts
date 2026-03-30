@@ -3,6 +3,7 @@ import type { ChordRulerEntry } from '../chordRuler'
 import type { PlaybackTimelineEvent } from '../playbackTimeline'
 import type { MeasureTimelineBundle } from '../timeline/types'
 import type {
+  ActivePedalSelection,
   DragDebugSnapshot,
   DragState,
   MeasureLayout,
@@ -64,6 +65,7 @@ export function buildScoreRuntimeDebugApi(params: {
   measurePairsRef: MutableRefObject<MeasurePair[]>
   chordRulerEntriesByPair: ChordRulerEntry[][] | null
   pedalSpans: PedalSpan[]
+  activePedalSelection: ActivePedalSelection | null
   activeChordSelection: ActiveChordSelection | null
   selectedMeasureHighlightRectPx: { x: number; y: number; width: number; height: number } | null
   chordRulerMarkerMetaByKey: Map<string, ChordRulerMarkerMeta>
@@ -112,6 +114,7 @@ export function buildScoreRuntimeDebugApi(params: {
       measurePairsRef: params.measurePairsRef,
       chordRulerEntriesByPair: params.chordRulerEntriesByPair,
       pedalSpans: params.pedalSpans,
+      activePedalSelection: params.activePedalSelection,
       scoreOverlayRef: params.scoreOverlayRef,
       scoreRef: params.scoreRef,
       overlayLastRectRef: params.overlayLastRectRef,
@@ -143,6 +146,7 @@ export function buildScoreRuntimeDebugApi(params: {
       selectedMeasureHighlightRectPx: params.selectedMeasureHighlightRectPx,
       chordRulerMarkerMetaByKey: params.chordRulerMarkerMetaByKey,
       activeSelection: params.activeSelection,
+      activePedalSelection: params.activePedalSelection,
       osmdPreviewSelectedSelectionKeyRef: params.osmdPreviewSelectedSelectionKeyRef,
       osmdPreviewNoteLookupBySelectionRef: params.osmdPreviewNoteLookupBySelectionRef,
     }),

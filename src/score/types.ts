@@ -19,6 +19,9 @@ export type StaffKind = 'treble' | 'bass'
 export type PedalStyle = 'text' | 'bracket' | 'mixed'
 export type PedalApplyScope = 'all' | 'segment' | 'chord'
 export type PedalLayoutMode = 'flexible' | 'uniform'
+export type ActivePedalSelection = {
+  pedalId: string
+}
 export type BeamTag = 'begin' | 'continue' | 'end'
 export type BeamLevelTag = 'begin' | 'continue' | 'end' | 'forward hook' | 'backward hook'
 export type BeamTagByLevel = Record<number, BeamLevelTag>

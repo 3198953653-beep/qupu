@@ -38,6 +38,7 @@ import {
 } from '../layout/startDecorationReserve'
 import type { MeasureTimelineBundle } from '../timeline/types'
 import type {
+  ActivePedalSelection,
   DragState,
   LayoutReflowHint,
   MeasureFrame,
@@ -314,6 +315,7 @@ export function renderVisibleSystems(params: {
   supplementalSpacingTicksByPair?: number[][] | null
   activeSelection: Selection | null
   activeAccidentalSelection?: Selection | null
+  activePedalSelection?: ActivePedalSelection | null
   activeTieSegmentKey?: string | null
   draggingSelection: Selection | null
   activeSelections?: Selection[] | null
@@ -358,6 +360,7 @@ export function renderVisibleSystems(params: {
     supplementalSpacingTicksByPair = null,
     activeSelection,
     activeAccidentalSelection = null,
+    activePedalSelection = null,
     activeTieSegmentKey = null,
     draggingSelection,
     activeSelections = null,
@@ -1584,6 +1587,7 @@ export function renderVisibleSystems(params: {
     context2D,
     measurePairs,
     pedalSpans,
+    activePedalSelection,
     chordRulerEntriesByPair,
     measureLayouts: nextMeasureLayouts,
     measureTimelineBundles: nextTimelineBundlesByPair,

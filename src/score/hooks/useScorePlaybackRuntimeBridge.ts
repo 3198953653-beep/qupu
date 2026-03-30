@@ -71,6 +71,7 @@ export function useScorePlaybackRuntimeBridge(params: {
         measurePairsRef: editorRefs.measurePairsRef,
         chordRulerEntriesByPair: layout.chordRulerEntriesByPair,
         pedalSpans: appState.pedalSpans,
+        activePedalSelection: appState.activePedalSelection,
         dragDebugFramesRef: editorRefs.dragDebugFramesRef,
         dragRef: editorRefs.dragRef,
         scoreOverlayRef: editorRefs.scoreOverlayRef,

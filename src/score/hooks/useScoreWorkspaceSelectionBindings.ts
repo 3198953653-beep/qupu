@@ -5,7 +5,7 @@ import { resolvePairTimeSignature } from '../measureRestUtils'
 import { useScoreAppState } from './useScoreAppState'
 import { useScoreEditorRefs } from './useScoreEditorRefs'
 import { useScoreEditingSessionHelpers } from './useScoreEditingSessionHelpers'
-import type { MeasurePair, Selection, TieSelection, TimeSignature } from '../types'
+import type { ActivePedalSelection, MeasurePair, Selection, TieSelection, TimeSignature } from '../types'
 
 function isSameSelection(left: Selection, right: Selection): boolean {
   return left.noteId === right.noteId && left.staff === right.staff && left.keyIndex === right.keyIndex
@@ -68,6 +68,7 @@ export function useScoreWorkspaceSelectionBindings(params: {
     sessionHelpers.resetMidiStepChain()
     appState.setActiveAccidentalSelection(null)
     appState.setActiveTieSelection(null)
+    appState.setActivePedalSelection(null)
     appState.setSelectedMeasureScope(null)
     clearActiveChordSelection()
     const nextTargetSelections = nextSelections
@@ -86,6 +87,7 @@ export function useScoreWorkspaceSelectionBindings(params: {
     sessionHelpers.resetMidiStepChain()
     appState.setActiveAccidentalSelection(null)
     appState.setActiveTieSelection(null)
+    appState.setActivePedalSelection(null)
     appState.setSelectedMeasureScope(null)
     clearActiveChordSelection()
     appState.setSelectedSelections([selection])
@@ -128,6 +130,7 @@ export function useScoreWorkspaceSelectionBindings(params: {
     sessionHelpers.resetMidiStepChain()
     appState.setActiveAccidentalSelection(selection)
     appState.setActiveTieSelection(null)
+    appState.setActivePedalSelection(null)
     appState.setSelectedMeasureScope(null)
     clearActiveChordSelection()
     appState.setDraggingSelection(null)
@@ -140,6 +143,7 @@ export function useScoreWorkspaceSelectionBindings(params: {
     sessionHelpers.resetMidiStepChain()
     appState.setActiveTieSelection(selection)
     appState.setActiveAccidentalSelection(null)
+    appState.setActivePedalSelection(null)
     appState.setSelectedMeasureScope(null)
     clearActiveChordSelection()
     appState.setDraggingSelection(null)
@@ -172,6 +176,7 @@ export function useScoreWorkspaceSelectionBindings(params: {
     sessionHelpers.resetMidiStepChain()
     appState.setActiveAccidentalSelection(null)
     appState.setActiveTieSelection(null)
+    appState.setActivePedalSelection(null)
     clearActiveChordSelection()
     if (pairIndex === null || staff === null) {
       appState.setIsSelectionVisible(false)
@@ -222,15 +227,30 @@ export function useScoreWorkspaceSelectionBindings(params: {
     sessionHelpers.resetMidiStepChain()
     appState.setActiveAccidentalSelection(null)
     appState.setActiveTieSelection(null)
+    appState.setActivePedalSelection(null)
     clearActiveChordSelection()
     appState.setIsSelectionVisible(true)
   }, [appState, clearActiveChordSelection, sessionHelpers])
+
+  const onPedalPointerDown = useCallback((selection: ActivePedalSelection) => {
+    sessionHelpers.resetMidiStepChain()
+    appState.setActivePedalSelection(selection)
+    appState.setActiveAccidentalSelection(null)
+    appState.setActiveTieSelection(null)
+    appState.setSelectedMeasureScope(null)
+    clearActiveChordSelection()
+    appState.setDraggingSelection(null)
+    appState.setSelectedSelections([])
+    appState.setIsSelectionVisible(false)
+    clearTrebleTapCandidate()
+  }, [appState, clearActiveChordSelection, clearTrebleTapCandidate, sessionHelpers])
 
   return {
     onSelectionPointerDown,
     onSelectionTapRelease,
     onAccidentalPointerDown,
     onTiePointerDown,
+    onPedalPointerDown,
     onBeforeApplyScoreChange,
     onAfterApplyScoreChange,
     onBlankPointerDown,

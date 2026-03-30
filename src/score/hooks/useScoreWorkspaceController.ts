@@ -37,6 +37,7 @@ export function useScoreWorkspaceController(params: {
   }
   onAfterScoreRender: () => void
   clearActiveChordSelection: () => void
+  clearActivePedalSelection: () => void
   onTrebleSelectionDoubleTap?: (selection: Selection) => void
   onTimelineSegmentDoubleClick?: (scopeKey: string) => void
   pushUndoSnapshot: (sourcePairs: import('../types').MeasurePair[]) => void
@@ -67,6 +68,7 @@ export function useScoreWorkspaceController(params: {
     layout,
     onAfterScoreRender,
     clearActiveChordSelection,
+    clearActivePedalSelection,
     onTrebleSelectionDoubleTap,
     onTimelineSegmentDoubleClick,
     pushUndoSnapshot,
@@ -116,6 +118,7 @@ export function useScoreWorkspaceController(params: {
     playbackTimelineEvents,
     clearDragOverlay,
     clearActiveChordSelection,
+    clearActivePedalSelection,
     handlePlaybackStart,
     handlePlaybackPoint,
     handlePlaybackComplete,

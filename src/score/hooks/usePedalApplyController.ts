@@ -73,6 +73,7 @@ export function usePedalApplyController(params: {
   timelineSegmentBlocks: TimelineSegmentBlock[]
   pedalSpans: PedalSpan[]
   setPedalSpans: (value: PedalSpan[] | ((current: PedalSpan[]) => PedalSpan[])) => void
+  clearActivePedalSelection: () => void
 }) {
   const {
     measurePairs,
@@ -83,6 +84,7 @@ export function usePedalApplyController(params: {
     timelineSegmentBlocks,
     pedalSpans,
     setPedalSpans,
+    clearActivePedalSelection,
   } = params
 
   const [isOpen, setIsOpen] = useState(false)
@@ -225,9 +227,11 @@ export function usePedalApplyController(params: {
         ...nextSpans,
       ]),
     )
+    clearActivePedalSelection()
     setIsOpen(false)
   }, [
     chordRulerEntriesByPair,
+    clearActivePedalSelection,
     measurePairs,
     measureTimeSignaturesByMeasure,
     pedalSpans,

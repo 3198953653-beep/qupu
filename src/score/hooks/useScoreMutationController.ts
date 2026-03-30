@@ -1,10 +1,12 @@
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 import type { MeasureStaffScope } from '../fullMeasureRestCollapse'
 import type {
+  ActivePedalSelection,
   DragState,
   ImportedNoteLocation,
   MeasurePair,
   MusicXmlMetadata,
+  PedalSpan,
   ScoreNote,
   Selection,
   TimeSignature,
@@ -26,6 +28,8 @@ export function useScoreMutationController(params: {
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
   selectedSelectionsRef: MutableRefObject<Selection[]>
   activeSelectionRef: MutableRefObject<Selection>
+  activePedalSelectionRef: MutableRefObject<ActivePedalSelection | null>
+  pedalSpansRef: MutableRefObject<PedalSpan[]>
   isSelectionVisibleRef: MutableRefObject<boolean>
   fullMeasureRestCollapseScopeKeysRef: MutableRefObject<string[]>
   midiStepChainRef: MutableRefObject<boolean>
@@ -39,8 +43,10 @@ export function useScoreMutationController(params: {
   resetMidiStepChain: () => void
   clearActiveAccidentalSelection: () => void
   clearActiveTieSelection: () => void
+  clearActivePedalSelection: () => void
   clearSelectedMeasureScope: () => void
   clearActiveChordSelection: () => void
+  setPedalSpans: Dispatch<SetStateAction<PedalSpan[]>>
   setMeasurePairsFromImport: Dispatch<SetStateAction<MeasurePair[] | null>>
   clearImportedChordRulerEntries: () => void
   setNotes: Dispatch<SetStateAction<ScoreNote[]>>
@@ -49,6 +55,7 @@ export function useScoreMutationController(params: {
   setFullMeasureRestCollapseScopeKeys: Dispatch<SetStateAction<string[]>>
   setActiveSelection: Dispatch<SetStateAction<Selection>>
   setSelectedSelections: Dispatch<SetStateAction<Selection[]>>
+  setActivePedalSelection: Dispatch<SetStateAction<ActivePedalSelection | null>>
   setIsRhythmLinked: Dispatch<SetStateAction<boolean>>
   setMeasureKeyFifthsFromImport: Dispatch<SetStateAction<number[] | null>>
   setMeasureDivisionsFromImport: Dispatch<SetStateAction<number[] | null>>
@@ -78,6 +85,8 @@ export function useScoreMutationController(params: {
     importedNoteLookupRef,
     selectedSelectionsRef,
     activeSelectionRef,
+    activePedalSelectionRef,
+    pedalSpansRef,
     isSelectionVisibleRef,
     fullMeasureRestCollapseScopeKeysRef,
     midiStepChainRef,
@@ -91,8 +100,10 @@ export function useScoreMutationController(params: {
     resetMidiStepChain,
     clearActiveAccidentalSelection,
     clearActiveTieSelection,
+    clearActivePedalSelection,
     clearSelectedMeasureScope,
     clearActiveChordSelection,
+    setPedalSpans,
     setMeasurePairsFromImport,
     clearImportedChordRulerEntries,
     setNotes,
@@ -101,6 +112,7 @@ export function useScoreMutationController(params: {
     setFullMeasureRestCollapseScopeKeys,
     setActiveSelection,
     setSelectedSelections,
+    setActivePedalSelection,
     setIsRhythmLinked,
     setMeasureKeyFifthsFromImport,
     setMeasureDivisionsFromImport,
@@ -115,6 +127,8 @@ export function useScoreMutationController(params: {
     musicXmlMetadataFromImport,
     importedNoteLookupRef,
     activeSelectionRef,
+    activePedalSelectionRef,
+    pedalSpansRef,
     isSelectionVisibleRef,
     fullMeasureRestCollapseScopeKeysRef,
     dragRef,
@@ -124,8 +138,10 @@ export function useScoreMutationController(params: {
     resetMidiStepChain,
     clearActiveAccidentalSelection,
     clearActiveTieSelection,
+    clearActivePedalSelection,
     clearSelectedMeasureScope,
     clearActiveChordSelection,
+    setPedalSpans,
     setMeasurePairsFromImport,
     clearImportedChordRulerEntries,
     setNotes,
@@ -133,6 +149,7 @@ export function useScoreMutationController(params: {
     setIsSelectionVisible,
     setFullMeasureRestCollapseScopeKeys,
     setActiveSelection,
+    setActivePedalSelection,
     setSelectedSelections,
   })
 

@@ -43,6 +43,8 @@ function App() {
   const editorRefs = useScoreEditorRefs({
     importFeedback: appState.importFeedback,
     activeSelection: appState.activeSelection,
+    activePedalSelection: appState.activePedalSelection,
+    pedalSpans: appState.pedalSpans,
     selectedSelections: appState.selectedSelections,
     fullMeasureRestCollapseScopeKeys: appState.fullMeasureRestCollapseScopeKeys,
     isSelectionVisible: appState.isSelectionVisible,

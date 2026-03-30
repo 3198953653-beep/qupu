@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 import { buildImportedNoteLookup, flattenBassFromPairs, flattenTrebleFromPairs } from '../scoreOps'
 import type {
+  ActivePedalSelection,
   DragState,
   ImportedNoteLocation,
   MeasurePair,
   MusicXmlMetadata,
+  PedalSpan,
   Selection,
   TimeSignature,
 } from '../types'
-import { cloneMeasurePairs, type UndoSnapshot } from './scoreMutationShared'
+import { cloneMeasurePairs, clonePedalSpans, type UndoSnapshot } from './scoreMutationShared'
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>
 
@@ -20,6 +22,8 @@ export function useScoreUndoHistory(params: {
   musicXmlMetadataFromImport: MusicXmlMetadata | null
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
   activeSelectionRef: MutableRefObject<Selection>
+  activePedalSelectionRef: MutableRefObject<ActivePedalSelection | null>
+  pedalSpansRef: MutableRefObject<PedalSpan[]>
   isSelectionVisibleRef: MutableRefObject<boolean>
   fullMeasureRestCollapseScopeKeysRef: MutableRefObject<string[]>
   dragRef: MutableRefObject<DragState | null>
@@ -29,8 +33,10 @@ export function useScoreUndoHistory(params: {
   resetMidiStepChain: () => void
   clearActiveAccidentalSelection: () => void
   clearActiveTieSelection: () => void
+  clearActivePedalSelection: () => void
   clearSelectedMeasureScope: () => void
   clearActiveChordSelection: () => void
+  setPedalSpans: StateSetter<PedalSpan[]>
   setMeasurePairsFromImport: StateSetter<MeasurePair[] | null>
   clearImportedChordRulerEntries: () => void
   setNotes: StateSetter<import('../types').ScoreNote[]>
@@ -38,6 +44,7 @@ export function useScoreUndoHistory(params: {
   setIsSelectionVisible: StateSetter<boolean>
   setFullMeasureRestCollapseScopeKeys: StateSetter<string[]>
   setActiveSelection: StateSetter<Selection>
+  setActivePedalSelection: StateSetter<ActivePedalSelection | null>
   setSelectedSelections: StateSetter<Selection[]>
 }) {
   const {
@@ -48,6 +55,8 @@ export function useScoreUndoHistory(params: {
     musicXmlMetadataFromImport,
     importedNoteLookupRef,
     activeSelectionRef,
+    activePedalSelectionRef,
+    pedalSpansRef,
     isSelectionVisibleRef,
     fullMeasureRestCollapseScopeKeysRef,
     dragRef,
@@ -57,8 +66,10 @@ export function useScoreUndoHistory(params: {
     resetMidiStepChain,
     clearActiveAccidentalSelection,
     clearActiveTieSelection,
+    clearActivePedalSelection,
     clearSelectedMeasureScope,
     clearActiveChordSelection,
+    setPedalSpans,
     setMeasurePairsFromImport,
     clearImportedChordRulerEntries,
     setNotes,
@@ -66,6 +77,7 @@ export function useScoreUndoHistory(params: {
     setIsSelectionVisible,
     setFullMeasureRestCollapseScopeKeys,
     setActiveSelection,
+    setActivePedalSelection,
     setSelectedSelections,
   } = params
 
@@ -89,6 +101,8 @@ export function useScoreUndoHistory(params: {
       selection: { ...activeSelectionRef.current },
       isSelectionVisible: isSelectionVisibleRef.current,
       fullMeasureRestCollapseScopeKeys: [...fullMeasureRestCollapseScopeKeysRef.current],
+      pedalSpans: clonePedalSpans(pedalSpansRef.current),
+      activePedalSelection: activePedalSelectionRef.current ? { ...activePedalSelectionRef.current } : null,
     })
     if (stack.length > 120) {
       stack.splice(0, stack.length - 120)
@@ -124,18 +138,27 @@ export function useScoreUndoHistory(params: {
     importedNoteLookupRef.current = buildImportedNoteLookup(restoredPairs)
     setNotes(flattenTrebleFromPairs(restoredPairs))
     setBassNotes(flattenBassFromPairs(restoredPairs))
+    setPedalSpans(clonePedalSpans(snapshot.pedalSpans))
     setIsSelectionVisible(snapshot.isSelectionVisible)
     clearActiveAccidentalSelection()
     clearActiveTieSelection()
+    clearActivePedalSelection()
     clearSelectedMeasureScope()
     clearActiveChordSelection()
     setFullMeasureRestCollapseScopeKeys(snapshot.fullMeasureRestCollapseScopeKeys)
     setActiveSelection(snapshot.selection)
+    setActivePedalSelection(
+      snapshot.activePedalSelection &&
+        snapshot.pedalSpans.some((span) => span.id === snapshot.activePedalSelection?.pedalId)
+        ? { ...snapshot.activePedalSelection }
+        : null,
+    )
     setSelectedSelections(snapshot.isSelectionVisible ? [snapshot.selection] : [])
     return true
   }, [
     clearActiveAccidentalSelection,
     clearActiveChordSelection,
+    clearActivePedalSelection,
     clearActiveTieSelection,
     clearDragOverlayRef,
     clearDragPreviewState,
@@ -147,11 +170,13 @@ export function useScoreUndoHistory(params: {
     measurePairsFromImportRef,
     resetMidiStepChain,
     setActiveSelection,
+    setActivePedalSelection,
     setBassNotes,
     setFullMeasureRestCollapseScopeKeys,
     setIsSelectionVisible,
     setMeasurePairsFromImport,
     setNotes,
+    setPedalSpans,
     setSelectedSelections,
   ])
 

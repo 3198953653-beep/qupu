@@ -3,6 +3,7 @@ import type { ChordRulerEntry } from '../chordRuler'
 import { buildPedalRenderPlan } from '../render/drawPedalSpans'
 import type { MeasureTimelineBundle } from '../timeline/types'
 import type {
+  ActivePedalSelection,
   DragDebugSnapshot,
   DragState,
   MeasureLayout,
@@ -26,6 +27,7 @@ export function buildRuntimeDebugCanvasApi(params: {
   measurePairsRef: MutableRefObject<MeasurePair[]>
   chordRulerEntriesByPair: ChordRulerEntry[][] | null
   pedalSpans: PedalSpan[]
+  activePedalSelection: ActivePedalSelection | null
   scoreOverlayRef: MutableRefObject<HTMLCanvasElement | null>
   scoreRef: MutableRefObject<HTMLCanvasElement | null>
   overlayLastRectRef: MutableRefObject<MeasureLayout['overlayRect'] | null>
@@ -48,6 +50,7 @@ export function buildRuntimeDebugCanvasApi(params: {
     measurePairsRef,
     chordRulerEntriesByPair,
     pedalSpans,
+    activePedalSelection,
     scoreOverlayRef,
     scoreRef,
     overlayLastRectRef,
@@ -69,6 +72,7 @@ export function buildRuntimeDebugCanvasApi(params: {
         context2D: canvasContext,
         measurePairs: measurePairsRef.current,
         pedalSpans,
+        activePedalSelection,
         chordRulerEntriesByPair,
         measureLayouts: measureLayoutsRef.current,
         measureTimelineBundles: measureTimelineBundlesRef.current,
@@ -91,6 +95,11 @@ export function buildRuntimeDebugCanvasApi(params: {
         laneIndex: entry.laneIndex,
         requiredStartX: entry.requiredStartX,
         requiredEndX: entry.requiredEndX,
+        hitLeftX: entry.hitLeftX,
+        hitRightX: entry.hitRightX,
+        hitTopY: entry.hitTopY,
+        hitBottomY: entry.hitBottomY,
+        isActive: entry.isActive,
       }))
     },
     getDragPreviewFrames: () =>

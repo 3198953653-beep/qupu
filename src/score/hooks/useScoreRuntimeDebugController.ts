@@ -11,6 +11,7 @@ import type { OsmdPreviewInstance, OsmdPreviewRebalanceStats, OsmdPreviewSelecti
 import { useFirstMeasureDragDebug, type BeginOrEndDrag } from './useFirstMeasureDragDebug'
 import type { MeasureTimelineBundle } from '../timeline/types'
 import type {
+  ActivePedalSelection,
   DragDebugSnapshot,
   DragState,
   MeasureLayout,
@@ -33,6 +34,7 @@ export function useScoreRuntimeDebugController(params: {
   measurePairsRef: MutableRefObject<MeasurePair[]>
   chordRulerEntriesByPair: ChordRulerEntry[][] | null
   pedalSpans: PedalSpan[]
+  activePedalSelection: ActivePedalSelection | null
   dragDebugFramesRef: MutableRefObject<DragDebugSnapshot[]>
   dragRef: MutableRefObject<DragState | null>
   scoreOverlayRef: MutableRefObject<HTMLCanvasElement | null>
@@ -99,6 +101,7 @@ export function useScoreRuntimeDebugController(params: {
     measurePairsRef,
     chordRulerEntriesByPair,
     pedalSpans,
+    activePedalSelection,
     dragDebugFramesRef,
     dragRef,
     scoreOverlayRef,
@@ -203,6 +206,7 @@ export function useScoreRuntimeDebugController(params: {
     measurePairsRef,
     chordRulerEntriesByPair,
     pedalSpans,
+    activePedalSelection,
     activeChordSelection,
     selectedMeasureHighlightRectPx,
     chordRulerMarkerMetaByKey,
@@ -240,6 +244,7 @@ export function useScoreRuntimeDebugController(params: {
     noteLayoutsByPairRef,
     chordRulerEntriesByPair,
     pedalSpans,
+    activePedalSelection,
     measurePlayheadDebugLogRow,
     notePreviewEventsRef,
     osmdPreviewInstanceRef,

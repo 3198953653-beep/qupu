@@ -1,21 +1,26 @@
 import type { Dispatch, MutableRefObject, PointerEvent, SetStateAction } from 'react'
+import type { ChordRulerEntry } from './chordRuler'
 import { clampStaffInterGapPx } from './grandStaffLayout'
 import { getHitTarget } from './layout/hitTest'
 import type { HitGridIndex } from './layout/hitTest'
+import { buildPedalRenderPlan } from './render/drawPedalSpans'
 import { buildDragStateForHit, getDragMovePitch } from './dragInteractions'
 import { resolveCurrentNoteForHit } from './dragStart'
 import { buildSelectionGroupMoveTargets, buildSelectionPreviewLeadTarget } from './selectionGroupTargets'
 import { buildSelectionsInTimelineRange } from './selectionTimelineRange'
+import type { MeasureTimelineBundle } from './timeline/types'
 import { getTieFrozenIncoming } from './tieFrozen'
 import { cloneTieSelection } from './tieSelection'
 import type { ScoreNotePreviewMode } from './notePreview'
 import type {
+  ActivePedalSelection,
   DragDebugSnapshot,
   DragState,
   ImportedNoteLocation,
   MeasureLayout,
   MeasurePair,
   NoteLayout,
+  PedalSpan,
   Pitch,
   ScoreNote,
   Selection,
@@ -40,6 +45,61 @@ function resolveBlankStaffGapDragValue(
   clientY: number,
 ): number {
   return clampStaffInterGapPx(session.startStaffInterGapPx + (clientY - session.startClientY))
+}
+
+function findHitPedalSelection(params: {
+  x: number
+  y: number
+  context2D: CanvasRenderingContext2D | null
+  measurePairs: MeasurePair[]
+  pedalSpans: PedalSpan[]
+  chordRulerEntriesByPair: ChordRulerEntry[][] | null | undefined
+  measureLayouts: Map<number, MeasureLayout>
+  measureTimelineBundles: Map<number, MeasureTimelineBundle>
+  noteLayoutsByPair: Map<number, NoteLayout[]>
+}): ActivePedalSelection | null {
+  const {
+    x,
+    y,
+    context2D,
+    measurePairs,
+    pedalSpans,
+    chordRulerEntriesByPair,
+    measureLayouts,
+    measureTimelineBundles,
+    noteLayoutsByPair,
+  } = params
+  if (!context2D || pedalSpans.length === 0 || measureLayouts.size === 0) return null
+
+  const hitCandidates = buildPedalRenderPlan({
+    context2D,
+    measurePairs,
+    pedalSpans,
+    chordRulerEntriesByPair,
+    measureLayouts,
+    measureTimelineBundles,
+    noteLayoutsByPair,
+  }).filter((entry) =>
+    x >= entry.hitLeftX &&
+    x <= entry.hitRightX &&
+    y >= entry.hitTopY &&
+    y <= entry.hitBottomY,
+  )
+
+  if (hitCandidates.length === 0) return null
+
+  const winner = hitCandidates.reduce((best, entry) => {
+    if (!best) return entry
+    const bestCenterX = (best.occupiedStartX + best.occupiedEndX) / 2
+    const entryCenterX = (entry.occupiedStartX + entry.occupiedEndX) / 2
+    const bestDistance = Math.abs(x - bestCenterX)
+    const entryDistance = Math.abs(x - entryCenterX)
+    if (entryDistance < bestDistance) return entry
+    if (entryDistance > bestDistance) return best
+    return best
+  }, hitCandidates[0] ?? null)
+
+  return winner ? { pedalId: winner.span.id } : null
 }
 
 function upsertSelection(
@@ -189,7 +249,11 @@ export function handleBeginDragPointer(params: {
   trebleNoteById: Map<string, ScoreNote>
   bassNoteById: Map<string, ScoreNote>
   currentMeasurePairs: MeasurePair[]
+  pedalSpans: PedalSpan[]
+  chordRulerEntriesByPair: ChordRulerEntry[][] | null
   measureLayouts: Map<number, MeasureLayout>
+  measureTimelineBundles: Map<number, MeasureTimelineBundle>
+  noteLayoutsByPair: Map<number, NoteLayout[]>
   importedKeyFifths: number[] | null
   pitches: Pitch[]
   dragRef: MutableRefObject<DragState | null>
@@ -205,6 +269,7 @@ export function handleBeginDragPointer(params: {
   ) => void
   onAccidentalPointerDown?: (selection: Selection) => void
   onTiePointerDown?: (selection: TieSelection) => void
+  onPedalPointerDown?: (selection: ActivePedalSelection) => void
   onBlankPointerDown?: (payload: BlankPointerPayload) => void
   onSelectionActivated?: () => void
   onPreviewScoreNote?: (params: {
@@ -229,7 +294,11 @@ export function handleBeginDragPointer(params: {
     trebleNoteById,
     bassNoteById,
     currentMeasurePairs,
+    pedalSpans,
+    chordRulerEntriesByPair,
     measureLayouts,
+    measureTimelineBundles,
+    noteLayoutsByPair,
     importedKeyFifths,
     pitches,
     dragRef,
@@ -241,6 +310,7 @@ export function handleBeginDragPointer(params: {
     onSelectionPointerDown,
     onAccidentalPointerDown,
     onTiePointerDown,
+    onPedalPointerDown,
     onBlankPointerDown,
     onSelectionActivated,
     onPreviewScoreNote,
@@ -309,6 +379,23 @@ export function handleBeginDragPointer(params: {
   const y = (event.clientY - rect.top) * clientToScoreScaleY
   const hitTarget = getHitTarget(x, y, noteLayouts, 0, hitGrid)
   if (!hitTarget) {
+    const pedalHitSelection = findHitPedalSelection({
+      x,
+      y,
+      context2D: rawContext2D,
+      measurePairs: currentMeasurePairs,
+      pedalSpans,
+      chordRulerEntriesByPair,
+      measureLayouts,
+      measureTimelineBundles,
+      noteLayoutsByPair,
+    })
+    if (pedalHitSelection) {
+      event.preventDefault()
+      setDraggingSelection(null)
+      onPedalPointerDown?.(pedalHitSelection)
+      return
+    }
     const blankHit = resolveBlankMeasureHit({ x, y, measureLayouts })
     onBlankPointerDown?.(blankHit)
     if (blankHit.pairIndex !== null && blankHit.staff !== null) {

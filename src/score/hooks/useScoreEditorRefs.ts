@@ -4,6 +4,7 @@ import { Renderer } from 'vexflow'
 import type { MeasureTimelineBundle } from '../timeline/types'
 import type { HitGridIndex } from '../layout/hitTest'
 import type {
+  ActivePedalSelection,
   DragDebugSnapshot,
   DragState,
   ImportFeedback,
@@ -13,6 +14,7 @@ import type {
   MeasurePair,
   MusicXmlMetadata,
   NoteLayout,
+  PedalSpan,
   Pitch,
   Selection,
   TimeSignature,
@@ -21,6 +23,8 @@ import type {
 export function useScoreEditorRefs(params: {
   importFeedback: ImportFeedback
   activeSelection: Selection
+  activePedalSelection: ActivePedalSelection | null
+  pedalSpans: PedalSpan[]
   selectedSelections: Selection[]
   fullMeasureRestCollapseScopeKeys: string[]
   isSelectionVisible: boolean
@@ -29,6 +33,8 @@ export function useScoreEditorRefs(params: {
   const {
     importFeedback,
     activeSelection,
+    activePedalSelection,
+    pedalSpans,
     selectedSelections,
     fullMeasureRestCollapseScopeKeys,
     isSelectionVisible,
@@ -74,6 +80,8 @@ export function useScoreEditorRefs(params: {
   const importedNoteLookupRef = useRef<Map<string, ImportedNoteLocation>>(new Map())
   const importFeedbackRef = useRef<ImportFeedback>(importFeedback)
   const activeSelectionRef = useRef<Selection>(activeSelection)
+  const activePedalSelectionRef = useRef<ActivePedalSelection | null>(activePedalSelection)
+  const pedalSpansRef = useRef<PedalSpan[]>(pedalSpans)
   const selectedSelectionsRef = useRef<Selection[]>(selectedSelections)
   const fullMeasureRestCollapseScopeKeysRef = useRef<string[]>(fullMeasureRestCollapseScopeKeys)
   const isSelectionVisibleRef = useRef<boolean>(isSelectionVisible)
@@ -123,6 +131,8 @@ export function useScoreEditorRefs(params: {
     importedNoteLookupRef,
     importFeedbackRef,
     activeSelectionRef,
+    activePedalSelectionRef,
+    pedalSpansRef,
     selectedSelectionsRef,
     fullMeasureRestCollapseScopeKeysRef,
     isSelectionVisibleRef,

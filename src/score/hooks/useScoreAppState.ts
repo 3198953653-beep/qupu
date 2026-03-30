@@ -20,6 +20,7 @@ import {
 } from '../scorePresentation'
 import type { ChordRulerEntry } from '../chordRuler'
 import type {
+  ActivePedalSelection,
   BuiltInDemoMode,
   DragState,
   ImportFeedback,
@@ -51,6 +52,7 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
   })
   const [activeAccidentalSelection, setActiveAccidentalSelection] = useState<Selection | null>(null)
   const [activeTieSelection, setActiveTieSelection] = useState<TieSelection | null>(null)
+  const [activePedalSelection, setActivePedalSelection] = useState<ActivePedalSelection | null>(null)
   const [selectedSelections, setSelectedSelections] = useState<Selection[]>([
     { noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 },
   ])
@@ -127,6 +129,8 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
     setActiveAccidentalSelection,
     activeTieSelection,
     setActiveTieSelection,
+    activePedalSelection,
+    setActivePedalSelection,
     selectedSelections,
     setSelectedSelections,
     selectedMeasureScope,

@@ -2,6 +2,7 @@ import { handleCopyShortcut, handlePasteShortcut } from './keyboardClipboardComm
 import {
   handleDeleteAccidentalCommand,
   handleDeleteMeasureCommand,
+  handleDeletePedalCommand,
   handleDeleteSelectedKeyCommand,
   handleDeleteTieCommand,
   handleEscapeCommand,
@@ -22,6 +23,7 @@ export function handleGlobalKeyboardCommand(params: KeyboardCommandEventParams):
     event,
     activeTieSelection,
     activeAccidentalSelection,
+    activePedalSelection,
     undoLastScoreEdit,
     measurePairs,
     activeSelection,
@@ -35,6 +37,7 @@ export function handleGlobalKeyboardCommand(params: KeyboardCommandEventParams):
     applyKeyboardEditResult,
     setActiveTieSelection,
     setActiveAccidentalSelection,
+    setActivePedalSelection,
     setNotationPaletteLastAction,
   } = params
 
@@ -47,8 +50,10 @@ export function handleGlobalKeyboardCommand(params: KeyboardCommandEventParams):
     const handled = handleEscapeCommand({
       activeTieSelection,
       activeAccidentalSelection,
+      activePedalSelection,
       setActiveTieSelection,
       setActiveAccidentalSelection,
+      setActivePedalSelection,
     })
     return handled ? 'handled-prevent-default' : 'handled'
   }
@@ -92,6 +97,8 @@ export function handleDeleteKeyboardCommand(params: KeyboardCommandEventParams):
     activeSelection,
     activeTieSelection,
     activeAccidentalSelection,
+    activePedalSelection,
+    pedalSpans,
     selectedMeasureScope,
     isSelectionVisible,
     measurePairsFromImportRef,
@@ -100,9 +107,12 @@ export function handleDeleteKeyboardCommand(params: KeyboardCommandEventParams):
     importedNoteLookupRef,
     measureTimeSignaturesFromImportRef,
     applyKeyboardEditResult,
+    pushUndoSnapshot,
     playAccidentalEditPreview,
+    setPedalSpans,
     setActiveTieSelection,
     setActiveAccidentalSelection,
+    setActivePedalSelection,
     setIsSelectionVisible,
     setSelectedSelections,
     setSelectedMeasureScope,
@@ -135,6 +145,22 @@ export function handleDeleteKeyboardCommand(params: KeyboardCommandEventParams):
       applyKeyboardEditResult,
       playAccidentalEditPreview,
       setActiveAccidentalSelection,
+      setIsSelectionVisible,
+      setSelectedSelections,
+      setSelectedMeasureScope,
+      setNotationPaletteLastAction,
+    })
+    return 'handled-prevent-default'
+  }
+
+  if (activePedalSelection) {
+    handleDeletePedalCommand({
+      measurePairs,
+      pedalSpans,
+      activePedalSelection,
+      pushUndoSnapshot,
+      setPedalSpans,
+      setActivePedalSelection,
       setIsSelectionVisible,
       setSelectedSelections,
       setSelectedMeasureScope,

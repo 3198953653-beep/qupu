@@ -18,12 +18,14 @@ import {
 } from './dragPreviewController'
 import { flushPendingDragFrame, scheduleDragCommitFrame } from './dragScheduler'
 import type { ScoreNotePreviewMode } from './notePreview'
+import type { ChordRulerEntry } from './chordRuler'
 import { flattenBassFromPairs, flattenTrebleFromPairs } from './scoreOps'
 import type { TimeAxisSpacingConfig } from './layout/timeAxisSpacing'
 import type { MeasureTimelineBundle } from './timeline/types'
 import type { Renderer } from 'vexflow'
 import type { HitGridIndex } from './layout/hitTest'
 import type {
+  ActivePedalSelection,
   DragDebugSnapshot,
   DragState,
   ImportedNoteLocation,
@@ -31,6 +33,7 @@ import type {
   MeasureLayout,
   MeasurePair,
   NoteLayout,
+  PedalSpan,
   Pitch,
   ScoreNote,
   Selection,
@@ -69,6 +72,8 @@ export function useDragHandlers(params: {
   staffInterGapPx: number
   setStaffInterGapPx: StateSetter<number>
   currentSelections: Selection[]
+  pedalSpans: PedalSpan[]
+  chordRulerEntriesByPair: ChordRulerEntry[][] | null
   onSelectionPointerDown?: (
     selection: Selection,
     nextSelections: Selection[],
@@ -76,6 +81,7 @@ export function useDragHandlers(params: {
   ) => void
   onAccidentalPointerDown?: (selection: Selection) => void
   onTiePointerDown?: (selection: TieSelection) => void
+  onPedalPointerDown?: (selection: ActivePedalSelection) => void
   onBeforeApplyScoreChange?: (sourcePairs: MeasurePair[]) => void
   onAfterApplyScoreChange?: (params: { sourcePairs: MeasurePair[]; nextPairs: MeasurePair[] }) => void
   onBlankPointerDown?: (payload: BlankPointerPayload) => void
@@ -149,9 +155,12 @@ export function useDragHandlers(params: {
     staffInterGapPx,
     setStaffInterGapPx,
     currentSelections,
+    pedalSpans,
+    chordRulerEntriesByPair,
     onSelectionPointerDown,
     onAccidentalPointerDown,
     onTiePointerDown,
+    onPedalPointerDown,
     onBeforeApplyScoreChange,
     onAfterApplyScoreChange,
     onBlankPointerDown,
@@ -427,7 +436,11 @@ export function useDragHandlers(params: {
       trebleNoteById,
       bassNoteById,
       currentMeasurePairs: measurePairsRef.current,
+      pedalSpans,
+      chordRulerEntriesByPair,
       measureLayouts: measureLayoutsRef.current,
+      measureTimelineBundles: measureTimelineBundlesRef.current,
+      noteLayoutsByPair: noteLayoutsByPairRef.current,
       importedKeyFifths: measureKeyFifthsFromImportRef.current,
       pitches,
       dragRef,
@@ -439,6 +452,7 @@ export function useDragHandlers(params: {
       onSelectionPointerDown,
       onAccidentalPointerDown,
       onTiePointerDown,
+      onPedalPointerDown,
       onBlankPointerDown,
       onSelectionActivated,
       onPreviewScoreNote,

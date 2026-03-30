@@ -61,6 +61,7 @@ export function useChordMarkerController(params: {
   setActiveSelection: (selection: Selection) => void
   clearActiveAccidentalSelection: () => void
   clearActiveTieSelection: () => void
+  clearActivePedalSelection: () => void
   clearSelectedMeasureScope: () => void
   clearDraggingSelection: () => void
   resetMidiStepChain: () => void
@@ -100,6 +101,7 @@ export function useChordMarkerController(params: {
     setActiveSelection,
     clearActiveAccidentalSelection,
     clearActiveTieSelection,
+    clearActivePedalSelection,
     clearSelectedMeasureScope,
     clearDraggingSelection,
     resetMidiStepChain,
@@ -192,6 +194,7 @@ export function useChordMarkerController(params: {
     setActiveSelection,
     clearActiveAccidentalSelection,
     clearActiveTieSelection,
+    clearActivePedalSelection,
     clearSelectedMeasureScope,
     clearDraggingSelection,
     resetMidiStepChain,
@@ -271,6 +274,7 @@ export function useChordMarkerController(params: {
     resetMidiStepChain()
     clearActiveAccidentalSelection()
     clearActiveTieSelection()
+    clearActivePedalSelection()
     clearSelectedMeasureScope()
     clearDraggingSelection()
     clearActiveChordSelection()
@@ -285,6 +289,7 @@ export function useChordMarkerController(params: {
   }, [
     clearActiveAccidentalSelection,
     clearActiveChordSelection,
+    clearActivePedalSelection,
     clearActiveTieSelection,
     clearDraggingSelection,
     clearSelectedMeasureScope,

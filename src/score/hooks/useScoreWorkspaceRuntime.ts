@@ -75,6 +75,7 @@ export function useScoreWorkspaceRuntime(params: {
     },
     onAfterScoreRender: coreEditing.chordMarker.onAfterScoreRender,
     clearActiveChordSelection: coreEditing.chordMarker.clearActiveChordSelection,
+    clearActivePedalSelection: coreEditing.sessionHelpers.clearActivePedalSelection,
     onTrebleSelectionDoubleTap,
     onTimelineSegmentDoubleClick,
     pushUndoSnapshot: coreEditing.mutation.pushUndoSnapshot,

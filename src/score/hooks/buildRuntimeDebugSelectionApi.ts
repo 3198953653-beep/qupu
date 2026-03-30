@@ -1,5 +1,5 @@
 import type { MutableRefObject } from 'react'
-import type { MeasurePair, ScoreNote, Selection } from '../types'
+import type { ActivePedalSelection, MeasurePair, ScoreNote, Selection } from '../types'
 import type { ActiveChordSelection, ChordRulerMarkerMeta } from './useChordMarkerController'
 import type { OsmdPreviewSelectionTarget } from './useOsmdPreviewController'
 
@@ -16,6 +16,7 @@ export function buildRuntimeDebugSelectionApi(params: {
   selectedMeasureHighlightRectPx: { x: number; y: number; width: number; height: number } | null
   chordRulerMarkerMetaByKey: Map<string, ChordRulerMarkerMeta>
   activeSelection: Selection
+  activePedalSelection: ActivePedalSelection | null
   osmdPreviewSelectedSelectionKeyRef: MutableRefObject<string | null>
   osmdPreviewNoteLookupBySelectionRef: MutableRefObject<Map<string, OsmdPreviewSelectionTarget>>
 }) {
@@ -27,6 +28,7 @@ export function buildRuntimeDebugSelectionApi(params: {
     selectedMeasureHighlightRectPx,
     chordRulerMarkerMetaByKey,
     activeSelection,
+    activePedalSelection,
     osmdPreviewSelectedSelectionKeyRef,
     osmdPreviewNoteLookupBySelectionRef,
   } = params
@@ -92,6 +94,7 @@ export function buildRuntimeDebugSelectionApi(params: {
         keyMode: marker.keyMode,
       })),
     getActiveSelection: () => ({ ...activeSelection }),
+    getActivePedalSelection: () => (activePedalSelection ? { ...activePedalSelection } : null),
     getOsmdPreviewSelectedSelectionKey: () => osmdPreviewSelectedSelectionKeyRef.current,
     getOsmdPreviewNoteTargets: () =>
       [...osmdPreviewNoteLookupBySelectionRef.current.values()].map((target) => ({

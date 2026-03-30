@@ -16,6 +16,10 @@ export function useScoreEditingSessionHelpers(params: {
     appState.setActiveTieSelection(null)
   }, [appState])
 
+  const clearActivePedalSelection = useCallback(() => {
+    appState.setActivePedalSelection(null)
+  }, [appState])
+
   const clearSelectedMeasureScope = useCallback(() => {
     appState.setSelectedMeasureScope(null)
   }, [appState])
@@ -40,6 +44,7 @@ export function useScoreEditingSessionHelpers(params: {
   return {
     clearActiveAccidentalSelection,
     clearActiveTieSelection,
+    clearActivePedalSelection,
     clearSelectedMeasureScope,
     clearDraggingSelection,
     clearDragPreviewState,

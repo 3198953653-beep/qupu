@@ -8,6 +8,7 @@ import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
 import { renderVisibleSystems } from '../render/renderVisibleSystems'
 import type { MeasureTimelineBundle } from '../timeline/types'
 import type {
+  ActivePedalSelection,
   DragState,
   LayoutReflowHint,
   MeasureFrame,
@@ -41,6 +42,7 @@ export function useScoreRenderEffect(params: {
   supplementalSpacingTicksByPair?: number[][] | null
   activeSelection?: Selection | null
   activeAccidentalSelection?: Selection | null
+  activePedalSelection?: ActivePedalSelection | null
   activeTieSegmentKey?: string | null
   draggingSelection?: Selection | null
   activeSelections?: Selection[] | null
@@ -90,6 +92,7 @@ export function useScoreRenderEffect(params: {
     supplementalSpacingTicksByPair = null,
     activeSelection = null,
     activeAccidentalSelection = null,
+    activePedalSelection = null,
     activeTieSegmentKey = null,
     draggingSelection = null,
     activeSelections = null,
@@ -192,6 +195,7 @@ export function useScoreRenderEffect(params: {
         supplementalSpacingTicksByPair,
         activeSelection,
         activeAccidentalSelection,
+        activePedalSelection,
         activeTieSegmentKey,
         draggingSelection,
         activeSelections,
@@ -239,6 +243,7 @@ export function useScoreRenderEffect(params: {
     supplementalSpacingTicksByPair,
     activeSelection,
     activeAccidentalSelection,
+    activePedalSelection,
     activeTieSegmentKey,
     draggingSelection,
     activeSelections,

@@ -88,6 +88,7 @@ export function useScoreInteractionRuntimeController(params: {
     timelineSegmentBlocks: coreEditing.chordMarker.timelineSegmentBlocks,
     pedalSpans: appState.pedalSpans,
     setPedalSpans: appState.setPedalSpans,
+    clearActivePedalSelection: coreEditing.sessionHelpers.clearActivePedalSelection,
   })
 
   const playbackVolume = usePlaybackVolumeController({

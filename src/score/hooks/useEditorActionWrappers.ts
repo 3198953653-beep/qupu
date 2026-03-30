@@ -11,6 +11,7 @@ export function useEditorActionWrappers(params: {
   stopActivePlaybackSession: () => void
   requestPlaybackCursorReset: () => void
   clearActiveChordSelection: () => void
+  clearActivePedalSelection: () => void
   setActiveBuiltInDemo: Dispatch<SetStateAction<'none' | 'whole-note' | 'half-note'>>
   setTimelineSegmentOverlayMode: Dispatch<SetStateAction<TimelineSegmentOverlayMode>>
   setScoreSourceKind: Dispatch<SetStateAction<ScoreSourceKind>>
@@ -43,6 +44,7 @@ export function useEditorActionWrappers(params: {
     stopActivePlaybackSession,
     requestPlaybackCursorReset,
     clearActiveChordSelection,
+    clearActivePedalSelection,
     setActiveBuiltInDemo,
     setTimelineSegmentOverlayMode,
     setScoreSourceKind,
@@ -77,11 +79,13 @@ export function useEditorActionWrappers(params: {
     stopActivePlaybackSession()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
+    clearActivePedalSelection()
     setActiveBuiltInDemo('none')
     setPendingImportedScoreSourceKind('musicxml-text')
     importMusicXmlText(xmlText)
   }, [
     clearActiveChordSelection,
+    clearActivePedalSelection,
     clearFullMeasureRestCollapseScopes,
     importMusicXmlText,
     setPendingImportedScoreSourceKind,
@@ -93,11 +97,13 @@ export function useEditorActionWrappers(params: {
     stopActivePlaybackSession()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
+    clearActivePedalSelection()
     setActiveBuiltInDemo('none')
     setPendingImportedScoreSourceKind('musicxml-text')
     importMusicXmlFromTextarea()
   }, [
     clearActiveChordSelection,
+    clearActivePedalSelection,
     clearFullMeasureRestCollapseScopes,
     importMusicXmlFromTextarea,
     setPendingImportedScoreSourceKind,
@@ -109,11 +115,13 @@ export function useEditorActionWrappers(params: {
     stopActivePlaybackSession()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
+    clearActivePedalSelection()
     setActiveBuiltInDemo('none')
     setPendingImportedScoreSourceKind('musicxml-file')
     await onMusicXmlFileChange(event)
   }, [
     clearActiveChordSelection,
+    clearActivePedalSelection,
     clearFullMeasureRestCollapseScopes,
     onMusicXmlFileChange,
     setPendingImportedScoreSourceKind,
@@ -125,11 +133,13 @@ export function useEditorActionWrappers(params: {
     stopActivePlaybackSession()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
+    clearActivePedalSelection()
     setActiveBuiltInDemo('none')
     setPendingImportedScoreSourceKind('sample-musicxml')
     loadSampleMusicXml()
   }, [
     clearActiveChordSelection,
+    clearActivePedalSelection,
     clearFullMeasureRestCollapseScopes,
     loadSampleMusicXml,
     setPendingImportedScoreSourceKind,
@@ -142,6 +152,7 @@ export function useEditorActionWrappers(params: {
     requestPlaybackCursorReset()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
+    clearActivePedalSelection()
     clearSegmentRhythmTemplateBindings()
     clearPedalSpans()
     setPendingImportedScoreSourceKind(null)
@@ -151,6 +162,7 @@ export function useEditorActionWrappers(params: {
     loadWholeNoteDemo()
   }, [
     clearActiveChordSelection,
+    clearActivePedalSelection,
     clearFullMeasureRestCollapseScopes,
     clearPedalSpans,
     clearSegmentRhythmTemplateBindings,
@@ -168,6 +180,7 @@ export function useEditorActionWrappers(params: {
     requestPlaybackCursorReset()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
+    clearActivePedalSelection()
     clearSegmentRhythmTemplateBindings()
     clearPedalSpans()
     setPendingImportedScoreSourceKind(null)
@@ -177,6 +190,7 @@ export function useEditorActionWrappers(params: {
     loadHalfNoteDemo()
   }, [
     clearActiveChordSelection,
+    clearActivePedalSelection,
     clearFullMeasureRestCollapseScopes,
     clearPedalSpans,
     clearSegmentRhythmTemplateBindings,
@@ -194,6 +208,7 @@ export function useEditorActionWrappers(params: {
     requestPlaybackCursorReset()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
+    clearActivePedalSelection()
     clearSegmentRhythmTemplateBindings()
     clearPedalSpans()
     setPendingImportedScoreSourceKind(null)
@@ -203,6 +218,7 @@ export function useEditorActionWrappers(params: {
     resetScore()
   }, [
     clearActiveChordSelection,
+    clearActivePedalSelection,
     clearFullMeasureRestCollapseScopes,
     clearPedalSpans,
     clearSegmentRhythmTemplateBindings,
@@ -220,6 +236,7 @@ export function useEditorActionWrappers(params: {
     requestPlaybackCursorReset()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
+    clearActivePedalSelection()
     clearSegmentRhythmTemplateBindings()
     clearPedalSpans()
     setPendingImportedScoreSourceKind(null)
@@ -229,6 +246,7 @@ export function useEditorActionWrappers(params: {
     runAiDraft()
   }, [
     clearActiveChordSelection,
+    clearActivePedalSelection,
     clearFullMeasureRestCollapseScopes,
     clearPedalSpans,
     clearSegmentRhythmTemplateBindings,
@@ -246,6 +264,7 @@ export function useEditorActionWrappers(params: {
     requestPlaybackCursorReset()
     clearFullMeasureRestCollapseScopes()
     clearActiveChordSelection()
+    clearActivePedalSelection()
     clearSegmentRhythmTemplateBindings()
     clearPedalSpans()
     setPendingImportedScoreSourceKind(null)
@@ -256,6 +275,7 @@ export function useEditorActionWrappers(params: {
   }, [
     applyRhythmPreset,
     clearActiveChordSelection,
+    clearActivePedalSelection,
     clearFullMeasureRestCollapseScopes,
     clearPedalSpans,
     clearSegmentRhythmTemplateBindings,

@@ -5,7 +5,7 @@ import {
 } from '../chordRangeNoteCoverage'
 import { PEDAL_MIN_VISUAL_GAP_PX, sortPedalSpans } from '../pedalUtils'
 import type { MeasureTimelineBundle } from '../timeline/types'
-import type { MeasureLayout, MeasurePair, NoteLayout, PedalSpan } from '../types'
+import type { ActivePedalSelection, MeasureLayout, MeasurePair, NoteLayout, PedalSpan } from '../types'
 
 const PEDAL_BASELINE_OFFSET_PX = 18
 const PEDAL_BRACKET_HOOK_HEIGHT_PX = 10
@@ -14,9 +14,41 @@ const PEDAL_MIN_DRAW_WIDTH_PX = 4
 const PEDAL_MIN_NOTE_CLEARANCE_PX = 2
 const PEDAL_TEXT_ASCENT_FALLBACK_PX = 11
 const PEDAL_COLOR = '#111111'
+const PEDAL_ACTIVE_COLOR = '#2437E8'
+const PEDAL_ACTIVE_BAND_FILL = 'rgba(36, 55, 232, 0.14)'
 const PEDAL_TEXT_FONT = 'italic 13px "Times New Roman", Georgia, serif'
 const PEDAL_TEXT_LABEL = 'Ped'
 const PEDAL_RELEASE_LABEL = '*'
+const PEDAL_ACTIVE_BAND_PADDING_X_PX = 5
+const PEDAL_ACTIVE_BAND_PADDING_Y_PX = 4
+const PEDAL_HIT_PADDING_X_PX = 6
+const PEDAL_HIT_PADDING_Y_PX = 6
+
+function traceRoundedRect(params: {
+  context2D: CanvasRenderingContext2D
+  x: number
+  y: number
+  width: number
+  height: number
+  radius: number
+}): void {
+  const { context2D, x, y, width, height, radius } = params
+  const safeWidth = Math.max(0, width)
+  const safeHeight = Math.max(0, height)
+  if (safeWidth <= 0 || safeHeight <= 0) return
+  const safeRadius = Math.max(0, Math.min(radius, safeWidth / 2, safeHeight / 2))
+  context2D.beginPath()
+  context2D.moveTo(x + safeRadius, y)
+  context2D.lineTo(x + safeWidth - safeRadius, y)
+  context2D.quadraticCurveTo(x + safeWidth, y, x + safeWidth, y + safeRadius)
+  context2D.lineTo(x + safeWidth, y + safeHeight - safeRadius)
+  context2D.quadraticCurveTo(x + safeWidth, y + safeHeight, x + safeWidth - safeRadius, y + safeHeight)
+  context2D.lineTo(x + safeRadius, y + safeHeight)
+  context2D.quadraticCurveTo(x, y + safeHeight, x, y + safeHeight - safeRadius)
+  context2D.lineTo(x, y + safeRadius)
+  context2D.quadraticCurveTo(x, y, x + safeRadius, y)
+  context2D.closePath()
+}
 
 function getMeasureContentBounds(measureLayout: MeasureLayout): {
   startX: number
@@ -130,6 +162,11 @@ type VisualPedalSpan = {
   laneIndex: number
   requiredStartX: number | null
   requiredEndX: number | null
+  hitLeftX: number
+  hitRightX: number
+  hitTopY: number
+  hitBottomY: number
+  isActive: boolean
 }
 
 type SpanCoverageRange = {
@@ -375,6 +412,7 @@ export function buildPedalRenderPlan(params: {
   context2D: CanvasRenderingContext2D | null | undefined
   measurePairs: MeasurePair[]
   pedalSpans: PedalSpan[]
+  activePedalSelection?: ActivePedalSelection | null
   chordRulerEntriesByPair?: ChordRulerEntry[][] | null
   measureLayouts: Map<number, MeasureLayout>
   measureTimelineBundles: Map<number, MeasureTimelineBundle>
@@ -384,6 +422,7 @@ export function buildPedalRenderPlan(params: {
     context2D,
     measurePairs,
     pedalSpans,
+    activePedalSelection = null,
     chordRulerEntriesByPair = null,
     measureLayouts,
     measureTimelineBundles,
@@ -483,6 +522,14 @@ export function buildPedalRenderPlan(params: {
       laneIndex: 0,
       requiredStartX,
       requiredEndX,
+      hitLeftX: startX - PEDAL_HIT_PADDING_X_PX,
+      hitRightX: getPedalOccupiedEndX({ span, endX, releaseWidthPx }) + PEDAL_HIT_PADDING_X_PX,
+      hitTopY: getPedalTopY({
+        baselineY: baseBaselineY,
+        pedalTopInsetPx,
+      }) - PEDAL_HIT_PADDING_Y_PX,
+      hitBottomY: baseBaselineY + PEDAL_HIT_PADDING_Y_PX,
+      isActive: activePedalSelection?.pedalId === span.id,
     }]
   })
 
@@ -526,6 +573,18 @@ export function buildPedalRenderPlan(params: {
         pedalTopInsetPx: entry.pedalTopInsetPx,
       }),
       laneIndex: 0,
+      hitLeftX: entry.startX - PEDAL_HIT_PADDING_X_PX,
+      hitRightX: getPedalOccupiedEndX({
+        span: entry.span,
+        endX,
+        releaseWidthPx,
+      }) + PEDAL_HIT_PADDING_X_PX,
+      hitTopY: getPedalTopY({
+        baselineY,
+        pedalTopInsetPx: entry.pedalTopInsetPx,
+      }) - PEDAL_HIT_PADDING_Y_PX,
+      hitBottomY: baselineY + PEDAL_HIT_PADDING_Y_PX,
+      isActive: activePedalSelection?.pedalId === entry.span.id,
     }
   })
 }
@@ -534,6 +593,7 @@ export function drawPedalSpans(params: {
   context2D: CanvasRenderingContext2D | null | undefined
   measurePairs: MeasurePair[]
   pedalSpans: PedalSpan[]
+  activePedalSelection?: ActivePedalSelection | null
   chordRulerEntriesByPair?: ChordRulerEntry[][] | null
   measureLayouts: Map<number, MeasureLayout>
   measureTimelineBundles: Map<number, MeasureTimelineBundle>
@@ -543,6 +603,7 @@ export function drawPedalSpans(params: {
     context2D,
     measurePairs,
     pedalSpans,
+    activePedalSelection = null,
     chordRulerEntriesByPair = null,
     measureLayouts,
     measureTimelineBundles,
@@ -552,6 +613,7 @@ export function drawPedalSpans(params: {
     context2D,
     measurePairs,
     pedalSpans,
+    activePedalSelection,
     chordRulerEntriesByPair,
     measureLayouts,
     measureTimelineBundles,
@@ -574,6 +636,27 @@ export function drawPedalSpans(params: {
     const startX = entry.startX
     const endX = Math.max(entry.endX, startX + PEDAL_MIN_DRAW_WIDTH_PX)
     if (!Number.isFinite(startX) || !Number.isFinite(endX)) return
+    const pedalColor = entry.isActive ? PEDAL_ACTIVE_COLOR : PEDAL_COLOR
+
+    if (entry.isActive) {
+      const bandLeftX = Math.min(entry.occupiedStartX, entry.occupiedEndX) - PEDAL_ACTIVE_BAND_PADDING_X_PX
+      const bandRightX = Math.max(entry.occupiedStartX, entry.occupiedEndX) + PEDAL_ACTIVE_BAND_PADDING_X_PX
+      const bandTopY = entry.pedalTopY - PEDAL_ACTIVE_BAND_PADDING_Y_PX
+      const bandBottomY = entry.baselineY + PEDAL_ACTIVE_BAND_PADDING_Y_PX
+      traceRoundedRect({
+        context2D,
+        x: bandLeftX,
+        y: bandTopY,
+        width: bandRightX - bandLeftX,
+        height: bandBottomY - bandTopY,
+        radius: 6,
+      })
+      context2D.fillStyle = PEDAL_ACTIVE_BAND_FILL
+      context2D.fill()
+    }
+
+    context2D.strokeStyle = pedalColor
+    context2D.fillStyle = pedalColor
 
     if (entry.span.style === 'text') {
       context2D.textAlign = 'left'

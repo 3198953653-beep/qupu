@@ -7,10 +7,12 @@ import {
 } from 'react'
 import type { NoteClipboardPayload } from '../copyPasteTypes'
 import type {
+  ActivePedalSelection,
   ImportedNoteLocation,
   LayoutReflowHint,
   MeasureLayout,
   MeasurePair,
+  PedalSpan,
   ScoreNote,
   Selection,
   TieSelection,
@@ -34,6 +36,8 @@ export function useKeyboardCommandController(params: {
   selectedMeasureScope: MeasureScope
   activeTieSelection: TieSelection | null
   activeAccidentalSelection: Selection | null
+  activePedalSelection: ActivePedalSelection | null
+  pedalSpans: PedalSpan[]
   measureKeyFifthsFromImport: number[] | null
   activeSelectionRef: MutableRefObject<Selection>
   measurePairsRef: MutableRefObject<MeasurePair[]>
@@ -50,6 +54,7 @@ export function useKeyboardCommandController(params: {
   undoLastScoreEdit: () => boolean
   applyKeyboardEditResult: KeyboardEditResultApplier
   playAccidentalEditPreview: KeyboardAccidentalPreviewPlayer
+  setPedalSpans: Dispatch<SetStateAction<PedalSpan[]>>
   setNotes: Dispatch<SetStateAction<ScoreNote[]>>
   setBassNotes: Dispatch<SetStateAction<ScoreNote[]>>
   setMeasurePairsFromImport: Dispatch<SetStateAction<MeasurePair[] | null>>
@@ -59,6 +64,7 @@ export function useKeyboardCommandController(params: {
   setActiveSelection: Dispatch<SetStateAction<Selection>>
   setActiveTieSelection: Dispatch<SetStateAction<TieSelection | null>>
   setActiveAccidentalSelection: Dispatch<SetStateAction<Selection | null>>
+  setActivePedalSelection: Dispatch<SetStateAction<ActivePedalSelection | null>>
   setNotationPaletteLastAction: Dispatch<SetStateAction<string>>
 }): void {
   const {
@@ -71,6 +77,8 @@ export function useKeyboardCommandController(params: {
     selectedMeasureScope,
     activeTieSelection,
     activeAccidentalSelection,
+    activePedalSelection,
+    pedalSpans,
     measureKeyFifthsFromImport,
     activeSelectionRef,
     measurePairsRef,
@@ -87,6 +95,7 @@ export function useKeyboardCommandController(params: {
     undoLastScoreEdit,
     applyKeyboardEditResult,
     playAccidentalEditPreview,
+    setPedalSpans,
     setNotes,
     setBassNotes,
     setMeasurePairsFromImport,
@@ -96,6 +105,7 @@ export function useKeyboardCommandController(params: {
     setActiveSelection,
     setActiveTieSelection,
     setActiveAccidentalSelection,
+    setActivePedalSelection,
     setNotationPaletteLastAction,
   } = params
 
@@ -199,6 +209,8 @@ export function useKeyboardCommandController(params: {
     selectedMeasureScope,
     activeTieSelection,
     activeAccidentalSelection,
+    activePedalSelection,
+    pedalSpans,
     measureKeyFifthsFromImport,
     noteClipboardRef,
     importedNoteLookupRef,
@@ -209,10 +221,13 @@ export function useKeyboardCommandController(params: {
     undoLastScoreEdit,
     handleMoveSelectionsByKeyboardSteps,
     handleMoveSelectionByKeyboardArrow,
+    pushUndoSnapshot,
     applyKeyboardEditResult,
     playAccidentalEditPreview,
+    setPedalSpans,
     setActiveTieSelection,
     setActiveAccidentalSelection,
+    setActivePedalSelection,
     setIsSelectionVisible,
     setSelectedSelections,
     setSelectedMeasureScope,

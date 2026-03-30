@@ -1,4 +1,5 @@
-import type { MeasurePair, ScoreNote, Selection, TimeSignature } from '../types'
+import type { ActivePedalSelection, MeasurePair, PedalSpan, ScoreNote, Selection, TimeSignature } from '../types'
+import { normalizePedalSpan } from '../pedalUtils'
 
 export type UndoSnapshot = {
   pairs: MeasurePair[]
@@ -6,6 +7,8 @@ export type UndoSnapshot = {
   selection: Selection
   isSelectionVisible: boolean
   fullMeasureRestCollapseScopeKeys: string[]
+  pedalSpans: PedalSpan[]
+  activePedalSelection: ActivePedalSelection | null
 }
 
 export function cloneScoreNote(note: ScoreNote): ScoreNote {
@@ -30,6 +33,10 @@ export function cloneMeasurePairs(pairs: MeasurePair[]): MeasurePair[] {
     treble: pair.treble.map(cloneScoreNote),
     bass: pair.bass.map(cloneScoreNote),
   }))
+}
+
+export function clonePedalSpans(spans: PedalSpan[]): PedalSpan[] {
+  return spans.map((span) => normalizePedalSpan({ ...span }))
 }
 
 export function resolvePairKeyFifthsForKeyboard(pairIndex: number, keyFifthsByMeasure?: number[] | null): number {

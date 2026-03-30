@@ -1,8 +1,10 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
 import type { NoteClipboardPayload } from '../copyPasteTypes'
 import type {
+  ActivePedalSelection,
   ImportedNoteLocation,
   MeasurePair,
+  PedalSpan,
   Pitch,
   Selection,
   TieSelection,
@@ -46,6 +48,8 @@ export type KeyboardCommandEventParams = {
   selectedMeasureScope: MeasureScope
   activeTieSelection: TieSelection | null
   activeAccidentalSelection: Selection | null
+  activePedalSelection: ActivePedalSelection | null
+  pedalSpans: PedalSpan[]
   measureKeyFifthsFromImport: number[] | null
   noteClipboardRef: MutableRefObject<NoteClipboardPayload | null>
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
@@ -56,10 +60,13 @@ export type KeyboardCommandEventParams = {
   undoLastScoreEdit: () => boolean
   handleMoveSelectionsByKeyboardSteps: KeyboardMoveSelectionsByKeyboardSteps
   handleMoveSelectionByKeyboardArrow: KeyboardMoveSelectionByKeyboardArrow
+  pushUndoSnapshot: (sourcePairs: MeasurePair[]) => void
   applyKeyboardEditResult: KeyboardEditResultApplier
   playAccidentalEditPreview: KeyboardAccidentalPreviewPlayer
+  setPedalSpans: StateSetter<PedalSpan[]>
   setActiveTieSelection: StateSetter<TieSelection | null>
   setActiveAccidentalSelection: StateSetter<Selection | null>
+  setActivePedalSelection: StateSetter<ActivePedalSelection | null>
   setIsSelectionVisible: StateSetter<boolean>
   setSelectedSelections: StateSetter<Selection[]>
   setSelectedMeasureScope: StateSetter<MeasureScope>

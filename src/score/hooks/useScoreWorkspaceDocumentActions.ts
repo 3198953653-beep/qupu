@@ -13,6 +13,7 @@ export function useScoreWorkspaceDocumentActions(params: {
   playbackTimelineEvents: PlaybackTimelineEvent[]
   clearDragOverlay: () => void
   clearActiveChordSelection: () => void
+  clearActivePedalSelection: () => void
   handlePlaybackStart: Parameters<typeof useScoreDocumentActionsController>[0]['editorHandlers']['onPlaybackStart']
   handlePlaybackPoint: Parameters<typeof useScoreDocumentActionsController>[0]['editorHandlers']['onPlaybackPoint']
   handlePlaybackComplete: Parameters<typeof useScoreDocumentActionsController>[0]['editorHandlers']['onPlaybackComplete']
@@ -29,6 +30,7 @@ export function useScoreWorkspaceDocumentActions(params: {
     playbackTimelineEvents,
     clearDragOverlay,
     clearActiveChordSelection,
+    clearActivePedalSelection,
     handlePlaybackStart,
     handlePlaybackPoint,
     handlePlaybackComplete,
@@ -45,6 +47,7 @@ export function useScoreWorkspaceDocumentActions(params: {
     const nextSourceKind = pendingImportedScoreSourceKindRef.current ?? 'musicxml-text'
     appState.setScoreSourceKind(nextSourceKind)
     appState.setSegmentRhythmTemplateBindings({})
+    appState.setActivePedalSelection(null)
     appState.setTimelineSegmentOverlayMode(
       result.importedTimelineSegmentStartPairIndexes && result.importedTimelineSegmentStartPairIndexes.length > 0
         ? 'imported-last-part'
@@ -53,6 +56,7 @@ export function useScoreWorkspaceDocumentActions(params: {
     pendingImportedScoreSourceKindRef.current = null
   }, [
     appState.setScoreSourceKind,
+    appState.setActivePedalSelection,
     appState.setSegmentRhythmTemplateBindings,
     appState.setTimelineSegmentOverlayMode,
     requestPlaybackCursorReset,
@@ -112,6 +116,7 @@ export function useScoreWorkspaceDocumentActions(params: {
       stopActivePlaybackSession,
       requestPlaybackCursorReset,
       clearActiveChordSelection,
+      clearActivePedalSelection,
       setActiveBuiltInDemo: appState.setActiveBuiltInDemo,
       setTimelineSegmentOverlayMode: appState.setTimelineSegmentOverlayMode,
       setScoreSourceKind: appState.setScoreSourceKind,

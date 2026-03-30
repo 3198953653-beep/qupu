@@ -3,9 +3,11 @@ import { buildNotationPaletteDerivedDisplay, type NotationPaletteDerivedDisplay,
 import { findSelectionLocationInPairs } from '../keyboardEdits'
 import { toDisplayPitch } from '../pitchUtils'
 import type {
+  ActivePedalSelection,
   ImportFeedback,
   ImportedNoteLocation,
   MeasurePair,
+  PedalSpan,
   ScoreNote,
   Selection,
   TieSelection,
@@ -24,10 +26,12 @@ export function useScoreSelectionController(params: {
   notes: ScoreNote[]
   bassNotes: ScoreNote[]
   measurePairs: MeasurePair[]
+  pedalSpans: PedalSpan[]
   activeSelection: Selection
   selectedSelections: Selection[]
   selectedMeasureScope: { pairIndex: number; staff: Selection['staff'] } | null
   activeTieSelection: TieSelection | null
+  activePedalSelection: ActivePedalSelection | null
   isSelectionVisible: boolean
   draggingSelection: Selection | null
   importFeedback: ImportFeedback
@@ -38,6 +42,8 @@ export function useScoreSelectionController(params: {
   bassNoteIndexById: Map<string, number>
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
   activeSelectionRef: MutableRefObject<Selection>
+  activePedalSelectionRef: MutableRefObject<ActivePedalSelection | null>
+  pedalSpansRef: MutableRefObject<PedalSpan[]>
   selectedSelectionsRef: MutableRefObject<Selection[]>
   fullMeasureRestCollapseScopeKeys: string[]
   fullMeasureRestCollapseScopeKeysRef: MutableRefObject<string[]>
@@ -49,6 +55,7 @@ export function useScoreSelectionController(params: {
   setSelectedSelections: Dispatch<SetStateAction<Selection[]>>
   setSelectedMeasureScope: (scope: { pairIndex: number; staff: Selection['staff'] } | null) => void
   setActiveTieSelection: (selection: TieSelection | null) => void
+  setActivePedalSelection: (selection: ActivePedalSelection | null) => void
 }): {
   currentSelection: ScoreNote
   currentSelectionPosition: number
@@ -60,10 +67,12 @@ export function useScoreSelectionController(params: {
     notes,
     bassNotes,
     measurePairs,
+    pedalSpans,
     activeSelection,
     selectedSelections,
     selectedMeasureScope,
     activeTieSelection,
+    activePedalSelection,
     isSelectionVisible,
     draggingSelection,
     importFeedback,
@@ -74,6 +83,8 @@ export function useScoreSelectionController(params: {
     bassNoteIndexById,
     importedNoteLookupRef,
     activeSelectionRef,
+    activePedalSelectionRef,
+    pedalSpansRef,
     selectedSelectionsRef,
     fullMeasureRestCollapseScopeKeys,
     fullMeasureRestCollapseScopeKeysRef,
@@ -85,6 +96,7 @@ export function useScoreSelectionController(params: {
     setSelectedSelections,
     setSelectedMeasureScope,
     setActiveTieSelection,
+    setActivePedalSelection,
   } = params
 
   useEffect(() => {
@@ -186,6 +198,14 @@ export function useScoreSelectionController(params: {
   }, [activeSelection, activeSelectionRef])
 
   useEffect(() => {
+    activePedalSelectionRef.current = activePedalSelection
+  }, [activePedalSelection, activePedalSelectionRef])
+
+  useEffect(() => {
+    pedalSpansRef.current = pedalSpans
+  }, [pedalSpans, pedalSpansRef])
+
+  useEffect(() => {
     selectedSelectionsRef.current = selectedSelections
   }, [selectedSelections, selectedSelectionsRef])
 
@@ -226,6 +246,13 @@ export function useScoreSelectionController(params: {
     if (stillExists) return
     setActiveTieSelection(null)
   }, [activeTieSelection, measurePairs, setActiveTieSelection])
+
+  useEffect(() => {
+    if (!activePedalSelection) return
+    const stillExists = pedalSpans.some((span) => span.id === activePedalSelection.pedalId)
+    if (stillExists) return
+    setActivePedalSelection(null)
+  }, [activePedalSelection, pedalSpans, setActivePedalSelection])
 
   useEffect(() => {
     isSelectionVisibleRef.current = isSelectionVisible
