@@ -1,4 +1,5 @@
 import type { Dispatch, MutableRefObject, PointerEvent, SetStateAction } from 'react'
+import { clampStaffInterGapPx } from './grandStaffLayout'
 import { getHitTarget } from './layout/hitTest'
 import type { HitGridIndex } from './layout/hitTest'
 import { buildDragStateForHit, getDragMovePitch } from './dragInteractions'
@@ -24,7 +25,22 @@ import type {
 type StateSetter<T> = Dispatch<SetStateAction<T>>
 export type SelectionPointerMode = 'replace' | 'append' | 'range'
 export type BlankPointerPayload = { pairIndex: number | null; staff: Selection['staff'] | null }
+export type BlankStaffGapDragSession = {
+  pointerId: number
+  startClientY: number
+  startStaffInterGapPx: number
+  pairIndex: number
+  staff: Selection['staff']
+  dragStarted: boolean
+}
 const REPLACE_TAP_SELECTION_THRESHOLD_MS = 180
+
+function resolveBlankStaffGapDragValue(
+  session: BlankStaffGapDragSession,
+  clientY: number,
+): number {
+  return clampStaffInterGapPx(session.startStaffInterGapPx + (clientY - session.startClientY))
+}
 
 function upsertSelection(
   selection: Selection,
@@ -177,6 +193,8 @@ export function handleBeginDragPointer(params: {
   importedKeyFifths: number[] | null
   pitches: Pitch[]
   dragRef: MutableRefObject<DragState | null>
+  blankStaffGapDragRef: MutableRefObject<BlankStaffGapDragSession | null>
+  staffInterGapPx: number
   currentSelections: Selection[]
   setActiveSelection: StateSetter<Selection>
   setDraggingSelection: StateSetter<Selection | null>
@@ -215,6 +233,8 @@ export function handleBeginDragPointer(params: {
     importedKeyFifths,
     pitches,
     dragRef,
+    blankStaffGapDragRef,
+    staffInterGapPx,
     currentSelections,
     setActiveSelection,
     setDraggingSelection,
@@ -291,6 +311,19 @@ export function handleBeginDragPointer(params: {
   if (!hitTarget) {
     const blankHit = resolveBlankMeasureHit({ x, y, measureLayouts })
     onBlankPointerDown?.(blankHit)
+    if (blankHit.pairIndex !== null && blankHit.staff !== null) {
+      event.preventDefault()
+      setDraggingSelection(null)
+      blankStaffGapDragRef.current = {
+        pointerId: event.pointerId,
+        startClientY: event.clientY,
+        startStaffInterGapPx: staffInterGapPx,
+        pairIndex: blankHit.pairIndex,
+        staff: blankHit.staff,
+        dragStarted: false,
+      }
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
     return
   }
 
@@ -489,12 +522,40 @@ export function handleBeginDragPointer(params: {
 export function handleSurfacePointerMove(params: {
   event: PointerEvent<HTMLCanvasElement>
   dragRef: MutableRefObject<DragState | null>
+  blankStaffGapDragRef: MutableRefObject<BlankStaffGapDragSession | null>
   previewStartThresholdPx: number
   pitches: Pitch[]
+  setStaffInterGapPx: StateSetter<number>
   drawDragMeasurePreview: (drag: DragState) => void
   scheduleDragCommit: (drag: DragState, pitch: Pitch) => void
 }): void {
-  const { event, dragRef, previewStartThresholdPx, pitches, drawDragMeasurePreview, scheduleDragCommit } = params
+  const {
+    event,
+    dragRef,
+    blankStaffGapDragRef,
+    previewStartThresholdPx,
+    pitches,
+    setStaffInterGapPx,
+    drawDragMeasurePreview,
+    scheduleDragCommit,
+  } = params
+  const blankStaffGapDrag = blankStaffGapDragRef.current
+  if (blankStaffGapDrag && event.pointerId === blankStaffGapDrag.pointerId) {
+    const deltaY = event.clientY - blankStaffGapDrag.startClientY
+    if (!blankStaffGapDrag.dragStarted && Math.abs(deltaY) < previewStartThresholdPx) {
+      return
+    }
+    event.preventDefault()
+    if (!blankStaffGapDrag.dragStarted) {
+      blankStaffGapDragRef.current = {
+        ...blankStaffGapDrag,
+        dragStarted: true,
+      }
+    }
+    setStaffInterGapPx(resolveBlankStaffGapDragValue(blankStaffGapDrag, event.clientY))
+    return
+  }
+
   const drag = dragRef.current
   if (!drag || event.pointerId !== drag.pointerId) return
 
@@ -520,9 +581,12 @@ export function handleSurfacePointerMove(params: {
 export function handleEndDragPointer(params: {
   event: PointerEvent<HTMLCanvasElement>
   dragRef: MutableRefObject<DragState | null>
+  blankStaffGapDragRef: MutableRefObject<BlankStaffGapDragSession | null>
   dragRafRef: MutableRefObject<number | null>
   dragPendingRef: MutableRefObject<{ drag: DragState; pitch: Pitch } | null>
   commitDragPitchToScore: (drag: DragState, pitch: Pitch) => void
+  previewStartThresholdPx: number
+  setStaffInterGapPx: StateSetter<number>
   dragPreviewFrameRef: MutableRefObject<number>
   clearDragOverlay: () => void
   setActiveSelection: StateSetter<Selection>
@@ -534,9 +598,12 @@ export function handleEndDragPointer(params: {
   const {
     event,
     dragRef,
+    blankStaffGapDragRef,
     dragRafRef,
     dragPendingRef,
     commitDragPitchToScore,
+    previewStartThresholdPx,
+    setStaffInterGapPx,
     dragPreviewFrameRef,
     clearDragOverlay,
     setActiveSelection,
@@ -545,6 +612,19 @@ export function handleEndDragPointer(params: {
     onSelectionTapRelease,
     onPreviewPendingDragPitch,
   } = params
+
+  const blankStaffGapDrag = blankStaffGapDragRef.current
+  if (blankStaffGapDrag && event.pointerId === blankStaffGapDrag.pointerId) {
+    const deltaY = event.clientY - blankStaffGapDrag.startClientY
+    if (blankStaffGapDrag.dragStarted || Math.abs(deltaY) >= previewStartThresholdPx) {
+      setStaffInterGapPx(resolveBlankStaffGapDragValue(blankStaffGapDrag, event.clientY))
+    }
+    blankStaffGapDragRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    return
+  }
 
   const drag = dragRef.current
   if (!drag || event.pointerId !== drag.pointerId) return

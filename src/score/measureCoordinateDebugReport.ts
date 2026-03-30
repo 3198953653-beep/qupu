@@ -262,6 +262,10 @@ export function buildMeasureCoordinateDebugReport(params: {
       systemTop: measureLayout?.systemTop ?? null,
       trebleY: measureLayout?.trebleY ?? null,
       bassY: measureLayout?.bassY ?? null,
+      trebleLineTopY: measureLayout?.trebleLineTopY ?? null,
+      trebleLineBottomY: measureLayout?.trebleLineBottomY ?? null,
+      bassLineTopY: measureLayout?.bassLineTopY ?? null,
+      bassLineBottomY: measureLayout?.bassLineBottomY ?? null,
       measureStartBarX: measureLayout?.measureX ?? null,
       measureEndBarX:
         measureLayout

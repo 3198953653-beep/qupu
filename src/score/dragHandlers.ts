@@ -1,8 +1,9 @@
-import { startTransition } from 'react'
+import { startTransition, useRef } from 'react'
 import type { Dispatch, MutableRefObject, PointerEvent, SetStateAction } from 'react'
 import { commitDragPitchToScoreData } from './dragInteractions'
 import { getStaffStepDelta, resolveGroupedTargetPitch } from './dragPitchTransform'
 import {
+  type BlankStaffGapDragSession,
   handleBeginDragPointer,
   handleEndDragPointer,
   handleSurfacePointerMove,
@@ -65,6 +66,8 @@ export function useDragHandlers(params: {
   setDragPreviewState: StateSetter<DragState | null>
   setActiveSelection: StateSetter<Selection>
   setDraggingSelection: StateSetter<Selection | null>
+  staffInterGapPx: number
+  setStaffInterGapPx: StateSetter<number>
   currentSelections: Selection[]
   onSelectionPointerDown?: (
     selection: Selection,
@@ -143,6 +146,8 @@ export function useDragHandlers(params: {
     setDragPreviewState,
     setActiveSelection,
     setDraggingSelection,
+    staffInterGapPx,
+    setStaffInterGapPx,
     currentSelections,
     onSelectionPointerDown,
     onAccidentalPointerDown,
@@ -172,6 +177,7 @@ export function useDragHandlers(params: {
     spacingLayoutMode = 'custom',
     showNoteHeadJianpu = false,
   } = params
+  const blankStaffGapDragRef = useRef<BlankStaffGapDragSession | null>(null)
 
   const resolvePreviewNoteByTarget = (target: {
     pairIndex: number
@@ -371,8 +377,10 @@ export function useDragHandlers(params: {
     handleSurfacePointerMove({
       event,
       dragRef,
+      blankStaffGapDragRef,
       previewStartThresholdPx,
       pitches,
+      setStaffInterGapPx,
       drawDragMeasurePreview,
       scheduleDragCommit,
     })
@@ -382,9 +390,12 @@ export function useDragHandlers(params: {
     handleEndDragPointer({
       event,
       dragRef,
+      blankStaffGapDragRef,
       dragRafRef,
       dragPendingRef,
       commitDragPitchToScore,
+      previewStartThresholdPx,
+      setStaffInterGapPx,
       dragPreviewFrameRef,
       clearDragOverlay,
       setActiveSelection,
@@ -420,6 +431,8 @@ export function useDragHandlers(params: {
       importedKeyFifths: measureKeyFifthsFromImportRef.current,
       pitches,
       dragRef,
+      blankStaffGapDragRef,
+      staffInterGapPx,
       currentSelections,
       setActiveSelection,
       setDraggingSelection,

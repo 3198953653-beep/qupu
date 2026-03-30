@@ -180,6 +180,8 @@ export function useScoreWorkspaceSurfaceRuntime(params: {
       setDragPreviewState: appState.setDragPreviewState,
       setActiveSelection: appState.setActiveSelection,
       setDraggingSelection: appState.setDraggingSelection,
+      staffInterGapPx: appState.staffInterGapPx,
+      setStaffInterGapPx: appState.setStaffInterGapPx,
       currentSelections: appState.selectedSelections,
       onSelectionPointerDown: selectionBindings.onSelectionPointerDown,
       onSelectionTapRelease: selectionBindings.onSelectionTapRelease,
