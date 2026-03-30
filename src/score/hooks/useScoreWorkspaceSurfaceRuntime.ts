@@ -183,6 +183,7 @@ export function useScoreWorkspaceSurfaceRuntime(params: {
       setDraggingSelection: appState.setDraggingSelection,
       staffInterGapPx: appState.staffInterGapPx,
       setStaffInterGapPx: appState.setStaffInterGapPx,
+      setPedalSpans: appState.setPedalSpans,
       currentSelections: appState.selectedSelections,
       pedalSpans: appState.pedalSpans,
       chordRulerEntriesByPair: layout.chordRulerEntriesByPair,

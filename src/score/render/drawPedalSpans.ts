@@ -1,13 +1,13 @@
 import { getMeasureTicksFromTimeSignature, type ChordRulerEntry } from '../chordRuler'
+import { GRAND_STAFF_BOTTOM_PADDING_PX, PEDAL_LANE_EXTRA_HEIGHT_PX } from '../grandStaffLayout'
 import {
   collectMeasureTickRangeLayoutCoverage,
   getMeasureTickRangeLayoutBounds,
 } from '../chordRangeNoteCoverage'
-import { PEDAL_MIN_VISUAL_GAP_PX, sortPedalSpans } from '../pedalUtils'
+import { PEDAL_BASELINE_OFFSET_PX, PEDAL_MIN_VISUAL_GAP_PX, sortPedalSpans } from '../pedalUtils'
 import type { MeasureTimelineBundle } from '../timeline/types'
 import type { ActivePedalSelection, MeasureLayout, MeasurePair, NoteLayout, PedalSpan } from '../types'
 
-const PEDAL_BASELINE_OFFSET_PX = 18
 const PEDAL_BRACKET_HOOK_HEIGHT_PX = 10
 const PEDAL_TEXT_MARGIN_RIGHT_PX = 6
 const PEDAL_MIN_DRAW_WIDTH_PX = 4
@@ -154,6 +154,10 @@ type VisualPedalSpan = {
   occupiedStartX: number
   occupiedEndX: number
   baseBaselineY: number
+  maxBaselineY: number
+  autoBaselineY: number
+  manualBaselineOffsetPx: number
+  resolvedBaselineY: number
   baselineY: number
   pedalTopInsetPx: number
   pedalTopY: number
@@ -184,6 +188,10 @@ type SpanCoverageBounds = {
 
 function normalizeTick(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
+}
+
+function normalizeManualBaselineOffsetPx(value: number): number {
+  return Number.isFinite(value) ? Math.round(value) : 0
 }
 
 function resolveSpanCoverageRange(params: {
@@ -347,6 +355,14 @@ function getPedalTopY(params: {
   return params.baselineY - params.pedalTopInsetPx
 }
 
+function getPedalMaxBaselineY(measureLayout: MeasureLayout): number | null {
+  const bassLineBottomY = Number.isFinite(measureLayout.bassLineBottomY)
+    ? measureLayout.bassLineBottomY
+    : measureLayout.bassY + 40
+  if (!Number.isFinite(bassLineBottomY)) return null
+  return bassLineBottomY + GRAND_STAFF_BOTTOM_PADDING_PX + PEDAL_LANE_EXTRA_HEIGHT_PX - PEDAL_ACTIVE_BAND_PADDING_Y_PX
+}
+
 function getPedalSystemKey(measureLayout: MeasureLayout): string {
   if (Number.isFinite(measureLayout.systemTop)) {
     return `system:${measureLayout.systemTop.toFixed(2)}`
@@ -481,7 +497,8 @@ export function buildPedalRenderPlan(params: {
     const baseBaselineY = (Number.isFinite(startMeasureLayout.bassLineBottomY)
       ? startMeasureLayout.bassLineBottomY
       : startMeasureLayout.bassY + 40) + PEDAL_BASELINE_OFFSET_PX
-    if (!Number.isFinite(baseBaselineY)) return []
+    const rawMaxBaselineY = getPedalMaxBaselineY(startMeasureLayout)
+    if (!Number.isFinite(baseBaselineY) || !Number.isFinite(rawMaxBaselineY)) return []
     const systemKey = getPedalSystemKey(startMeasureLayout)
     const pedalTopInsetPx = getPedalTopInsetPx({
       span,
@@ -499,6 +516,8 @@ export function buildPedalRenderPlan(params: {
     const requiredBaselineY = collisionBottomY !== null
       ? Math.max(baseBaselineY, collisionBottomY + PEDAL_MIN_NOTE_CLEARANCE_PX + pedalTopInsetPx)
       : baseBaselineY
+    const maxBaselineY = Math.max(requiredBaselineY, rawMaxBaselineY as number)
+    const manualBaselineOffsetPx = normalizeManualBaselineOffsetPx(span.manualBaselineOffsetPx)
 
     return [{
       span,
@@ -511,10 +530,14 @@ export function buildPedalRenderPlan(params: {
       occupiedStartX: startX,
       occupiedEndX: getPedalOccupiedEndX({ span, endX, releaseWidthPx }),
       baseBaselineY,
-      baselineY: baseBaselineY,
+      maxBaselineY,
+      autoBaselineY: requiredBaselineY,
+      manualBaselineOffsetPx,
+      resolvedBaselineY: requiredBaselineY,
+      baselineY: requiredBaselineY,
       pedalTopInsetPx,
       pedalTopY: getPedalTopY({
-        baselineY: baseBaselineY,
+        baselineY: requiredBaselineY,
         pedalTopInsetPx,
       }),
       collisionBottomY,
@@ -525,21 +548,12 @@ export function buildPedalRenderPlan(params: {
       hitLeftX: startX - PEDAL_HIT_PADDING_X_PX,
       hitRightX: getPedalOccupiedEndX({ span, endX, releaseWidthPx }) + PEDAL_HIT_PADDING_X_PX,
       hitTopY: getPedalTopY({
-        baselineY: baseBaselineY,
+        baselineY: requiredBaselineY,
         pedalTopInsetPx,
       }) - PEDAL_HIT_PADDING_Y_PX,
-      hitBottomY: baseBaselineY + PEDAL_HIT_PADDING_Y_PX,
+      hitBottomY: requiredBaselineY + PEDAL_HIT_PADDING_Y_PX,
       isActive: activePedalSelection?.pedalId === span.id,
     }]
-  })
-
-  const systemBaselineYByKey = new Map<string, number>()
-  baseEntries.forEach((entry) => {
-    if (entry.layoutMode !== 'uniform') return
-    const current = systemBaselineYByKey.get(entry.systemKey)
-    if (current === undefined || entry.requiredBaselineY > current) {
-      systemBaselineYByKey.set(entry.systemKey, entry.requiredBaselineY)
-    }
   })
 
   return baseEntries.map((entry, index) => {
@@ -555,9 +569,14 @@ export function buildPedalRenderPlan(params: {
         endX = nextStartLimitX
       }
     }
-    const baselineY = entry.layoutMode === 'uniform'
-      ? (systemBaselineYByKey.get(entry.systemKey) ?? entry.requiredBaselineY)
-      : entry.requiredBaselineY
+    const autoBaselineY = entry.requiredBaselineY
+    const resolvedBaselineY = Math.min(
+      entry.maxBaselineY,
+      Math.max(
+        autoBaselineY + entry.manualBaselineOffsetPx,
+        entry.requiredBaselineY,
+      ),
+    )
 
     return {
       ...entry,
@@ -567,9 +586,11 @@ export function buildPedalRenderPlan(params: {
         endX,
         releaseWidthPx,
       }),
-      baselineY,
+      autoBaselineY,
+      resolvedBaselineY,
+      baselineY: resolvedBaselineY,
       pedalTopY: getPedalTopY({
-        baselineY,
+        baselineY: resolvedBaselineY,
         pedalTopInsetPx: entry.pedalTopInsetPx,
       }),
       laneIndex: 0,
@@ -580,10 +601,10 @@ export function buildPedalRenderPlan(params: {
         releaseWidthPx,
       }) + PEDAL_HIT_PADDING_X_PX,
       hitTopY: getPedalTopY({
-        baselineY,
+        baselineY: resolvedBaselineY,
         pedalTopInsetPx: entry.pedalTopInsetPx,
       }) - PEDAL_HIT_PADDING_Y_PX,
-      hitBottomY: baselineY + PEDAL_HIT_PADDING_Y_PX,
+      hitBottomY: resolvedBaselineY + PEDAL_HIT_PADDING_Y_PX,
       isActive: activePedalSelection?.pedalId === entry.span.id,
     }
   })

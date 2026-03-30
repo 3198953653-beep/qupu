@@ -123,6 +123,7 @@ export type PedalSpan = {
   id: string
   style: PedalStyle
   layoutMode: PedalLayoutMode
+  manualBaselineOffsetPx: number
   staff: 'bass'
   startPairIndex: number
   startTick: number

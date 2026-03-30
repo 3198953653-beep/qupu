@@ -87,6 +87,10 @@ export function useScoreInteractionRuntimeController(params: {
     activeChordSelection: coreEditing.chordMarker.activeChordSelection,
     timelineSegmentBlocks: coreEditing.chordMarker.timelineSegmentBlocks,
     pedalSpans: appState.pedalSpans,
+    scoreRef: editorRefs.scoreRef,
+    measureLayoutsRef: editorRefs.measureLayoutsRef,
+    measureTimelineBundlesRef: editorRefs.measureTimelineBundlesRef,
+    noteLayoutsByPairRef: editorRefs.noteLayoutsByPairRef,
     setPedalSpans: appState.setPedalSpans,
     clearActivePedalSelection: coreEditing.sessionHelpers.clearActivePedalSelection,
   })

@@ -4,6 +4,7 @@ import { commitDragPitchToScoreData } from './dragInteractions'
 import { getStaffStepDelta, resolveGroupedTargetPitch } from './dragPitchTransform'
 import {
   type BlankStaffGapDragSession,
+  type PedalVerticalDragSession,
   handleBeginDragPointer,
   handleEndDragPointer,
   handleSurfacePointerMove,
@@ -71,6 +72,7 @@ export function useDragHandlers(params: {
   setDraggingSelection: StateSetter<Selection | null>
   staffInterGapPx: number
   setStaffInterGapPx: StateSetter<number>
+  setPedalSpans: StateSetter<PedalSpan[]>
   currentSelections: Selection[]
   pedalSpans: PedalSpan[]
   chordRulerEntriesByPair: ChordRulerEntry[][] | null
@@ -154,6 +156,7 @@ export function useDragHandlers(params: {
     setDraggingSelection,
     staffInterGapPx,
     setStaffInterGapPx,
+    setPedalSpans,
     currentSelections,
     pedalSpans,
     chordRulerEntriesByPair,
@@ -187,6 +190,7 @@ export function useDragHandlers(params: {
     showNoteHeadJianpu = false,
   } = params
   const blankStaffGapDragRef = useRef<BlankStaffGapDragSession | null>(null)
+  const pedalVerticalDragRef = useRef<PedalVerticalDragSession | null>(null)
 
   const resolvePreviewNoteByTarget = (target: {
     pairIndex: number
@@ -387,9 +391,12 @@ export function useDragHandlers(params: {
       event,
       dragRef,
       blankStaffGapDragRef,
+      pedalVerticalDragRef,
       previewStartThresholdPx,
       pitches,
       setStaffInterGapPx,
+      setPedalSpans,
+      onBeforePedalVerticalDragChange: () => onBeforeApplyScoreChange?.(measurePairsRef.current),
       drawDragMeasurePreview,
       scheduleDragCommit,
     })
@@ -400,11 +407,13 @@ export function useDragHandlers(params: {
       event,
       dragRef,
       blankStaffGapDragRef,
+      pedalVerticalDragRef,
       dragRafRef,
       dragPendingRef,
       commitDragPitchToScore,
       previewStartThresholdPx,
       setStaffInterGapPx,
+      setPedalSpans,
       dragPreviewFrameRef,
       clearDragOverlay,
       setActiveSelection,
@@ -445,6 +454,7 @@ export function useDragHandlers(params: {
       pitches,
       dragRef,
       blankStaffGapDragRef,
+      pedalVerticalDragRef,
       staffInterGapPx,
       currentSelections,
       setActiveSelection,

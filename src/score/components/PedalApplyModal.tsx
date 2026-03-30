@@ -117,7 +117,7 @@ export function PedalApplyModal(props: {
         <section className="pedal-apply-layout-section">
           <div className="pedal-apply-section-header">
             <h4>水平线模式</h4>
-            <span>灵活按每段避让，统一按同系统共线</span>
+            <span>灵活按每段避让，统一按同系统初始共线</span>
           </div>
           <div className="pedal-apply-layout-grid">
             {layoutModeOptions.map((option) => (

@@ -38,7 +38,18 @@ export type BlankStaffGapDragSession = {
   staff: Selection['staff']
   dragStarted: boolean
 }
+export type PedalVerticalDragSession = {
+  pointerId: number
+  pedalId: string
+  startClientY: number
+  startManualBaselineOffsetPx: number
+  minManualBaselineOffsetPx: number
+  maxManualBaselineOffsetPx: number
+  dragStarted: boolean
+  undoSnapshotTaken: boolean
+}
 const REPLACE_TAP_SELECTION_THRESHOLD_MS = 180
+type PedalRenderPlanEntry = ReturnType<typeof buildPedalRenderPlan>[number]
 
 function resolveBlankStaffGapDragValue(
   session: BlankStaffGapDragSession,
@@ -47,7 +58,18 @@ function resolveBlankStaffGapDragValue(
   return clampStaffInterGapPx(session.startStaffInterGapPx + (clientY - session.startClientY))
 }
 
-function findHitPedalSelection(params: {
+function resolvePedalVerticalDragValue(
+  session: PedalVerticalDragSession,
+  clientY: number,
+): number {
+  const nextOffset = Math.round(session.startManualBaselineOffsetPx + (clientY - session.startClientY))
+  return Math.min(
+    session.maxManualBaselineOffsetPx,
+    Math.max(session.minManualBaselineOffsetPx, nextOffset),
+  )
+}
+
+function findHitPedalPlanEntry(params: {
   x: number
   y: number
   context2D: CanvasRenderingContext2D | null
@@ -57,7 +79,7 @@ function findHitPedalSelection(params: {
   measureLayouts: Map<number, MeasureLayout>
   measureTimelineBundles: Map<number, MeasureTimelineBundle>
   noteLayoutsByPair: Map<number, NoteLayout[]>
-}): ActivePedalSelection | null {
+}): PedalRenderPlanEntry | null {
   const {
     x,
     y,
@@ -99,7 +121,7 @@ function findHitPedalSelection(params: {
     return best
   }, hitCandidates[0] ?? null)
 
-  return winner ? { pedalId: winner.span.id } : null
+  return winner ?? null
 }
 
 function upsertSelection(
@@ -258,6 +280,7 @@ export function handleBeginDragPointer(params: {
   pitches: Pitch[]
   dragRef: MutableRefObject<DragState | null>
   blankStaffGapDragRef: MutableRefObject<BlankStaffGapDragSession | null>
+  pedalVerticalDragRef: MutableRefObject<PedalVerticalDragSession | null>
   staffInterGapPx: number
   currentSelections: Selection[]
   setActiveSelection: StateSetter<Selection>
@@ -303,6 +326,7 @@ export function handleBeginDragPointer(params: {
     pitches,
     dragRef,
     blankStaffGapDragRef,
+    pedalVerticalDragRef,
     staffInterGapPx,
     currentSelections,
     setActiveSelection,
@@ -379,7 +403,7 @@ export function handleBeginDragPointer(params: {
   const y = (event.clientY - rect.top) * clientToScoreScaleY
   const hitTarget = getHitTarget(x, y, noteLayouts, 0, hitGrid)
   if (!hitTarget) {
-    const pedalHitSelection = findHitPedalSelection({
+    const pedalHitEntry = findHitPedalPlanEntry({
       x,
       y,
       context2D: rawContext2D,
@@ -390,10 +414,27 @@ export function handleBeginDragPointer(params: {
       measureTimelineBundles,
       noteLayoutsByPair,
     })
-    if (pedalHitSelection) {
+    if (pedalHitEntry) {
       event.preventDefault()
       setDraggingSelection(null)
+      const pedalHitSelection = { pedalId: pedalHitEntry.span.id }
       onPedalPointerDown?.(pedalHitSelection)
+      pedalVerticalDragRef.current = {
+        pointerId: event.pointerId,
+        pedalId: pedalHitSelection.pedalId,
+        startClientY: event.clientY,
+        startManualBaselineOffsetPx: Number.isFinite(pedalHitEntry.span.manualBaselineOffsetPx)
+          ? Math.round(pedalHitEntry.span.manualBaselineOffsetPx)
+          : 0,
+        minManualBaselineOffsetPx: Math.ceil(pedalHitEntry.requiredBaselineY - pedalHitEntry.autoBaselineY),
+        maxManualBaselineOffsetPx: Math.max(
+          Math.ceil(pedalHitEntry.requiredBaselineY - pedalHitEntry.autoBaselineY),
+          Math.floor(pedalHitEntry.maxBaselineY - pedalHitEntry.autoBaselineY),
+        ),
+        dragStarted: false,
+        undoSnapshotTaken: false,
+      }
+      event.currentTarget.setPointerCapture(event.pointerId)
       return
     }
     const blankHit = resolveBlankMeasureHit({ x, y, measureLayouts })
@@ -610,9 +651,12 @@ export function handleSurfacePointerMove(params: {
   event: PointerEvent<HTMLCanvasElement>
   dragRef: MutableRefObject<DragState | null>
   blankStaffGapDragRef: MutableRefObject<BlankStaffGapDragSession | null>
+  pedalVerticalDragRef: MutableRefObject<PedalVerticalDragSession | null>
   previewStartThresholdPx: number
   pitches: Pitch[]
   setStaffInterGapPx: StateSetter<number>
+  setPedalSpans: StateSetter<PedalSpan[]>
+  onBeforePedalVerticalDragChange?: () => void
   drawDragMeasurePreview: (drag: DragState) => void
   scheduleDragCommit: (drag: DragState, pitch: Pitch) => void
 }): void {
@@ -620,9 +664,12 @@ export function handleSurfacePointerMove(params: {
     event,
     dragRef,
     blankStaffGapDragRef,
+    pedalVerticalDragRef,
     previewStartThresholdPx,
     pitches,
     setStaffInterGapPx,
+    setPedalSpans,
+    onBeforePedalVerticalDragChange,
     drawDragMeasurePreview,
     scheduleDragCommit,
   } = params
@@ -640,6 +687,40 @@ export function handleSurfacePointerMove(params: {
       }
     }
     setStaffInterGapPx(resolveBlankStaffGapDragValue(blankStaffGapDrag, event.clientY))
+    return
+  }
+
+  const pedalVerticalDrag = pedalVerticalDragRef.current
+  if (pedalVerticalDrag && event.pointerId === pedalVerticalDrag.pointerId) {
+    const deltaY = event.clientY - pedalVerticalDrag.startClientY
+    if (!pedalVerticalDrag.dragStarted && Math.abs(deltaY) < previewStartThresholdPx) {
+      return
+    }
+    event.preventDefault()
+    if (!pedalVerticalDrag.dragStarted) {
+      if (!pedalVerticalDrag.undoSnapshotTaken) {
+        onBeforePedalVerticalDragChange?.()
+      }
+      pedalVerticalDragRef.current = {
+        ...pedalVerticalDrag,
+        dragStarted: true,
+        undoSnapshotTaken: true,
+      }
+    }
+    const nextOffset = resolvePedalVerticalDragValue(pedalVerticalDragRef.current ?? pedalVerticalDrag, event.clientY)
+    setPedalSpans((current) => {
+      let changed = false
+      const next = current.map((span) => {
+        if (span.id !== pedalVerticalDrag.pedalId) return span
+        if (span.manualBaselineOffsetPx === nextOffset) return span
+        changed = true
+        return {
+          ...span,
+          manualBaselineOffsetPx: nextOffset,
+        }
+      })
+      return changed ? next : current
+    })
     return
   }
 
@@ -669,11 +750,13 @@ export function handleEndDragPointer(params: {
   event: PointerEvent<HTMLCanvasElement>
   dragRef: MutableRefObject<DragState | null>
   blankStaffGapDragRef: MutableRefObject<BlankStaffGapDragSession | null>
+  pedalVerticalDragRef: MutableRefObject<PedalVerticalDragSession | null>
   dragRafRef: MutableRefObject<number | null>
   dragPendingRef: MutableRefObject<{ drag: DragState; pitch: Pitch } | null>
   commitDragPitchToScore: (drag: DragState, pitch: Pitch) => void
   previewStartThresholdPx: number
   setStaffInterGapPx: StateSetter<number>
+  setPedalSpans: StateSetter<PedalSpan[]>
   dragPreviewFrameRef: MutableRefObject<number>
   clearDragOverlay: () => void
   setActiveSelection: StateSetter<Selection>
@@ -686,11 +769,13 @@ export function handleEndDragPointer(params: {
     event,
     dragRef,
     blankStaffGapDragRef,
+    pedalVerticalDragRef,
     dragRafRef,
     dragPendingRef,
     commitDragPitchToScore,
     previewStartThresholdPx,
     setStaffInterGapPx,
+    setPedalSpans,
     dragPreviewFrameRef,
     clearDragOverlay,
     setActiveSelection,
@@ -707,6 +792,32 @@ export function handleEndDragPointer(params: {
       setStaffInterGapPx(resolveBlankStaffGapDragValue(blankStaffGapDrag, event.clientY))
     }
     blankStaffGapDragRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    return
+  }
+
+  const pedalVerticalDrag = pedalVerticalDragRef.current
+  if (pedalVerticalDrag && event.pointerId === pedalVerticalDrag.pointerId) {
+    const deltaY = event.clientY - pedalVerticalDrag.startClientY
+    if (pedalVerticalDrag.dragStarted || Math.abs(deltaY) >= previewStartThresholdPx) {
+      const nextOffset = resolvePedalVerticalDragValue(pedalVerticalDrag, event.clientY)
+      setPedalSpans((current) => {
+        let changed = false
+        const next = current.map((span) => {
+          if (span.id !== pedalVerticalDrag.pedalId) return span
+          if (span.manualBaselineOffsetPx === nextOffset) return span
+          changed = true
+          return {
+            ...span,
+            manualBaselineOffsetPx: nextOffset,
+          }
+        })
+        return changed ? next : current
+      })
+    }
+    pedalVerticalDragRef.current = null
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }

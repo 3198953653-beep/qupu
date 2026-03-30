@@ -1,16 +1,21 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type MutableRefObject } from 'react'
 import { parseTimelineSegmentScopeKey } from '../segmentRhythmTemplateEngine'
 import {
   PEDAL_LAYOUT_MODE_LABELS,
   PEDAL_STYLE_LABELS,
   buildPedalSpansForScope,
   getDefaultPedalApplyScope,
+  normalizePedalSpan,
   sortPedalSpans,
   spanIntersectsPedalScope,
 } from '../pedalUtils'
+import { buildPedalRenderPlan } from '../render/drawPedalSpans'
 import type { ChordRulerEntry } from '../chordRuler'
+import type { MeasureTimelineBundle } from '../timeline/types'
 import type {
   MeasurePair,
+  MeasureLayout,
+  NoteLayout,
   PedalApplyScope,
   PedalLayoutMode,
   PedalSpan,
@@ -72,6 +77,10 @@ export function usePedalApplyController(params: {
   activeChordSelection: ActiveChordSelection | null
   timelineSegmentBlocks: TimelineSegmentBlock[]
   pedalSpans: PedalSpan[]
+  scoreRef: MutableRefObject<HTMLCanvasElement | null>
+  measureLayoutsRef: MutableRefObject<Map<number, MeasureLayout>>
+  measureTimelineBundlesRef: MutableRefObject<Map<number, MeasureTimelineBundle>>
+  noteLayoutsByPairRef: MutableRefObject<Map<number, NoteLayout[]>>
   setPedalSpans: (value: PedalSpan[] | ((current: PedalSpan[]) => PedalSpan[])) => void
   clearActivePedalSelection: () => void
 }) {
@@ -83,13 +92,17 @@ export function usePedalApplyController(params: {
     activeChordSelection,
     timelineSegmentBlocks,
     pedalSpans,
+    scoreRef,
+    measureLayoutsRef,
+    measureTimelineBundlesRef,
+    noteLayoutsByPairRef,
     setPedalSpans,
     clearActivePedalSelection,
   } = params
 
   const [isOpen, setIsOpen] = useState(false)
   const [selectedScope, setSelectedScope] = useState<PedalApplyScope>('all')
-  const [selectedLayoutMode, setSelectedLayoutMode] = useState<PedalLayoutMode>('flexible')
+  const [selectedLayoutMode, setSelectedLayoutMode] = useState<PedalLayoutMode>('uniform')
 
   const hasAnyChordEntries = useMemo(
     () => Boolean(chordRulerEntriesByPair?.some((entries) => entries.length > 0)),
@@ -193,7 +206,7 @@ export function usePedalApplyController(params: {
   const openModal = useCallback(() => {
     if (!hasAnyChordEntries) return
     setSelectedScope(defaultScope)
-    setSelectedLayoutMode('flexible')
+    setSelectedLayoutMode('uniform')
     setIsOpen(true)
   }, [defaultScope, hasAnyChordEntries])
 
@@ -201,10 +214,67 @@ export function usePedalApplyController(params: {
     setIsOpen(false)
   }, [])
 
+  const bakeUniformPedalOffsets = useCallback((spans: PedalSpan[]): PedalSpan[] => {
+    if (selectedLayoutMode !== 'uniform' || spans.length === 0) return spans
+    const canvasContext = scoreRef.current?.getContext('2d') ?? null
+    const measureLayouts = measureLayoutsRef.current
+    if (!canvasContext || measureLayouts.size === 0) return spans
+    const plan = buildPedalRenderPlan({
+      context2D: canvasContext,
+      measurePairs,
+      pedalSpans: spans,
+      chordRulerEntriesByPair,
+      measureLayouts,
+      measureTimelineBundles: measureTimelineBundlesRef.current,
+      noteLayoutsByPair: noteLayoutsByPairRef.current,
+    })
+    if (plan.length === 0) return spans
+
+    const maxRequiredBaselineBySystem = new Map<string, number>()
+    plan.forEach((entry) => {
+      if (entry.span.layoutMode !== 'uniform') return
+      const current = maxRequiredBaselineBySystem.get(entry.systemKey)
+      if (current === undefined || entry.requiredBaselineY > current) {
+        maxRequiredBaselineBySystem.set(entry.systemKey, entry.requiredBaselineY)
+      }
+    })
+
+    const manualOffsetById = new Map<string, number>()
+    plan.forEach((entry) => {
+      if (entry.span.layoutMode !== 'uniform') return
+      const systemBaselineY = maxRequiredBaselineBySystem.get(entry.systemKey)
+      if (!Number.isFinite(systemBaselineY)) return
+      manualOffsetById.set(
+        entry.span.id,
+        Math.max(0, Math.round((systemBaselineY as number) - entry.requiredBaselineY)),
+      )
+    })
+
+    return sortPedalSpans(
+      spans.map((span) => {
+        if (span.layoutMode !== 'uniform') return span
+        const manualBaselineOffsetPx = manualOffsetById.get(span.id) ?? 0
+        if (span.manualBaselineOffsetPx === manualBaselineOffsetPx) return span
+        return normalizePedalSpan({
+          ...span,
+          manualBaselineOffsetPx,
+        })
+      }),
+    )
+  }, [
+    chordRulerEntriesByPair,
+    measureLayoutsRef,
+    measurePairs,
+    measureTimelineBundlesRef,
+    noteLayoutsByPairRef,
+    scoreRef,
+    selectedLayoutMode,
+  ])
+
   const applyStyle = useCallback((style: PedalStyle) => {
     const scope = resolveScopeRange(selectedScope)
     if (!scope) return
-    const nextSpans = buildPedalSpansForScope({
+    const draftSpans = buildPedalSpansForScope({
       style,
       layoutMode: selectedLayoutMode,
       scope,
@@ -212,7 +282,8 @@ export function usePedalApplyController(params: {
       chordRulerEntriesByPair,
       measureTimeSignaturesByMeasure,
     })
-    if (nextSpans.length === 0) return
+    if (draftSpans.length === 0) return
+    const nextSpans = bakeUniformPedalOffsets(draftSpans)
 
     const shouldOverwrite =
       !pedalSpans.some((span) => spanIntersectsPedalScope(span, scope)) ||
@@ -235,6 +306,7 @@ export function usePedalApplyController(params: {
     measurePairs,
     measureTimeSignaturesByMeasure,
     pedalSpans,
+    bakeUniformPedalOffsets,
     resolveScopeRange,
     selectedLayoutMode,
     selectedScope,

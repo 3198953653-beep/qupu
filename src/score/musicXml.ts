@@ -10,8 +10,10 @@ import {
 } from './constants'
 import type { ChordRulerEntry } from './chordRuler'
 import { normalizeKeyMode } from './chordDegree'
+import { STAFF_LINE_SPAN_PX } from './grandStaffLayout'
 import { buildMeasureRestNotes, resolvePairTimeSignature } from './measureRestUtils'
 import {
+  PEDAL_BASELINE_OFFSET_PX,
   createPedalSpanId,
   getMusicXmlPedalStyleAttributes,
   getPedalStyleFromMusicXmlAttributes,
@@ -275,10 +277,26 @@ type ImportedPedalMeasureSpan = {
   id: string
   style: PedalStyle
   staff: 'bass'
+  manualBaselineOffsetPx: number
   startMeasureIndex: number
   startTick: number
   endMeasureIndex: number
   endTick: number
+}
+
+const MUSICXML_PEDAL_DEFAULT_Y_AUTO_BASE = -(STAFF_LINE_SPAN_PX + PEDAL_BASELINE_OFFSET_PX)
+
+function parseMusicXmlPedalManualBaselineOffsetPx(defaultYAttr?: string | null): number {
+  const defaultY = defaultYAttr ? Number(defaultYAttr) : Number.NaN
+  if (!Number.isFinite(defaultY)) return 0
+  return Math.round((defaultY * -1) - Math.abs(MUSICXML_PEDAL_DEFAULT_Y_AUTO_BASE))
+}
+
+function toMusicXmlPedalDefaultY(manualBaselineOffsetPx: number): number {
+  const safeManualBaselineOffsetPx = Number.isFinite(manualBaselineOffsetPx)
+    ? Math.round(manualBaselineOffsetPx)
+    : 0
+  return MUSICXML_PEDAL_DEFAULT_Y_AUTO_BASE - safeManualBaselineOffsetPx
 }
 
 function getPartMeasureElements(partEl: Element, measureLimit: number): Element[] {
@@ -472,6 +490,7 @@ function analyzeImportedTimelineSegmentPart(partEl: Element, measureLimit: numbe
 function appendImportedPedalMeasureSpan(params: {
   destination: ImportedPedalMeasureSpan[]
   style: PedalStyle
+  manualBaselineOffsetPx?: number
   startMeasureIndex: number
   startTick: number
   endMeasureIndex: number
@@ -480,6 +499,7 @@ function appendImportedPedalMeasureSpan(params: {
   const {
     destination,
     style,
+    manualBaselineOffsetPx = 0,
     startMeasureIndex: rawStartMeasureIndex,
     startTick: rawStartTick,
     endMeasureIndex: rawEndMeasureIndex,
@@ -496,6 +516,9 @@ function appendImportedPedalMeasureSpan(params: {
     id: createPedalSpanId(),
     style,
     staff: 'bass',
+    manualBaselineOffsetPx: Number.isFinite(manualBaselineOffsetPx)
+      ? Math.round(manualBaselineOffsetPx)
+      : 0,
     startMeasureIndex,
     startTick,
     endMeasureIndex,
@@ -513,9 +536,10 @@ function analyzeImportedPedalParts(partEls: Element[], measureLimit: number): Im
     let divisions = 1
     let currentTime: TimeSignature = { beats: 4, beatType: 4 }
     const measureTicksByIndex: number[] = []
-    let openPedal:
+        let openPedal:
       | {
           style: PedalStyle
+          manualBaselineOffsetPx: number
           startMeasureIndex: number
           startTick: number
         }
@@ -589,6 +613,9 @@ function analyzeImportedPedalParts(partEls: Element[], measureLimit: number): Im
               signAttr: pedalEl.getAttribute('sign'),
               lineAttr: pedalEl.getAttribute('line'),
             })
+            const pedalManualBaselineOffsetPx = parseMusicXmlPedalManualBaselineOffsetPx(
+              pedalEl.getAttribute('default-y'),
+            )
 
             if (pedalType === 'start') {
               if (
@@ -598,6 +625,7 @@ function analyzeImportedPedalParts(partEls: Element[], measureLimit: number): Im
                 appendImportedPedalMeasureSpan({
                   destination: importedSpans,
                   style: openPedal.style,
+                  manualBaselineOffsetPx: openPedal.manualBaselineOffsetPx,
                   startMeasureIndex: openPedal.startMeasureIndex,
                   startTick: openPedal.startTick,
                   endMeasureIndex: measureIndex,
@@ -606,6 +634,7 @@ function analyzeImportedPedalParts(partEls: Element[], measureLimit: number): Im
               }
               openPedal = {
                 style: pedalStyle,
+                manualBaselineOffsetPx: pedalManualBaselineOffsetPx,
                 startMeasureIndex: measureIndex,
                 startTick: eventTick,
               }
@@ -617,6 +646,7 @@ function analyzeImportedPedalParts(partEls: Element[], measureLimit: number): Im
                 appendImportedPedalMeasureSpan({
                   destination: importedSpans,
                   style: openPedal.style,
+                  manualBaselineOffsetPx: openPedal.manualBaselineOffsetPx,
                   startMeasureIndex: openPedal.startMeasureIndex,
                   startTick: openPedal.startTick,
                   endMeasureIndex: measureIndex,
@@ -625,6 +655,7 @@ function analyzeImportedPedalParts(partEls: Element[], measureLimit: number): Im
               }
               openPedal = {
                 style: pedalStyle,
+                manualBaselineOffsetPx: pedalManualBaselineOffsetPx,
                 startMeasureIndex: measureIndex,
                 startTick: eventTick,
               }
@@ -636,6 +667,10 @@ function analyzeImportedPedalParts(partEls: Element[], measureLimit: number): Im
             appendImportedPedalMeasureSpan({
               destination: importedSpans,
               style: openPedal.style,
+              manualBaselineOffsetPx:
+                Number.isFinite(pedalManualBaselineOffsetPx) && pedalManualBaselineOffsetPx !== 0
+                  ? pedalManualBaselineOffsetPx
+                  : openPedal.manualBaselineOffsetPx,
               startMeasureIndex: openPedal.startMeasureIndex,
               startTick: openPedal.startTick,
               endMeasureIndex: measureIndex,
@@ -652,6 +687,7 @@ function analyzeImportedPedalParts(partEls: Element[], measureLimit: number): Im
       appendImportedPedalMeasureSpan({
         destination: importedSpans,
         style: openPedal.style,
+        manualBaselineOffsetPx: openPedal.manualBaselineOffsetPx,
         startMeasureIndex: openPedal.startMeasureIndex,
         startTick: openPedal.startTick,
         endMeasureIndex: lastMeasureIndex,
@@ -679,6 +715,7 @@ function analyzeImportedPedalParts(partEls: Element[], measureLimit: number): Im
     if (
       previous &&
       previous.style === span.style &&
+      previous.manualBaselineOffsetPx === span.manualBaselineOffsetPx &&
       previous.startMeasureIndex === span.startMeasureIndex &&
       previous.startTick === span.startTick &&
       previous.endMeasureIndex === span.endMeasureIndex &&
@@ -1068,6 +1105,7 @@ function finalizeImportResult(params: {
             normalizePedalSpan({
               id: span.id || createPedalSpanId(),
               style: span.style,
+              manualBaselineOffsetPx: span.manualBaselineOffsetPx,
               staff: 'bass',
               startPairIndex,
               startTick: span.startTick,
@@ -1314,13 +1352,18 @@ export function buildMusicXmlFromMeasurePairs(params: {
     destination: string[]
     kind: 'start' | 'stop'
     style: PedalStyle
+    defaultY?: number | null
   }) => {
-    const { destination, kind, style } = params
+    const { destination, kind, style, defaultY = null } = params
     const attributes = getMusicXmlPedalStyleAttributes(style)
+    const defaultYAttr =
+      typeof defaultY === 'number' && Number.isFinite(defaultY)
+        ? ` default-y="${Math.round(defaultY)}"`
+        : ''
     destination.push('   <direction placement="below">')
     destination.push('    <direction-type>')
     destination.push(
-      `     <pedal type="${kind}" line="${attributes.line}" sign="${attributes.sign}"/>`,
+      `     <pedal type="${kind}" line="${attributes.line}" sign="${attributes.sign}"${defaultYAttr}/>`,
     )
     destination.push('    </direction-type>')
     destination.push('    <voice>1</voice>')
@@ -1332,6 +1375,7 @@ export function buildMusicXmlFromMeasurePairs(params: {
     tick: number
     kind: 'start' | 'stop'
     style: PedalStyle
+    defaultY: number
   }>>()
 
   pedalSpans.forEach((span) => {
@@ -1344,13 +1388,14 @@ export function buildMusicXmlFromMeasurePairs(params: {
     const endMeasureTicks = getMeasureTicksByTime(pickTime(endMeasureIndex))
     const startTick = Math.max(0, Math.min(startMeasureTicks, Math.round(span.startTick)))
     const endTick = Math.max(0, Math.min(endMeasureTicks, Math.round(span.endTick)))
+    const defaultY = toMusicXmlPedalDefaultY(span.manualBaselineOffsetPx)
 
     const startEvents = pedalEventsByMeasure.get(startMeasureIndex) ?? []
-    startEvents.push({ tick: startTick, kind: 'start', style: span.style })
+    startEvents.push({ tick: startTick, kind: 'start', style: span.style, defaultY })
     pedalEventsByMeasure.set(startMeasureIndex, startEvents)
 
     const stopEvents = pedalEventsByMeasure.get(endMeasureIndex) ?? []
-    stopEvents.push({ tick: endTick, kind: 'stop', style: span.style })
+    stopEvents.push({ tick: endTick, kind: 'stop', style: span.style, defaultY })
     pedalEventsByMeasure.set(endMeasureIndex, stopEvents)
   })
 
@@ -1614,6 +1659,7 @@ export function buildMusicXmlFromMeasurePairs(params: {
           destination: lines,
           kind: event.kind,
           style: event.style,
+          defaultY: event.defaultY,
         })
       })
       appendBackup(lines, pedalCursorDuration)
