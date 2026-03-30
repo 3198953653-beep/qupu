@@ -118,6 +118,7 @@ export function useHorizontalScoreLayout(params: {
     measurePairsFromImport,
     importedChordRulerEntriesByPairFromImport,
     measureTimeSignaturesFromImport,
+    pedalSpans,
   })
   const grandStaffLayoutMetrics = useMemo(
     () => getGrandStaffLayoutMetrics(staffInterGapPx, { includePedalLane: pedalSpans.length > 0 }),

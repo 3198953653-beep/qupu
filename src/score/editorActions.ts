@@ -99,7 +99,7 @@ export async function playScoreAction(params: {
     event.targets.forEach((target) => {
       synth.triggerAttackRelease(
         toTonePitch(target.pitch),
-        target.durationTone,
+        target.durationSeconds,
         undefined,
         PLAYBACK_VELOCITY_BY_STAFF[target.staff],
       )
@@ -127,10 +127,11 @@ export async function playScoreAction(params: {
     playbackPointTimerIdsRef.current.push(timerId)
   })
 
-  const completionDelayMs = Math.max(
-    200,
-    Math.round((lastEvent?.atSeconds ?? 0) * 1000) + 220,
+  const latestReleaseAtSeconds = playbackTimelineEvents.reduce(
+    (maxReleaseAtSeconds, event) => Math.max(maxReleaseAtSeconds, event.latestReleaseAtSeconds),
+    lastEvent?.atSeconds ?? 0,
   )
+  const completionDelayMs = Math.max(200, Math.round(latestReleaseAtSeconds * 1000) + 220)
   stopPlayTimerRef.current = window.setTimeout(() => {
     if (playbackSessionIdRef.current !== sessionId) return
     setIsPlaying(false)

@@ -58,8 +58,32 @@ export function buildRuntimeDebugPlaybackApi(params: {
       playbackTimelineEvents.map((event) => ({
         pairIndex: event.pairIndex,
         onsetTick: event.onsetTick,
+        absoluteTick: event.absoluteTick,
         atSeconds: event.atSeconds,
         targetCount: event.targets.length,
+        extendedTargetCount: event.targets.filter((target) => target.pedalExtended).length,
+        latestReleaseAbsoluteTick: event.latestReleaseAbsoluteTick,
+        latestReleaseAtSeconds: event.latestReleaseAtSeconds,
       })),
+    getPlaybackTimelineTargets: () =>
+      playbackTimelineEvents.flatMap((event) =>
+        event.targets.map((target) => ({
+          pairIndex: event.pairIndex,
+          onsetTick: event.onsetTick,
+          absoluteTick: event.absoluteTick,
+          atSeconds: event.atSeconds,
+          staff: target.staff,
+          noteId: target.noteId,
+          noteIndex: target.noteIndex,
+          keyIndex: target.keyIndex,
+          pitch: target.pitch,
+          baseDurationTicks: target.baseDurationTicks,
+          playbackDurationTicks: target.playbackDurationTicks,
+          durationSeconds: target.durationSeconds,
+          releaseAbsoluteTick: target.releaseAbsoluteTick,
+          releaseAtSeconds: event.atSeconds + target.durationSeconds,
+          pedalExtended: target.pedalExtended,
+        })),
+      ),
   }
 }

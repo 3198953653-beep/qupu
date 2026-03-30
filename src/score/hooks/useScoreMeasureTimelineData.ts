@@ -4,7 +4,7 @@ import { buildChordRulerEntries, type ChordRulerEntry } from '../chordRuler'
 import { buildMeasurePairs } from '../scoreOps'
 import { resolvePairTimeSignature } from '../measureRestUtils'
 import { getPlaybackPointKey } from './usePlaybackController'
-import type { MeasurePair, PlaybackPoint, ScoreNote, TimeSignature } from '../types'
+import type { MeasurePair, PedalSpan, PlaybackPoint, ScoreNote, TimeSignature } from '../types'
 
 function buildNoteIndexByIdMap(notes: ScoreNote[]): Map<string, number> {
   const byId = new Map<string, number>()
@@ -18,6 +18,7 @@ export function useScoreMeasureTimelineData(params: {
   measurePairsFromImport: MeasurePair[] | null
   importedChordRulerEntriesByPairFromImport: ChordRulerEntry[][] | null
   measureTimeSignaturesFromImport: TimeSignature[] | null
+  pedalSpans: PedalSpan[]
 }) {
   const {
     notes,
@@ -25,6 +26,7 @@ export function useScoreMeasureTimelineData(params: {
     measurePairsFromImport,
     importedChordRulerEntriesByPairFromImport,
     measureTimeSignaturesFromImport,
+    pedalSpans,
   } = params
 
   const measurePairs = useMemo(
@@ -63,8 +65,9 @@ export function useScoreMeasureTimelineData(params: {
       buildPlaybackTimeline({
         measurePairs,
         timeSignaturesByMeasure: measureTimeSignaturesFromImport,
+        pedalSpans,
       }),
-    [measurePairs, measureTimeSignaturesFromImport],
+    [measurePairs, measureTimeSignaturesFromImport, pedalSpans],
   )
 
   const playbackTimelineEventByPointKey = useMemo(
