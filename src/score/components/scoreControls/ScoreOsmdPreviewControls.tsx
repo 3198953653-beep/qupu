@@ -6,7 +6,6 @@ type ScoreOsmdPreviewControlsProps = Pick<
   ScoreControlsProps,
   | 'onOpenMusicXmlFilePicker'
   | 'onOpenDirectOsmdFilePicker'
-  | 'onLoadSampleMusicXml'
   | 'onExportMusicXmlFile'
   | 'onOpenOsmdPreview'
   | 'onOpenBeamGroupingTool'
@@ -37,7 +36,6 @@ export function ScoreOsmdPreviewControls(props: ScoreOsmdPreviewControlsProps) {
   const {
     onOpenMusicXmlFilePicker,
     onOpenDirectOsmdFilePicker,
-    onLoadSampleMusicXml,
     onExportMusicXmlFile,
     onOpenOsmdPreview,
     onOpenBeamGroupingTool,
@@ -71,7 +69,6 @@ export function ScoreOsmdPreviewControls(props: ScoreOsmdPreviewControlsProps) {
       <div className="import-actions">
         <button type="button" onClick={onOpenMusicXmlFilePicker}>加载乐谱文件</button>
         <button type="button" onClick={onOpenDirectOsmdFilePicker}>直接预览文件</button>
-        <button type="button" onClick={onLoadSampleMusicXml}>加载示例乐谱</button>
         <button type="button" onClick={onExportMusicXmlFile}>导出乐谱文件</button>
         <button type="button" onClick={onOpenOsmdPreview}>OSMD预览</button>
         <button type="button" onClick={onOpenBeamGroupingTool}>音值组合</button>

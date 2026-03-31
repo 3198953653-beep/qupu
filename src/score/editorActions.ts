@@ -3,7 +3,6 @@ import { createAiVariation } from './ai'
 import {
   DEFAULT_DEMO_MEASURE_COUNT,
   RHYTHM_PRESETS,
-  SAMPLE_MUSIC_XML,
 } from './constants'
 import { clearImportedSourceState } from './importSourceState'
 import { buildMusicXmlExportPayload } from './musicXmlActions'
@@ -200,15 +199,6 @@ export async function handleMusicXmlFileChange(params: {
   } finally {
     event.currentTarget.value = ''
   }
-}
-
-export function loadSampleMusicXmlAction(params: {
-  setMusicXmlInput: StateSetter<string>
-  importMusicXmlText: (xmlText: string) => void
-}): void {
-  const { setMusicXmlInput, importMusicXmlText } = params
-  setMusicXmlInput(SAMPLE_MUSIC_XML)
-  importMusicXmlText(SAMPLE_MUSIC_XML)
 }
 
 export function loadWholeNoteDemoAction(params: {

@@ -21,7 +21,6 @@ export type ScoreControlsProps = {
   showNoteHeadJianpuEnabled: boolean
   onToggleNoteHeadJianpuDisplay: () => void
   onOpenMusicXmlFilePicker: () => void
-  onLoadSampleMusicXml: () => void
   onLoadWholeNoteDemo: () => void
   onLoadHalfNoteDemo: () => void
   onExportMusicXmlFile: () => void

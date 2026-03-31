@@ -8,7 +8,6 @@ type EditorActionWrapperBaseParams = Omit<
   | 'importMusicXmlText'
   | 'importMusicXmlFromTextarea'
   | 'onMusicXmlFileChange'
-  | 'loadSampleMusicXml'
   | 'loadWholeNoteDemo'
   | 'loadHalfNoteDemo'
   | 'resetScore'
@@ -40,7 +39,6 @@ export function useScoreDocumentActionsController(params: {
     importMusicXmlText: handlers.importMusicXmlText,
     importMusicXmlFromTextarea: handlers.importMusicXmlFromTextarea,
     onMusicXmlFileChange: handlers.onMusicXmlFileChange,
-    loadSampleMusicXml: handlers.loadSampleMusicXml,
     loadWholeNoteDemo: handlers.loadWholeNoteDemo,
     loadHalfNoteDemo: handlers.loadHalfNoteDemo,
     resetScore: handlers.resetScore,

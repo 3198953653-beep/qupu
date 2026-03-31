@@ -11,7 +11,6 @@ export type ScoreSourceKind =
   | 'reset-default'
   | 'musicxml-file'
   | 'musicxml-text'
-  | 'sample-musicxml'
   | 'built-in-demo'
   | 'rhythm-preset'
   | 'ai-draft'

@@ -41,7 +41,7 @@ export function useScoreWorkspaceDocumentActions(params: {
     pitches,
   } = params
   const pendingImportedScoreSourceKindRef =
-    useRef<Extract<ScoreSourceKind, 'musicxml-file' | 'musicxml-text' | 'sample-musicxml'> | null>(null)
+    useRef<Extract<ScoreSourceKind, 'musicxml-file' | 'musicxml-text'> | null>(null)
   const handleImportedScoreApplied = useCallback((result: ImportResult) => {
     requestPlaybackCursorReset()
     const nextSourceKind = pendingImportedScoreSourceKindRef.current ?? 'musicxml-text'

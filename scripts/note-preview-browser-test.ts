@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { chromium, type Page } from 'playwright'
-import { SAMPLE_MUSIC_XML } from '../src/score/constants'
+import { SAMPLE_MUSIC_XML } from './sampleMusicXmlFixture'
 
 type ImportFeedback = {
   kind: 'idle' | 'loading' | 'success' | 'error'

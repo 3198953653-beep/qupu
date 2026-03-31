@@ -62,7 +62,6 @@ export function ScoreControls(props: ScoreControlsProps) {
     onResetSpacingConfig,
     onOpenMusicXmlFilePicker,
     onOpenDirectOsmdFilePicker,
-    onLoadSampleMusicXml,
     onExportMusicXmlFile,
     onOpenOsmdPreview,
     onOpenBeamGroupingTool,
@@ -154,7 +153,6 @@ export function ScoreControls(props: ScoreControlsProps) {
       <ScoreOsmdPreviewControls
         onOpenMusicXmlFilePicker={onOpenMusicXmlFilePicker}
         onOpenDirectOsmdFilePicker={onOpenDirectOsmdFilePicker}
-        onLoadSampleMusicXml={onLoadSampleMusicXml}
         onExportMusicXmlFile={onExportMusicXmlFile}
         onOpenOsmdPreview={onOpenOsmdPreview}
         onOpenBeamGroupingTool={onOpenBeamGroupingTool}

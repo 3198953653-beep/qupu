@@ -18,11 +18,10 @@ export function useEditorActionWrappers(params: {
   setSegmentRhythmTemplateBindings: Dispatch<SetStateAction<Record<string, SegmentRhythmTemplateBinding>>>
   setPedalSpans: Dispatch<SetStateAction<PedalSpan[]>>
   setFullMeasureRestCollapseScopeKeys: Dispatch<SetStateAction<string[]>>
-  setPendingImportedScoreSourceKind: (kind: Extract<ScoreSourceKind, 'musicxml-file' | 'musicxml-text' | 'sample-musicxml'> | null) => void
+  setPendingImportedScoreSourceKind: (kind: Extract<ScoreSourceKind, 'musicxml-file' | 'musicxml-text'> | null) => void
   importMusicXmlText: (xmlText: string) => void
   importMusicXmlFromTextarea: () => void
   onMusicXmlFileChange: (event: ChangeEvent<HTMLInputElement>) => Promise<void>
-  loadSampleMusicXml: () => void
   loadWholeNoteDemo: () => void
   loadHalfNoteDemo: () => void
   resetScore: () => void
@@ -33,7 +32,6 @@ export function useEditorActionWrappers(params: {
   importMusicXmlTextWithCollapseReset: (xmlText: string) => void
   importMusicXmlFromTextareaWithCollapseReset: () => void
   onMusicXmlFileChangeWithCollapseReset: (event: ChangeEvent<HTMLInputElement>) => Promise<void>
-  loadSampleMusicXmlWithCollapseReset: () => void
   loadWholeNoteDemoWithCollapseReset: () => void
   loadHalfNoteDemoWithCollapseReset: () => void
   resetScoreWithCollapseReset: () => void
@@ -55,7 +53,6 @@ export function useEditorActionWrappers(params: {
     importMusicXmlText,
     importMusicXmlFromTextarea,
     onMusicXmlFileChange,
-    loadSampleMusicXml,
     loadWholeNoteDemo,
     loadHalfNoteDemo,
     resetScore,
@@ -124,24 +121,6 @@ export function useEditorActionWrappers(params: {
     clearActivePedalSelection,
     clearFullMeasureRestCollapseScopes,
     onMusicXmlFileChange,
-    setPendingImportedScoreSourceKind,
-    setActiveBuiltInDemo,
-    stopActivePlaybackSession,
-  ])
-
-  const loadSampleMusicXmlWithCollapseReset = useCallback(() => {
-    stopActivePlaybackSession()
-    clearFullMeasureRestCollapseScopes()
-    clearActiveChordSelection()
-    clearActivePedalSelection()
-    setActiveBuiltInDemo('none')
-    setPendingImportedScoreSourceKind('sample-musicxml')
-    loadSampleMusicXml()
-  }, [
-    clearActiveChordSelection,
-    clearActivePedalSelection,
-    clearFullMeasureRestCollapseScopes,
-    loadSampleMusicXml,
     setPendingImportedScoreSourceKind,
     setActiveBuiltInDemo,
     stopActivePlaybackSession,
@@ -292,7 +271,6 @@ export function useEditorActionWrappers(params: {
     importMusicXmlTextWithCollapseReset,
     importMusicXmlFromTextareaWithCollapseReset,
     onMusicXmlFileChangeWithCollapseReset,
-    loadSampleMusicXmlWithCollapseReset,
     loadWholeNoteDemoWithCollapseReset,
     loadHalfNoteDemoWithCollapseReset,
     resetScoreWithCollapseReset,

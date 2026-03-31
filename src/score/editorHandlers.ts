@@ -5,7 +5,6 @@ import {
   exportMusicXmlFileAction,
   handleMusicXmlFileChange,
   loadHalfNoteDemoAction,
-  loadSampleMusicXmlAction,
   loadWholeNoteDemoAction,
   playScoreAction,
   resetScoreAction,
@@ -91,7 +90,6 @@ export function useEditorHandlers(params: {
   importMusicXmlFromTextarea: () => void
   openMusicXmlFilePicker: () => void
   onMusicXmlFileChange: (event: ChangeEvent<HTMLInputElement>) => Promise<void>
-  loadSampleMusicXml: () => void
   loadWholeNoteDemo: () => void
   loadHalfNoteDemo: () => void
   exportMusicXmlFile: () => void
@@ -235,13 +233,6 @@ export function useEditorHandlers(params: {
     })
   }
 
-  const loadSampleMusicXml = () => {
-    loadSampleMusicXmlAction({
-      setMusicXmlInput,
-      importMusicXmlText,
-    })
-  }
-
   const exportMusicXmlFile = () => {
     exportMusicXmlFileAction({
       measurePairs,
@@ -362,7 +353,6 @@ export function useEditorHandlers(params: {
     importMusicXmlFromTextarea,
     openMusicXmlFilePicker,
     onMusicXmlFileChange,
-    loadSampleMusicXml,
     loadWholeNoteDemo,
     loadHalfNoteDemo,
     exportMusicXmlFile,
