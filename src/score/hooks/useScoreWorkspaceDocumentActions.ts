@@ -102,8 +102,6 @@ export function useScoreWorkspaceDocumentActions(params: {
       setActiveSelection: appState.setActiveSelection,
       setIsRhythmLinked: appState.setIsRhythmLinked,
       setImportFeedback: appState.setImportFeedback,
-      musicXmlInput: appState.musicXmlInput,
-      setMusicXmlInput: appState.setMusicXmlInput,
       fileInputRef: editorRefs.fileInputRef,
       measurePairs,
       pedalSpans: appState.pedalSpans,

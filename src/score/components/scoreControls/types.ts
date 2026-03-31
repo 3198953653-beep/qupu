@@ -41,7 +41,6 @@ export type ScoreControlsProps = {
     item: NotationPaletteItem,
   ) => void
   onOpenDirectOsmdFilePicker: () => void
-  onImportMusicXmlFromTextarea: () => void
   midiSupported: boolean
   midiPermissionState: 'idle' | 'granted' | 'denied' | 'unsupported' | 'error'
   midiInputOptions: Array<{ id: string; name: string }>

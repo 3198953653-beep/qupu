@@ -75,7 +75,6 @@ export function ScoreControls(props: ScoreControlsProps) {
     notationPaletteActiveItemIdsOverride,
     notationPaletteSummaryOverride,
     onNotationPaletteSelectionChange,
-    onImportMusicXmlFromTextarea,
     midiSupported,
     midiPermissionState,
     midiInputOptions,
@@ -166,7 +165,6 @@ export function ScoreControls(props: ScoreControlsProps) {
         notationPaletteActiveItemIdsOverride={notationPaletteActiveItemIdsOverride}
         notationPaletteSummaryOverride={notationPaletteSummaryOverride}
         onNotationPaletteSelectionChange={onNotationPaletteSelectionChange}
-        onImportMusicXmlFromTextarea={onImportMusicXmlFromTextarea}
         midiSupported={midiSupported}
         midiPermissionState={midiPermissionState}
         midiInputOptions={midiInputOptions}

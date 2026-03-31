@@ -24,7 +24,6 @@ import type {
 } from './types'
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>
-const MUSIC_XML_TEXTAREA_MAX_CHARS = 2000
 
 function clearPlaybackTimeouts(params: {
   stopPlayTimerRef: MutableRefObject<number | null>
@@ -39,13 +38,6 @@ function clearPlaybackTimeouts(params: {
     window.clearTimeout(timerId)
   })
   playbackPointTimerIdsRef.current = []
-}
-
-function formatMusicXmlTextareaPreview(xmlText: string): string {
-  if (xmlText.length <= MUSIC_XML_TEXTAREA_MAX_CHARS) return xmlText
-  return `<!-- 已从文件加载较大的乐谱文本（${xmlText.length.toLocaleString()} 字符）。
-为保证性能，预览已隐藏。
-如需编辑完整文本，请重新打开源文件。 -->`
 }
 
 export async function playScoreAction(params: {
@@ -182,17 +174,15 @@ export function stopPlaybackAction(params: {
 
 export async function handleMusicXmlFileChange(params: {
   event: ChangeEvent<HTMLInputElement>
-  setMusicXmlInput: StateSetter<string>
   importMusicXmlText: (xmlText: string) => void
   setImportFeedback: StateSetter<ImportFeedback>
 }): Promise<void> {
-  const { event, setMusicXmlInput, importMusicXmlText, setImportFeedback } = params
+  const { event, importMusicXmlText, setImportFeedback } = params
   const file = event.target.files?.[0]
   if (!file) return
 
   try {
     const xmlText = await file.text()
-    setMusicXmlInput(formatMusicXmlTextareaPreview(xmlText))
     importMusicXmlText(xmlText)
   } catch {
     setImportFeedback({ kind: 'error', message: '无法读取所选文件。' })

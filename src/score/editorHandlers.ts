@@ -72,8 +72,6 @@ export function useEditorHandlers(params: {
   setIsRhythmLinked: StateSetter<boolean>
   setImportFeedback: StateSetter<ImportFeedback>
 
-  musicXmlInput: string
-  setMusicXmlInput: StateSetter<string>
   fileInputRef: MutableRefObject<HTMLInputElement | null>
 
   measurePairs: MeasurePair[]
@@ -87,7 +85,6 @@ export function useEditorHandlers(params: {
   stopPlayback: () => void
   applyImportedScore: (result: ImportResult) => void
   importMusicXmlText: (xmlText: string) => void
-  importMusicXmlFromTextarea: () => void
   openMusicXmlFilePicker: () => void
   onMusicXmlFileChange: (event: ChangeEvent<HTMLInputElement>) => Promise<void>
   loadWholeNoteDemo: () => void
@@ -136,8 +133,6 @@ export function useEditorHandlers(params: {
     setActiveSelection,
     setIsRhythmLinked,
     setImportFeedback,
-    musicXmlInput,
-    setMusicXmlInput,
     fileInputRef,
     measurePairs,
     pedalSpans,
@@ -216,10 +211,6 @@ export function useEditorHandlers(params: {
     })
   }
 
-  const importMusicXmlFromTextarea = () => {
-    importMusicXmlText(musicXmlInput)
-  }
-
   const openMusicXmlFilePicker = () => {
     fileInputRef.current?.click()
   }
@@ -227,7 +218,6 @@ export function useEditorHandlers(params: {
   const onMusicXmlFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     await handleMusicXmlFileChange({
       event,
-      setMusicXmlInput,
       importMusicXmlText,
       setImportFeedback,
     })
@@ -350,7 +340,6 @@ export function useEditorHandlers(params: {
     stopPlayback,
     applyImportedScore,
     importMusicXmlText,
-    importMusicXmlFromTextarea,
     openMusicXmlFilePicker,
     onMusicXmlFileChange,
     loadWholeNoteDemo,

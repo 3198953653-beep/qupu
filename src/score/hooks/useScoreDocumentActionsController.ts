@@ -6,7 +6,6 @@ import { useEditorActionWrappers } from './useEditorActionWrappers'
 type EditorActionWrapperBaseParams = Omit<
   Parameters<typeof useEditorActionWrappers>[0],
   | 'importMusicXmlText'
-  | 'importMusicXmlFromTextarea'
   | 'onMusicXmlFileChange'
   | 'loadWholeNoteDemo'
   | 'loadHalfNoteDemo'
@@ -37,7 +36,6 @@ export function useScoreDocumentActionsController(params: {
   const wrappers = useEditorActionWrappers({
     ...editorActionWrappersBase,
     importMusicXmlText: handlers.importMusicXmlText,
-    importMusicXmlFromTextarea: handlers.importMusicXmlFromTextarea,
     onMusicXmlFileChange: handlers.onMusicXmlFileChange,
     loadWholeNoteDemo: handlers.loadWholeNoteDemo,
     loadHalfNoteDemo: handlers.loadHalfNoteDemo,

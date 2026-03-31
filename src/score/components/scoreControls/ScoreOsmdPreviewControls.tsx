@@ -19,7 +19,6 @@ type ScoreOsmdPreviewControlsProps = Pick<
   | 'notationPaletteActiveItemIdsOverride'
   | 'notationPaletteSummaryOverride'
   | 'onNotationPaletteSelectionChange'
-  | 'onImportMusicXmlFromTextarea'
   | 'midiSupported'
   | 'midiPermissionState'
   | 'midiInputOptions'
@@ -49,7 +48,6 @@ export function ScoreOsmdPreviewControls(props: ScoreOsmdPreviewControlsProps) {
     notationPaletteActiveItemIdsOverride = null,
     notationPaletteSummaryOverride = null,
     onNotationPaletteSelectionChange,
-    onImportMusicXmlFromTextarea,
     midiSupported,
     midiPermissionState,
     midiInputOptions,
@@ -92,7 +90,6 @@ export function ScoreOsmdPreviewControls(props: ScoreOsmdPreviewControlsProps) {
             onSelectionChange={onNotationPaletteSelectionChange}
           />
         </div>
-        <button type="button" onClick={onImportMusicXmlFromTextarea}>导入文本</button>
       </div>
 
       <div className="midi-input-row">

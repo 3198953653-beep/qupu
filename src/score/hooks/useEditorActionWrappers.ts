@@ -20,7 +20,6 @@ export function useEditorActionWrappers(params: {
   setFullMeasureRestCollapseScopeKeys: Dispatch<SetStateAction<string[]>>
   setPendingImportedScoreSourceKind: (kind: Extract<ScoreSourceKind, 'musicxml-file' | 'musicxml-text'> | null) => void
   importMusicXmlText: (xmlText: string) => void
-  importMusicXmlFromTextarea: () => void
   onMusicXmlFileChange: (event: ChangeEvent<HTMLInputElement>) => Promise<void>
   loadWholeNoteDemo: () => void
   loadHalfNoteDemo: () => void
@@ -30,7 +29,6 @@ export function useEditorActionWrappers(params: {
 }): {
   clearFullMeasureRestCollapseScopes: () => void
   importMusicXmlTextWithCollapseReset: (xmlText: string) => void
-  importMusicXmlFromTextareaWithCollapseReset: () => void
   onMusicXmlFileChangeWithCollapseReset: (event: ChangeEvent<HTMLInputElement>) => Promise<void>
   loadWholeNoteDemoWithCollapseReset: () => void
   loadHalfNoteDemoWithCollapseReset: () => void
@@ -51,7 +49,6 @@ export function useEditorActionWrappers(params: {
     setFullMeasureRestCollapseScopeKeys,
     setPendingImportedScoreSourceKind,
     importMusicXmlText,
-    importMusicXmlFromTextarea,
     onMusicXmlFileChange,
     loadWholeNoteDemo,
     loadHalfNoteDemo,
@@ -85,24 +82,6 @@ export function useEditorActionWrappers(params: {
     clearActivePedalSelection,
     clearFullMeasureRestCollapseScopes,
     importMusicXmlText,
-    setPendingImportedScoreSourceKind,
-    setActiveBuiltInDemo,
-    stopActivePlaybackSession,
-  ])
-
-  const importMusicXmlFromTextareaWithCollapseReset = useCallback(() => {
-    stopActivePlaybackSession()
-    clearFullMeasureRestCollapseScopes()
-    clearActiveChordSelection()
-    clearActivePedalSelection()
-    setActiveBuiltInDemo('none')
-    setPendingImportedScoreSourceKind('musicxml-text')
-    importMusicXmlFromTextarea()
-  }, [
-    clearActiveChordSelection,
-    clearActivePedalSelection,
-    clearFullMeasureRestCollapseScopes,
-    importMusicXmlFromTextarea,
     setPendingImportedScoreSourceKind,
     setActiveBuiltInDemo,
     stopActivePlaybackSession,
@@ -269,7 +248,6 @@ export function useEditorActionWrappers(params: {
   return {
     clearFullMeasureRestCollapseScopes,
     importMusicXmlTextWithCollapseReset,
-    importMusicXmlFromTextareaWithCollapseReset,
     onMusicXmlFileChangeWithCollapseReset,
     loadWholeNoteDemoWithCollapseReset,
     loadHalfNoteDemoWithCollapseReset,

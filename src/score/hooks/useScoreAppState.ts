@@ -65,7 +65,6 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
   const [draggingSelection, setDraggingSelection] = useState<Selection | null>(null)
   const [dragPreviewState, setDragPreviewState] = useState<DragState | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
-  const [musicXmlInput, setMusicXmlInput] = useState<string>('')
   const [importFeedback, setImportFeedback] = useState<ImportFeedback>({ kind: 'idle', message: '' })
   const [isNotationPaletteOpen, setIsNotationPaletteOpen] = useState(false)
   const [notationPaletteSelection, setNotationPaletteSelection] = useState<NotationPaletteSelection>(
@@ -145,8 +144,6 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
     setDragPreviewState,
     isPlaying,
     setIsPlaying,
-    musicXmlInput,
-    setMusicXmlInput,
     importFeedback,
     setImportFeedback,
     isNotationPaletteOpen,
