@@ -10,6 +10,7 @@ import {
   buildMeasureTimelineBundle,
   getMeasureUniformTimelineWeightMetrics,
   getMeasureUniformTimelineWeightSpan,
+  resolveMeasureMinWidthStretchPlan,
   resolvePublicAxisLayoutForConsumption,
 } from './timeAxisSpacing'
 import { resolveEffectiveBoundary } from './effectiveBoundary'
@@ -82,7 +83,7 @@ type MeasureSpacingProbe = {
 const MIN_FORMAT_WIDTH_PX = 8
 const EPS = 0.05
 const PROBE_MEASURE_X = 1024
-const SOLVER_CACHE_VERSION = 'v9'
+const SOLVER_CACHE_VERSION = 'v11'
 const SOLVER_CACHE_MAX_ENTRIES = 12000
 const TRAILING_FLAG_BARLINE_SAFE_GAP_PX = 1
 
@@ -230,6 +231,7 @@ function buildMeasureWidthCacheKey(params: {
     `startDecor=${meta.showStartDecorations ? 1 : 0}`,
     `actualStart=${meta.actualStartDecorationWidthPx.toFixed(3)}`,
     `endDecor=${meta.showEndDecorations ? 1 : 0}`,
+    `minW=${spacingConfig.minMeasureWidthPx}`,
     `lead=${spacingConfig.leadingBarlineGapPx}`,
     `g32=${spacingConfig.baseMinGap32Px}`,
     `m2safe=${spacingConfig.secondChordSafeGapPx}`,
@@ -530,7 +532,13 @@ export function solveHorizontalMeasureWidths(params: SolveHorizontalMeasureWidth
       spacingConfig,
       timelineBundle,
     )
-    let width = Number(timelineSpan.toFixed(3))
+    const minWidthStretchPlan = resolveMeasureMinWidthStretchPlan({
+      spacingConfig,
+      leadingGapPx: timelineMetrics.leadingGapPx,
+      anchorSpanPx: timelineMetrics.anchorSpanPx,
+      trailingGapPx: timelineMetrics.trailingGapPx,
+    })
+    let width = Number(Math.max(timelineSpan, minWidthStretchPlan.targetContentWidthPx).toFixed(3))
 
     if (!shouldProbePrecisely) {
       if (cacheKey && widthCache) {

@@ -1146,11 +1146,15 @@ async function main() {
 
     await ensureSpacingPanelOpen(page)
     const spacingControlPresence = await page.evaluate(() => ({
+      hasMinMeasureWidth: document.querySelector('#min-measure-width-range') !== null,
       hasLeadingGap: document.querySelector('#leading-barline-gap-range') !== null,
       hasChordMarkerSize: document.querySelector('#chord-marker-ui-scale-range') !== null,
       hasOldMaxGap: document.querySelector('#barline-edge-max-gap') !== null,
       hasOldMinGap: document.querySelector('#barline-edge-min-gap') !== null,
     }))
+    if (!spacingControlPresence.hasMinMeasureWidth) {
+      throw new Error('Missing the new #min-measure-width-range control.')
+    }
     if (!spacingControlPresence.hasLeadingGap) {
       throw new Error('Missing the new #leading-barline-gap-range control.')
     }
@@ -1163,6 +1167,10 @@ async function main() {
     const defaultChordMarkerSize = await getInputValue(page, '#chord-marker-ui-scale-input')
     if (defaultChordMarkerSize !== 134) {
       throw new Error(`Expected default chord marker size to be 134, got ${defaultChordMarkerSize}.`)
+    }
+    const defaultMinMeasureWidth = await getInputValue(page, '#min-measure-width-input')
+    if (defaultMinMeasureWidth !== 120) {
+      throw new Error(`Expected default minimum measure width to be 120, got ${defaultMinMeasureWidth}.`)
     }
     const defaultChordMarkerMetrics = await getFirstChordMarkerRenderedMetrics(page)
     await setInputValue(page, '#chord-marker-ui-scale-range', 160)
@@ -1280,8 +1288,6 @@ async function main() {
     if (halfDemoComparableRows.length < 2) {
       throw new Error('Half-note demo should expose at least two comparable measures.')
     }
-    const halfDemoBaselineWidth = getRequiredMeasureWidth(halfDemoComparableRows[0], 'Half-note baseline row 0')
-    const halfDemoBaselineGap = getSpacingGap(halfDemoComparableRows[0], 0, 32)
     const halfDemoBaselineActualDecoration = getRequiredActualStartDecorationWidth(
       halfDemoComparableRows[0],
       'Half-note baseline row 0',
@@ -1289,6 +1295,15 @@ async function main() {
     if (halfDemoBaselineActualDecoration <= 0) {
       throw new Error(`Half-note first measure should report a positive actual start decoration width, got ${halfDemoBaselineActualDecoration}.`)
     }
+    const halfDemoUndecoratedRows = halfDemoComparableRows.slice(1)
+    if (halfDemoUndecoratedRows.length === 0) {
+      throw new Error('Half-note demo should expose at least one undecorated measure for spacing comparison.')
+    }
+    const halfDemoUndecoratedBaselineWidth = getRequiredMeasureWidth(
+      halfDemoUndecoratedRows[0],
+      'Half-note undecorated baseline row',
+    )
+    const halfDemoUndecoratedBaselineGap = getSpacingGap(halfDemoUndecoratedRows[0], 0, 32)
     halfDemoComparableRows.forEach((row, rowIndex) => {
       const width = getRequiredMeasureWidth(row, `Half-note row ${rowIndex}`)
       const renderedWidth = getRequiredRenderedMeasureWidth(row, `Half-note row ${rowIndex}`)
@@ -1299,6 +1314,16 @@ async function main() {
         if (Math.abs(inset - halfDemoBaselineActualDecoration) > 1.5) {
           throw new Error(
             `Half-note first measure inset should match its actual decoration width: inset=${inset.toFixed(3)} actual=${halfDemoBaselineActualDecoration.toFixed(3)}.`,
+          )
+        }
+        if (width < defaultMinMeasureWidth - 1.5) {
+          throw new Error(
+            `Half-note decorated row should respect minimum content width ${defaultMinMeasureWidth}, got ${width.toFixed(3)}.`,
+          )
+        }
+        if (Math.abs(width - halfDemoUndecoratedBaselineWidth) > 1.5) {
+          throw new Error(
+            `Half-note decorated content width should match undecorated rows: decorated=${width.toFixed(3)} baseline=${halfDemoUndecoratedBaselineWidth.toFixed(3)}.`,
           )
         }
         if (renderedWidth < width + 8) {
@@ -1314,14 +1339,19 @@ async function main() {
       if (Math.abs(inset) > 1.5) {
         throw new Error(`Half-note row ${rowIndex} should start at the barline axis, got inset=${inset.toFixed(3)}.`)
       }
-      if (Math.abs(width - halfDemoBaselineWidth) > 1.5) {
+      if (width < defaultMinMeasureWidth - 1.5) {
         throw new Error(
-          `Half-note content width should match across equal-content measures: row0=${halfDemoBaselineWidth.toFixed(3)} row${rowIndex}=${width.toFixed(3)}.`,
+          `Half-note row ${rowIndex} should respect minimum content width ${defaultMinMeasureWidth}, got ${width.toFixed(3)}.`,
         )
       }
-      if (Math.abs(gap - halfDemoBaselineGap) > 1.5) {
+      if (Math.abs(width - halfDemoUndecoratedBaselineWidth) > 1.5) {
         throw new Error(
-          `Half-note demo spacing gap should match across measures: row0=${halfDemoBaselineGap.toFixed(3)} row${rowIndex}=${gap.toFixed(3)}.`,
+          `Half-note undecorated content width should match across equal-content measures: baseline=${halfDemoUndecoratedBaselineWidth.toFixed(3)} row${rowIndex}=${width.toFixed(3)}.`,
+        )
+      }
+      if (Math.abs(gap - halfDemoUndecoratedBaselineGap) > 1.5) {
+        throw new Error(
+          `Half-note demo spacing gap should match across undecorated measures: baseline=${halfDemoUndecoratedBaselineGap.toFixed(3)} row${rowIndex}=${gap.toFixed(3)}.`,
         )
       }
       if (Math.abs(renderedWidth - width) > 1.5) {
@@ -1405,9 +1435,14 @@ async function main() {
     const changedGap = getSpacingGap(changedMeasureRow, 0, 32)
     const baselineGap = getSpacingGap(baselineMeasureRow, 0, 32)
     const plainGap = getSpacingGap(plainMeasureRow, 0, 32)
-    if (Math.abs(changedGap - baselineGap) > 1.5 || Math.abs(plainGap - baselineGap) > 1.5) {
+    if (Math.abs(changedGap - baselineGap) > 1.5) {
       throw new Error(
-        `Decoration-change import should keep identical spacing gap across measures: row0=${baselineGap.toFixed(3)} row1=${plainGap.toFixed(3)} row2=${changedGap.toFixed(3)}.`,
+        `Decoration-change import should keep identical spacing gap across decorated measures: row0=${baselineGap.toFixed(3)} row2=${changedGap.toFixed(3)}.`,
+      )
+    }
+    if (plainGap < baselineGap - 1.5) {
+      throw new Error(
+        `Decoration plain row should not shrink below decorated spacing gap: row0=${baselineGap.toFixed(3)} row1=${plainGap.toFixed(3)}.`,
       )
     }
     const changedWidth = getRequiredMeasureWidth(changedMeasureRow, 'Decoration changed row 2')
@@ -1416,17 +1451,29 @@ async function main() {
     const changedRenderedWidth = getRequiredRenderedMeasureWidth(changedMeasureRow, 'Decoration changed row 2')
     const baselineRenderedWidth = getRequiredRenderedMeasureWidth(baselineMeasureRow, 'Decoration baseline row 0')
     const plainRenderedWidth = getRequiredRenderedMeasureWidth(plainMeasureRow, 'Decoration plain row 1')
-    if (
-      Math.abs(changedWidth - plainWidth) > 1.5 ||
-      Math.abs(baselineWidth - plainWidth) > 1.5
-    ) {
+    if (Math.abs(changedWidth - baselineWidth) > 1.5) {
       throw new Error(
-        `Decoration-change import should keep content width aligned across equal-content measures: row0=${baselineWidth.toFixed(3)} row1=${plainWidth.toFixed(3)} row2=${changedWidth.toFixed(3)}.`,
+        `Decoration-change import should keep decorated content width aligned: row0=${baselineWidth.toFixed(3)} row2=${changedWidth.toFixed(3)}.`,
       )
     }
-    if (changedRenderedWidth < plainRenderedWidth + 8 || baselineRenderedWidth < plainRenderedWidth + 8) {
+    if (baselineWidth < defaultMinMeasureWidth - 1.5) {
       throw new Error(
-        `Decorated measures should render wider than plain measures after separating content width: row0=${baselineRenderedWidth.toFixed(3)} row1=${plainRenderedWidth.toFixed(3)} row2=${changedRenderedWidth.toFixed(3)}.`,
+        `Decoration baseline row should respect minimum content width ${defaultMinMeasureWidth}: row0=${baselineWidth.toFixed(3)}.`,
+      )
+    }
+    if (changedWidth < defaultMinMeasureWidth - 1.5) {
+      throw new Error(
+        `Decoration changed row should respect minimum content width ${defaultMinMeasureWidth}: row2=${changedWidth.toFixed(3)}.`,
+      )
+    }
+    if (plainWidth < defaultMinMeasureWidth - 1.5) {
+      throw new Error(
+        `Decoration plain row should respect minimum content width ${defaultMinMeasureWidth}: row1=${plainWidth.toFixed(3)}.`,
+      )
+    }
+    if (changedRenderedWidth < plainRenderedWidth - 1.5 || baselineRenderedWidth < plainRenderedWidth - 1.5) {
+      throw new Error(
+        `Decoration-change import should keep decorated rendered width no narrower than plain row: row0=${baselineRenderedWidth.toFixed(3)} row1=${plainRenderedWidth.toFixed(3)} row2=${changedRenderedWidth.toFixed(3)}.`,
       )
     }
 

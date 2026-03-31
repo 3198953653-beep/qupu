@@ -8,6 +8,7 @@ import {
   clampChordMarkerUiScalePercent,
   clampDurationGapRatio,
   clampLeadingBarlineGapPx,
+  clampMinMeasureWidthPx,
   clampPageHorizontalPaddingPx,
   clampSecondChordSafeGapPx,
 } from '../scorePresentation'
@@ -44,6 +45,11 @@ export function buildSpacingConfigControlHandlers(params: {
       setTimeAxisSpacingConfig((current) => ({
         ...current,
         leadingBarlineGapPx: clampLeadingBarlineGapPx(nextValue),
+      })),
+    onMinMeasureWidthPxChange: (nextValue: number) =>
+      setTimeAxisSpacingConfig((current) => ({
+        ...current,
+        minMeasureWidthPx: clampMinMeasureWidthPx(nextValue),
       })),
     onSecondChordSafeGapPxChange: (nextValue: number) =>
       setTimeAxisSpacingConfig((current) => ({

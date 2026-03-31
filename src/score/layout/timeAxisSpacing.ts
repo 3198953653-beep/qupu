@@ -166,6 +166,7 @@ const MAX_RENDERED_NOTE_HEAD_WIDTH_PX = DEFAULT_NOTE_HEAD_WIDTH_PX * 2.5
 const MAX_NOTE_HEAD_COLUMN_OFFSET_PX = DEFAULT_NOTE_HEAD_WIDTH_PX * 5
 const NOTE_HEAD_COLUMN_COMPARE_EPSILON_PX = 0.01
 const BASE_GAP_UNIT_PX = 3.5
+const DEFAULT_MIN_MEASURE_WIDTH_PX = 120
 const MIN_GAP_BEATS = 1 / 32
 const GAP_GAMMA = 0.7
 const GAP_BASE_WEIGHT = 0.45
@@ -174,6 +175,7 @@ export type TimeAxisSpacingConfig = {
   minGapBeats: number
   gapGamma: number
   gapBaseWeight: number
+  minMeasureWidthPx: number
   leadingBarlineGapPx: number
   interOnsetPaddingPx: number
   baseMinGap32Px: number
@@ -200,6 +202,7 @@ export const DEFAULT_TIME_AXIS_SPACING_CONFIG: TimeAxisSpacingConfig = {
   minGapBeats: MIN_GAP_BEATS,
   gapGamma: GAP_GAMMA,
   gapBaseWeight: GAP_BASE_WEIGHT,
+  minMeasureWidthPx: DEFAULT_MIN_MEASURE_WIDTH_PX,
   leadingBarlineGapPx: 9.7,
   interOnsetPaddingPx: 1,
   baseMinGap32Px: 6.9,
@@ -759,6 +762,13 @@ export type MeasureTimelineWeightMetrics = {
   totalWidthPx: number
 }
 
+export type MeasureMinWidthStretchPlan = {
+  targetContentWidthPx: number
+  intrinsicContentWidthPx: number
+  stretchableSpanPx: number
+  segmentStretchScale: number
+}
+
 export type TimeAxisSpacingOnsetReserve = {
   onsetTicks: number
   baseX: number
@@ -799,16 +809,54 @@ export function getLeadingBarlineGapPx(
   return Math.max(0, spacingConfig.leadingBarlineGapPx)
 }
 
+export function resolveMeasureMinWidthStretchPlan(params: {
+  spacingConfig: TimeAxisSpacingConfig
+  leadingGapPx: number
+  anchorSpanPx: number
+  trailingGapPx: number
+}): MeasureMinWidthStretchPlan {
+  const { spacingConfig, leadingGapPx, anchorSpanPx, trailingGapPx } = params
+  const safeMinMeasureWidthPx = Number.isFinite(spacingConfig.minMeasureWidthPx)
+    ? Math.max(0, spacingConfig.minMeasureWidthPx)
+    : DEFAULT_MIN_MEASURE_WIDTH_PX
+  const safeLeadingGapPx = Number.isFinite(leadingGapPx) ? Math.max(0, leadingGapPx) : 0
+  const safeAnchorSpanPx = Number.isFinite(anchorSpanPx) ? Math.max(0, anchorSpanPx) : 0
+  const safeTrailingGapPx = Number.isFinite(trailingGapPx) ? Math.max(0, trailingGapPx) : 0
+  const targetContentWidthPx = Math.max(0, safeMinMeasureWidthPx)
+  const intrinsicContentWidthPx = safeLeadingGapPx + safeAnchorSpanPx + safeTrailingGapPx
+  const stretchableSpanPx = safeAnchorSpanPx + safeTrailingGapPx
+  if (targetContentWidthPx <= intrinsicContentWidthPx + 0.0001 || stretchableSpanPx <= 0.0001) {
+    return {
+      targetContentWidthPx,
+      intrinsicContentWidthPx,
+      stretchableSpanPx,
+      segmentStretchScale: 1,
+    }
+  }
+  const requiredStretchableSpanPx = Math.max(stretchableSpanPx, targetContentWidthPx - safeLeadingGapPx)
+  const segmentStretchScale = Math.max(1, requiredStretchableSpanPx / Math.max(0.0001, stretchableSpanPx))
+  return {
+    targetContentWidthPx,
+    intrinsicContentWidthPx,
+    stretchableSpanPx,
+    segmentStretchScale,
+  }
+}
+
 function buildMeasureSpacingWeights(params: {
   spacingTicks: readonly number[]
   measureTicks: number
   spacingConfig?: TimeAxisSpacingConfig
+  segmentStretchScale?: number
 }): MeasureSpacingWeights {
   const {
     spacingTicks,
     measureTicks,
     spacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
+    segmentStretchScale = 1,
   } = params
+  const safeSegmentStretchScale =
+    Number.isFinite(segmentStretchScale) && segmentStretchScale > 0 ? segmentStretchScale : 1
   const safeMeasureTicks = Math.max(1, Math.round(measureTicks))
   const orderedTicks = [...new Set(spacingTicks)]
     .map((tick) => clampMeasureTick(tick, safeMeasureTicks))
@@ -830,14 +878,15 @@ function buildMeasureSpacingWeights(params: {
   let anchorSpanWeight = 0
   for (let index = 1; index < orderedTicks.length; index += 1) {
     const deltaTicks = Math.max(1, orderedTicks[index] - orderedTicks[index - 1])
-    const gapWeight = mapTickGapToWeight(deltaTicks, spacingConfig)
+    const gapWeight = mapTickGapToWeight(deltaTicks, spacingConfig) * safeSegmentStretchScale
     segmentWeights.push(gapWeight)
     anchorSpanWeight += gapWeight
   }
 
   const lastTick = orderedTicks[orderedTicks.length - 1] ?? 0
   const trailingTailTicks = Math.max(0, safeMeasureTicks - lastTick)
-  const trailingTailWeight = trailingTailTicks > 0 ? mapTickGapToWeight(trailingTailTicks, spacingConfig) : 0
+  const trailingTailWeight =
+    trailingTailTicks > 0 ? mapTickGapToWeight(trailingTailTicks, spacingConfig) * safeSegmentStretchScale : 0
   const leadingGapPx = getLeadingBarlineGapPx(spacingConfig)
   const totalWeight = anchorSpanWeight + trailingTailWeight
 
@@ -1889,10 +1938,22 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
   })
   const axisBoundaryStart = uniformSpacingByTicks ? effectiveBoundary.effectiveStartX : defaultAxisBoundaryStart
   const axisBoundaryEnd = uniformSpacingByTicks ? effectiveBoundary.effectiveEndX : defaultAxisBoundaryEnd
+  const intrinsicSpacingWeights = buildMeasureSpacingWeights({
+    spacingTicks: onsetTicks,
+    measureTicks: measureTotalTicks,
+    spacingConfig,
+  })
+  const minWidthStretchPlan = resolveMeasureMinWidthStretchPlan({
+    spacingConfig,
+    leadingGapPx: intrinsicSpacingWeights.leadingGapPx,
+    anchorSpanPx: intrinsicSpacingWeights.anchorSpanWeight,
+    trailingGapPx: intrinsicSpacingWeights.trailingTailWeight,
+  })
   const spacingWeights = buildMeasureSpacingWeights({
     spacingTicks: onsetTicks,
     measureTicks: measureTotalTicks,
     spacingConfig,
+    segmentStretchScale: minWidthStretchPlan.segmentStretchScale,
   })
   const axisStart = axisBoundaryStart + Math.max(0, spacingWeights.leadingGapPx)
   const baseTargetXByOnset = buildBaseTargetXByOnset({

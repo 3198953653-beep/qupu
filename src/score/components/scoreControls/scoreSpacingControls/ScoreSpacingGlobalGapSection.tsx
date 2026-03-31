@@ -5,12 +5,14 @@ type ScoreSpacingGlobalGapSectionProps = Pick<
   | 'chordMarkerUiScalePercent'
   | 'chordMarkerPaddingPx'
   | 'staffInterGapPx'
+  | 'minMeasureWidthPx'
   | 'baseMinGap32Px'
   | 'leadingBarlineGapPx'
   | 'secondChordSafeGapPx'
   | 'onChordMarkerUiScalePercentChange'
   | 'onChordMarkerPaddingPxChange'
   | 'onStaffInterGapPxChange'
+  | 'onMinMeasureWidthPxChange'
   | 'onBaseMinGap32PxChange'
   | 'onLeadingBarlineGapPxChange'
   | 'onSecondChordSafeGapPxChange'
@@ -21,12 +23,14 @@ export function ScoreSpacingGlobalGapSection(props: ScoreSpacingGlobalGapSection
     chordMarkerUiScalePercent,
     chordMarkerPaddingPx,
     staffInterGapPx,
+    minMeasureWidthPx,
     baseMinGap32Px,
     leadingBarlineGapPx,
     secondChordSafeGapPx,
     onChordMarkerUiScalePercentChange,
     onChordMarkerPaddingPxChange,
     onStaffInterGapPxChange,
+    onMinMeasureWidthPxChange,
     onBaseMinGap32PxChange,
     onLeadingBarlineGapPxChange,
     onSecondChordSafeGapPxChange,
@@ -110,6 +114,32 @@ export function ScoreSpacingGlobalGapSection(props: ScoreSpacingGlobalGapSection
           handleFloatValue((event.target as HTMLInputElement).value, onStaffInterGapPxChange)
         }
         onChange={(event) => handleFloatValue(event.target.value, onStaffInterGapPxChange)}
+      />
+
+      <label htmlFor="min-measure-width-range">最小小节宽度（不含谱号/调号/拍号，px）</label>
+      <input
+        id="min-measure-width-range"
+        type="range"
+        min={0}
+        max={320}
+        step={1}
+        value={minMeasureWidthPx}
+        onInput={(event) =>
+          handleFloatValue((event.target as HTMLInputElement).value, onMinMeasureWidthPxChange)
+        }
+        onChange={(event) => handleFloatValue(event.target.value, onMinMeasureWidthPxChange)}
+      />
+      <input
+        id="min-measure-width-input"
+        type="number"
+        min={0}
+        max={320}
+        step={1}
+        value={minMeasureWidthPx}
+        onInput={(event) =>
+          handleFloatValue((event.target as HTMLInputElement).value, onMinMeasureWidthPxChange)
+        }
+        onChange={(event) => handleFloatValue(event.target.value, onMinMeasureWidthPxChange)}
       />
 
       <label htmlFor="duration-base-gap-32">全局间距大小</label>

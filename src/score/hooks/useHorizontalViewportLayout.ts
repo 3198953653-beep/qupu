@@ -187,6 +187,7 @@ export function useHorizontalViewportLayout(params: {
       .map((range) => `${range.startPairIndex}-${range.endPairIndexExclusive}`)
       .join(',')
     const spacingKey = [
+      timeAxisSpacingConfig.minMeasureWidthPx,
       timeAxisSpacingConfig.baseMinGap32Px,
       timeAxisSpacingConfig.leadingBarlineGapPx,
       timeAxisSpacingConfig.secondChordSafeGapPx,
@@ -206,6 +207,7 @@ export function useHorizontalViewportLayout(params: {
     scoreWidth,
     spacingLayoutMode,
     systemRanges,
+    timeAxisSpacingConfig.minMeasureWidthPx,
     timeAxisSpacingConfig.baseMinGap32Px,
     timeAxisSpacingConfig.durationGapRatios.eighth,
     timeAxisSpacingConfig.durationGapRatios.half,

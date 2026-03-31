@@ -55,6 +55,7 @@ export function useScoreControlsProps(params: ScoreViewAdapterParams): ScoreCont
     pageHorizontalPaddingPx: appState.pageHorizontalPaddingPx,
     chordMarkerUiScalePercent: layout.safeChordMarkerUiScalePercent,
     chordMarkerPaddingPx: layout.safeChordMarkerPaddingPx,
+    minMeasureWidthPx: appState.timeAxisSpacingConfig.minMeasureWidthPx,
     baseMinGap32Px: appState.timeAxisSpacingConfig.baseMinGap32Px,
     leadingBarlineGapPx: appState.timeAxisSpacingConfig.leadingBarlineGapPx,
     secondChordSafeGapPx: appState.timeAxisSpacingConfig.secondChordSafeGapPx,

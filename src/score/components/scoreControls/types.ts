@@ -64,6 +64,7 @@ export type ScoreControlsProps = {
   pageHorizontalPaddingPx: number
   chordMarkerUiScalePercent: number
   chordMarkerPaddingPx: number
+  minMeasureWidthPx: number
   baseMinGap32Px: number
   leadingBarlineGapPx: number
   secondChordSafeGapPx: number
@@ -76,6 +77,7 @@ export type ScoreControlsProps = {
   onPageHorizontalPaddingPxChange: (nextValue: number) => void
   onChordMarkerUiScalePercentChange: (nextValue: number) => void
   onChordMarkerPaddingPxChange: (nextValue: number) => void
+  onMinMeasureWidthPxChange: (nextValue: number) => void
   onBaseMinGap32PxChange: (nextValue: number) => void
   onLeadingBarlineGapPxChange: (nextValue: number) => void
   onSecondChordSafeGapPxChange: (nextValue: number) => void

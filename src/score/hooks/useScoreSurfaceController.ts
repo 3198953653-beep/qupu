@@ -95,6 +95,7 @@ export function useScoreSurfaceController(params: {
     horizontalMeasureWidthCacheRef.current.clear()
   }, [
     horizontalMeasureWidthCacheRef,
+    timeAxisSpacingConfig.minMeasureWidthPx,
     timeAxisSpacingConfig.baseMinGap32Px,
     timeAxisSpacingConfig.leadingBarlineGapPx,
     timeAxisSpacingConfig.secondChordSafeGapPx,

@@ -7,8 +7,11 @@ const CHORD_MARKER_UI_SCALE_PERCENT_MIN = 60
 const CHORD_MARKER_UI_SCALE_PERCENT_MAX = 240
 const CHORD_MARKER_PADDING_PX_MIN = 0
 const CHORD_MARKER_PADDING_PX_MAX = 24
+const MIN_MEASURE_WIDTH_PX_MIN = 0
+const MIN_MEASURE_WIDTH_PX_MAX = 320
 
 export const DEFAULT_PAGE_HORIZONTAL_PADDING_PX = 86
+export const DEFAULT_MIN_MEASURE_WIDTH_PX = 120
 export const DEFAULT_CHORD_MARKER_UI_SCALE_PERCENT = 134
 export const DEFAULT_CHORD_MARKER_PADDING_PX = 6
 
@@ -149,6 +152,10 @@ export function clampBaseMinGap32Px(value: number): number {
 export function clampLeadingBarlineGapPx(value: number): number {
   const clamped = clampNumber(value, 0, 80)
   return Number(clamped.toFixed(2))
+}
+
+export function clampMinMeasureWidthPx(value: number): number {
+  return Math.round(clampNumber(value, MIN_MEASURE_WIDTH_PX_MIN, MIN_MEASURE_WIDTH_PX_MAX))
 }
 
 export function clampSecondChordSafeGapPx(value: number): number {
