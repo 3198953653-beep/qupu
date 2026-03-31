@@ -66,7 +66,7 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
   const [dragPreviewState, setDragPreviewState] = useState<DragState | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [importFeedback, setImportFeedback] = useState<ImportFeedback>({ kind: 'idle', message: '' })
-  const [isNotationPaletteOpen, setIsNotationPaletteOpen] = useState(false)
+  const [isNotationPaletteOpen, setIsNotationPaletteOpen] = useState(true)
   const [notationPaletteSelection, setNotationPaletteSelection] = useState<NotationPaletteSelection>(
     () => getDefaultNotationPaletteSelection(),
   )
