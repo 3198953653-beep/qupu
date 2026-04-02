@@ -5,6 +5,12 @@ import {
   getRenderedNoteGlyphBounds,
   getRenderedNoteVisualX,
 } from './renderPosition'
+import {
+  getRenderedNoteHeadAbsoluteX,
+  getRenderedNoteHeadColumnMetrics,
+  getRenderedNoteHeadWidth,
+  type RenderedNoteHeadLike,
+} from './noteHeadColumns'
 import type { MeasurePair, ScoreNote, StaffKind } from '../types'
 import { resolveEffectiveBoundary } from './effectiveBoundary'
 import { buildPublicAxisLayout } from '../timeline/axisLayout'
@@ -117,19 +123,6 @@ type NoteSpacingGeometry = {
   collisionRightBodyTailPx: number
 }
 
-type VexBoundingBoxLike = {
-  getX?: () => number
-  getW?: () => number
-}
-
-type VexNoteHeadLike = {
-  getAbsoluteX?: () => number
-  getBoundingBox?: () => VexBoundingBoxLike | null
-  getWidth?: () => number
-  isDisplaced?: () => boolean
-  preFormatted?: boolean
-}
-
 type ApplyUnifiedTimeAxisSpacingParams = {
   measure: MeasurePair
   noteStartX: number
@@ -152,7 +145,6 @@ type ApplyUnifiedTimeAxisSpacingParams = {
 }
 
 const MIN_RENDER_WIDTH_PX = 1
-const DEFAULT_NOTE_HEAD_WIDTH_PX = 9
 const TICKS_PER_QUARTER = 16
 const DEFAULT_COMPACT_TAIL_ANCHOR_TICKS = 4
 const UNIFORM_TICK_SPACING_START_GUARD_PX = 0
@@ -162,9 +154,6 @@ const ACCIDENTAL_PREALLOCATED_CLEARANCE_PX = 0
 const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
 const COLLISION_RIGHT_BODY_PADDING_PX = 1.0
 const ACCIDENTAL_COLLISION_SAFE_GAP_PX = 1
-const MAX_RENDERED_NOTE_HEAD_WIDTH_PX = DEFAULT_NOTE_HEAD_WIDTH_PX * 2.5
-const MAX_NOTE_HEAD_COLUMN_OFFSET_PX = DEFAULT_NOTE_HEAD_WIDTH_PX * 5
-const NOTE_HEAD_COLUMN_COMPARE_EPSILON_PX = 0.01
 const BASE_GAP_UNIT_PX = 3.5
 const DEFAULT_MIN_MEASURE_WIDTH_PX = 120
 const MIN_GAP_BEATS = 1 / 32
@@ -231,153 +220,13 @@ function getStaffTotalTicks(notes: ScoreNote[]): number {
   return Math.max(1, cursorTicks)
 }
 
-function getRenderedNoteHeadWidth(noteHead: VexNoteHeadLike | null | undefined): number {
-  const bboxWidth = noteHead?.getBoundingBox?.()?.getW?.()
-  if (typeof bboxWidth === 'number' && Number.isFinite(bboxWidth) && bboxWidth > 0) {
-    return Math.min(MAX_RENDERED_NOTE_HEAD_WIDTH_PX, bboxWidth)
-  }
-  const rawWidth = noteHead?.getWidth?.()
-  if (typeof rawWidth === 'number' && Number.isFinite(rawWidth) && rawWidth > 0) {
-    return Math.min(MAX_RENDERED_NOTE_HEAD_WIDTH_PX, rawWidth)
-  }
-  return DEFAULT_NOTE_HEAD_WIDTH_PX
-}
-
-function getRenderedNoteHeadAbsoluteX(params: {
-  noteHead: VexNoteHeadLike | null | undefined
-  anchorX: number
-  stemDirection: number
-}): number | null {
-  const { noteHead, anchorX, stemDirection } = params
-  const isDisplaced = noteHead?.isDisplaced?.() === true
-  const absoluteX = noteHead?.getAbsoluteX?.()
-  if (
-    typeof absoluteX === 'number' &&
-    Number.isFinite(absoluteX) &&
-    Math.abs(absoluteX - anchorX) <= MAX_NOTE_HEAD_COLUMN_OFFSET_PX
-  ) {
-    return absoluteX
-  }
-  const bboxX = noteHead?.getBoundingBox?.()?.getX?.()
-  if (
-    typeof bboxX === 'number' &&
-    Number.isFinite(bboxX) &&
-    Math.abs(bboxX - anchorX) <= MAX_NOTE_HEAD_COLUMN_OFFSET_PX
-  ) {
-    return bboxX
-  }
-  if (!isDisplaced) {
-    return anchorX
-  }
-
-  const isPreFormatted = noteHead?.preFormatted === true
-  const headWidth = getRenderedNoteHeadWidth(noteHead)
-  const displacementPx = isDisplaced ? (headWidth - Stem.WIDTH / 2) * stemDirection : 0
-  const displacementMultiplier = isPreFormatted ? 1 : 2
-  return anchorX + displacementPx * displacementMultiplier
-}
-
-function getRenderedNoteHeadColumnReserves(vexNote: StaveNote, anchorX: number): {
-  resolvedAnchorX: number
-  hasMultipleColumns: boolean
-  leftColumnReservePx: number
-  rightColumnReservePx: number
-} {
-  const noteHeads = (vexNote.noteHeads ?? []) as VexNoteHeadLike[]
-  const stemDirection = vexNote.getStemDirection()
-  if (noteHeads.length === 0) {
-    return {
-      resolvedAnchorX: anchorX,
-      hasMultipleColumns: false,
-      leftColumnReservePx: 0,
-      rightColumnReservePx: 0,
-    }
-  }
-
-  const acceptedHeads: Array<{ x: number; isDisplaced: boolean }> = []
-
-  noteHeads.forEach((noteHead) => {
-    const headX = getRenderedNoteHeadAbsoluteX({
-      noteHead,
-      anchorX,
-      stemDirection,
-    })
-    if (typeof headX !== 'number' || !Number.isFinite(headX)) return
-    if (Math.abs(headX - anchorX) > MAX_NOTE_HEAD_COLUMN_OFFSET_PX) return
-    acceptedHeads.push({
-      x: headX,
-      isDisplaced: noteHead?.isDisplaced?.() === true,
-    })
-  })
-
-  if (acceptedHeads.length === 0) {
-    return {
-      resolvedAnchorX: anchorX,
-      hasMultipleColumns: false,
-      leftColumnReservePx: 0,
-      rightColumnReservePx: 0,
-    }
-  }
-
-  const columnBuckets = acceptedHeads.reduce<
-    Array<{
-      x: number
-      totalCount: number
-      nonDisplacedCount: number
-    }>
-  >((buckets, head) => {
-    const existingBucket = buckets.find((entry) => Math.abs(entry.x - head.x) <= NOTE_HEAD_COLUMN_COMPARE_EPSILON_PX)
-    if (existingBucket) {
-      existingBucket.totalCount += 1
-      if (!head.isDisplaced) {
-        existingBucket.nonDisplacedCount += 1
-      }
-      return buckets
-    }
-    return [
-      ...buckets,
-      {
-        x: head.x,
-        totalCount: 1,
-        nonDisplacedCount: head.isDisplaced ? 0 : 1,
-      },
-    ]
-  }, [])
-  columnBuckets.sort((left, right) => left.x - right.x)
-  const primaryColumn =
-    columnBuckets.slice().sort((left, right) => {
-      if (right.totalCount !== left.totalCount) {
-        return right.totalCount - left.totalCount
-      }
-      if (right.nonDisplacedCount !== left.nonDisplacedCount) {
-        return right.nonDisplacedCount - left.nonDisplacedCount
-      }
-      const leftDistance = Math.abs(left.x - anchorX)
-      const rightDistance = Math.abs(right.x - anchorX)
-      if (leftDistance !== rightDistance) {
-        return leftDistance - rightDistance
-      }
-      return left.x - right.x
-    })[0] ?? null
-  const resolvedAnchorX = primaryColumn?.x ?? anchorX
-  const minHeadX = acceptedHeads.reduce((minValue, head) => Math.min(minValue, head.x), Number.POSITIVE_INFINITY)
-  const maxHeadX = acceptedHeads.reduce((maxValue, head) => Math.max(maxValue, head.x), Number.NEGATIVE_INFINITY)
-  const hasMultipleColumns = columnBuckets.length > 1
-  return {
-    resolvedAnchorX,
-    hasMultipleColumns,
-    leftColumnReservePx: hasMultipleColumns ? Math.max(0, resolvedAnchorX - minHeadX) : 0,
-    rightColumnReservePx: hasMultipleColumns ? Math.max(0, maxHeadX - resolvedAnchorX) : 0,
-  }
-}
-
 function getRenderedNoteOccupiedBounds(
   vexNote: StaveNote,
   params?: {
     rightPaddingPx?: number
   },
 ): { leftX: number; rightX: number } | null {
-  const noteHeads = (vexNote.noteHeads ?? []) as VexNoteHeadLike[]
+  const noteHeads = (vexNote.noteHeads ?? []) as RenderedNoteHeadLike[]
   const anchorX = getRenderedNoteVisualX(vexNote)
   const stemDirection = vexNote.getStemDirection()
 
@@ -449,7 +298,7 @@ function getNoteRawReserveExtents(vexNote: StaveNote): {
       hasMultipleColumns,
       leftColumnReservePx,
       rightColumnReservePx,
-    } = getRenderedNoteHeadColumnReserves(vexNote, fallbackAnchorX)
+    } = getRenderedNoteHeadColumnMetrics(vexNote, fallbackAnchorX)
     if (hasMultipleColumns) {
       rawLeftStructuralReservePx = Math.max(rawLeftStructuralReservePx, leftColumnReservePx)
       rawRightReservePx = Math.max(rawRightReservePx, rightColumnReservePx)

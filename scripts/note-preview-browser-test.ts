@@ -24,6 +24,8 @@ type DumpNoteHead = {
   pitch: string | null
   x: number
   y: number
+  hitMinX?: number | null
+  hitMaxX?: number | null
 }
 
 type DumpAccidentalCoord = {
@@ -31,6 +33,10 @@ type DumpAccidentalCoord = {
   rightX: number
   leftX: number
   visualRightX: number | null
+  accidentalVisualLeftXExact?: number | null
+  accidentalVisualRightXExact?: number | null
+  ownHeadLeftXExact?: number | null
+  ownGapPxExact?: number | null
 }
 
 type DumpNoteRow = {
@@ -46,6 +52,10 @@ type DumpNoteRow = {
 type MeasureDumpRow = {
   pairIndex: number
   rendered: boolean
+  measureX?: number | null
+  measureWidth?: number | null
+  effectiveBoundaryStartX?: number | null
+  effectiveBoundaryEndX?: number | null
   notes: DumpNoteRow[]
 }
 
@@ -72,6 +82,9 @@ const DEV_HOST = '127.0.0.1'
 const DEV_PORT = 4173
 const DEV_URL = `http://${DEV_HOST}:${DEV_PORT}`
 const DEFAULT_DRAG_DELTA_CLIENT_Y = -42
+const ACCIDENTAL_VISIBILITY_TOLERANCE_PX = 2
+const ACCIDENTAL_OWN_HEAD_SAFE_GAP_PX = 2
+const ACCIDENTAL_BLOCKER_SAFE_GAP_PX = 0
 
 const ACCIDENTAL_PREVIEW_FIXTURE_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE score-partwise PUBLIC
@@ -186,7 +199,17 @@ async function stopDevServer(server: ChildProcess): Promise<void> {
       resolve()
       return
     }
-    server.once('exit', () => resolve())
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(fallbackTimer)
+      resolve()
+    }
+    const fallbackTimer = setTimeout(() => {
+      finish()
+    }, 5000)
+    server.once('exit', () => finish())
     if (process.platform === 'win32' && server.pid) {
       spawn('taskkill', ['/pid', String(server.pid), '/T', '/F'], { stdio: 'ignore' })
       return
@@ -202,8 +225,11 @@ async function waitForServer(url: string, timeoutMs: number): Promise<void> {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
     try {
-      const response = await fetch(url, { method: 'GET' })
-      if (response.ok) return
+      const response = await Promise.race([
+        fetch(url, { method: 'GET', cache: 'no-store' }),
+        sleep(1500).then(() => null),
+      ])
+      if (response && 'ok' in response && response.ok) return
     } catch {
       // retry
     }
@@ -348,6 +374,174 @@ function findNoteHead(note: DumpNoteRow, keyIndex: number): DumpNoteHead {
     throw new Error(`Unable to find keyIndex=${keyIndex} for note ${note.noteId}.`)
   }
   return head
+}
+
+function getAccidentalLeftX(accidental: DumpAccidentalCoord): number {
+  if (
+    typeof accidental.accidentalVisualLeftXExact === 'number' &&
+    Number.isFinite(accidental.accidentalVisualLeftXExact)
+  ) {
+    return accidental.accidentalVisualLeftXExact
+  }
+  if (Number.isFinite(accidental.leftX)) return accidental.leftX
+  if (Number.isFinite(accidental.rightX)) return accidental.rightX - 9
+  return Number.NaN
+}
+
+function getAccidentalRightX(accidental: DumpAccidentalCoord): number {
+  if (
+    typeof accidental.accidentalVisualRightXExact === 'number' &&
+    Number.isFinite(accidental.accidentalVisualRightXExact)
+  ) {
+    return accidental.accidentalVisualRightXExact
+  }
+  if (typeof accidental.visualRightX === 'number' && Number.isFinite(accidental.visualRightX)) {
+    return accidental.visualRightX
+  }
+  const leftX = getAccidentalLeftX(accidental)
+  return Number.isFinite(leftX) ? leftX + 9 : Number.NaN
+}
+
+function resolveNoteHeadLeftX(head: DumpNoteHead | null | undefined): number | null {
+  if (!head) return null
+  if (typeof head.hitMinX === 'number' && Number.isFinite(head.hitMinX)) {
+    return head.hitMinX
+  }
+  return typeof head.x === 'number' && Number.isFinite(head.x) ? head.x : null
+}
+
+function resolveNoteHeadRightX(head: DumpNoteHead | null | undefined): number | null {
+  if (!head) return null
+  const leftX = resolveNoteHeadLeftX(head)
+  if (typeof head.hitMaxX === 'number' && Number.isFinite(head.hitMaxX)) {
+    if (leftX === null || head.hitMaxX >= leftX) {
+      return head.hitMaxX
+    }
+  }
+  return leftX !== null ? leftX + 9 : null
+}
+
+function assertChordAccidentalVisibleAndSafe(params: {
+  row: MeasureDumpRow
+  note: DumpNoteRow
+  keyIndex: number
+  context: string
+}): {
+  accidentalLeftX: number
+  accidentalRightX: number
+  blockerHeadLeftX: number
+  gapToHeadPx: number
+  ownHeadLeftX: number
+  gapToOwnHeadPx: number
+} {
+  const { row, note, keyIndex, context } = params
+  const accidental = note.accidentalCoords.find((entry) => entry.keyIndex === keyIndex)
+  if (!accidental) {
+    throw new Error(`${context}: missing accidental for keyIndex=${keyIndex}.`)
+  }
+  const accidentalLeftX = getAccidentalLeftX(accidental)
+  const accidentalRightX = getAccidentalRightX(accidental)
+  if (!Number.isFinite(accidentalLeftX) || !Number.isFinite(accidentalRightX)) {
+    throw new Error(
+      `${context}: accidental coordinates are not finite (left=${String(accidentalLeftX)}, right=${String(accidentalRightX)}).`,
+    )
+  }
+
+  const boundaryStartX =
+    typeof row.measureX === 'number' && Number.isFinite(row.measureX)
+        ? row.measureX
+      : typeof row.effectiveBoundaryStartX === 'number' && Number.isFinite(row.effectiveBoundaryStartX)
+        ? row.effectiveBoundaryStartX
+        : null
+  const boundaryEndX =
+    typeof row.measureX === 'number' &&
+        Number.isFinite(row.measureX) &&
+        typeof row.measureWidth === 'number' &&
+        Number.isFinite(row.measureWidth)
+        ? row.measureX + row.measureWidth
+      : typeof row.effectiveBoundaryEndX === 'number' && Number.isFinite(row.effectiveBoundaryEndX)
+        ? row.effectiveBoundaryEndX
+        : null
+  if (boundaryStartX === null || boundaryEndX === null) {
+    throw new Error(`${context}: missing measure boundary data in debug dump.`)
+  }
+  if (accidentalLeftX < boundaryStartX - ACCIDENTAL_VISIBILITY_TOLERANCE_PX) {
+    throw new Error(
+      `${context}: accidental left edge is outside visible measure corridor (${accidentalLeftX.toFixed(3)} < ${(boundaryStartX - ACCIDENTAL_VISIBILITY_TOLERANCE_PX).toFixed(3)}).`,
+    )
+  }
+  if (accidentalRightX > boundaryEndX + ACCIDENTAL_VISIBILITY_TOLERANCE_PX) {
+    throw new Error(
+      `${context}: accidental right edge is outside visible measure corridor (${accidentalRightX.toFixed(3)} > ${(boundaryEndX + ACCIDENTAL_VISIBILITY_TOLERANCE_PX).toFixed(3)}).`,
+    )
+  }
+
+  const blockerHeads = note.noteHeads.filter((head) => head.keyIndex !== keyIndex)
+  const blockerHeadLeftX = blockerHeads.reduce((minValue, head) => {
+    const resolvedLeftX = resolveNoteHeadLeftX(head)
+    return resolvedLeftX === null ? minValue : Math.min(minValue, resolvedLeftX)
+  }, Number.POSITIVE_INFINITY)
+  if (!Number.isFinite(blockerHeadLeftX)) {
+    throw new Error(`${context}: missing notehead coordinates for collision check.`)
+  }
+  const blockerHeadRightX = blockerHeads.reduce((maxValue, head) => {
+    const resolvedRightX = resolveNoteHeadRightX(head)
+    return resolvedRightX === null ? maxValue : Math.max(maxValue, resolvedRightX)
+  }, Number.NEGATIVE_INFINITY)
+  if (!Number.isFinite(blockerHeadRightX)) {
+    throw new Error(`${context}: missing blocker notehead width coordinates for collision check.`)
+  }
+  const gapToHeadPx = blockerHeadLeftX - accidentalRightX
+  const overlapsBlocker =
+    accidentalRightX > blockerHeadLeftX + ACCIDENTAL_BLOCKER_SAFE_GAP_PX + 0.15 &&
+    accidentalLeftX < blockerHeadRightX - ACCIDENTAL_BLOCKER_SAFE_GAP_PX - 0.15
+  if (overlapsBlocker) {
+    throw new Error(
+      `${context}: accidental overlaps blocker head left=${accidentalLeftX.toFixed(3)} right=${accidentalRightX.toFixed(3)} blocker=[${blockerHeadLeftX.toFixed(3)}, ${blockerHeadRightX.toFixed(3)}].`,
+    )
+  }
+  const ownHead =
+    note.noteHeads.find((head) => head.keyIndex === keyIndex) ??
+    note.noteHeads.find((head) => resolveNoteHeadLeftX(head) !== null) ??
+    null
+  if (!ownHead) {
+    throw new Error(`${context}: missing own notehead coordinates for keyIndex=${keyIndex}.`)
+  }
+  const ownHeadLeftMeasured = resolveNoteHeadLeftX(ownHead)
+  if (ownHeadLeftMeasured === null) {
+    throw new Error(`${context}: own notehead measured-left is unavailable for keyIndex=${keyIndex}.`)
+  }
+  const ownHeadLeftX =
+    typeof accidental.ownHeadLeftXExact === 'number' && Number.isFinite(accidental.ownHeadLeftXExact)
+      ? accidental.ownHeadLeftXExact
+      : ownHeadLeftMeasured
+  const ownGapMeasured = ownHeadLeftMeasured - accidentalRightX
+  const gapToOwnHeadPx =
+    typeof accidental.ownGapPxExact === 'number' && Number.isFinite(accidental.ownGapPxExact)
+      ? accidental.ownGapPxExact
+      : ownGapMeasured
+  if (
+    typeof accidental.ownGapPxExact === 'number' &&
+    Number.isFinite(accidental.ownGapPxExact) &&
+    Math.abs(accidental.ownGapPxExact - ownGapMeasured) > 0.65
+  ) {
+    throw new Error(
+      `${context}: own gap exact mismatch (exact=${accidental.ownGapPxExact.toFixed(3)} measured=${ownGapMeasured.toFixed(3)}).`,
+    )
+  }
+  if (gapToOwnHeadPx < ACCIDENTAL_OWN_HEAD_SAFE_GAP_PX - 0.15) {
+    throw new Error(
+      `${context}: accidental overlaps own head gap=${gapToOwnHeadPx.toFixed(3)} (< ${ACCIDENTAL_OWN_HEAD_SAFE_GAP_PX}).`,
+    )
+  }
+  return {
+    accidentalLeftX,
+    accidentalRightX,
+    blockerHeadLeftX,
+    gapToHeadPx,
+    ownHeadLeftX,
+    gapToOwnHeadPx,
+  }
 }
 
 async function toClientPoint(page: Page, logicalX: number, logicalY: number): Promise<{ x: number; y: number }> {
@@ -594,6 +788,18 @@ async function runAccidentalPreviewScenarios(page: Page) {
   await clickNotationPaletteButton(page, '升记号')
   const chordEvents = await waitForNotePreviewCountAtLeast(page, 1)
   expectSingleClickPreviewPitch(chordEvents, 'c#/5', 'chord-member accidental preview')
+  const chordRowsAfterAccidental = await collectMergedDump(page)
+  const chordRowAfterAccidental = chordRowsAfterAccidental.find((entry) => entry.pairIndex === 1)
+  if (!chordRowAfterAccidental?.rendered) {
+    throw new Error('Chord accidental visibility check failed: measure 2 is not rendered.')
+  }
+  const chordNoteAfterAccidental = findRenderedNoteById(chordRowsAfterAccidental, chordNote.noteId)
+  const chordAccidentalVisibility = assertChordAccidentalVisibleAndSafe({
+    row: chordRowAfterAccidental,
+    note: chordNoteAfterAccidental,
+    keyIndex: 1,
+    context: 'chord-member accidental visibility',
+  })
 
   await importMusicXmlViaDebugApi(page, ACCIDENTAL_PREVIEW_FIXTURE_XML)
   await setScoreScale(page)
@@ -635,6 +841,7 @@ async function runAccidentalPreviewScenarios(page: Page) {
     noOpEvents,
     deleteEvents,
     chordEvents,
+    chordAccidentalVisibility,
     multiEvents,
     chordActiveSelection,
     multiActiveSelection,

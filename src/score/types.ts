@@ -150,6 +150,10 @@ export type AccidentalLayout = {
   x: number
   y: number
   renderedAccidental: string
+  visualLeftXExact?: number
+  visualRightXExact?: number
+  ownHeadLeftXExact?: number
+  ownGapPxExact?: number
   hitCenterX?: number
   hitCenterY?: number
   hitRadiusX?: number

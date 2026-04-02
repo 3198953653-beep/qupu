@@ -11,6 +11,24 @@ function isSameSelection(left: Selection, right: Selection): boolean {
   return left.noteId === right.noteId && left.staff === right.staff && left.keyIndex === right.keyIndex
 }
 
+function toRoundedDebugNumber(value: number): number {
+  return Number(value.toFixed(3))
+}
+
+function toFiniteNumber(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function resolveDebugNoteHeadLeftX(head: {
+  x: number
+  hitMinX?: number
+} | null): number | null {
+  if (!head) return null
+  const hitMinX = toFiniteNumber(head.hitMinX)
+  const headX = toFiniteNumber(head.x)
+  return hitMinX ?? headX
+}
+
 export function useScoreWorkspaceSelectionBindings(params: {
   appState: ReturnType<typeof useScoreAppState>
   editorRefs: ReturnType<typeof useScoreEditorRefs>
@@ -38,6 +56,64 @@ export function useScoreWorkspaceSelectionBindings(params: {
   const clearTrebleTapCandidate = useCallback(() => {
     lastTrebleTapRef.current = null
   }, [])
+
+  const logNoteClickGeometry = useCallback((selection: Selection) => {
+    if (!import.meta.env.DEV) return
+    const targetLayout =
+      editorRefs.noteLayoutsRef.current.find(
+        (layout) => layout.id === selection.noteId && layout.staff === selection.staff,
+      ) ?? null
+    if (!targetLayout) return
+
+    const selectedHead =
+      targetLayout.noteHeads.find(
+        (head) =>
+          head.keyIndex === selection.keyIndex &&
+          (Number.isFinite(head.hitMinX) || Number.isFinite(head.x)),
+      ) ?? null
+    const fallbackHead =
+      targetLayout.noteHeads.find((head) => Number.isFinite(head.hitMinX) || Number.isFinite(head.x)) ?? null
+    const noteLeftX =
+      resolveDebugNoteHeadLeftX(selectedHead) ??
+      resolveDebugNoteHeadLeftX(fallbackHead) ??
+      toFiniteNumber(targetLayout.visualLeftX)
+    if (noteLeftX === null) return
+
+    const payload = {
+      noteId: selection.noteId,
+      staff: selection.staff,
+      keyIndex: selection.keyIndex,
+      pairIndex: targetLayout.pairIndex,
+      noteIndex: targetLayout.noteIndex,
+      noteLeftX: toRoundedDebugNumber(noteLeftX),
+    }
+    console.log('[note-click-geometry]', payload)
+  }, [editorRefs.noteLayoutsRef])
+
+  const logAccidentalClickGeometry = useCallback((selection: Selection) => {
+    if (!import.meta.env.DEV) return
+    const targetLayout =
+      editorRefs.noteLayoutsRef.current.find(
+        (layout) => layout.id === selection.noteId && layout.staff === selection.staff,
+      ) ?? null
+    if (!targetLayout) return
+
+    const targetAccidental =
+      targetLayout.accidentalLayouts.find((entry) => entry.keyIndex === selection.keyIndex) ?? null
+    const accidentalX =
+      toFiniteNumber(targetAccidental?.visualRightXExact) ??
+      toFiniteNumber(targetAccidental?.hitMaxX)
+    if (accidentalX === null) return
+
+    console.log('[accidental-click-geometry]', {
+      noteId: selection.noteId,
+      staff: selection.staff,
+      keyIndex: selection.keyIndex,
+      pairIndex: targetLayout.pairIndex,
+      noteIndex: targetLayout.noteIndex,
+      accidentalX: toRoundedDebugNumber(accidentalX),
+    })
+  }, [editorRefs.noteLayoutsRef])
 
   const normalizeTrebleDialogSelection = useCallback((selection: Selection): Selection | null => {
     if (selection.staff !== 'treble') return null
@@ -93,6 +169,7 @@ export function useScoreWorkspaceSelectionBindings(params: {
     appState.setSelectedSelections([selection])
     appState.setActiveSelection(selection)
     appState.setIsSelectionVisible(true)
+    logNoteClickGeometry(selection)
 
     const normalizedSelection = normalizeTrebleDialogSelection(selection)
     if (!normalizedSelection) {
@@ -121,6 +198,7 @@ export function useScoreWorkspaceSelectionBindings(params: {
     appState,
     clearActiveChordSelection,
     clearTrebleTapCandidate,
+    logNoteClickGeometry,
     normalizeTrebleDialogSelection,
     onTrebleSelectionDoubleTap,
     sessionHelpers,
@@ -128,6 +206,7 @@ export function useScoreWorkspaceSelectionBindings(params: {
 
   const onAccidentalPointerDown = useCallback((selection: Selection) => {
     sessionHelpers.resetMidiStepChain()
+    logAccidentalClickGeometry(selection)
     appState.setActiveAccidentalSelection(selection)
     appState.setActiveTieSelection(null)
     appState.setActivePedalSelection(null)
@@ -137,7 +216,7 @@ export function useScoreWorkspaceSelectionBindings(params: {
     appState.setSelectedSelections([])
     appState.setIsSelectionVisible(false)
     clearTrebleTapCandidate()
-  }, [appState, clearActiveChordSelection, clearTrebleTapCandidate, sessionHelpers])
+  }, [appState, clearActiveChordSelection, clearTrebleTapCandidate, logAccidentalClickGeometry, sessionHelpers])
 
   const onTiePointerDown = useCallback((selection: TieSelection) => {
     sessionHelpers.resetMidiStepChain()

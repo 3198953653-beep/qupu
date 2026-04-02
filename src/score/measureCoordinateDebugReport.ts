@@ -146,11 +146,31 @@ export function buildMeasureCoordinateDebugReport(params: {
             pitch: head.pitch,
             x: head.x,
             y: head.y,
+            hitMinX:
+              typeof head.hitMinX === 'number' && Number.isFinite(head.hitMinX)
+                ? head.hitMinX
+                : null,
+            hitMaxX:
+              typeof head.hitMaxX === 'number' && Number.isFinite(head.hitMaxX)
+                ? head.hitMaxX
+                : null,
           })),
           accidentalCoords: Object.entries(layout.accidentalRightXByKeyIndex)
             .map(([rawKeyIndex, leftX]) => {
               const keyIndex = Number(rawKeyIndex)
               const accidentalLayout = layout.accidentalLayouts.find((entry) => entry.keyIndex === keyIndex)
+              const accidentalVisualLeftXExact =
+                typeof accidentalLayout?.visualLeftXExact === 'number' && Number.isFinite(accidentalLayout.visualLeftXExact)
+                  ? accidentalLayout.visualLeftXExact
+                  : typeof accidentalLayout?.hitMinX === 'number' && Number.isFinite(accidentalLayout.hitMinX)
+                    ? accidentalLayout.hitMinX
+                    : leftX
+              const accidentalVisualRightXExact =
+                typeof accidentalLayout?.visualRightXExact === 'number' && Number.isFinite(accidentalLayout.visualRightXExact)
+                  ? accidentalLayout.visualRightXExact
+                  : typeof accidentalLayout?.hitMaxX === 'number' && Number.isFinite(accidentalLayout.hitMaxX)
+                    ? accidentalLayout.hitMaxX
+                    : null
               return {
                 keyIndex,
                 rightX: leftX,
@@ -161,6 +181,16 @@ export function buildMeasureCoordinateDebugReport(params: {
                 visualRightX:
                   typeof accidentalLayout?.hitMaxX === 'number' && Number.isFinite(accidentalLayout.hitMaxX)
                     ? accidentalLayout.hitMaxX
+                    : null,
+                accidentalVisualLeftXExact,
+                accidentalVisualRightXExact,
+                ownHeadLeftXExact:
+                  typeof accidentalLayout?.ownHeadLeftXExact === 'number' && Number.isFinite(accidentalLayout.ownHeadLeftXExact)
+                    ? accidentalLayout.ownHeadLeftXExact
+                    : null,
+                ownGapPxExact:
+                  typeof accidentalLayout?.ownGapPxExact === 'number' && Number.isFinite(accidentalLayout.ownGapPxExact)
+                    ? accidentalLayout.ownGapPxExact
                     : null,
               }
             })

@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 import { chromium, type Page } from 'playwright'
 
 type ImportFeedback = {
@@ -12,6 +13,10 @@ type DumpAccidentalCoord = {
   rightX: number
   leftX?: number | null
   visualRightX?: number | null
+  accidentalVisualLeftXExact?: number | null
+  accidentalVisualRightXExact?: number | null
+  ownHeadLeftXExact?: number | null
+  ownGapPxExact?: number | null
 }
 
 type DumpNoteRow = {
@@ -22,6 +27,14 @@ type DumpNoteRow = {
   duration?: string | null
   onsetTicksInMeasure: number | null
   visualRightX?: number | null
+  noteHeads?: Array<{
+    x: number
+    y?: number | null
+    pitch?: string | null
+    keyIndex?: number | null
+    hitMinX?: number | null
+    hitMaxX?: number | null
+  }>
   accidentalCoords?: DumpAccidentalCoord[]
 }
 
@@ -35,7 +48,10 @@ type DumpSpacingSegment = {
 
 type MeasureDumpRow = {
   pairIndex: number
+  measureX?: number | null
+  measureWidth?: number | null
   effectiveBoundaryStartX?: number | null
+  effectiveBoundaryEndX?: number | null
   notes: DumpNoteRow[]
   spacingSegments?: DumpSpacingSegment[]
 }
@@ -53,6 +69,13 @@ type FixtureScenario =
       expectedExtra: 'positive' | 'zero'
       previousKind: 'note' | 'rest'
       targetPitch: string
+      xmlText: string
+    }
+  | {
+      key: string
+      kind: 'same-onset-chord'
+      targetPitch: string
+      blockerPitch: string
       xmlText: string
     }
   | {
@@ -84,7 +107,17 @@ type LeadingFixtureResult = {
   failureReasons: string[]
 }
 
-type FixtureResult = InnerFixtureResult | LeadingFixtureResult
+type FixtureResult = InnerFixtureResult | LeadingFixtureResult | SameOnsetChordFixtureResult
+type SameOnsetChordFixtureResult = {
+  key: string
+  kind: 'same-onset-chord'
+  targetPitch: string
+  blockerPitch: string
+  finalGapPx: number
+  ownGapPx: number
+  passed: boolean
+  failureReasons: string[]
+}
 
 type DesktopTargetResult = {
   segmentKey: string
@@ -117,9 +150,13 @@ const DEV_PORT = 4186
 const DEV_URL = `http://${DEV_HOST}:${DEV_PORT}`
 const DEFAULT_XML_PATH = String.raw`C:\Users\76743\Desktop\1234.musicxml`
 const ACCIDENTAL_SAFE_GAP_PX = 1
+const ACCIDENTAL_OWN_HEAD_SAFE_GAP_PX = 2
+const ACCIDENTAL_BLOCKER_SAFE_GAP_PX = 0
+const SAME_ONSET_VISIBILITY_TOLERANCE_PX = 2
 const GAP_EPSILON_PX = 0.15
 const LEADING_MAX_GAP_PX = 2.2
 const APPROX_ACCIDENTAL_WIDTH_PX = 9
+const APPROX_NOTEHEAD_WIDTH_PX = 9
 const DEFAULT_LEADING_BARLINE_GAP_PX = 9.7
 
 function durationTypeFromCode(durationCode: DurationCode): 'whole' | 'half' | 'quarter' | 'eighth' | '16th' | '32nd' {
@@ -205,6 +242,44 @@ function buildPitchNoteXml(params: {
   ].join('\n')
 }
 
+function buildChordPitchNoteXml(params: {
+  durationCode: DurationCode
+  step: string
+  octave: number
+  alter?: -2 | -1 | 1 | 2
+  accidentalText?: string
+  stem?: 'up' | 'down'
+}): string {
+  const { durationCode, step, octave, alter, accidentalText, stem } = params
+  const resolvedAccidentalText =
+    accidentalText ??
+    (alter === 2
+      ? 'double-sharp'
+      : alter === 1
+        ? 'sharp'
+        : alter === -1
+          ? 'flat'
+          : alter === -2
+            ? 'flat-flat'
+            : null)
+  return [
+    '      <note>',
+    '        <chord/>',
+    '        <pitch>',
+    `          <step>${step}</step>`,
+    ...(typeof alter === 'number' ? [`          <alter>${alter}</alter>`] : []),
+    `          <octave>${octave}</octave>`,
+    '        </pitch>',
+    ...(resolvedAccidentalText ? [`        <accidental>${resolvedAccidentalText}</accidental>`] : []),
+    `        <duration>${durationTicksFromCode(durationCode)}</duration>`,
+    '        <voice>1</voice>',
+    `        <type>${durationTypeFromCode(durationCode)}</type>`,
+    ...(stem ? [`        <stem>${stem}</stem>`] : []),
+    '        <staff>1</staff>',
+    '      </note>',
+  ].join('\n')
+}
+
 function buildRemainingTrebleRestsXml(remainingTicks: number): string[] {
   const restDurations: Array<{ code: DurationCode; ticks: number }> = [
     { code: '1', ticks: 32 },
@@ -230,6 +305,7 @@ function buildRemainingTrebleRestsXml(remainingTicks: number): string[] {
 
 function buildFixtureXml(events: string[]): string {
   const totalTicks = events.reduce((sum, event) => {
+    if (event.includes('<chord/>')) return sum
     const match = event.match(/<duration>(\d+)<\/duration>/)
     return sum + Number(match?.[1] ?? 0)
   }, 0)
@@ -313,6 +389,56 @@ const FIXTURE_SCENARIOS: FixtureScenario[] = [
     xmlText: buildFixtureXml([
       buildPitchNoteXml({ durationCode: '2', step: 'E', octave: 4, stem: 'up' }),
       buildPitchNoteXml({ durationCode: '2', step: 'C', alter: 1, octave: 5, stem: 'up' }),
+    ]),
+  },
+  {
+    key: 'fixture-same-onset-second-chord-accidental-clamp',
+    kind: 'same-onset-chord',
+    targetPitch: 'D#5',
+    blockerPitch: 'C5',
+    xmlText: buildFixtureXml([
+      buildPitchNoteXml({ durationCode: '2', step: 'B', octave: 4, stem: 'down' }),
+      buildPitchNoteXml({ durationCode: '4', step: 'C', octave: 5, stem: 'down' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'D', alter: 1, octave: 5, stem: 'down' }),
+      ...buildRemainingTrebleRestsXml(8),
+    ]),
+  },
+  {
+    key: 'fixture-same-onset-stem-up-accidental-clamp',
+    kind: 'same-onset-chord',
+    targetPitch: 'A#4',
+    blockerPitch: 'G4',
+    xmlText: buildFixtureXml([
+      buildPitchNoteXml({ durationCode: '4', step: 'E', octave: 4, stem: 'up' }),
+      buildPitchNoteXml({ durationCode: '4', step: 'G', octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'A', alter: 1, octave: 4, stem: 'up' }),
+      ...buildRemainingTrebleRestsXml(16),
+    ]),
+  },
+  {
+    key: 'fixture-user-file-first-measure-beat1',
+    kind: 'same-onset-chord',
+    targetPitch: 'D#5',
+    blockerPitch: 'C5',
+    xmlText: buildFixtureXml([
+      buildPitchNoteXml({ durationCode: '4', step: 'C', octave: 5, stem: 'down' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'D', alter: 1, octave: 5, stem: 'down' }),
+      buildPitchNoteXml({ durationCode: '4', step: 'G', octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'A', alter: 1, octave: 4, stem: 'up' }),
+      ...buildRemainingTrebleRestsXml(16),
+    ]),
+  },
+  {
+    key: 'fixture-user-file-first-measure-beat2',
+    kind: 'same-onset-chord',
+    targetPitch: 'A#4',
+    blockerPitch: 'G4',
+    xmlText: buildFixtureXml([
+      buildPitchNoteXml({ durationCode: '4', step: 'C', octave: 5, stem: 'down' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'D', alter: 1, octave: 5, stem: 'down' }),
+      buildPitchNoteXml({ durationCode: '4', step: 'G', octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'A', alter: 1, octave: 4, stem: 'up' }),
+      ...buildRemainingTrebleRestsXml(16),
     ]),
   },
 ]
@@ -493,9 +619,155 @@ function getAccidentalLeftX(note: DumpNoteRow): number | null {
   return Number.isFinite(leftX) ? leftX : null
 }
 
+function getAccidentalRightX(note: DumpNoteRow): number | null {
+  const accidentalCoords = note.accidentalCoords ?? []
+  const rightX = accidentalCoords.reduce((maxValue, accidental) => {
+    const leftX =
+      typeof accidental.accidentalVisualLeftXExact === 'number' && Number.isFinite(accidental.accidentalVisualLeftXExact)
+        ? accidental.accidentalVisualLeftXExact
+        : typeof accidental.leftX === 'number' && Number.isFinite(accidental.leftX)
+        ? accidental.leftX
+        : Number.isFinite(accidental.rightX)
+          ? accidental.rightX - APPROX_ACCIDENTAL_WIDTH_PX
+          : Number.NaN
+    const candidate =
+      typeof accidental.accidentalVisualRightXExact === 'number' && Number.isFinite(accidental.accidentalVisualRightXExact)
+        ? accidental.accidentalVisualRightXExact
+        : typeof accidental.visualRightX === 'number' && Number.isFinite(accidental.visualRightX)
+        ? accidental.visualRightX
+        : Number.isFinite(leftX)
+          ? leftX + APPROX_ACCIDENTAL_WIDTH_PX
+          : Number.NEGATIVE_INFINITY
+    return Math.max(maxValue, candidate)
+  }, Number.NEGATIVE_INFINITY)
+  return Number.isFinite(rightX) ? rightX : null
+}
+
+function resolveNoteHeadLeftWithSanity(head: {
+  x?: number | null
+  hitMinX?: number | null
+} | null): number | null {
+  if (!head) return null
+  const hitMinX =
+    typeof head.hitMinX === 'number' && Number.isFinite(head.hitMinX)
+      ? head.hitMinX
+      : null
+  const headX = typeof head.x === 'number' && Number.isFinite(head.x) ? head.x : null
+  return hitMinX ?? headX
+}
+
+function resolveNoteHeadRightWithSanity(head: {
+  x?: number | null
+  hitMinX?: number | null
+  hitMaxX?: number | null
+} | null): number | null {
+  if (!head) return null
+  const leftX = resolveNoteHeadLeftWithSanity(head)
+  const hitMaxX =
+    typeof head.hitMaxX === 'number' && Number.isFinite(head.hitMaxX)
+      ? head.hitMaxX
+      : null
+  if (leftX !== null && hitMaxX !== null && hitMaxX >= leftX) {
+    return hitMaxX
+  }
+  return leftX !== null ? leftX + APPROX_NOTEHEAD_WIDTH_PX : hitMaxX
+}
+
+function resolveNoteHeadBoundsByPitch(params: {
+  note: DumpNoteRow
+  pitch: string
+}): { leftX: number; rightX: number } | null {
+  const { note, pitch } = params
+  const normalizedPitch = normalizePitch(pitch)
+  const noteHead =
+    (note.noteHeads ?? []).find((head) => normalizePitch(head.pitch) === normalizedPitch) ??
+    null
+  if (!noteHead) {
+    return null
+  }
+  const leftX = resolveNoteHeadLeftWithSanity(noteHead)
+  const rightX =
+    resolveNoteHeadRightWithSanity(noteHead) ??
+    (leftX !== null ? leftX + APPROX_NOTEHEAD_WIDTH_PX : null)
+  if (leftX === null || rightX === null) {
+    return null
+  }
+  return {
+    leftX,
+    rightX,
+  }
+}
+
+function resolveOwnNoteHeadLeftX(params: {
+  note: DumpNoteRow
+  targetPitch: string
+  keyIndex: number
+}): number | null {
+  const { note, targetPitch, keyIndex } = params
+  const ownHeadLeftXExact = (note.accidentalCoords ?? []).find((entry) => entry.keyIndex === keyIndex)?.ownHeadLeftXExact
+  if (typeof ownHeadLeftXExact === 'number' && Number.isFinite(ownHeadLeftXExact)) {
+    return ownHeadLeftXExact
+  }
+  const noteHeads = note.noteHeads ?? []
+  const byKeyIndex = noteHeads.find(
+    (head) => typeof head.keyIndex === 'number' && Number.isFinite(head.keyIndex) && head.keyIndex === keyIndex,
+  )
+  if (byKeyIndex) {
+    const resolvedLeftX = resolveNoteHeadLeftWithSanity(byKeyIndex)
+    if (resolvedLeftX !== null) {
+      return resolvedLeftX
+    }
+  }
+  const normalizedTargetPitch = normalizePitch(targetPitch)
+  const byPitch = noteHeads.find((head) => normalizePitch(head.pitch) === normalizedTargetPitch)
+  if (byPitch) {
+    const resolvedLeftX = resolveNoteHeadLeftWithSanity(byPitch)
+    if (resolvedLeftX !== null) {
+      return resolvedLeftX
+    }
+  }
+  const fallback = noteHeads.reduce((maxValue, head) => {
+    if (typeof head.x !== 'number' || !Number.isFinite(head.x)) return maxValue
+    return Math.max(maxValue, head.x)
+  }, Number.NEGATIVE_INFINITY)
+  return Number.isFinite(fallback) ? fallback : null
+}
+
+function resolveOwnNoteHeadVisibleLeftX(params: {
+  note: DumpNoteRow
+  targetPitch: string
+  keyIndex: number
+}): number | null {
+  const { note, targetPitch, keyIndex } = params
+  const noteHeads = note.noteHeads ?? []
+  const byKeyIndex = noteHeads.find(
+    (head) => typeof head.keyIndex === 'number' && Number.isFinite(head.keyIndex) && head.keyIndex === keyIndex,
+  )
+  if (byKeyIndex) {
+    const resolvedLeftX = resolveNoteHeadLeftWithSanity(byKeyIndex)
+    if (resolvedLeftX !== null) {
+      return resolvedLeftX
+    }
+  }
+  const normalizedTargetPitch = normalizePitch(targetPitch)
+  const byPitch = noteHeads.find((head) => normalizePitch(head.pitch) === normalizedTargetPitch)
+  if (byPitch) {
+    const resolvedLeftX = resolveNoteHeadLeftWithSanity(byPitch)
+    if (resolvedLeftX !== null) {
+      return resolvedLeftX
+    }
+  }
+  return null
+}
+
 function findTrebleNoteByPitch(row: MeasureDumpRow, pitch: string): DumpNoteRow | null {
   const normalizedPitch = normalizePitch(pitch)
-  return sortTrebleNotes(row).find((note) => normalizePitch(note.pitch) === normalizedPitch) ?? null
+  return (
+    sortTrebleNotes(row).find((note) => {
+      if (normalizePitch(note.pitch) === normalizedPitch) return true
+      return (note.noteHeads ?? []).some((head) => normalizePitch(head.pitch) === normalizedPitch)
+    }) ?? null
+  )
 }
 
 function analyzeInnerFixtureScenario(params: {
@@ -607,16 +879,195 @@ function analyzeLeadingFixtureScenario(params: {
   }
 }
 
+function analyzeSameOnsetChordFixtureScenario(params: {
+  row: MeasureDumpRow
+  scenario: Extract<FixtureScenario, { kind: 'same-onset-chord' }>
+}): SameOnsetChordFixtureResult {
+  const { row, scenario } = params
+  const failures: string[] = []
+  const targetNote =
+    findTrebleNoteByPitch(row, scenario.targetPitch) ??
+    sortTrebleNotes(row).find((note) => (note.accidentalCoords?.length ?? 0) > 0) ??
+    null
+  const blockerNote = findTrebleNoteByPitch(row, scenario.blockerPitch)
+  if (!targetNote) {
+    throw new Error(`[${scenario.key}] Could not find target note ${scenario.targetPitch}`)
+  }
+  if (!blockerNote) {
+    failures.push(`blocker-note-not-found:${scenario.blockerPitch}`)
+  }
+  if (
+    blockerNote &&
+    typeof targetNote.onsetTicksInMeasure === 'number' &&
+    typeof blockerNote.onsetTicksInMeasure === 'number' &&
+    targetNote.onsetTicksInMeasure !== blockerNote.onsetTicksInMeasure
+  ) {
+    failures.push(`onset-mismatch:${targetNote.onsetTicksInMeasure}!=${blockerNote.onsetTicksInMeasure}`)
+  }
+
+  const targetAccidental = (targetNote.accidentalCoords ?? [])[0] ?? null
+  if (!targetAccidental) {
+    throw new Error(`[${scenario.key}] Missing accidental coords for ${scenario.targetPitch}`)
+  }
+  const accidentalRightX = assertFinite(
+    typeof targetAccidental.accidentalVisualRightXExact === 'number' &&
+      Number.isFinite(targetAccidental.accidentalVisualRightXExact)
+      ? targetAccidental.accidentalVisualRightXExact
+      : getAccidentalRightX(targetNote),
+    `${scenario.key}.accidentalRightX`,
+  )
+  const accidentalLeftX = assertFinite(
+    typeof targetAccidental.accidentalVisualLeftXExact === 'number' &&
+      Number.isFinite(targetAccidental.accidentalVisualLeftXExact)
+      ? targetAccidental.accidentalVisualLeftXExact
+      : getAccidentalLeftX(targetNote),
+    `${scenario.key}.accidentalLeftX`,
+  )
+  const ownHeadLeftX = assertFinite(
+    resolveOwnNoteHeadLeftX({
+      note: targetNote,
+      targetPitch: scenario.targetPitch,
+      keyIndex: targetAccidental.keyIndex,
+    }),
+    `${scenario.key}.ownHeadLeftX`,
+  )
+  const ownHeadVisibleLeftX = resolveOwnNoteHeadVisibleLeftX({
+    note: targetNote,
+    targetPitch: scenario.targetPitch,
+    keyIndex: targetAccidental.keyIndex,
+  })
+  const ownHeadExactFromAccidental =
+    typeof targetAccidental.ownHeadLeftXExact === 'number' && Number.isFinite(targetAccidental.ownHeadLeftXExact)
+      ? targetAccidental.ownHeadLeftXExact
+      : null
+  if (
+    typeof ownHeadExactFromAccidental === 'number' &&
+    Number.isFinite(ownHeadExactFromAccidental) &&
+    typeof ownHeadVisibleLeftX === 'number' &&
+    Number.isFinite(ownHeadVisibleLeftX) &&
+    Math.abs(ownHeadExactFromAccidental - ownHeadVisibleLeftX) > 0.5 + GAP_EPSILON_PX
+  ) {
+    failures.push(
+      `own-head-exact-mismatch:exact=${ownHeadExactFromAccidental.toFixed(3)} visible=${ownHeadVisibleLeftX.toFixed(3)}`,
+    )
+  }
+  const blockerHeadBounds = blockerNote
+    ? resolveNoteHeadBoundsByPitch({
+        note: blockerNote,
+        pitch: scenario.blockerPitch,
+      })
+    : null
+  if (!blockerHeadBounds) {
+    failures.push(`blocker-head-bounds-not-found:${scenario.blockerPitch}`)
+  }
+  const blockerHeadLeftX = blockerHeadBounds?.leftX ?? Number.NaN
+  const blockerHeadRightX = blockerHeadBounds?.rightX ?? Number.NaN
+  const finalGapPx = Number.isFinite(blockerHeadLeftX)
+    ? blockerHeadLeftX - accidentalRightX
+    : Number.NaN
+  const overlapsBlockerHead =
+    Number.isFinite(blockerHeadLeftX) &&
+    Number.isFinite(blockerHeadRightX) &&
+    accidentalRightX > blockerHeadLeftX + ACCIDENTAL_BLOCKER_SAFE_GAP_PX + GAP_EPSILON_PX &&
+    accidentalLeftX < blockerHeadRightX - ACCIDENTAL_BLOCKER_SAFE_GAP_PX - GAP_EPSILON_PX
+  if (Number.isFinite(finalGapPx)) {
+    const blockerGapIndicatesOverlap = finalGapPx < -GAP_EPSILON_PX
+    if (overlapsBlockerHead !== blockerGapIndicatesOverlap) {
+      failures.push(
+        `blocker-gap-geometry-mismatch:gap=${finalGapPx.toFixed(3)} overlap=${String(overlapsBlockerHead)}`,
+      )
+    }
+  }
+  if (overlapsBlockerHead) {
+    failures.push(
+      `blocker-head-overlap:left=${accidentalLeftX.toFixed(3)} right=${accidentalRightX.toFixed(3)} blocker=[${blockerHeadLeftX.toFixed(3)},${blockerHeadRightX.toFixed(3)}]`,
+    )
+  }
+  const ownHeadGapPx = ownHeadLeftX - accidentalRightX
+  const ownGapExact =
+    typeof targetAccidental.ownGapPxExact === 'number' && Number.isFinite(targetAccidental.ownGapPxExact)
+      ? targetAccidental.ownGapPxExact
+      : null
+  if (
+    typeof ownGapExact === 'number' &&
+    Number.isFinite(ownGapExact) &&
+    Math.abs(ownGapExact - ownHeadGapPx) > 0.5 + GAP_EPSILON_PX
+  ) {
+    failures.push(`own-gap-exact-mismatch:exact=${ownGapExact.toFixed(3)} measured=${ownHeadGapPx.toFixed(3)}`)
+  }
+  const ownGapForAssertion =
+    typeof ownGapExact === 'number' && Number.isFinite(ownGapExact)
+      ? ownGapExact
+      : ownHeadGapPx
+  if (
+    typeof ownGapExact === 'number' &&
+    Number.isFinite(ownGapExact) &&
+    ownHeadGapPx < ACCIDENTAL_OWN_HEAD_SAFE_GAP_PX - GAP_EPSILON_PX &&
+    ownGapExact >= ACCIDENTAL_OWN_HEAD_SAFE_GAP_PX - GAP_EPSILON_PX
+  ) {
+    failures.push(`own-gap-truth-mismatch:exact=${ownGapExact.toFixed(3)} measured=${ownHeadGapPx.toFixed(3)}`)
+  }
+  if (ownGapForAssertion < ACCIDENTAL_OWN_HEAD_SAFE_GAP_PX - GAP_EPSILON_PX) {
+    failures.push(`own-gap-too-small:${ownGapForAssertion.toFixed(3)}`)
+  }
+
+  const boundaryStartX =
+    typeof row.effectiveBoundaryStartX === 'number' && Number.isFinite(row.effectiveBoundaryStartX)
+        ? row.effectiveBoundaryStartX
+      : typeof row.measureX === 'number' && Number.isFinite(row.measureX)
+        ? row.measureX
+        : null
+  const leftVisibilityAllowancePx = APPROX_ACCIDENTAL_WIDTH_PX + SAME_ONSET_VISIBILITY_TOLERANCE_PX
+  if (boundaryStartX !== null && accidentalLeftX < boundaryStartX - leftVisibilityAllowancePx) {
+    failures.push(
+      `accidental-left-outside-measure:${accidentalLeftX.toFixed(3)}<${(boundaryStartX - leftVisibilityAllowancePx).toFixed(3)}`,
+    )
+  }
+
+  const boundaryEndX =
+    typeof row.effectiveBoundaryEndX === 'number' && Number.isFinite(row.effectiveBoundaryEndX)
+        ? row.effectiveBoundaryEndX
+      : typeof row.measureX === 'number' &&
+          Number.isFinite(row.measureX) &&
+          typeof row.measureWidth === 'number' &&
+          Number.isFinite(row.measureWidth)
+        ? row.measureX + row.measureWidth
+        : null
+  if (boundaryEndX !== null && accidentalRightX > boundaryEndX + SAME_ONSET_VISIBILITY_TOLERANCE_PX) {
+    failures.push(
+      `accidental-right-outside-measure:${accidentalRightX.toFixed(3)}>${(boundaryEndX + SAME_ONSET_VISIBILITY_TOLERANCE_PX).toFixed(3)}`,
+    )
+  }
+
+  return {
+    key: scenario.key,
+    kind: 'same-onset-chord',
+    targetPitch: scenario.targetPitch,
+    blockerPitch: scenario.blockerPitch,
+    finalGapPx: Number(finalGapPx.toFixed(3)),
+    ownGapPx: Number(ownGapForAssertion.toFixed(3)),
+    passed: failures.length === 0,
+    failureReasons: failures,
+  }
+}
+
 function analyzeFixtureScenario(row: MeasureDumpRow, scenario: FixtureScenario): FixtureResult {
-  return scenario.kind === 'leading'
-    ? analyzeLeadingFixtureScenario({
-        row,
-        scenario,
-      })
-    : analyzeInnerFixtureScenario({
-        row,
-        scenario,
-      })
+  if (scenario.kind === 'leading') {
+    return analyzeLeadingFixtureScenario({
+      row,
+      scenario,
+    })
+  }
+  if (scenario.kind === 'same-onset-chord') {
+    return analyzeSameOnsetChordFixtureScenario({
+      row,
+      scenario,
+    })
+  }
+  return analyzeInnerFixtureScenario({
+    row,
+    scenario,
+  })
 }
 
 function analyzeDesktopTarget(row: MeasureDumpRow): DesktopTargetResult {
@@ -723,6 +1174,8 @@ async function runFixtureScenario(page: Page, scenario: FixtureScenario): Promis
 async function main(): Promise<void> {
   const xmlPath = process.argv[2] || DEFAULT_XML_PATH
   const xmlText = await readFile(xmlPath, 'utf8')
+  const isDefaultDesktopXml =
+    path.resolve(xmlPath).toLowerCase() === path.resolve(DEFAULT_XML_PATH).toLowerCase()
 
   const server = startDevServer()
   let browser: import('playwright').Browser | null = null
@@ -731,7 +1184,7 @@ async function main(): Promise<void> {
     await waitForServer(DEV_URL, 120000)
     browser = await chromium.launch({ headless: true })
     const page = await browser.newPage({ viewport: { width: 1600, height: 1200 } })
-    await page.goto(DEV_URL, { waitUntil: 'networkidle', timeout: 120000 })
+    await page.goto(DEV_URL, { waitUntil: 'domcontentloaded', timeout: 120000 })
     await waitForDebugApi(page)
     await setScoreScale(page)
 
@@ -744,8 +1197,17 @@ async function main(): Promise<void> {
       throw new Error('No rendered measures found')
     }
 
-    const desktopTarget = analyzeDesktopTarget(firstRow)
-    const desktopKeySignatureCases = analyzeDesktopKeySignatureCases(firstRow)
+    const desktopTarget = isDefaultDesktopXml
+      ? analyzeDesktopTarget(firstRow)
+      : {
+          segmentKey: 'n/a',
+          finalGapPx: 0,
+          accidentalRequestedExtraPx: 0,
+          accidentalVisibleGapPx: null,
+          passed: true,
+          failureReasons: [],
+        }
+    const desktopKeySignatureCases = isDefaultDesktopXml ? analyzeDesktopKeySignatureCases(firstRow) : []
 
     const fixtureResults: FixtureResult[] = []
     for (const scenario of FIXTURE_SCENARIOS) {
@@ -761,6 +1223,26 @@ async function main(): Promise<void> {
     const failedFixtures = fixtureResults
       .filter((result) => !result.passed)
       .map((result) => `[${result.key}] ${result.failureReasons.join(', ')}`)
+
+    const userBeat1 = fixtureResults.find(
+      (result): result is SameOnsetChordFixtureResult =>
+        result.kind === 'same-onset-chord' && result.key === 'fixture-user-file-first-measure-beat1',
+    )
+    const userBeat2 = fixtureResults.find(
+      (result): result is SameOnsetChordFixtureResult =>
+        result.kind === 'same-onset-chord' && result.key === 'fixture-user-file-first-measure-beat2',
+    )
+    if (userBeat1 && userBeat2) {
+      const ownGapDelta = Math.abs(userBeat1.ownGapPx - userBeat2.ownGapPx)
+      console.log(
+        `[user-file-own-gap-delta] beat1=${userBeat1.ownGapPx.toFixed(3)} beat2=${userBeat2.ownGapPx.toFixed(3)} delta=${ownGapDelta.toFixed(3)}`,
+      )
+      if (ownGapDelta > 0.5 + GAP_EPSILON_PX) {
+        failedFixtures.push(
+          `[user-file-own-gap-parity] beat1=${userBeat1.ownGapPx.toFixed(3)} beat2=${userBeat2.ownGapPx.toFixed(3)} delta=${ownGapDelta.toFixed(3)}`,
+        )
+      }
+    }
 
     if (failedDesktopCases.length > 0 || failedFixtures.length > 0) {
       throw new Error([...failedDesktopCases, ...failedFixtures].join('\n'))

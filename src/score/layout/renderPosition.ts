@@ -91,15 +91,20 @@ export function roundNumber(value: number, digits = 3): number {
 }
 
 export function getAccidentalVisualX(note: StaveNote, modifier: Accidental, renderedIndex: number): number | null {
-  const absoluteX = (modifier as unknown as { getAbsoluteX?: () => number }).getAbsoluteX?.()
-  if (typeof absoluteX === 'number' && Number.isFinite(absoluteX)) return absoluteX
   const start = note.getModifierStartXY(1, renderedIndex)
   const startX = start?.x
-  if (!Number.isFinite(startX)) return null
+  if (Number.isFinite(startX)) {
+    // Mirror VexFlow Accidental.draw(): x = start.x - width (+ xShift at render time).
+    const width = modifier.getWidth()
+    const fallbackX = startX - width + modifier.getXShift()
+    if (Number.isFinite(fallbackX)) return fallbackX
+  }
+
+  const absoluteX = (modifier as unknown as { getAbsoluteX?: () => number }).getAbsoluteX?.()
+  if (typeof absoluteX === 'number' && Number.isFinite(absoluteX) && Math.abs(absoluteX) > 0.0001) return absoluteX
+
   // Mirror VexFlow Accidental.draw(): x = start.x - width (+ xShift at render time).
-  const width = modifier.getWidth()
-  const fallbackX = startX - width + modifier.getXShift()
-  return Number.isFinite(fallbackX) ? fallbackX : null
+  return null
 }
 
 export function getAccidentalRightXByRenderedIndex(note: StaveNote): Map<number, number> {

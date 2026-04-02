@@ -1,5 +1,5 @@
 import { Accidental, BarlineType, Beam, Dot, Formatter, Fraction, Renderer, Stave, StaveConnector, StaveNote, StaveTie, Voice } from 'vexflow'
-import { PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX, TICKS_PER_BEAT } from '../constants'
+import { TICKS_PER_BEAT } from '../constants'
 import {
   buildRenderedNoteKeys,
   getAccidentalStateKey,
@@ -9,7 +9,6 @@ import {
 } from '../accidentals'
 import { getDurationDots, toVexDuration } from '../layout/demand'
 import {
-  addModifierXShift,
   deltaOrNull,
   finiteOrNull,
   getAccidentalRightXByRenderedIndex,
@@ -19,6 +18,7 @@ import {
   getRenderedNoteGlyphBounds,
   getRenderedNoteVisualX,
 } from '../layout/renderPosition'
+import { getRenderedNoteHeadAbsoluteX, getRenderedNoteHeadColumnMetrics, getRenderedNoteHeadWidth } from '../layout/noteHeadColumns'
 import { applyUnifiedTimeAxisSpacing } from '../layout/timeAxisSpacing'
 import type { AppliedTimeAxisSpacingMetrics, TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
 import { getStepOctaveAlterFromPitch } from '../pitchMath'
@@ -53,7 +53,18 @@ const PITCH_LINE_MAP: Record<StaffKind, Record<Pitch, number>> = {
   bass: buildPitchLineMap('bass', PITCHES),
 }
 const VALID_BEAM_DURATIONS = ['4', '8', '16', '32', '64'] as const
-const ACCIDENTAL_HEAD_CLEARANCE_PX = 2
+const ACCIDENTAL_NOTEHEAD_CLEARANCE_PX = 2
+const ACCIDENTAL_PREVIOUS_NOTE_CLEARANCE_PX = 1
+const ACCIDENTAL_BLOCKER_NOTEHEAD_CLEARANCE_PX = 0
+const ACCIDENTAL_MAX_LEFT_GAP_FROM_HEAD_PX = 96
+const ACCIDENTAL_STATIC_PREFERRED_TOLERANCE_PX = 2
+const ACCIDENTAL_TARGET_EPSILON_PX = 0.001
+const ACCIDENTAL_BBOX_POSITION_TOLERANCE_PX = 24
+const NOTEHEAD_BOUNDS_MIN_WIDTH_PX = 4
+const NOTEHEAD_BOUNDS_MAX_WIDTH_PX = 10
+const NOTEHEAD_MAX_OFFSET_FROM_BASE_PX = 45
+const NOTEHEAD_BBOX_TO_ABSOLUTE_TOLERANCE_PX = 4
+const NOTEHEAD_DISPLACED_ABSOLUTE_TO_LEFT_OFFSET_PX = 1
 const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
 const MIN_FORMAT_WIDTH_PX = 8
 const DEFAULT_NOTE_HEAD_HIT_RADIUS_X = 5.5
@@ -110,6 +121,7 @@ type NoteHeadGeometry = {
 }
 
 type VexNoteHeadLike = {
+  getAbsoluteX?: () => number
   getBoundingBox?: () =>
     | {
         getX: () => number
@@ -118,6 +130,9 @@ type VexNoteHeadLike = {
         getH: () => number
       }
     | null
+  getWidth?: () => number
+  isDisplaced?: () => boolean
+  preFormatted?: boolean
   getStyle?: () => { fillStyle?: string; strokeStyle?: string }
 }
 
@@ -132,6 +147,674 @@ type MeasuredNumeralMetrics = {
 
 function getRenderedNoteHead(vexNote: StaveNote, renderedIndex: number): VexNoteHeadLike | null {
   return (vexNote.noteHeads?.[renderedIndex] ?? null) as VexNoteHeadLike | null
+}
+
+function isReadyAbsoluteX(value: number | null | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) > 0.0001
+}
+
+type NoteHeadBoundsResolution = {
+  leftX: number
+  rightX: number
+  width: number
+  usedFallback: boolean
+}
+
+function resolveRenderedNoteHeadBounds(params: {
+  noteHead: VexNoteHeadLike | null
+  noteBaseX: number
+  stemDirection: number
+}): NoteHeadBoundsResolution | null {
+  const { noteHead, noteBaseX, stemDirection } = params
+  if (!noteHead || !Number.isFinite(noteBaseX)) return null
+
+  const resolvedHeadLeftX = getRenderedNoteHeadAbsoluteX({
+    noteHead,
+    anchorX: noteBaseX,
+    stemDirection,
+  })
+  const widthRaw = noteHead.getWidth?.()
+  const resolvedWidth =
+    typeof widthRaw === 'number' && Number.isFinite(widthRaw) && widthRaw > 0
+      ? Math.min(NOTEHEAD_BOUNDS_MAX_WIDTH_PX, Math.max(NOTEHEAD_BOUNDS_MIN_WIDTH_PX, widthRaw))
+      : getRenderedNoteHeadWidth(noteHead)
+
+  const bbox = noteHead.getBoundingBox?.() ?? null
+  const bboxLeftX = bbox?.getX?.()
+  const bboxWidthRaw = bbox?.getW?.()
+  const bboxWidth =
+    typeof bboxWidthRaw === 'number' && Number.isFinite(bboxWidthRaw)
+      ? Math.min(NOTEHEAD_BOUNDS_MAX_WIDTH_PX, Math.max(NOTEHEAD_BOUNDS_MIN_WIDTH_PX, bboxWidthRaw))
+      : null
+  const bboxLooksSane =
+    typeof bboxLeftX === 'number' &&
+    Number.isFinite(bboxLeftX) &&
+    typeof bboxWidth === 'number' &&
+    Number.isFinite(bboxWidth) &&
+    bboxWidth > 0 &&
+    Math.abs((bboxLeftX as number) - noteBaseX) <= NOTEHEAD_MAX_OFFSET_FROM_BASE_PX + NOTEHEAD_BOUNDS_MAX_WIDTH_PX
+  const bboxMatchesResolvedHead =
+    bboxLooksSane &&
+    typeof resolvedHeadLeftX === 'number' &&
+    Number.isFinite(resolvedHeadLeftX) &&
+    Math.abs((bboxLeftX as number) - (resolvedHeadLeftX as number)) <= NOTEHEAD_BBOX_TO_ABSOLUTE_TOLERANCE_PX
+  if (bboxMatchesResolvedHead) {
+    return {
+      leftX: bboxLeftX as number,
+      rightX: (bboxLeftX as number) + (bboxWidth as number),
+      width: bboxWidth as number,
+      usedFallback: false,
+    }
+  }
+
+  if (typeof resolvedHeadLeftX !== 'number' || !Number.isFinite(resolvedHeadLeftX)) {
+    if (!bboxLooksSane) {
+      return null
+    }
+    return {
+      leftX: bboxLeftX as number,
+      rightX: (bboxLeftX as number) + (bboxWidth as number),
+      width: bboxWidth as number,
+      usedFallback: true,
+    }
+  }
+  const rawAbsoluteX = noteHead.getAbsoluteX?.()
+  const hasReadyAbsoluteX =
+    typeof rawAbsoluteX === 'number' && Number.isFinite(rawAbsoluteX) && Math.abs(rawAbsoluteX) > 0.0001
+  const absoluteDeltaFromBase = resolvedHeadLeftX - noteBaseX
+  const shouldApplyDisplacedFallback =
+    Math.abs(absoluteDeltaFromBase) >= resolvedWidth + NOTEHEAD_DISPLACED_ABSOLUTE_TO_LEFT_OFFSET_PX
+  const adjustedDisplacedLeftX =
+    shouldApplyDisplacedFallback
+      ? resolvedHeadLeftX + (noteBaseX - resolvedHeadLeftX) / 2
+      : null
+  const leftX =
+    typeof adjustedDisplacedLeftX === 'number' &&
+    Number.isFinite(adjustedDisplacedLeftX) &&
+    Math.abs(adjustedDisplacedLeftX - noteBaseX) <= NOTEHEAD_MAX_OFFSET_FROM_BASE_PX + NOTEHEAD_BOUNDS_MAX_WIDTH_PX
+      ? adjustedDisplacedLeftX
+      : resolvedHeadLeftX
+  const usedFallback = !hasReadyAbsoluteX || leftX !== resolvedHeadLeftX
+  return {
+    leftX,
+    rightX: leftX + resolvedWidth,
+    width: resolvedWidth,
+    usedFallback,
+  }
+}
+
+function resolveMeasuredNoteHeadBounds(params: {
+  noteHead: VexNoteHeadLike | null
+  noteBaseX: number
+  stemDirection: number
+}): NoteHeadBoundsResolution | null {
+  const { noteHead, noteBaseX, stemDirection } = params
+  if (!noteHead || !Number.isFinite(noteBaseX)) return null
+
+  const bbox = noteHead.getBoundingBox?.() ?? null
+  const bboxLeftX = bbox?.getX?.()
+  const bboxWidthRaw = bbox?.getW?.()
+  const bboxWidth =
+    typeof bboxWidthRaw === 'number' && Number.isFinite(bboxWidthRaw)
+      ? Math.min(NOTEHEAD_BOUNDS_MAX_WIDTH_PX, Math.max(NOTEHEAD_BOUNDS_MIN_WIDTH_PX, bboxWidthRaw))
+      : null
+  const bboxLooksSane =
+    typeof bboxLeftX === 'number' &&
+    Number.isFinite(bboxLeftX) &&
+    typeof bboxWidth === 'number' &&
+    Number.isFinite(bboxWidth) &&
+    bboxWidth > 0 &&
+    Math.abs((bboxLeftX as number) - noteBaseX) <= NOTEHEAD_MAX_OFFSET_FROM_BASE_PX + NOTEHEAD_BOUNDS_MAX_WIDTH_PX
+  if (bboxLooksSane) {
+    return {
+      leftX: bboxLeftX as number,
+      rightX: (bboxLeftX as number) + (bboxWidth as number),
+      width: bboxWidth as number,
+      usedFallback: false,
+    }
+  }
+
+  return resolveRenderedNoteHeadBounds({
+    noteHead,
+    noteBaseX,
+    stemDirection,
+  })
+}
+
+function resolveChordHeadLeftX(params: { vexNote: StaveNote; noteBaseX: number }): {
+  chordHeadLeftX: number
+  usedFallback: boolean
+} {
+  const { vexNote, noteBaseX } = params
+  const noteHeads = (vexNote.noteHeads ?? []) as VexNoteHeadLike[]
+  if (!Number.isFinite(noteBaseX) || noteHeads.length === 0) {
+    return {
+      chordHeadLeftX: noteBaseX,
+      usedFallback: true,
+    }
+  }
+  let minHeadLeftX = Number.POSITIVE_INFINITY
+  let usedFallback = false
+  const stemDirection = vexNote.getStemDirection()
+  noteHeads.forEach((noteHead) => {
+    const resolvedBounds = resolveMeasuredNoteHeadBounds({
+      noteHead,
+      noteBaseX,
+      stemDirection,
+    })
+    if (!resolvedBounds) {
+      usedFallback = true
+      return
+    }
+    if (resolvedBounds.usedFallback) {
+      usedFallback = true
+    }
+    minHeadLeftX = Math.min(minHeadLeftX, resolvedBounds.leftX)
+  })
+  if (Number.isFinite(minHeadLeftX)) {
+    return {
+      chordHeadLeftX: minHeadLeftX,
+      usedFallback,
+    }
+  }
+
+  const { minHeadX } = getRenderedNoteHeadColumnMetrics(vexNote, noteBaseX)
+  if (Number.isFinite(minHeadX)) {
+    return {
+      chordHeadLeftX: minHeadX,
+      usedFallback: true,
+    }
+  }
+
+  return {
+    chordHeadLeftX: noteBaseX,
+    usedFallback: true,
+  }
+}
+
+function resolveCurrentAccidentalLeftX(params: {
+  vexNote: StaveNote
+  modifier: Accidental
+  renderedIndex: number
+}): {
+  leftX: number | null
+  usedFallback: boolean
+} {
+  const { vexNote, modifier, renderedIndex } = params
+  const startBasedX = resolveAccidentalLeftXFromStart({
+    vexNote,
+    modifier,
+    renderedIndex,
+  })
+  if (isReadyAbsoluteX(startBasedX)) {
+    return {
+      leftX: startBasedX,
+      usedFallback: false,
+    }
+  }
+
+  const nativeX = getAccidentalVisualX(vexNote, modifier, renderedIndex)
+  if (isReadyAbsoluteX(nativeX)) {
+    return {
+      leftX: nativeX,
+      usedFallback: true,
+    }
+  }
+
+  return {
+    leftX: null,
+    usedFallback: true,
+  }
+}
+
+function resolveAccidentalWidth(params: {
+  modifier: Accidental
+  accidentalCode: string | null | undefined
+}): number {
+  const { modifier, accidentalCode } = params
+  const widthRaw = modifier.getWidth()
+  if (Number.isFinite(widthRaw) && widthRaw > 0) {
+    return widthRaw
+  }
+  switch (accidentalCode) {
+    case 'bb':
+      return 16
+    case '##':
+      return 12
+    case 'b':
+    case '#':
+      return 10
+    case 'n':
+      return 9
+    default:
+      return 10
+  }
+}
+
+function resolveMeasuredAccidentalBounds(params: {
+  vexNote: StaveNote
+  modifier: Accidental
+  renderedIndex: number
+  fallbackWidth: number
+}): {
+  leftX: number
+  rightX: number
+  width: number
+  usedFallback: boolean
+} | null {
+  const { vexNote, modifier, renderedIndex, fallbackWidth } = params
+  const startBasedLeftX = resolveAccidentalLeftXFromStart({
+    vexNote,
+    modifier,
+    renderedIndex,
+  })
+  const nativeLeftX = getAccidentalVisualX(vexNote, modifier, renderedIndex)
+  const referenceLeftX =
+    typeof startBasedLeftX === 'number' && Number.isFinite(startBasedLeftX)
+      ? startBasedLeftX
+      : typeof nativeLeftX === 'number' && Number.isFinite(nativeLeftX)
+        ? nativeLeftX
+        : null
+
+  const bbox = (
+    modifier as unknown as {
+      getBoundingBox?: () =>
+        | {
+            getX?: () => number
+            getW?: () => number
+          }
+        | null
+    }
+  ).getBoundingBox?.()
+  const bboxLeftX = bbox?.getX?.()
+  const bboxWidth = bbox?.getW?.()
+  if (
+    typeof bboxLeftX === 'number' &&
+    Number.isFinite(bboxLeftX) &&
+    typeof bboxWidth === 'number' &&
+    Number.isFinite(bboxWidth) &&
+    bboxWidth > 0
+  ) {
+    const bboxMatchesReference =
+      referenceLeftX === null
+        ? true
+        : Math.abs(bboxLeftX - referenceLeftX) <= ACCIDENTAL_BBOX_POSITION_TOLERANCE_PX
+    if (bboxMatchesReference) {
+      return {
+        leftX: bboxLeftX,
+        rightX: bboxLeftX + bboxWidth,
+        width: bboxWidth,
+        usedFallback: false,
+      }
+    }
+  }
+
+  const widthRaw = modifier.getWidth()
+  const resolvedWidth =
+    typeof widthRaw === 'number' && Number.isFinite(widthRaw) && widthRaw > 0
+      ? widthRaw
+      : fallbackWidth
+  if (referenceLeftX !== null) {
+    return {
+      leftX: referenceLeftX,
+      rightX: referenceLeftX + resolvedWidth,
+      width: resolvedWidth,
+      usedFallback: true,
+    }
+  }
+
+  return null
+}
+
+function resolveAccidentalLeftXFromStart(params: {
+  vexNote: StaveNote
+  modifier: Accidental
+  renderedIndex: number
+}): number | null {
+  const { vexNote, modifier, renderedIndex } = params
+  const startX = vexNote.getModifierStartXY(1, renderedIndex)?.x
+  const width = modifier.getWidth()
+  if (
+    typeof startX !== 'number' ||
+    !Number.isFinite(startX) ||
+    typeof width !== 'number' ||
+    !Number.isFinite(width)
+  ) {
+    return null
+  }
+  const leftX = startX - width + modifier.getXShift()
+  return Number.isFinite(leftX) ? leftX : null
+}
+
+function applyAccidentalLeftXTarget(params: {
+  vexNote: StaveNote
+  modifier: Accidental
+  renderedIndex: number
+  targetLeftX: number
+}): {
+  applied: boolean
+  delta: number
+} {
+  const { vexNote, modifier, renderedIndex, targetLeftX } = params
+  if (!Number.isFinite(targetLeftX)) {
+    return {
+      applied: false,
+      delta: 0,
+    }
+  }
+  const initialXShift = modifier.getXShift()
+  const readLeftX = (xShift: number): number | null => {
+    modifier.setXShift(xShift)
+    const leftX = getAccidentalVisualX(vexNote, modifier, renderedIndex)
+    return typeof leftX === 'number' && Number.isFinite(leftX) ? leftX : null
+  }
+
+  let bestXShift = initialXShift
+  let bestLeftX = readLeftX(initialXShift)
+  if (bestLeftX === null) {
+    modifier.setXShift(initialXShift)
+    return {
+      applied: false,
+      delta: 0,
+    }
+  }
+  let bestError = Math.abs(targetLeftX - bestLeftX)
+  if (bestError < ACCIDENTAL_TARGET_EPSILON_PX) {
+    modifier.setXShift(initialXShift)
+    return {
+      applied: false,
+      delta: 0,
+    }
+  }
+
+  let currentXShift = initialXShift
+  let currentLeftX = bestLeftX
+  for (let iteration = 0; iteration < 4; iteration += 1) {
+    const error = targetLeftX - currentLeftX
+    if (Math.abs(error) < ACCIDENTAL_TARGET_EPSILON_PX) {
+      break
+    }
+
+    const probeStep = 1
+    const probeLeftX = readLeftX(currentXShift + probeStep)
+    if (probeLeftX === null) {
+      break
+    }
+    const sensitivity = (probeLeftX - currentLeftX) / probeStep
+    if (!Number.isFinite(sensitivity) || Math.abs(sensitivity) < ACCIDENTAL_TARGET_EPSILON_PX) {
+      break
+    }
+
+    const candidateXShift = currentXShift + error / sensitivity
+    const candidateLeftX = readLeftX(candidateXShift)
+    if (candidateLeftX === null) {
+      break
+    }
+    const candidateError = Math.abs(targetLeftX - candidateLeftX)
+    if (candidateError + ACCIDENTAL_TARGET_EPSILON_PX < bestError) {
+      bestError = candidateError
+      bestXShift = candidateXShift
+      bestLeftX = candidateLeftX
+    }
+    currentXShift = candidateXShift
+    currentLeftX = candidateLeftX
+  }
+
+  modifier.setXShift(bestXShift)
+  const appliedDelta = bestXShift - initialXShift
+  if (Math.abs(appliedDelta) < ACCIDENTAL_TARGET_EPSILON_PX) {
+    return {
+      applied: false,
+      delta: 0,
+    }
+  }
+
+  return {
+    applied: true,
+    delta: appliedDelta,
+  }
+}
+
+function isAccidentalLeftXOutlier(params: {
+  candidateLeftX: number | null
+  referenceHeadLeftX: number
+  modifierWidth: number
+}): boolean {
+  const { candidateLeftX, referenceHeadLeftX, modifierWidth } = params
+  if (candidateLeftX === null || !Number.isFinite(candidateLeftX)) return false
+  if (!Number.isFinite(referenceHeadLeftX)) return false
+  if (!Number.isFinite(modifierWidth) || modifierWidth <= 0) return false
+  const candidateRightX = candidateLeftX + modifierWidth
+  const gapToChordHead = referenceHeadLeftX - candidateRightX
+  return (
+    gapToChordHead > ACCIDENTAL_MAX_LEFT_GAP_FROM_HEAD_PX ||
+    gapToChordHead < -ACCIDENTAL_MAX_LEFT_GAP_FROM_HEAD_PX
+  )
+}
+
+function resolvePreviousNoteOccupiedRightX(params: {
+  sourceNotes: ScoreNote[]
+  renderedBySourceIndex: Map<number, RenderedMeasureNote>
+  noteIndex: number
+}): number | null {
+  const { sourceNotes, renderedBySourceIndex, noteIndex } = params
+  for (let previousNoteIndex = noteIndex - 1; previousNoteIndex >= 0; previousNoteIndex -= 1) {
+    const previousSourceNote = sourceNotes[previousNoteIndex]
+    if (!previousSourceNote || previousSourceNote.isRest) continue
+    const previousRenderedEntry = renderedBySourceIndex.get(previousNoteIndex)
+    if (!previousRenderedEntry) continue
+    const headEndX = previousRenderedEntry.vexNote.getNoteHeadEndX()
+    if (Number.isFinite(headEndX)) {
+      return headEndX
+    }
+    const visualBounds = getRenderedNoteGlyphBounds(previousRenderedEntry.vexNote)
+    const visualRightX = visualBounds?.rightX
+    if (typeof visualRightX === 'number' && Number.isFinite(visualRightX)) {
+      return visualRightX
+    }
+    const previousNoteX = getRenderedNoteVisualX(previousRenderedEntry.vexNote)
+    const previousGlyphWidth = previousRenderedEntry.vexNote.getGlyphWidth()
+    if (Number.isFinite(previousNoteX) && Number.isFinite(previousGlyphWidth)) {
+      return previousNoteX + previousGlyphWidth
+    }
+  }
+  return null
+}
+
+function resolveRenderedIndexForRenderedKey(params: {
+  renderedKeys: RenderedNoteKey[]
+  renderedKey: RenderedNoteKey
+  fallbackRenderedIndex: number
+}): number {
+  const { renderedKeys, renderedKey, fallbackRenderedIndex } = params
+  const byKeyIndex = renderedKeys.findIndex((entry) => entry.keyIndex === renderedKey.keyIndex)
+  if (byKeyIndex >= 0) return byKeyIndex
+  const byPitch = renderedKeys.findIndex((entry) => entry.pitch === renderedKey.pitch)
+  if (byPitch >= 0) return byPitch
+  return fallbackRenderedIndex
+}
+
+function resolveAccidentalModifierForRenderedKey(params: {
+  accidentalModifiers: Accidental[]
+  renderedKeys: RenderedNoteKey[]
+  renderedKey: RenderedNoteKey
+  fallbackRenderedIndex: number
+}): {
+  modifier: Accidental | null
+  keyRenderedIndex: number
+} {
+  const { accidentalModifiers, renderedKeys, renderedKey, fallbackRenderedIndex } = params
+  const keyRenderedIndex = resolveRenderedIndexForRenderedKey({
+    renderedKeys,
+    renderedKey,
+    fallbackRenderedIndex,
+  })
+  const modifier =
+    accidentalModifiers.find((item) => item.getIndex() === keyRenderedIndex) ??
+    (accidentalModifiers.length === 1 ? accidentalModifiers[0] : null)
+  return {
+    modifier,
+    keyRenderedIndex,
+  }
+}
+
+function resolveOwnHeadLeftX(params: {
+  vexNote: StaveNote
+  renderedIndex: number
+  noteBaseX: number
+}): {
+  ownHeadLeftX: number | null
+  usedFallback: boolean
+} {
+  const { vexNote, renderedIndex, noteBaseX } = params
+  const noteHead = (vexNote.noteHeads?.[renderedIndex] ?? null) as VexNoteHeadLike | null
+  if (!noteHead || !Number.isFinite(noteBaseX)) {
+    return {
+      ownHeadLeftX: null,
+      usedFallback: true,
+    }
+  }
+  const resolvedBounds = resolveMeasuredNoteHeadBounds({
+    noteHead,
+    noteBaseX,
+    stemDirection: vexNote.getStemDirection(),
+  })
+  if (!resolvedBounds) {
+    return {
+      ownHeadLeftX: null,
+      usedFallback: true,
+    }
+  }
+  return {
+    ownHeadLeftX: resolvedBounds.leftX,
+    usedFallback: resolvedBounds.usedFallback,
+  }
+}
+
+function resolveMeasuredOwnHeadLeftX(params: {
+  vexNote: StaveNote
+  renderedIndex: number
+  noteBaseX: number
+}): {
+  ownHeadLeftX: number | null
+  usedFallback: boolean
+} {
+  const { vexNote, renderedIndex, noteBaseX } = params
+  const noteHead = (vexNote.noteHeads?.[renderedIndex] ?? null) as VexNoteHeadLike | null
+  if (!noteHead || !Number.isFinite(noteBaseX)) {
+    return {
+      ownHeadLeftX: null,
+      usedFallback: true,
+    }
+  }
+  const resolvedBounds = resolveMeasuredNoteHeadBounds({
+    noteHead,
+    noteBaseX,
+    stemDirection: vexNote.getStemDirection(),
+  })
+  if (!resolvedBounds) {
+    return {
+      ownHeadLeftX: null,
+      usedFallback: true,
+    }
+  }
+  return {
+    ownHeadLeftX: resolvedBounds.leftX,
+    usedFallback: resolvedBounds.usedFallback,
+  }
+}
+
+type ChordBlockerHeadBounds = {
+  leftX: number
+  rightX: number
+}
+
+function resolveChordBlockerHeadBounds(params: {
+  vexNote: StaveNote
+  renderedIndex: number
+  noteBaseX: number
+}): {
+  blockerHeadBounds: ChordBlockerHeadBounds[]
+  usedFallback: boolean
+} {
+  const { vexNote, renderedIndex, noteBaseX } = params
+  const noteHeads = (vexNote.noteHeads ?? []) as VexNoteHeadLike[]
+  if (!Number.isFinite(noteBaseX) || noteHeads.length === 0) {
+    return {
+      blockerHeadBounds: [],
+      usedFallback: true,
+    }
+  }
+  const stemDirection = vexNote.getStemDirection()
+  const blockerHeadBounds: ChordBlockerHeadBounds[] = []
+  let usedFallback = false
+  noteHeads.forEach((noteHead, noteHeadIndex) => {
+    if (noteHeadIndex === renderedIndex) return
+    const resolvedBounds = resolveMeasuredNoteHeadBounds({
+      noteHead,
+      noteBaseX,
+      stemDirection,
+    })
+    if (!resolvedBounds) {
+      usedFallback = true
+      return
+    }
+    if (resolvedBounds.usedFallback) {
+      usedFallback = true
+    }
+
+    blockerHeadBounds.push({
+      leftX: resolvedBounds.leftX,
+      rightX: resolvedBounds.rightX,
+    })
+  })
+  return {
+    blockerHeadBounds,
+    usedFallback,
+  }
+}
+
+function resolveAccidentalLeftAfterChordHeadAvoidance(params: {
+  candidateLeftX: number
+  modifierWidth: number
+  blockerHeadBounds: ChordBlockerHeadBounds[]
+}): {
+  leftX: number
+  clamped: boolean
+} {
+  const { candidateLeftX, modifierWidth, blockerHeadBounds } = params
+  if (!Number.isFinite(candidateLeftX) || !Number.isFinite(modifierWidth) || modifierWidth <= 0) {
+    return {
+      leftX: candidateLeftX,
+      clamped: false,
+    }
+  }
+  let resolvedLeftX = candidateLeftX
+  let clamped = false
+  const maxIterations = Math.max(1, blockerHeadBounds.length + 1)
+  for (let iteration = 0; iteration < maxIterations; iteration += 1) {
+    const overlappingBounds = blockerHeadBounds.filter((bound) => {
+      return (
+        resolvedLeftX + modifierWidth > bound.leftX + ACCIDENTAL_BLOCKER_NOTEHEAD_CLEARANCE_PX + ACCIDENTAL_TARGET_EPSILON_PX &&
+        resolvedLeftX < bound.rightX - ACCIDENTAL_BLOCKER_NOTEHEAD_CLEARANCE_PX - ACCIDENTAL_TARGET_EPSILON_PX
+      )
+    })
+    if (overlappingBounds.length === 0) {
+      break
+    }
+    const nextLeftX = overlappingBounds.reduce((leftMost, bound) => {
+      return Math.min(leftMost, bound.leftX - modifierWidth - ACCIDENTAL_BLOCKER_NOTEHEAD_CLEARANCE_PX)
+    }, resolvedLeftX)
+    if (!(nextLeftX < resolvedLeftX - ACCIDENTAL_TARGET_EPSILON_PX)) {
+      break
+    }
+    resolvedLeftX = nextLeftX
+    clamped = true
+  }
+  return {
+    leftX: resolvedLeftX,
+    clamped,
+  }
 }
 
 function resolveNoteHeadGeometry(params: {
@@ -1031,9 +1714,17 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           (entry) => entry.keyIndex === activeAccidentalSelection.keyIndex,
         )
         if (renderedIndex < 0) return
-        const accidentalModifier = renderedEntry.vexNote
+        const targetRenderedKey = renderedEntry.renderedKeys[renderedIndex]
+        if (!targetRenderedKey) return
+        const accidentalModifiers = renderedEntry.vexNote
           .getModifiersByType(Accidental.CATEGORY)
-          .find((modifier) => modifier.getIndex() === renderedIndex) as Accidental | undefined
+          .map((modifier) => modifier as Accidental)
+        const { modifier: accidentalModifier } = resolveAccidentalModifierForRenderedKey({
+          accidentalModifiers,
+          renderedKeys: renderedEntry.renderedKeys,
+          renderedKey: targetRenderedKey,
+          fallbackRenderedIndex: renderedIndex,
+        })
         accidentalModifier?.setStyle({ fillStyle: '#2437E8', strokeStyle: '#2437E8' })
       })
     }
@@ -1057,6 +1748,17 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   })
   const bassBeams: Beam[] = Beam.generateBeams(bassVexNotes, {
     groups: [new Fraction(1, 4)],
+  })
+
+  // Beam generation may rebuild notehead internals; rebind stave/context so
+  // pre-draw accidental alignment reads stable notehead geometry.
+  trebleVexNotes.forEach((vexNote) => {
+    vexNote.setStave(trebleStave)
+    vexNote.setContext(context)
+  })
+  bassVexNotes.forEach((vexNote) => {
+    vexNote.setStave(bassStave)
+    vexNote.setContext(context)
   })
 
   let appliedSpacingMetrics: AppliedTimeAxisSpacingMetrics | null = null
@@ -1155,7 +1857,12 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       renderedEntry.renderedKeys.forEach((renderedKey, renderedIndex) => {
         if (!renderedKey.accidental) return
         const rowKey = `${layoutKey}|${renderedKey.keyIndex}`
-        const modifier = accidentalModifiers.find((item) => item.getIndex() === renderedIndex)
+        const { modifier, keyRenderedIndex } = resolveAccidentalModifierForRenderedKey({
+          accidentalModifiers,
+          renderedKeys: renderedEntry.renderedKeys,
+          renderedKey,
+          fallbackRenderedIndex: renderedIndex,
+        })
         if (!modifier) {
           accidentalLockByRowKey.set(rowKey, {
             targetRightX: null,
@@ -1165,59 +1872,407 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           return
         }
 
-        const headXRaw = renderedEntry.vexNote.noteHeads[renderedIndex]?.getAbsoluteX()
-        const headX =
-          Number.isFinite(headXRaw) && Math.abs(headXRaw) > 0.0001
-            ? headXRaw
-            : noteBaseX
-        const widthRaw = modifier.getWidth()
-        const modifierWidth = Number.isFinite(widthRaw) ? widthRaw : null
-        const targetByHead =
-          typeof headX === 'number' && Number.isFinite(headX) && modifierWidth !== null
-            ? headX - modifierWidth - ACCIDENTAL_HEAD_CLEARANCE_PX
+        const modifierWidth = resolveAccidentalWidth({
+          modifier,
+          accidentalCode: renderedKey.accidental,
+        })
+        const resolvedChordHead = resolveChordHeadLeftX({
+          vexNote: renderedEntry.vexNote,
+          noteBaseX,
+        })
+        const resolvedChordBlockerHeads = resolveChordBlockerHeadBounds({
+          vexNote: renderedEntry.vexNote,
+          renderedIndex,
+          noteBaseX,
+        })
+        const previousNoteOccupiedRightX = resolvePreviousNoteOccupiedRightX({
+          sourceNotes,
+          renderedBySourceIndex,
+          noteIndex,
+        })
+        const minAccidentalLeftX =
+          typeof previousNoteOccupiedRightX === 'number' && Number.isFinite(previousNoteOccupiedRightX)
+            ? previousNoteOccupiedRightX + ACCIDENTAL_PREVIOUS_NOTE_CLEARANCE_PX
             : null
 
         const targetedX = targetByKeyIndex?.get(renderedKey.keyIndex)
-        const fallbackTarget =
-          targetByHead ?? (Number.isFinite(noteBaseX) ? noteBaseX + PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX : null)
-        const targetRightX =
-          typeof targetedX === 'number' && Number.isFinite(targetedX)
-            ? targetedX
-            : fallbackTarget
-        if (targetRightX === null) {
+        const targetedCandidateX =
+          typeof targetedX === 'number' && Number.isFinite(targetedX) ? targetedX : null
+        const resolvedCurrentAccidental = resolveCurrentAccidentalLeftX({
+          vexNote: renderedEntry.vexNote,
+          modifier,
+          renderedIndex: keyRenderedIndex,
+        })
+        const currentLeftX = resolvedCurrentAccidental.leftX
+        const resolvedOwnHead = resolveOwnHeadLeftX({
+          vexNote: renderedEntry.vexNote,
+          renderedIndex: keyRenderedIndex,
+          noteBaseX,
+        })
+        const preferredLeftByOwnHead =
+          typeof resolvedOwnHead.ownHeadLeftX === 'number' && Number.isFinite(resolvedOwnHead.ownHeadLeftX)
+            ? resolvedOwnHead.ownHeadLeftX - modifierWidth - ACCIDENTAL_NOTEHEAD_CLEARANCE_PX
+            : null
+        const outlierReferenceHeadLeftX =
+          typeof resolvedOwnHead.ownHeadLeftX === 'number' && Number.isFinite(resolvedOwnHead.ownHeadLeftX)
+            ? resolvedOwnHead.ownHeadLeftX
+            : resolvedChordHead.chordHeadLeftX
+        const staticOutlierRejected = isAccidentalLeftXOutlier({
+          candidateLeftX: targetedCandidateX,
+          referenceHeadLeftX: outlierReferenceHeadLeftX,
+          modifierWidth,
+        })
+        const nativeOutlierRejected = isAccidentalLeftXOutlier({
+          candidateLeftX: currentLeftX,
+          referenceHeadLeftX: outlierReferenceHeadLeftX,
+          modifierWidth,
+        })
+
+        const isCandidateInsideCorridor = (candidateLeftX: number): boolean => {
+          if (!Number.isFinite(candidateLeftX)) return false
+          if (
+            typeof minAccidentalLeftX === 'number' &&
+            Number.isFinite(minAccidentalLeftX) &&
+            candidateLeftX < minAccidentalLeftX - ACCIDENTAL_TARGET_EPSILON_PX
+          ) {
+            return false
+          }
+          return true
+        }
+
+        const staticNearPreferred =
+          targetedCandidateX !== null &&
+          preferredLeftByOwnHead !== null &&
+          Math.abs(targetedCandidateX - preferredLeftByOwnHead) <= ACCIDENTAL_STATIC_PREFERRED_TOLERANCE_PX
+
+        let chosenTargetX: number | null = null
+        let chosenTargetSource:
+          | 'preferred-own-head'
+          | 'static-near-preferred'
+          | 'native-fallback'
+          | 'head-safe'
+          | 'previous-safe'
+          | null = null
+        if (preferredLeftByOwnHead !== null) {
+          if (
+            staticNearPreferred &&
+            targetedCandidateX !== null &&
+            !staticOutlierRejected &&
+            isCandidateInsideCorridor(targetedCandidateX)
+          ) {
+            chosenTargetX = targetedCandidateX
+            chosenTargetSource = 'static-near-preferred'
+          } else {
+            chosenTargetX = preferredLeftByOwnHead
+            chosenTargetSource = 'preferred-own-head'
+          }
+        } else if (currentLeftX !== null && !nativeOutlierRejected) {
+          chosenTargetX = currentLeftX
+          chosenTargetSource = 'native-fallback'
+        }
+
+        if (chosenTargetX === null) {
+          if (
+            typeof resolvedChordHead.chordHeadLeftX === 'number' &&
+            Number.isFinite(resolvedChordHead.chordHeadLeftX)
+          ) {
+            chosenTargetX = resolvedChordHead.chordHeadLeftX - modifierWidth - ACCIDENTAL_NOTEHEAD_CLEARANCE_PX
+            chosenTargetSource = 'head-safe'
+          } else if (typeof minAccidentalLeftX === 'number' && Number.isFinite(minAccidentalLeftX)) {
+            chosenTargetX = minAccidentalLeftX
+            chosenTargetSource = 'previous-safe'
+          } else if (currentLeftX !== null) {
+            chosenTargetX = currentLeftX
+            chosenTargetSource = 'native-fallback'
+          }
+        }
+
+        const lockReasonSuffixes: string[] = []
+        if (resolvedOwnHead.usedFallback) lockReasonSuffixes.push('own-head-fallback')
+        if (resolvedChordHead.usedFallback) lockReasonSuffixes.push('chord-head-fallback')
+        if (resolvedChordBlockerHeads.usedFallback) lockReasonSuffixes.push('chord-blocker-fallback')
+        if (staticOutlierRejected) lockReasonSuffixes.push('static-outlier-fallback')
+        if (nativeOutlierRejected) lockReasonSuffixes.push('native-outlier-fallback')
+        const buildLockReason = (base: string): string =>
+          lockReasonSuffixes.length === 0 ? base : `${base}+${lockReasonSuffixes.join('+')}`
+
+        if (chosenTargetX === null) {
           accidentalLockByRowKey.set(rowKey, {
             targetRightX: null,
             applied: false,
-            reason: 'no-target',
+            reason: buildLockReason('no-target'),
           })
           return
         }
 
-        const currentRightX = getAccidentalVisualX(renderedEntry.vexNote, modifier, renderedIndex)
-        if (currentRightX === null) {
+        const initialChordCollisionResolution = resolveAccidentalLeftAfterChordHeadAvoidance({
+          candidateLeftX: chosenTargetX,
+          modifierWidth,
+          blockerHeadBounds: resolvedChordBlockerHeads.blockerHeadBounds,
+        })
+        let clampedTargetRightX = initialChordCollisionResolution.leftX
+        let clampedByChordBoundary = initialChordCollisionResolution.clamped
+        let clampedByPreviousBoundary = false
+        let clampedByOwnHeadBoundary = false
+        let infeasibleCorridor = false
+        let usedExactAccidentalBoundsFallback = false
+        let usedExactOwnHeadFallback = false
+        if (typeof minAccidentalLeftX === 'number' && Number.isFinite(minAccidentalLeftX)) {
+          if (
+            clampedTargetRightX < minAccidentalLeftX - ACCIDENTAL_TARGET_EPSILON_PX
+          ) {
+            clampedTargetRightX = minAccidentalLeftX
+            clampedByPreviousBoundary = true
+          }
+          const postPreviousCollisionResolution = resolveAccidentalLeftAfterChordHeadAvoidance({
+            candidateLeftX: clampedTargetRightX,
+            modifierWidth,
+            blockerHeadBounds: resolvedChordBlockerHeads.blockerHeadBounds,
+          })
+          if (postPreviousCollisionResolution.clamped) {
+            clampedByChordBoundary = true
+            if (
+              typeof minAccidentalLeftX === 'number' &&
+              Number.isFinite(minAccidentalLeftX) &&
+              postPreviousCollisionResolution.leftX < minAccidentalLeftX - ACCIDENTAL_TARGET_EPSILON_PX
+            ) {
+              infeasibleCorridor = true
+            }
+            clampedTargetRightX = postPreviousCollisionResolution.leftX
+          }
+        }
+
+        const effectiveCurrentLeftX =
+          currentLeftX !== null && !nativeOutlierRejected
+            ? currentLeftX
+            : null
+        const effectiveCurrentRightX =
+          effectiveCurrentLeftX ??
+          (Number.isFinite(noteBaseX) ? noteBaseX - modifierWidth : null)
+
+        if (effectiveCurrentRightX === null) {
+          const invalidCurrentReasonBase = infeasibleCorridor
+            ? 'infeasible-corridor-invalid-current-x'
+            : clampedByChordBoundary || chosenTargetSource === 'head-safe'
+              ? 'chord-collision-clamped-invalid-current-x'
+              : clampedByPreviousBoundary || chosenTargetSource === 'previous-safe'
+                ? 'previous-boundary-clamped-invalid-current-x'
+                : chosenTargetSource === 'native-fallback'
+                  ? 'native-fallback-used-invalid-current-x'
+                  : 'preferred-own-head-aligned-invalid-current-x'
           accidentalLockByRowKey.set(rowKey, {
-            targetRightX,
+            targetRightX: clampedTargetRightX,
             applied: false,
-            reason: 'invalid-current-x',
+            reason: buildLockReason(invalidCurrentReasonBase),
           })
           return
         }
 
-        const delta = targetRightX - currentRightX
-        if (Math.abs(delta) >= 0.001) {
-          addModifierXShift(modifier, delta)
+        const delta = clampedTargetRightX - effectiveCurrentRightX
+        if (Math.abs(delta) >= ACCIDENTAL_TARGET_EPSILON_PX) {
+          applyAccidentalLeftXTarget({
+            vexNote: renderedEntry.vexNote,
+            modifier,
+            renderedIndex: keyRenderedIndex,
+            targetLeftX: clampedTargetRightX,
+          })
         }
 
-        const alignedRightX = getAccidentalVisualX(renderedEntry.vexNote, modifier, renderedIndex)
+        const postApplyMaxIterations = Math.max(3, resolvedChordBlockerHeads.blockerHeadBounds.length + 3)
+        for (let iteration = 0; iteration < postApplyMaxIterations; iteration += 1) {
+          const exactOwnHead = resolveOwnHeadLeftX({
+            vexNote: renderedEntry.vexNote,
+            renderedIndex: keyRenderedIndex,
+            noteBaseX,
+          })
+          const exactBounds = resolveMeasuredAccidentalBounds({
+            vexNote: renderedEntry.vexNote,
+            modifier,
+            renderedIndex: keyRenderedIndex,
+            fallbackWidth: modifierWidth,
+          })
+          if (exactBounds?.usedFallback) usedExactAccidentalBoundsFallback = true
+          if (exactOwnHead.usedFallback) usedExactOwnHeadFallback = true
+          if (!exactBounds || typeof exactOwnHead.ownHeadLeftX !== 'number' || !Number.isFinite(exactOwnHead.ownHeadLeftX)) {
+            break
+          }
+
+          const ownGapPxExact = exactOwnHead.ownHeadLeftX - exactBounds.rightX
+          if (ownGapPxExact >= ACCIDENTAL_NOTEHEAD_CLEARANCE_PX - ACCIDENTAL_TARGET_EPSILON_PX) {
+            break
+          }
+
+          let nextLeftX = exactBounds.leftX - (ACCIDENTAL_NOTEHEAD_CLEARANCE_PX - ownGapPxExact)
+          clampedByOwnHeadBoundary = true
+          const postOwnCollisionResolution = resolveAccidentalLeftAfterChordHeadAvoidance({
+            candidateLeftX: nextLeftX,
+            modifierWidth: exactBounds.width,
+            blockerHeadBounds: resolvedChordBlockerHeads.blockerHeadBounds,
+          })
+          if (postOwnCollisionResolution.clamped) {
+            clampedByChordBoundary = true
+            nextLeftX = postOwnCollisionResolution.leftX
+          }
+
+          const postApplyShiftDelta = nextLeftX - exactBounds.leftX
+          if (postApplyShiftDelta < -ACCIDENTAL_TARGET_EPSILON_PX) {
+            applyAccidentalLeftXTarget({
+              vexNote: renderedEntry.vexNote,
+              modifier,
+              renderedIndex: keyRenderedIndex,
+              targetLeftX: nextLeftX,
+            })
+            continue
+          }
+          if (clampedByOwnHeadBoundary) {
+            infeasibleCorridor = true
+          }
+          break
+        }
+
+        let finalOwnHead = resolveOwnHeadLeftX({
+          vexNote: renderedEntry.vexNote,
+          renderedIndex: keyRenderedIndex,
+          noteBaseX,
+        })
+        let finalAccidentalBounds = resolveMeasuredAccidentalBounds({
+          vexNote: renderedEntry.vexNote,
+          modifier,
+          renderedIndex: keyRenderedIndex,
+          fallbackWidth: modifierWidth,
+        })
+        if (finalAccidentalBounds?.usedFallback) usedExactAccidentalBoundsFallback = true
+        if (finalOwnHead.usedFallback) usedExactOwnHeadFallback = true
+
+        if (
+          typeof minAccidentalLeftX === 'number' &&
+          Number.isFinite(minAccidentalLeftX) &&
+          finalAccidentalBounds &&
+          finalAccidentalBounds.leftX < minAccidentalLeftX - ACCIDENTAL_TARGET_EPSILON_PX
+        ) {
+          const candidateLeftX = minAccidentalLeftX
+          const candidateRightX = candidateLeftX + finalAccidentalBounds.width
+          const candidateAllowedByOwnHead =
+            typeof finalOwnHead.ownHeadLeftX !== 'number' ||
+            !Number.isFinite(finalOwnHead.ownHeadLeftX) ||
+            candidateRightX <=
+              finalOwnHead.ownHeadLeftX - ACCIDENTAL_NOTEHEAD_CLEARANCE_PX + ACCIDENTAL_TARGET_EPSILON_PX
+          const candidateChordCollisionResolution = resolveAccidentalLeftAfterChordHeadAvoidance({
+            candidateLeftX,
+            modifierWidth: finalAccidentalBounds.width,
+            blockerHeadBounds: resolvedChordBlockerHeads.blockerHeadBounds,
+          })
+          const candidateAllowedByChord =
+            Math.abs(candidateChordCollisionResolution.leftX - candidateLeftX) <= ACCIDENTAL_TARGET_EPSILON_PX
+
+          if (candidateAllowedByOwnHead && candidateAllowedByChord) {
+            const previousBoundaryShiftDelta = candidateLeftX - finalAccidentalBounds.leftX
+            if (Math.abs(previousBoundaryShiftDelta) >= ACCIDENTAL_TARGET_EPSILON_PX) {
+              applyAccidentalLeftXTarget({
+                vexNote: renderedEntry.vexNote,
+                modifier,
+                renderedIndex: keyRenderedIndex,
+                targetLeftX: candidateLeftX,
+              })
+            }
+            clampedByPreviousBoundary = true
+            finalOwnHead = resolveOwnHeadLeftX({
+              vexNote: renderedEntry.vexNote,
+              renderedIndex: keyRenderedIndex,
+              noteBaseX,
+            })
+            finalAccidentalBounds = resolveMeasuredAccidentalBounds({
+              vexNote: renderedEntry.vexNote,
+              modifier,
+              renderedIndex: keyRenderedIndex,
+              fallbackWidth: modifierWidth,
+            })
+            if (finalAccidentalBounds?.usedFallback) usedExactAccidentalBoundsFallback = true
+            if (finalOwnHead.usedFallback) usedExactOwnHeadFallback = true
+          } else {
+            infeasibleCorridor = true
+          }
+        }
+
+        if (finalAccidentalBounds) {
+          const finalChordCollisionResolution = resolveAccidentalLeftAfterChordHeadAvoidance({
+            candidateLeftX: finalAccidentalBounds.leftX,
+            modifierWidth: finalAccidentalBounds.width,
+            blockerHeadBounds: resolvedChordBlockerHeads.blockerHeadBounds,
+          })
+          if (finalChordCollisionResolution.leftX < finalAccidentalBounds.leftX - ACCIDENTAL_TARGET_EPSILON_PX) {
+            const finalChordShiftDelta = finalChordCollisionResolution.leftX - finalAccidentalBounds.leftX
+            if (Math.abs(finalChordShiftDelta) >= ACCIDENTAL_TARGET_EPSILON_PX) {
+              applyAccidentalLeftXTarget({
+                vexNote: renderedEntry.vexNote,
+                modifier,
+                renderedIndex: keyRenderedIndex,
+                targetLeftX: finalChordCollisionResolution.leftX,
+              })
+            }
+            clampedByChordBoundary = true
+            finalOwnHead = resolveOwnHeadLeftX({
+              vexNote: renderedEntry.vexNote,
+              renderedIndex: keyRenderedIndex,
+              noteBaseX,
+            })
+            finalAccidentalBounds = resolveMeasuredAccidentalBounds({
+              vexNote: renderedEntry.vexNote,
+              modifier,
+              renderedIndex: keyRenderedIndex,
+              fallbackWidth: modifierWidth,
+            })
+            if (finalAccidentalBounds?.usedFallback) usedExactAccidentalBoundsFallback = true
+            if (finalOwnHead.usedFallback) usedExactOwnHeadFallback = true
+            if (
+              typeof minAccidentalLeftX === 'number' &&
+              Number.isFinite(minAccidentalLeftX) &&
+              finalAccidentalBounds &&
+              finalAccidentalBounds.leftX < minAccidentalLeftX - ACCIDENTAL_TARGET_EPSILON_PX
+            ) {
+              infeasibleCorridor = true
+            }
+          }
+        }
+
+        if (
+          finalAccidentalBounds &&
+          typeof finalOwnHead.ownHeadLeftX === 'number' &&
+          Number.isFinite(finalOwnHead.ownHeadLeftX)
+        ) {
+          const finalOwnGapPxExact = finalOwnHead.ownHeadLeftX - finalAccidentalBounds.rightX
+          if (finalOwnGapPxExact < ACCIDENTAL_NOTEHEAD_CLEARANCE_PX - ACCIDENTAL_TARGET_EPSILON_PX) {
+            clampedByOwnHeadBoundary = true
+            if (typeof minAccidentalLeftX === 'number' && finalAccidentalBounds.leftX <= minAccidentalLeftX + ACCIDENTAL_TARGET_EPSILON_PX) {
+              infeasibleCorridor = true
+            }
+          }
+        }
+
+        if (usedExactAccidentalBoundsFallback) lockReasonSuffixes.push('accidental-bounds-fallback')
+        if (usedExactOwnHeadFallback) lockReasonSuffixes.push('own-head-exact-fallback')
+
+        const alignedRightX = getAccidentalVisualX(renderedEntry.vexNote, modifier, keyRenderedIndex)
         if (alignedRightX !== null) {
           previewAccidentalByRowKey.set(rowKey, alignedRightX)
         } else {
-          previewAccidentalByRowKey.set(rowKey, targetRightX)
+          previewAccidentalByRowKey.set(rowKey, clampedTargetRightX)
         }
+        const reasonBase = infeasibleCorridor
+          ? 'infeasible-corridor'
+          : clampedByChordBoundary || chosenTargetSource === 'head-safe'
+            ? 'chord-collision-clamped'
+            : clampedByPreviousBoundary || chosenTargetSource === 'previous-safe'
+              ? 'previous-boundary-clamped'
+              : clampedByOwnHeadBoundary
+                ? 'preferred-own-head-aligned'
+              : chosenTargetSource === 'native-fallback'
+                ? 'native-fallback-used'
+                : 'preferred-own-head-aligned'
         accidentalLockByRowKey.set(rowKey, {
-          targetRightX,
+          targetRightX: clampedTargetRightX,
           applied: true,
-          reason: Math.abs(delta) >= 0.001 ? 'native-aligned' : 'native-already-aligned',
+          reason: buildLockReason(reasonBase),
         })
       })
     })
@@ -2085,22 +3140,60 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       const sourceNote = measure.treble[sourceNoteIndex]
       if (!sourceNote) return []
       const ys = vexNote.getYs()
+      const noteBaseX = getRenderedNoteVisualX(vexNote)
       const renderedHeadXByIndex = new Map<number, number>()
       renderedKeys.forEach((_, renderedIndex) => {
-        const headX = vexNote.noteHeads[renderedIndex]?.getAbsoluteX() ?? getRenderedNoteVisualX(vexNote)
+        const headX = vexNote.noteHeads[renderedIndex]?.getAbsoluteX() ?? noteBaseX
         if (!Number.isFinite(headX)) return
         renderedHeadXByIndex.set(renderedIndex, headX)
       })
       const accidentalByRenderedIndex = getAccidentalRightXByRenderedIndex(vexNote)
       const accidentalRightXByKeyIndex: Record<number, number> = {}
+      const accidentalModifiers = vexNote
+        .getModifiersByType(Accidental.CATEGORY)
+        .map((modifier) => modifier as Accidental)
       const accidentalLayouts = renderedKeys.flatMap((entry, renderedIndex) => {
-        const accidentalX = accidentalByRenderedIndex.get(renderedIndex)
-        if (accidentalX === undefined || !entry.accidental) return []
-        const modifier = vexNote
-          .getModifiersByType(Accidental.CATEGORY)
-          .find((candidate) => candidate.getIndex() === renderedIndex) as Accidental | undefined
+        if (!entry.accidental) return []
+        const { modifier, keyRenderedIndex } = resolveAccidentalModifierForRenderedKey({
+          accidentalModifiers,
+          renderedKeys,
+          renderedKey: entry,
+          fallbackRenderedIndex: renderedIndex,
+        })
+        const accidentalX = accidentalByRenderedIndex.get(keyRenderedIndex)
+        if (accidentalX === undefined) return []
         const width = Number.isFinite(modifier?.getWidth()) ? (modifier?.getWidth() as number) : 8
-        const centerX = accidentalX + width / 2
+        const resolvedMeasuredOwnHead = resolveMeasuredOwnHeadLeftX({
+          vexNote,
+          renderedIndex: keyRenderedIndex,
+          noteBaseX,
+        })
+        const exactMeasuredBounds = modifier
+          ? resolveMeasuredAccidentalBounds({
+              vexNote,
+              modifier,
+              renderedIndex: keyRenderedIndex,
+              fallbackWidth: width,
+            })
+          : null
+        const visualLeftXExact = exactMeasuredBounds?.leftX ?? accidentalX
+        const visualRightXExact = exactMeasuredBounds?.rightX ?? visualLeftXExact + width
+        const ownHeadLeftXExact =
+          typeof resolvedMeasuredOwnHead.ownHeadLeftX === 'number' && Number.isFinite(resolvedMeasuredOwnHead.ownHeadLeftX)
+            ? resolvedMeasuredOwnHead.ownHeadLeftX
+            : undefined
+        const ownGapPxExact =
+          typeof ownHeadLeftXExact === 'number' && Number.isFinite(visualRightXExact)
+            ? ownHeadLeftXExact - visualRightXExact
+            : undefined
+        const measuredWidth =
+          exactMeasuredBounds && Number.isFinite(exactMeasuredBounds.width) && exactMeasuredBounds.width > 0
+            ? exactMeasuredBounds.width
+            : width
+        const centerX =
+          Number.isFinite(visualLeftXExact) && Number.isFinite(visualRightXExact)
+            ? (visualLeftXExact + visualRightXExact) / 2
+            : accidentalX + measuredWidth / 2
         const centerY = ys[renderedIndex] ?? ys[0] ?? 0
         return [
           {
@@ -2108,16 +3201,27 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
             x: centerX,
             y: centerY,
             renderedAccidental: entry.accidental,
+            visualLeftXExact,
+            visualRightXExact,
+            ownHeadLeftXExact,
+            ownGapPxExact,
             ...buildAccidentalHitGeometry({
               centerX,
               centerY,
-              width,
+              width: measuredWidth,
             }),
           },
         ]
       })
       renderedKeys.forEach((entry, renderedIndex) => {
-        const offset = accidentalByRenderedIndex.get(renderedIndex)
+        if (!entry.accidental) return
+        const { keyRenderedIndex } = resolveAccidentalModifierForRenderedKey({
+          accidentalModifiers,
+          renderedKeys,
+          renderedKey: entry,
+          fallbackRenderedIndex: renderedIndex,
+        })
+        const offset = accidentalByRenderedIndex.get(keyRenderedIndex)
         if (offset === undefined) return
         accidentalRightXByKeyIndex[entry.keyIndex] = offset
       })
@@ -2177,22 +3281,60 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       const sourceNote = measure.bass[sourceNoteIndex]
       if (!sourceNote) return []
       const ys = vexNote.getYs()
+      const noteBaseX = getRenderedNoteVisualX(vexNote)
       const renderedHeadXByIndex = new Map<number, number>()
       renderedKeys.forEach((_, renderedIndex) => {
-        const headX = vexNote.noteHeads[renderedIndex]?.getAbsoluteX() ?? getRenderedNoteVisualX(vexNote)
+        const headX = vexNote.noteHeads[renderedIndex]?.getAbsoluteX() ?? noteBaseX
         if (!Number.isFinite(headX)) return
         renderedHeadXByIndex.set(renderedIndex, headX)
       })
       const accidentalByRenderedIndex = getAccidentalRightXByRenderedIndex(vexNote)
       const accidentalRightXByKeyIndex: Record<number, number> = {}
+      const accidentalModifiers = vexNote
+        .getModifiersByType(Accidental.CATEGORY)
+        .map((modifier) => modifier as Accidental)
       const accidentalLayouts = renderedKeys.flatMap((entry, renderedIndex) => {
-        const accidentalX = accidentalByRenderedIndex.get(renderedIndex)
-        if (accidentalX === undefined || !entry.accidental) return []
-        const modifier = vexNote
-          .getModifiersByType(Accidental.CATEGORY)
-          .find((candidate) => candidate.getIndex() === renderedIndex) as Accidental | undefined
+        if (!entry.accidental) return []
+        const { modifier, keyRenderedIndex } = resolveAccidentalModifierForRenderedKey({
+          accidentalModifiers,
+          renderedKeys,
+          renderedKey: entry,
+          fallbackRenderedIndex: renderedIndex,
+        })
+        const accidentalX = accidentalByRenderedIndex.get(keyRenderedIndex)
+        if (accidentalX === undefined) return []
         const width = Number.isFinite(modifier?.getWidth()) ? (modifier?.getWidth() as number) : 8
-        const centerX = accidentalX + width / 2
+        const resolvedMeasuredOwnHead = resolveMeasuredOwnHeadLeftX({
+          vexNote,
+          renderedIndex: keyRenderedIndex,
+          noteBaseX,
+        })
+        const exactMeasuredBounds = modifier
+          ? resolveMeasuredAccidentalBounds({
+              vexNote,
+              modifier,
+              renderedIndex: keyRenderedIndex,
+              fallbackWidth: width,
+            })
+          : null
+        const visualLeftXExact = exactMeasuredBounds?.leftX ?? accidentalX
+        const visualRightXExact = exactMeasuredBounds?.rightX ?? visualLeftXExact + width
+        const ownHeadLeftXExact =
+          typeof resolvedMeasuredOwnHead.ownHeadLeftX === 'number' && Number.isFinite(resolvedMeasuredOwnHead.ownHeadLeftX)
+            ? resolvedMeasuredOwnHead.ownHeadLeftX
+            : undefined
+        const ownGapPxExact =
+          typeof ownHeadLeftXExact === 'number' && Number.isFinite(visualRightXExact)
+            ? ownHeadLeftXExact - visualRightXExact
+            : undefined
+        const measuredWidth =
+          exactMeasuredBounds && Number.isFinite(exactMeasuredBounds.width) && exactMeasuredBounds.width > 0
+            ? exactMeasuredBounds.width
+            : width
+        const centerX =
+          Number.isFinite(visualLeftXExact) && Number.isFinite(visualRightXExact)
+            ? (visualLeftXExact + visualRightXExact) / 2
+            : accidentalX + measuredWidth / 2
         const centerY = ys[renderedIndex] ?? ys[0] ?? 0
         return [
           {
@@ -2200,16 +3342,27 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
             x: centerX,
             y: centerY,
             renderedAccidental: entry.accidental,
+            visualLeftXExact,
+            visualRightXExact,
+            ownHeadLeftXExact,
+            ownGapPxExact,
             ...buildAccidentalHitGeometry({
               centerX,
               centerY,
-              width,
+              width: measuredWidth,
             }),
           },
         ]
       })
       renderedKeys.forEach((entry, renderedIndex) => {
-        const offset = accidentalByRenderedIndex.get(renderedIndex)
+        if (!entry.accidental) return
+        const { keyRenderedIndex } = resolveAccidentalModifierForRenderedKey({
+          accidentalModifiers,
+          renderedKeys,
+          renderedKey: entry,
+          fallbackRenderedIndex: renderedIndex,
+        })
+        const offset = accidentalByRenderedIndex.get(keyRenderedIndex)
         if (offset === undefined) return
         accidentalRightXByKeyIndex[entry.keyIndex] = offset
       })
