@@ -45,6 +45,9 @@ type DumpNoteRow = {
   accidentalCoords?: Array<{
     keyIndex: number
     rightX: number
+    visualRightX?: number | null
+    ownHeadLeftXExact?: number | null
+    ownGapPxExact?: number | null
   }>
 }
 
@@ -74,6 +77,10 @@ type DumpSpacingSegment = {
   appliedGapPx: number | null
   trebleRequestedExtraPx?: number | null
   bassRequestedExtraPx?: number | null
+  noteRestRequestedExtraPx?: number | null
+  noteRestVisibleGapPx?: number | null
+  accidentalRequestedExtraPx?: number | null
+  accidentalVisibleGapPx?: number | null
   winningStaff?: StaffSlotWinner
 }
 
@@ -180,6 +187,10 @@ type FixtureResult = {
   requestedSafeGapPx?: number | null
   expectedSegmentExtraPx?: number | null
   actualSegmentExtraPx?: number | null
+  rawLeftReservePx?: number | null
+  leftOccupiedInsetPx?: number | null
+  accidentalSegmentRequestedExtraPx?: number | null
+  minOwnGapPxExact?: number | null
   passed: boolean
   failureReasons: string[]
 }
@@ -210,6 +221,7 @@ const TARGET_PAIR_COUNT = 8
 const GAP_EPSILON_PX = 0.15
 const HEAD_X_EPSILON_PX = 0.01
 const DEFAULT_SECOND_CHORD_SAFE_GAP_PX = 3
+const ACCIDENTAL_OWN_GAP_MIN_PX = 2
 const DEFAULT_NOTE_HEAD_WIDTH_PX = 9
 const APPROX_ACCIDENTAL_WIDTH_PX = 8
 const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
@@ -611,6 +623,97 @@ const TRAILING_BASS_BOUNDARY_COLLISION_FIXTURE_XML = `<?xml version="1.0" encodi
 </score-partwise>
 `
 
+function buildEnharmonicConsistencyFixtureXml(params: {
+  lowerStep: 'D' | 'E'
+  includePreviousNote: boolean
+}): string {
+  const { lowerStep, includePreviousNote } = params
+  const onsetPrelude = includePreviousNote
+    ? `
+      <note>
+        <pitch><step>G</step><octave>4</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+`
+    : ''
+  const targetDurationXml = includePreviousNote
+    ? `
+        <duration>4</duration>
+        <type>quarter</type>
+`
+    : `
+        <duration>16</duration>
+        <type>whole</type>
+`
+  const trailingRest = includePreviousNote
+    ? `
+      <note>
+        <rest/>
+        <duration>8</duration>
+        <type>half</type>
+        <staff>1</staff>
+      </note>
+`
+    : ''
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC
+  "-//Recordare//DTD MusicXML 3.1 Partwise//EN"
+  "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <part-list>
+    <score-part id="P1">
+      <part-name>Piano</part-name>
+    </score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <staves>2</staves>
+        <clef number="1"><sign>G</sign><line>2</line></clef>
+        <clef number="2"><sign>F</sign><line>4</line></clef>
+      </attributes>${onsetPrelude}
+      <note>
+        <pitch><step>${lowerStep}</step><alter>1</alter><octave>4</octave></pitch>${targetDurationXml}
+        <accidental>sharp</accidental>
+        <staff>1</staff>
+      </note>
+      <note>
+        <chord/>
+        <pitch><step>C</step><alter>1</alter><octave>5</octave></pitch>${targetDurationXml}
+        <accidental>sharp</accidental>
+        <staff>1</staff>
+      </note>${trailingRest}
+    </measure>
+  </part>
+</score-partwise>
+`
+}
+
+const ENHARMONIC_PREVIOUS_DSHARP_CSHARP_FIXTURE_XML = buildEnharmonicConsistencyFixtureXml({
+  lowerStep: 'D',
+  includePreviousNote: true,
+})
+
+const ENHARMONIC_PREVIOUS_ESHARP_CSHARP_FIXTURE_XML = buildEnharmonicConsistencyFixtureXml({
+  lowerStep: 'E',
+  includePreviousNote: true,
+})
+
+const ENHARMONIC_BARLINE_DSHARP_CSHARP_FIXTURE_XML = buildEnharmonicConsistencyFixtureXml({
+  lowerStep: 'D',
+  includePreviousNote: false,
+})
+
+const ENHARMONIC_BARLINE_ESHARP_CSHARP_FIXTURE_XML = buildEnharmonicConsistencyFixtureXml({
+  lowerStep: 'E',
+  includePreviousNote: false,
+})
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -974,6 +1077,10 @@ function sanitizeSpacingSegment(entry: DumpSpacingSegment | null | undefined): D
     appliedGapPx: toRoundedFiniteNumber(entry.appliedGapPx),
     trebleRequestedExtraPx: toRoundedFiniteNumber(entry.trebleRequestedExtraPx),
     bassRequestedExtraPx: toRoundedFiniteNumber(entry.bassRequestedExtraPx),
+    noteRestRequestedExtraPx: toRoundedFiniteNumber(entry.noteRestRequestedExtraPx),
+    noteRestVisibleGapPx: toRoundedFiniteNumber(entry.noteRestVisibleGapPx),
+    accidentalRequestedExtraPx: toRoundedFiniteNumber(entry.accidentalRequestedExtraPx),
+    accidentalVisibleGapPx: toRoundedFiniteNumber(entry.accidentalVisibleGapPx),
     winningStaff: entry.winningStaff ?? 'none',
   }
 }
@@ -2383,6 +2490,225 @@ function analyzeTrailingCollisionFixture(
   }
 }
 
+function createEnharmonicConsistencyAnalyzer(params: {
+  key: string
+  lowerPitch: 'd#/4' | 'e#/4'
+  targetOnsetTicks: number
+  requirePreviousSegment: boolean
+}) {
+  const { key, lowerPitch, targetOnsetTicks, requirePreviousSegment } = params
+  return (
+    row: MergedMeasureDumpRow,
+    scale: DebugScaleConfig,
+    secondChordSafeGapPx = DEFAULT_SECOND_CHORD_SAFE_GAP_PX,
+  ): FixtureResult => {
+    const failures: string[] = []
+
+    const normalizePitch = (value: string | null | undefined): string | null => {
+      if (typeof value !== 'string') return null
+      return value.trim().toLowerCase()
+    }
+
+    const targetNote =
+      row.notes.find((note) => {
+        if (note.staff !== 'treble' || note.isRest === true) return false
+        if (!Number.isFinite(note.onsetTicksInMeasure)) return false
+        if (Math.round(note.onsetTicksInMeasure as number) !== targetOnsetTicks) return false
+        if (!Array.isArray(note.noteHeads) || note.noteHeads.length < 2) return false
+        const normalizedHeadPitches = new Set(
+          note.noteHeads.map((head) => normalizePitch(head.pitch)).filter((pitch): pitch is string => pitch !== null),
+        )
+        return normalizedHeadPitches.has(lowerPitch) && normalizedHeadPitches.has('c#/5')
+      }) ?? null
+
+    const onsetReserve =
+      getSpacingOnsetReserves(row).find((reserve) => reserve.onsetTicks === targetOnsetTicks) ?? null
+    const trebleMetrics = buildStaffOnsetMetrics(row, 'treble')
+    const targetMetrics = trebleMetrics.find((metrics) => metrics.onsetTicks === targetOnsetTicks) ?? null
+    const targetMetricsIndex = trebleMetrics.findIndex((metrics) => metrics.onsetTicks === targetOnsetTicks)
+    const previousMetrics = targetMetricsIndex > 0 ? trebleMetrics[targetMetricsIndex - 1] ?? null : null
+    const nextMetrics =
+      targetMetricsIndex >= 0 && targetMetricsIndex < trebleMetrics.length - 1
+        ? trebleMetrics[targetMetricsIndex + 1] ?? null
+        : null
+
+    if (!row.rendered) pushFailure(failures, 'fixture-not-rendered')
+    if (!targetNote) pushFailure(failures, 'enharmonic-target-note-missing')
+    if (!onsetReserve) pushFailure(failures, 'enharmonic-onset-reserve-missing')
+    if (!targetMetrics) pushFailure(failures, 'enharmonic-target-metrics-missing')
+
+    const boundaryStartX =
+      typeof row.effectiveBoundaryStartX === 'number' && Number.isFinite(row.effectiveBoundaryStartX)
+        ? Number(row.effectiveBoundaryStartX.toFixed(3))
+        : null
+    const boundaryEndX =
+      typeof row.effectiveBoundaryEndX === 'number' && Number.isFinite(row.effectiveBoundaryEndX)
+        ? Number(row.effectiveBoundaryEndX.toFixed(3))
+        : null
+
+    const expectedLeftRequestPx =
+      targetMetrics !== null
+        ? computeExpectedLeftRequestPx(targetMetrics, previousMetrics, boundaryStartX, secondChordSafeGapPx)
+        : null
+    const expectedRightRequestPx =
+      targetMetrics !== null
+        ? computeExpectedRightRequestPx(targetMetrics, nextMetrics, boundaryEndX, targetNote, secondChordSafeGapPx)
+        : null
+
+    const actualLeftSummary =
+      targetMetrics !== null
+        ? resolveSlotRequestSummary({
+            row,
+            staff: 'treble',
+            onsetTicks: targetMetrics.onsetTicks,
+            side: 'left',
+          })
+        : { requestedExtraPx: 0, winningStaff: 'none' as StaffSlotWinner }
+    const actualRightSummary =
+      targetMetrics !== null
+        ? resolveSlotRequestSummary({
+            row,
+            staff: 'treble',
+            onsetTicks: targetMetrics.onsetTicks,
+            side: 'right',
+          })
+        : { requestedExtraPx: 0, winningStaff: 'none' as StaffSlotWinner }
+
+    const segment =
+      previousMetrics !== null
+        ? findSpacingSegmentByTicks(row, previousMetrics.onsetTicks, targetOnsetTicks)
+        : null
+    if (requirePreviousSegment && !segment) {
+      pushFailure(failures, 'enharmonic-target-segment-missing')
+    }
+
+    const accidentalSegmentRequestedExtraPx =
+      segment !== null ? Number(Math.max(0, segment.accidentalRequestedExtraPx ?? 0).toFixed(3)) : 0
+
+    const ownGapValues = (targetNote?.accidentalCoords ?? [])
+      .map((accidental) => toRoundedFiniteNumber(accidental.ownGapPxExact))
+      .filter((value): value is number => value !== null)
+    const minOwnGapPxExact =
+      ownGapValues.length > 0 ? Number(Math.min(...ownGapValues).toFixed(3)) : null
+    if (targetNote && ownGapValues.length < 2) {
+      pushFailure(failures, 'enharmonic-accidentals-missing', ownGapValues.length)
+    }
+    if (minOwnGapPxExact === null || minOwnGapPxExact < ACCIDENTAL_OWN_GAP_MIN_PX - GAP_EPSILON_PX) {
+      pushFailure(failures, 'enharmonic-own-gap-too-small', minOwnGapPxExact)
+    }
+
+    const finalVisibleLeftGapPx = computeFinalVisibleLeftGapPx({
+      metrics: targetMetrics,
+      previousMetrics,
+      boundaryStartX,
+      appliedExtraPx: actualLeftSummary.requestedExtraPx,
+    })
+
+    const direction = classifyDirection(
+      targetNote && Number.isFinite(targetNote.x) ? Number(targetNote.x.toFixed(3)) : null,
+      targetNote ? dedupeSortedNumbers(targetNote.noteHeads.map((head) => head.x), HEAD_X_EPSILON_PX) : [],
+    )
+
+    return {
+      key,
+      scale,
+      measureWidth:
+        typeof row.measureWidth === 'number' && Number.isFinite(row.measureWidth)
+          ? Number(row.measureWidth.toFixed(3))
+          : null,
+      targetOnsetTicks: targetOnsetTicks,
+      direction,
+      headXs: targetNote ? dedupeSortedNumbers(targetNote.noteHeads.map((head) => head.x), HEAD_X_EPSILON_PX) : [],
+      expectedLeftRequestPx,
+      actualLeftRequestPx: Number(actualLeftSummary.requestedExtraPx.toFixed(3)),
+      leftWinningStaff: actualLeftSummary.winningStaff,
+      expectedRightRequestPx,
+      actualRightRequestPx: Number(actualRightSummary.requestedExtraPx.toFixed(3)),
+      rightWinningStaff: actualRightSummary.winningStaff,
+      visibleLeftGapPx: finalVisibleLeftGapPx,
+      visibleRightGapPx: computeFinalVisibleRightGapPx({
+        metrics: targetMetrics,
+        nextMetrics,
+        boundaryEndX,
+        sourceNote: targetNote,
+        appliedExtraPx: actualRightSummary.requestedExtraPx,
+      }),
+      requestedSafeGapPx: secondChordSafeGapPx,
+      actualSegmentExtraPx: segment !== null ? Number(Math.max(0, segment.extraReservePx ?? 0).toFixed(3)) : 0,
+      rawLeftReservePx: onsetReserve?.rawLeftReservePx ?? null,
+      leftOccupiedInsetPx: onsetReserve?.leftOccupiedInsetPx ?? null,
+      accidentalSegmentRequestedExtraPx,
+      minOwnGapPxExact,
+      passed: failures.length === 0,
+      failureReasons: failures,
+    }
+  }
+}
+
+function buildEnharmonicParityFixtureResult(params: {
+  key: string
+  baseFixture: FixtureResult
+  targetFixture: FixtureResult
+  compareAccidentalSegment: boolean
+}): FixtureResult {
+  const { key, baseFixture, targetFixture, compareAccidentalSegment } = params
+  const failures: string[] = []
+  const compareMetric = (
+    metricName: string,
+    baseValue: number | null | undefined,
+    targetValue: number | null | undefined,
+  ) => {
+    if (baseValue === null || baseValue === undefined || targetValue === null || targetValue === undefined) {
+      pushFailure(failures, `${metricName}-missing`, `${baseValue ?? 'null'}!=${targetValue ?? 'null'}`)
+      return
+    }
+    if (Math.abs(baseValue - targetValue) > 0.5) {
+      pushFailure(failures, `${metricName}-mismatch`, `${baseValue}!=${targetValue}`)
+    }
+  }
+
+  if (!baseFixture.passed) pushFailure(failures, 'base-fixture-failed', baseFixture.key)
+  if (!targetFixture.passed) pushFailure(failures, 'target-fixture-failed', targetFixture.key)
+
+  compareMetric('raw-left-reserve', baseFixture.rawLeftReservePx, targetFixture.rawLeftReservePx)
+  compareMetric('left-occupied-inset', baseFixture.leftOccupiedInsetPx, targetFixture.leftOccupiedInsetPx)
+  compareMetric('left-request', baseFixture.actualLeftRequestPx, targetFixture.actualLeftRequestPx)
+  if (compareAccidentalSegment) {
+    compareMetric(
+      'accidental-segment-request',
+      baseFixture.accidentalSegmentRequestedExtraPx,
+      targetFixture.accidentalSegmentRequestedExtraPx,
+    )
+  }
+  compareMetric('min-own-gap', baseFixture.minOwnGapPxExact, targetFixture.minOwnGapPxExact)
+
+  return {
+    key,
+    scale: targetFixture.scale,
+    measureWidth: targetFixture.measureWidth,
+    targetOnsetTicks: targetFixture.targetOnsetTicks,
+    direction:
+      baseFixture.direction === targetFixture.direction
+        ? baseFixture.direction
+        : 'both',
+    headXs: [],
+    expectedLeftRequestPx: baseFixture.actualLeftRequestPx,
+    actualLeftRequestPx: targetFixture.actualLeftRequestPx,
+    leftWinningStaff: targetFixture.leftWinningStaff,
+    expectedRightRequestPx: baseFixture.actualRightRequestPx,
+    actualRightRequestPx: targetFixture.actualRightRequestPx,
+    rightWinningStaff: targetFixture.rightWinningStaff,
+    visibleLeftGapPx: targetFixture.visibleLeftGapPx,
+    visibleRightGapPx: targetFixture.visibleRightGapPx,
+    rawLeftReservePx: targetFixture.rawLeftReservePx,
+    leftOccupiedInsetPx: targetFixture.leftOccupiedInsetPx,
+    accidentalSegmentRequestedExtraPx: targetFixture.accidentalSegmentRequestedExtraPx,
+    minOwnGapPxExact: targetFixture.minOwnGapPxExact,
+    passed: failures.length === 0,
+    failureReasons: failures,
+  }
+}
+
 async function runDesktopScenario(
   page: Page,
   xmlText: string,
@@ -2515,6 +2841,69 @@ async function main(): Promise<void> {
         page,
         xmlText: TRAILING_BASS_BOUNDARY_COLLISION_FIXTURE_XML,
         analyzer: analyzeTrailingCollisionFixture,
+      }),
+    )
+    console.log('[second-chord-spacing] running enharmonic previous-note fixtures')
+    const enharmonicPreviousDSharpFixture = await runFixtureScenario({
+      page,
+      xmlText: ENHARMONIC_PREVIOUS_DSHARP_CSHARP_FIXTURE_XML,
+      analyzer: createEnharmonicConsistencyAnalyzer({
+        key: 'fixture-enharmonic-previous-dsharp-csharp',
+        lowerPitch: 'd#/4',
+        targetOnsetTicks: 16,
+        requirePreviousSegment: true,
+      }),
+    })
+    const enharmonicPreviousESharpFixture = await runFixtureScenario({
+      page,
+      xmlText: ENHARMONIC_PREVIOUS_ESHARP_CSHARP_FIXTURE_XML,
+      analyzer: createEnharmonicConsistencyAnalyzer({
+        key: 'fixture-enharmonic-previous-esharp-csharp',
+        lowerPitch: 'e#/4',
+        targetOnsetTicks: 16,
+        requirePreviousSegment: true,
+      }),
+    })
+    fixtureResults.push(enharmonicPreviousDSharpFixture)
+    fixtureResults.push(enharmonicPreviousESharpFixture)
+    fixtureResults.push(
+      buildEnharmonicParityFixtureResult({
+        key: 'fixture-enharmonic-previous-parity',
+        baseFixture: enharmonicPreviousDSharpFixture,
+        targetFixture: enharmonicPreviousESharpFixture,
+        compareAccidentalSegment: true,
+      }),
+    )
+
+    console.log('[second-chord-spacing] running enharmonic barline fixtures')
+    const enharmonicBarlineDSharpFixture = await runFixtureScenario({
+      page,
+      xmlText: ENHARMONIC_BARLINE_DSHARP_CSHARP_FIXTURE_XML,
+      analyzer: createEnharmonicConsistencyAnalyzer({
+        key: 'fixture-enharmonic-barline-dsharp-csharp',
+        lowerPitch: 'd#/4',
+        targetOnsetTicks: 0,
+        requirePreviousSegment: false,
+      }),
+    })
+    const enharmonicBarlineESharpFixture = await runFixtureScenario({
+      page,
+      xmlText: ENHARMONIC_BARLINE_ESHARP_CSHARP_FIXTURE_XML,
+      analyzer: createEnharmonicConsistencyAnalyzer({
+        key: 'fixture-enharmonic-barline-esharp-csharp',
+        lowerPitch: 'e#/4',
+        targetOnsetTicks: 0,
+        requirePreviousSegment: false,
+      }),
+    })
+    fixtureResults.push(enharmonicBarlineDSharpFixture)
+    fixtureResults.push(enharmonicBarlineESharpFixture)
+    fixtureResults.push(
+      buildEnharmonicParityFixtureResult({
+        key: 'fixture-enharmonic-barline-parity',
+        baseFixture: enharmonicBarlineDSharpFixture,
+        targetFixture: enharmonicBarlineESharpFixture,
+        compareAccidentalSegment: false,
       }),
     )
 

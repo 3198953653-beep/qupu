@@ -1761,6 +1761,15 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     vexNote.setContext(context)
   })
 
+  if (spacingLayoutMode === 'custom') {
+    alignRenderedAccidentalOffset('treble', measure.treble, trebleRenderedBySourceIndex, {
+      captureLockState: false,
+    })
+    alignRenderedAccidentalOffset('bass', measure.bass, bassRenderedBySourceIndex, {
+      captureLockState: false,
+    })
+  }
+
   let appliedSpacingMetrics: AppliedTimeAxisSpacingMetrics | null = null
   if (spacingLayoutMode === 'custom') {
     appliedSpacingMetrics = applyUnifiedTimeAxisSpacing({
@@ -1839,11 +1848,26 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     alignRenderedRestToMeasureCenter('bass', bassRendered[0])
   }
 
-  const alignRenderedAccidentalOffset = (
+  function alignRenderedAccidentalOffset(
     staff: StaffKind,
     sourceNotes: ScoreNote[],
     renderedBySourceIndex: Map<number, RenderedMeasureNote>,
-  ) => {
+    options?: {
+      captureLockState?: boolean
+    },
+  ) {
+    const captureLockState = options?.captureLockState ?? true
+    const setAccidentalLockState = (
+      rowKey: string,
+      value: { targetRightX: number | null; applied: boolean; reason: string },
+    ) => {
+      if (!captureLockState) return
+      accidentalLockByRowKey.set(rowKey, value)
+    }
+    const setPreviewAccidentalRightX = (rowKey: string, value: number) => {
+      if (!captureLockState) return
+      previewAccidentalByRowKey.set(rowKey, value)
+    }
     sourceNotes.forEach((sourceNote, noteIndex) => {
       const renderedEntry = renderedBySourceIndex.get(noteIndex)
       if (!renderedEntry) return
@@ -1864,7 +1888,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           fallbackRenderedIndex: renderedIndex,
         })
         if (!modifier) {
-          accidentalLockByRowKey.set(rowKey, {
+          setAccidentalLockState(rowKey, {
             targetRightX: null,
             applied: false,
             reason: 'no-modifier',
@@ -1997,7 +2021,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           lockReasonSuffixes.length === 0 ? base : `${base}+${lockReasonSuffixes.join('+')}`
 
         if (chosenTargetX === null) {
-          accidentalLockByRowKey.set(rowKey, {
+          setAccidentalLockState(rowKey, {
             targetRightX: null,
             applied: false,
             reason: buildLockReason('no-target'),
@@ -2055,12 +2079,12 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
             ? 'infeasible-corridor-invalid-current-x'
             : clampedByChordBoundary || chosenTargetSource === 'head-safe'
               ? 'chord-collision-clamped-invalid-current-x'
-              : clampedByPreviousBoundary || chosenTargetSource === 'previous-safe'
+            : clampedByPreviousBoundary || chosenTargetSource === 'previous-safe'
                 ? 'previous-boundary-clamped-invalid-current-x'
                 : chosenTargetSource === 'native-fallback'
                   ? 'native-fallback-used-invalid-current-x'
                   : 'preferred-own-head-aligned-invalid-current-x'
-          accidentalLockByRowKey.set(rowKey, {
+          setAccidentalLockState(rowKey, {
             targetRightX: clampedTargetRightX,
             applied: false,
             reason: buildLockReason(invalidCurrentReasonBase),
@@ -2254,9 +2278,9 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
 
         const alignedRightX = getAccidentalVisualX(renderedEntry.vexNote, modifier, keyRenderedIndex)
         if (alignedRightX !== null) {
-          previewAccidentalByRowKey.set(rowKey, alignedRightX)
+          setPreviewAccidentalRightX(rowKey, alignedRightX)
         } else {
-          previewAccidentalByRowKey.set(rowKey, clampedTargetRightX)
+          setPreviewAccidentalRightX(rowKey, clampedTargetRightX)
         }
         const reasonBase = infeasibleCorridor
           ? 'infeasible-corridor'
@@ -2269,7 +2293,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
               : chosenTargetSource === 'native-fallback'
                 ? 'native-fallback-used'
                 : 'preferred-own-head-aligned'
-        accidentalLockByRowKey.set(rowKey, {
+        setAccidentalLockState(rowKey, {
           targetRightX: clampedTargetRightX,
           applied: true,
           reason: buildLockReason(reasonBase),
