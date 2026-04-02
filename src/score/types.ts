@@ -260,6 +260,8 @@ export type DragDebugRow = {
   accidentalTargetRightX: number | null
   accidentalLockApplied: boolean
   accidentalLockReason: string
+  accidentalPreviousOccupiedRightX: number | null
+  accidentalPreviousGapMeasured: number | null
 }
 
 export type DragDebugSnapshot = {

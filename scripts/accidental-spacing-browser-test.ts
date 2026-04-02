@@ -80,6 +80,14 @@ type FixtureScenario =
     }
   | {
       key: string
+      kind: 'previous-boundary'
+      previousOnsetTicks: number
+      targetOnsetTicks: number
+      targetPitch: string
+      xmlText: string
+    }
+  | {
+      key: string
       kind: 'leading'
       targetPitch: string
       xmlText: string
@@ -107,7 +115,11 @@ type LeadingFixtureResult = {
   failureReasons: string[]
 }
 
-type FixtureResult = InnerFixtureResult | LeadingFixtureResult | SameOnsetChordFixtureResult
+type FixtureResult =
+  | InnerFixtureResult
+  | LeadingFixtureResult
+  | SameOnsetChordFixtureResult
+  | PreviousBoundaryFixtureResult
 type SameOnsetChordFixtureResult = {
   key: string
   kind: 'same-onset-chord'
@@ -115,6 +127,19 @@ type SameOnsetChordFixtureResult = {
   blockerPitch: string
   finalGapPx: number
   ownGapPx: number
+  passed: boolean
+  failureReasons: string[]
+}
+
+type PreviousBoundaryFixtureResult = {
+  key: string
+  kind: 'previous-boundary'
+  previousOnsetTicks: number
+  targetOnsetTicks: number
+  targetPitch: string
+  previousOccupiedRightX: number
+  minAccidentalLeftX: number
+  finalGapPx: number
   passed: boolean
   failureReasons: string[]
 }
@@ -143,6 +168,7 @@ type FinalReport = {
   desktopTarget: DesktopTargetResult
   desktopKeySignatureCases: DesktopKeySignatureResult[]
   fixtureResults: FixtureResult[]
+  userFileBeat2ToBeat3Boundary: PreviousBoundaryFixtureResult | null
 }
 
 const DEV_HOST = '127.0.0.1'
@@ -158,6 +184,7 @@ const LEADING_MAX_GAP_PX = 2.2
 const APPROX_ACCIDENTAL_WIDTH_PX = 9
 const APPROX_NOTEHEAD_WIDTH_PX = 9
 const DEFAULT_LEADING_BARLINE_GAP_PX = 9.7
+const USER_FILE_BEAT_BOUNDARY_NAME = '二度变音记号问题.musicxml'
 
 function durationTypeFromCode(durationCode: DurationCode): 'whole' | 'half' | 'quarter' | 'eighth' | '16th' | '32nd' {
   switch (durationCode) {
@@ -441,6 +468,23 @@ const FIXTURE_SCENARIOS: FixtureScenario[] = [
       ...buildRemainingTrebleRestsXml(16),
     ]),
   },
+  {
+    key: 'fixture-user-file-beat2-to-beat3-previous-boundary',
+    kind: 'previous-boundary',
+    previousOnsetTicks: 16,
+    targetOnsetTicks: 32,
+    targetPitch: 'B#4',
+    xmlText: buildFixtureXml([
+      buildPitchNoteXml({ durationCode: '4', step: 'C', octave: 5, stem: 'down' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'D', alter: 1, octave: 5, stem: 'down' }),
+      buildPitchNoteXml({ durationCode: '4', step: 'G', octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'A', alter: 1, octave: 4, stem: 'up' }),
+      buildPitchNoteXml({ durationCode: '4', step: 'B', alter: 1, octave: 4, stem: 'down' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'D', octave: 5, accidentalText: 'natural', stem: 'down' }),
+      buildPitchNoteXml({ durationCode: '4', step: 'C', octave: 5, stem: 'down' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'D', octave: 5, stem: 'down' }),
+    ]),
+  },
 ]
 
 function sleep(ms: number): Promise<void> {
@@ -641,6 +685,27 @@ function getAccidentalRightX(note: DumpNoteRow): number | null {
     return Math.max(maxValue, candidate)
   }, Number.NEGATIVE_INFINITY)
   return Number.isFinite(rightX) ? rightX : null
+}
+
+function getNoteOccupiedRightX(note: DumpNoteRow): number | null {
+  const headRightX = (note.noteHeads ?? []).reduce((maxValue, head) => {
+    const resolvedRightX = resolveNoteHeadRightWithSanity(head)
+    if (resolvedRightX === null || !Number.isFinite(resolvedRightX)) return maxValue
+    return Math.max(maxValue, resolvedRightX)
+  }, Number.NEGATIVE_INFINITY)
+  const visualRightX =
+    typeof note.visualRightX === 'number' && Number.isFinite(note.visualRightX)
+      ? note.visualRightX
+      : Number.NEGATIVE_INFINITY
+  const accidentalRightX = getAccidentalRightX(note)
+  const occupiedRightX = Math.max(
+    headRightX,
+    visualRightX,
+    typeof accidentalRightX === 'number' && Number.isFinite(accidentalRightX)
+      ? accidentalRightX
+      : Number.NEGATIVE_INFINITY,
+  )
+  return Number.isFinite(occupiedRightX) ? occupiedRightX : null
 }
 
 function resolveNoteHeadLeftWithSanity(head: {
@@ -1051,9 +1116,88 @@ function analyzeSameOnsetChordFixtureScenario(params: {
   }
 }
 
+function analyzePreviousBoundaryFixtureScenario(params: {
+  row: MeasureDumpRow
+  scenario: Extract<FixtureScenario, { kind: 'previous-boundary' }>
+}): PreviousBoundaryFixtureResult {
+  const { row, scenario } = params
+  const failures: string[] = []
+  const trebleNotes = sortTrebleNotes(row)
+  const previousOnsetNotes = trebleNotes.filter(
+    (note) =>
+      typeof note.onsetTicksInMeasure === 'number' &&
+      Math.round(note.onsetTicksInMeasure) === scenario.previousOnsetTicks,
+  )
+  const targetOnsetNotes = trebleNotes.filter(
+    (note) =>
+      typeof note.onsetTicksInMeasure === 'number' &&
+      Math.round(note.onsetTicksInMeasure) === scenario.targetOnsetTicks,
+  )
+
+  if (previousOnsetNotes.length === 0) {
+    failures.push(`missing-previous-onset:${scenario.previousOnsetTicks}`)
+  }
+  if (targetOnsetNotes.length === 0) {
+    failures.push(`missing-target-onset:${scenario.targetOnsetTicks}`)
+  }
+
+  const targetNote =
+    targetOnsetNotes.find((note) => normalizePitch(note.pitch) === normalizePitch(scenario.targetPitch)) ??
+    findTrebleNoteByPitch(row, scenario.targetPitch) ??
+    null
+  if (!targetNote) {
+    failures.push(`target-note-not-found:${scenario.targetPitch}`)
+  }
+
+  const previousOccupiedRightX = previousOnsetNotes.reduce((maxValue, note) => {
+    const occupiedRightX = getNoteOccupiedRightX(note)
+    if (occupiedRightX === null || !Number.isFinite(occupiedRightX)) return maxValue
+    return Math.max(maxValue, occupiedRightX)
+  }, Number.NEGATIVE_INFINITY)
+  if (!Number.isFinite(previousOccupiedRightX)) {
+    failures.push('missing-previous-occupied-right-x')
+  }
+
+  const targetAccidentalLeftX = targetOnsetNotes.reduce((minValue, note) => {
+    const accidentalLeftX = getAccidentalLeftX(note)
+    if (accidentalLeftX === null || !Number.isFinite(accidentalLeftX)) return minValue
+    return Math.min(minValue, accidentalLeftX)
+  }, Number.POSITIVE_INFINITY)
+  if (!Number.isFinite(targetAccidentalLeftX)) {
+    failures.push('missing-target-accidental-left-x')
+  }
+
+  const finalGapPx =
+    Number.isFinite(previousOccupiedRightX) && Number.isFinite(targetAccidentalLeftX)
+      ? targetAccidentalLeftX - previousOccupiedRightX
+      : Number.NaN
+  if (Number.isFinite(finalGapPx) && finalGapPx < ACCIDENTAL_SAFE_GAP_PX - GAP_EPSILON_PX) {
+    failures.push(`previous-boundary-gap-too-small:${finalGapPx.toFixed(3)}`)
+  }
+
+  return {
+    key: scenario.key,
+    kind: 'previous-boundary',
+    previousOnsetTicks: scenario.previousOnsetTicks,
+    targetOnsetTicks: scenario.targetOnsetTicks,
+    targetPitch: scenario.targetPitch,
+    previousOccupiedRightX: Number.isFinite(previousOccupiedRightX) ? Number(previousOccupiedRightX.toFixed(3)) : Number.NaN,
+    minAccidentalLeftX: Number.isFinite(targetAccidentalLeftX) ? Number(targetAccidentalLeftX.toFixed(3)) : Number.NaN,
+    finalGapPx: Number.isFinite(finalGapPx) ? Number(finalGapPx.toFixed(3)) : Number.NaN,
+    passed: failures.length === 0,
+    failureReasons: failures,
+  }
+}
+
 function analyzeFixtureScenario(row: MeasureDumpRow, scenario: FixtureScenario): FixtureResult {
   if (scenario.kind === 'leading') {
     return analyzeLeadingFixtureScenario({
+      row,
+      scenario,
+    })
+  }
+  if (scenario.kind === 'previous-boundary') {
+    return analyzePreviousBoundaryFixtureScenario({
       row,
       scenario,
     })
@@ -1214,11 +1358,30 @@ async function main(): Promise<void> {
       fixtureResults.push(await runFixtureScenario(page, scenario))
     }
 
+    const isUserFileBeatBoundaryCheckTarget =
+      path.basename(path.resolve(xmlPath)).toLowerCase() === USER_FILE_BEAT_BOUNDARY_NAME.toLowerCase()
+    const userFileBeat2ToBeat3Boundary = isUserFileBeatBoundaryCheckTarget
+      ? analyzePreviousBoundaryFixtureScenario({
+          row: firstRow,
+          scenario: {
+            key: 'user-file-first-measure-beat2-to-beat3',
+            kind: 'previous-boundary',
+            previousOnsetTicks: 16,
+            targetOnsetTicks: 32,
+            targetPitch: 'B#4',
+            xmlText: '',
+          },
+        })
+      : null
+
     const failedDesktopCases = [
       ...(desktopTarget.passed ? [] : [`desktop-target:${desktopTarget.failureReasons.join(',')}`]),
       ...desktopKeySignatureCases
         .filter((entry) => !entry.passed)
         .map((entry) => `desktop-${entry.pitch}:${entry.failureReasons.join(',')}`),
+      ...(userFileBeat2ToBeat3Boundary && !userFileBeat2ToBeat3Boundary.passed
+        ? [`user-file-beat2-to-beat3:${userFileBeat2ToBeat3Boundary.failureReasons.join(',')}`]
+        : []),
     ]
     const failedFixtures = fixtureResults
       .filter((result) => !result.passed)
@@ -1254,6 +1417,7 @@ async function main(): Promise<void> {
       desktopTarget,
       desktopKeySignatureCases,
       fixtureResults,
+      userFileBeat2ToBeat3Boundary,
     }
 
     console.log(JSON.stringify(report, null, 2))

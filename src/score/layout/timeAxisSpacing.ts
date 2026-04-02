@@ -440,6 +440,24 @@ function buildTimeAxisRenderedRefs(params: {
   return refs
 }
 
+function resolveStaffVisualBlockerBounds(vexNote: StaveNote): { leftX: number; rightX: number } | null {
+  const glyphBounds = getRenderedNoteGlyphBounds(vexNote)
+  const occupiedBounds = getRenderedNoteOccupiedBounds(vexNote, {
+    rightPaddingPx: 0,
+  })
+  const leftCandidates = [glyphBounds?.leftX, occupiedBounds?.leftX].filter(
+    (value): value is number => typeof value === 'number' && Number.isFinite(value),
+  )
+  const rightCandidates = [glyphBounds?.rightX, occupiedBounds?.rightX].filter(
+    (value): value is number => typeof value === 'number' && Number.isFinite(value),
+  )
+  if (leftCandidates.length === 0 || rightCandidates.length === 0) return null
+  return {
+    leftX: Math.min(...leftCandidates),
+    rightX: Math.max(...rightCandidates),
+  }
+}
+
 function buildStaffVisualBlockerRefs(refs: TimeAxisRenderedRef[]): Record<StaffKind, StaffVisualBlockerRef[]> {
   const blockers: Record<StaffKind, StaffVisualBlockerRef[]> = {
     treble: [],
@@ -447,11 +465,11 @@ function buildStaffVisualBlockerRefs(refs: TimeAxisRenderedRef[]): Record<StaffK
   }
 
   refs.forEach((ref) => {
-    const glyphBounds = getRenderedNoteGlyphBounds(ref.vexNote)
-    if (!glyphBounds) return
+    const blockerBounds = resolveStaffVisualBlockerBounds(ref.vexNote)
+    if (!blockerBounds) return
     const anchorX = getRenderedNoteVisualX(ref.vexNote)
-    const visualLeftX = glyphBounds.leftX
-    const visualRightX = glyphBounds.rightX
+    const visualLeftX = blockerBounds.leftX
+    const visualRightX = blockerBounds.rightX
     const accidentalLeftX = getRenderedNoteAccidentalLeftX(ref.vexNote)
     const flagProjectionPx =
       ref.isRest !== true && ref.vexNote.hasFlag() && !ref.vexNote.getBeam()
@@ -469,7 +487,7 @@ function buildStaffVisualBlockerRefs(refs: TimeAxisRenderedRef[]): Record<StaffK
       hasNonRest: !ref.isRest,
       hasStandaloneFlaggedNote: flagProjectionPx !== null,
       hasRenderedAccidental: typeof accidentalLeftX === 'number' && Number.isFinite(accidentalLeftX),
-      anchorX: Number.isFinite(anchorX) ? anchorX : glyphBounds.leftX,
+      anchorX: Number.isFinite(anchorX) ? anchorX : blockerBounds.leftX,
       visualLeftX,
       visualRightX,
       accidentalLeftX,

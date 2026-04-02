@@ -603,19 +603,65 @@ function resolvePreviousNoteOccupiedRightX(params: {
     if (!previousSourceNote || previousSourceNote.isRest) continue
     const previousRenderedEntry = renderedBySourceIndex.get(previousNoteIndex)
     if (!previousRenderedEntry) continue
-    const headEndX = previousRenderedEntry.vexNote.getNoteHeadEndX()
+    const previousVexNote = previousRenderedEntry.vexNote
+    const previousNoteBaseX = getRenderedNoteVisualX(previousVexNote)
+    const previousStemDirection = previousVexNote.getStemDirection()
+    const occupiedRightXCandidates: number[] = []
+
+    const previousNoteHeads = (previousVexNote.noteHeads ?? []) as VexNoteHeadLike[]
+    previousNoteHeads.forEach((noteHead) => {
+      const resolvedBounds = resolveMeasuredNoteHeadBounds({
+        noteHead,
+        noteBaseX: previousNoteBaseX,
+        stemDirection: previousStemDirection,
+      })
+      if (resolvedBounds && Number.isFinite(resolvedBounds.rightX)) {
+        occupiedRightXCandidates.push(resolvedBounds.rightX)
+      }
+    })
+
+    const previousAccidentalModifiers = previousVexNote
+      .getModifiersByType(Accidental.CATEGORY)
+      .map((modifier) => modifier as Accidental)
+    previousAccidentalModifiers.forEach((modifier) => {
+      const renderedIndex = modifier.getIndex()
+      if (typeof renderedIndex !== 'number' || !Number.isFinite(renderedIndex)) return
+      const renderedKey = previousRenderedEntry.renderedKeys[renderedIndex]
+      const fallbackWidth = resolveAccidentalWidth({
+        modifier,
+        accidentalCode: renderedKey?.accidental ?? null,
+      })
+      const resolvedBounds = resolveMeasuredAccidentalBounds({
+        vexNote: previousVexNote,
+        modifier,
+        renderedIndex,
+        fallbackWidth,
+      })
+      if (resolvedBounds && Number.isFinite(resolvedBounds.rightX)) {
+        occupiedRightXCandidates.push(resolvedBounds.rightX)
+      }
+    })
+
+    const headEndX = previousVexNote.getNoteHeadEndX()
     if (Number.isFinite(headEndX)) {
-      return headEndX
+      occupiedRightXCandidates.push(headEndX)
     }
-    const visualBounds = getRenderedNoteGlyphBounds(previousRenderedEntry.vexNote)
+    const visualBounds = getRenderedNoteGlyphBounds(previousVexNote)
     const visualRightX = visualBounds?.rightX
     if (typeof visualRightX === 'number' && Number.isFinite(visualRightX)) {
-      return visualRightX
+      occupiedRightXCandidates.push(visualRightX)
     }
-    const previousNoteX = getRenderedNoteVisualX(previousRenderedEntry.vexNote)
-    const previousGlyphWidth = previousRenderedEntry.vexNote.getGlyphWidth()
-    if (Number.isFinite(previousNoteX) && Number.isFinite(previousGlyphWidth)) {
-      return previousNoteX + previousGlyphWidth
+    const previousGlyphWidth = previousVexNote.getGlyphWidth()
+    if (Number.isFinite(previousNoteBaseX) && Number.isFinite(previousGlyphWidth)) {
+      occupiedRightXCandidates.push(previousNoteBaseX + previousGlyphWidth)
+    }
+
+    const previousOccupiedRightX = occupiedRightXCandidates.reduce(
+      (maxValue, candidate) => (Number.isFinite(candidate) ? Math.max(maxValue, candidate) : maxValue),
+      Number.NEGATIVE_INFINITY,
+    )
+    if (Number.isFinite(previousOccupiedRightX)) {
+      return previousOccupiedRightX
     }
   }
   return null
@@ -1058,6 +1104,14 @@ type RenderedMeasureNote = {
   sourceNoteIndex: number
 }
 
+type AccidentalLockState = {
+  targetRightX: number | null
+  applied: boolean
+  reason: string
+  previousOccupiedRightX?: number | null
+  previousGapMeasured?: number | null
+}
+
 function drawRenderedNoteHeadNumerals(params: {
   context2D: CanvasRenderingContext2D
   sourceNotes: ScoreNote[]
@@ -1305,7 +1359,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   }
   const lockPreviewAccidentalLayout = freezePreviewAccidentalLayout && normalizedPreviewNotes.length > 0
   const previewAccidentalByRowKey = new Map<string, number>()
-  const accidentalLockByRowKey = new Map<string, { targetRightX: number | null; applied: boolean; reason: string }>()
+  const accidentalLockByRowKey = new Map<string, AccidentalLockState>()
 
   const resolveRenderedNoteData = (
     note: ScoreNote,
@@ -1859,7 +1913,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     const captureLockState = options?.captureLockState ?? true
     const setAccidentalLockState = (
       rowKey: string,
-      value: { targetRightX: number | null; applied: boolean; reason: string },
+      value: AccidentalLockState,
     ) => {
       if (!captureLockState) return
       accidentalLockByRowKey.set(rowKey, value)
@@ -2025,6 +2079,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
             targetRightX: null,
             applied: false,
             reason: buildLockReason('no-target'),
+            previousOccupiedRightX: previousNoteOccupiedRightX,
+            previousGapMeasured: null,
           })
           return
         }
@@ -2088,6 +2144,11 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
             targetRightX: clampedTargetRightX,
             applied: false,
             reason: buildLockReason(invalidCurrentReasonBase),
+            previousOccupiedRightX: previousNoteOccupiedRightX,
+            previousGapMeasured:
+              typeof previousNoteOccupiedRightX === 'number' && Number.isFinite(previousNoteOccupiedRightX)
+                ? clampedTargetRightX - previousNoteOccupiedRightX
+                : null,
           })
           return
         }
@@ -2293,10 +2354,18 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
               : chosenTargetSource === 'native-fallback'
                 ? 'native-fallback-used'
                 : 'preferred-own-head-aligned'
+        const previousGapMeasured =
+          typeof previousNoteOccupiedRightX === 'number' &&
+          Number.isFinite(previousNoteOccupiedRightX) &&
+          finalAccidentalBounds
+            ? finalAccidentalBounds.leftX - previousNoteOccupiedRightX
+            : null
         setAccidentalLockState(rowKey, {
           targetRightX: clampedTargetRightX,
           applied: true,
           reason: buildLockReason(reasonBase),
+          previousOccupiedRightX: previousNoteOccupiedRightX,
+          previousGapMeasured,
         })
       })
     })
@@ -2365,6 +2434,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
             accidentalTargetRightX: lockInfo?.targetRightX ?? null,
             accidentalLockApplied: lockInfo?.applied ?? false,
             accidentalLockReason: lockInfo?.reason ?? 'no-lock-record',
+            accidentalPreviousOccupiedRightX: lockInfo?.previousOccupiedRightX ?? null,
+            accidentalPreviousGapMeasured: lockInfo?.previousGapMeasured ?? null,
           })
         })
       })
