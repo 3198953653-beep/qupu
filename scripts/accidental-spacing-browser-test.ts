@@ -88,6 +88,17 @@ type FixtureScenario =
     }
   | {
       key: string
+      kind: 'threshold-gap'
+      previousOnsetTicks: number
+      targetOnsetTicks: number
+      targetPitch: string
+      requiredGapPx: number
+      expectedRequest: 'positive' | 'zero'
+      maxRequestedExtraPx?: number
+      xmlText: string
+    }
+  | {
+      key: string
       kind: 'leading'
       targetPitch: string
       xmlText: string
@@ -120,6 +131,7 @@ type FixtureResult =
   | LeadingFixtureResult
   | SameOnsetChordFixtureResult
   | PreviousBoundaryFixtureResult
+  | ThresholdGapFixtureResult
 type SameOnsetChordFixtureResult = {
   key: string
   kind: 'same-onset-chord'
@@ -139,6 +151,21 @@ type PreviousBoundaryFixtureResult = {
   targetPitch: string
   previousOccupiedRightX: number
   minAccidentalLeftX: number
+  finalGapPx: number
+  passed: boolean
+  failureReasons: string[]
+}
+
+type ThresholdGapFixtureResult = {
+  key: string
+  kind: 'threshold-gap'
+  previousOnsetTicks: number
+  targetOnsetTicks: number
+  targetPitch: string
+  requiredGapPx: number
+  accidentalRequestedExtraPx: number
+  accidentalVisibleGapPx: number
+  expectedRequestedExtraPx: number
   finalGapPx: number
   passed: boolean
   failureReasons: string[]
@@ -480,7 +507,46 @@ const FIXTURE_SCENARIOS: FixtureScenario[] = [
       buildPitchNoteXml({ durationCode: '4', step: 'G', octave: 4, stem: 'up' }),
       buildChordPitchNoteXml({ durationCode: '4', step: 'A', alter: 1, octave: 4, stem: 'up' }),
       buildPitchNoteXml({ durationCode: '4', step: 'B', alter: 1, octave: 4, stem: 'down' }),
-      buildChordPitchNoteXml({ durationCode: '4', step: 'D', octave: 5, accidentalText: 'natural', stem: 'down' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'D', alter: 1, octave: 5, stem: 'down' }),
+      buildPitchNoteXml({ durationCode: '4', step: 'C', octave: 5, stem: 'down' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'D', octave: 5, stem: 'down' }),
+    ]),
+  },
+  {
+    key: 'fixture-second-chord-threshold-g4a4',
+    kind: 'threshold-gap',
+    previousOnsetTicks: 16,
+    targetOnsetTicks: 32,
+    targetPitch: 'B#4',
+    requiredGapPx: 3,
+    expectedRequest: 'positive',
+    maxRequestedExtraPx: 12,
+    xmlText: buildFixtureXml([
+      buildPitchNoteXml({ durationCode: '4', step: 'C', octave: 5, stem: 'down' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'D', octave: 5, stem: 'down' }),
+      buildPitchNoteXml({ durationCode: '4', step: 'G', octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'A', octave: 4, stem: 'up' }),
+      buildPitchNoteXml({ durationCode: '4', step: 'B', alter: 1, octave: 4, stem: 'down' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'D', alter: 1, octave: 5, stem: 'down' }),
+      buildPitchNoteXml({ durationCode: '4', step: 'C', octave: 5, stem: 'down' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'D', octave: 5, stem: 'down' }),
+    ]),
+  },
+  {
+    key: 'fixture-second-chord-threshold-g4b4',
+    kind: 'threshold-gap',
+    previousOnsetTicks: 16,
+    targetOnsetTicks: 32,
+    targetPitch: 'B#4',
+    requiredGapPx: 1,
+    expectedRequest: 'zero',
+    xmlText: buildFixtureXml([
+      buildPitchNoteXml({ durationCode: '4', step: 'C', octave: 5, stem: 'down' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'D', octave: 5, stem: 'down' }),
+      buildPitchNoteXml({ durationCode: '4', step: 'G', octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'B', octave: 4, stem: 'up' }),
+      buildPitchNoteXml({ durationCode: '4', step: 'B', alter: 1, octave: 4, stem: 'down' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'D', alter: 1, octave: 5, stem: 'down' }),
       buildPitchNoteXml({ durationCode: '4', step: 'C', octave: 5, stem: 'down' }),
       buildChordPitchNoteXml({ durationCode: '4', step: 'D', octave: 5, stem: 'down' }),
     ]),
@@ -693,19 +759,21 @@ function getNoteOccupiedRightX(note: DumpNoteRow): number | null {
     if (resolvedRightX === null || !Number.isFinite(resolvedRightX)) return maxValue
     return Math.max(maxValue, resolvedRightX)
   }, Number.NEGATIVE_INFINITY)
-  const visualRightX =
-    typeof note.visualRightX === 'number' && Number.isFinite(note.visualRightX)
-      ? note.visualRightX
-      : Number.NEGATIVE_INFINITY
   const accidentalRightX = getAccidentalRightX(note)
   const occupiedRightX = Math.max(
     headRightX,
-    visualRightX,
     typeof accidentalRightX === 'number' && Number.isFinite(accidentalRightX)
       ? accidentalRightX
       : Number.NEGATIVE_INFINITY,
   )
-  return Number.isFinite(occupiedRightX) ? occupiedRightX : null
+  if (Number.isFinite(occupiedRightX)) {
+    return occupiedRightX
+  }
+  const visualRightX =
+    typeof note.visualRightX === 'number' && Number.isFinite(note.visualRightX)
+      ? note.visualRightX
+      : null
+  return visualRightX
 }
 
 function resolveNoteHeadLeftWithSanity(head: {
@@ -864,8 +932,11 @@ function analyzeInnerFixtureScenario(params: {
   }
 
   const accidentalLeftX = assertFinite(getAccidentalLeftX(targetNote), `${scenario.key}.accidentalLeftX`)
-  const previousVisualRightX = assertFinite(targetIndex > 0 ? previousNote.visualRightX : null, `${scenario.key}.previousVisualRightX`)
-  const finalGapPx = accidentalLeftX - previousVisualRightX
+  const previousOccupiedRightX = assertFinite(
+    targetIndex > 0 ? getNoteOccupiedRightX(previousNote) : null,
+    `${scenario.key}.previousOccupiedRightX`,
+  )
+  const finalGapPx = accidentalLeftX - previousOccupiedRightX
   const accidentalRequestedExtraPx = assertFinite(
     segment.accidentalRequestedExtraPx ?? 0,
     `${scenario.key}.segment.accidentalRequestedExtraPx`,
@@ -1189,9 +1260,142 @@ function analyzePreviousBoundaryFixtureScenario(params: {
   }
 }
 
+function analyzeThresholdGapFixtureScenario(params: {
+  row: MeasureDumpRow
+  scenario: Extract<FixtureScenario, { kind: 'threshold-gap' }>
+}): ThresholdGapFixtureResult {
+  const { row, scenario } = params
+  const failures: string[] = []
+  const trebleNotes = sortTrebleNotes(row)
+  const previousOnsetNotes = trebleNotes.filter(
+    (note) =>
+      typeof note.onsetTicksInMeasure === 'number' &&
+      Math.round(note.onsetTicksInMeasure) === scenario.previousOnsetTicks,
+  )
+  const targetOnsetNotes = trebleNotes.filter(
+    (note) =>
+      typeof note.onsetTicksInMeasure === 'number' &&
+      Math.round(note.onsetTicksInMeasure) === scenario.targetOnsetTicks,
+  )
+  if (previousOnsetNotes.length === 0) {
+    failures.push(`missing-previous-onset:${scenario.previousOnsetTicks}`)
+  }
+  if (targetOnsetNotes.length === 0) {
+    failures.push(`missing-target-onset:${scenario.targetOnsetTicks}`)
+  }
+
+  const targetNote =
+    targetOnsetNotes.find((note) => normalizePitch(note.pitch) === normalizePitch(scenario.targetPitch)) ??
+    findTrebleNoteByPitch(row, scenario.targetPitch) ??
+    null
+  if (!targetNote) {
+    failures.push(`target-note-not-found:${scenario.targetPitch}`)
+  }
+
+  const previousOccupiedRightX = previousOnsetNotes.reduce((maxValue, note) => {
+    const occupiedRightX = getNoteOccupiedRightX(note)
+    if (occupiedRightX === null || !Number.isFinite(occupiedRightX)) return maxValue
+    return Math.max(maxValue, occupiedRightX)
+  }, Number.NEGATIVE_INFINITY)
+  if (!Number.isFinite(previousOccupiedRightX)) {
+    failures.push('missing-previous-occupied-right-x')
+  }
+
+  const targetAccidentalLeftX = targetOnsetNotes.reduce((minValue, note) => {
+    const accidentalLeftX = getAccidentalLeftX(note)
+    if (accidentalLeftX === null || !Number.isFinite(accidentalLeftX)) return minValue
+    return Math.min(minValue, accidentalLeftX)
+  }, Number.POSITIVE_INFINITY)
+  if (!Number.isFinite(targetAccidentalLeftX)) {
+    failures.push('missing-target-accidental-left-x')
+  }
+
+  const segment = (row.spacingSegments ?? []).find(
+    (entry) => entry.fromOnsetTicks === scenario.previousOnsetTicks && entry.toOnsetTicks === scenario.targetOnsetTicks,
+  )
+  if (!segment) {
+    failures.push(`missing-target-segment:${scenario.previousOnsetTicks}->${scenario.targetOnsetTicks}`)
+  }
+  const accidentalRequestedExtraPx =
+    segment && typeof segment.accidentalRequestedExtraPx === 'number' && Number.isFinite(segment.accidentalRequestedExtraPx)
+      ? segment.accidentalRequestedExtraPx
+      : Number.NaN
+  const accidentalVisibleGapPx =
+    segment && typeof segment.accidentalVisibleGapPx === 'number' && Number.isFinite(segment.accidentalVisibleGapPx)
+      ? segment.accidentalVisibleGapPx
+      : Number.NaN
+  if (!Number.isFinite(accidentalRequestedExtraPx)) {
+    failures.push('missing-accidental-requested-extra')
+  }
+  if (!Number.isFinite(accidentalVisibleGapPx)) {
+    failures.push('missing-accidental-visible-gap')
+  }
+
+  const expectedRequestedExtraPx =
+    Number.isFinite(accidentalVisibleGapPx)
+      ? Math.max(0, scenario.requiredGapPx - accidentalVisibleGapPx)
+      : Number.NaN
+  if (
+    Number.isFinite(accidentalRequestedExtraPx) &&
+    Number.isFinite(expectedRequestedExtraPx) &&
+    Math.abs(accidentalRequestedExtraPx - expectedRequestedExtraPx) > GAP_EPSILON_PX
+  ) {
+    failures.push(`request-not-threshold-clamped:${accidentalRequestedExtraPx.toFixed(3)}!=${expectedRequestedExtraPx.toFixed(3)}`)
+  }
+  if (scenario.expectedRequest === 'positive' && !(accidentalRequestedExtraPx > GAP_EPSILON_PX)) {
+    failures.push(`expected-positive-request-missing:${accidentalRequestedExtraPx.toFixed(3)}`)
+  }
+  if (scenario.expectedRequest === 'zero' && accidentalRequestedExtraPx > GAP_EPSILON_PX) {
+    failures.push(`expected-zero-request-missing:${accidentalRequestedExtraPx.toFixed(3)}`)
+  }
+  if (
+    typeof scenario.maxRequestedExtraPx === 'number' &&
+    Number.isFinite(scenario.maxRequestedExtraPx) &&
+    Number.isFinite(accidentalRequestedExtraPx) &&
+    accidentalRequestedExtraPx > scenario.maxRequestedExtraPx + GAP_EPSILON_PX
+  ) {
+    failures.push(`requested-extra-too-large:${accidentalRequestedExtraPx.toFixed(3)}>${scenario.maxRequestedExtraPx.toFixed(3)}`)
+  }
+
+  const finalGapPx =
+    Number.isFinite(previousOccupiedRightX) && Number.isFinite(targetAccidentalLeftX)
+      ? targetAccidentalLeftX - previousOccupiedRightX
+      : Number.NaN
+  if (Number.isFinite(finalGapPx) && finalGapPx < ACCIDENTAL_SAFE_GAP_PX - GAP_EPSILON_PX) {
+    failures.push(`final-gap-too-small:${finalGapPx.toFixed(3)}`)
+  }
+
+  return {
+    key: scenario.key,
+    kind: 'threshold-gap',
+    previousOnsetTicks: scenario.previousOnsetTicks,
+    targetOnsetTicks: scenario.targetOnsetTicks,
+    targetPitch: scenario.targetPitch,
+    requiredGapPx: scenario.requiredGapPx,
+    accidentalRequestedExtraPx: Number.isFinite(accidentalRequestedExtraPx)
+      ? Number(accidentalRequestedExtraPx.toFixed(3))
+      : Number.NaN,
+    accidentalVisibleGapPx: Number.isFinite(accidentalVisibleGapPx)
+      ? Number(accidentalVisibleGapPx.toFixed(3))
+      : Number.NaN,
+    expectedRequestedExtraPx: Number.isFinite(expectedRequestedExtraPx)
+      ? Number(expectedRequestedExtraPx.toFixed(3))
+      : Number.NaN,
+    finalGapPx: Number.isFinite(finalGapPx) ? Number(finalGapPx.toFixed(3)) : Number.NaN,
+    passed: failures.length === 0,
+    failureReasons: failures,
+  }
+}
+
 function analyzeFixtureScenario(row: MeasureDumpRow, scenario: FixtureScenario): FixtureResult {
   if (scenario.kind === 'leading') {
     return analyzeLeadingFixtureScenario({
+      row,
+      scenario,
+    })
+  }
+  if (scenario.kind === 'threshold-gap') {
+    return analyzeThresholdGapFixtureScenario({
       row,
       scenario,
     })
@@ -1229,8 +1433,8 @@ function analyzeDesktopTarget(row: MeasureDumpRow): DesktopTargetResult {
     throw new Error('[desktop] Could not find target treble notes for 48->52 segment')
   }
   const accidentalLeftX = assertFinite(getAccidentalLeftX(currentNote), 'desktop.target.accidentalLeftX')
-  const previousVisualRightX = assertFinite(previousNote.visualRightX, 'desktop.previous.visualRightX')
-  const finalGapPx = accidentalLeftX - previousVisualRightX
+  const previousOccupiedRightX = assertFinite(getNoteOccupiedRightX(previousNote), 'desktop.previous.occupiedRightX')
+  const finalGapPx = accidentalLeftX - previousOccupiedRightX
   const accidentalRequestedExtraPx = assertFinite(
     segment.accidentalRequestedExtraPx ?? 0,
     'desktop.segment.accidentalRequestedExtraPx',

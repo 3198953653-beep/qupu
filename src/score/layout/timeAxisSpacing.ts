@@ -68,10 +68,15 @@ type StaffVisualBlockerRef = {
   hasNonRest: boolean
   hasStandaloneFlaggedNote: boolean
   hasRenderedAccidental: boolean
+  accidentalCount: number
+  minAccidentalWidthPx: number | null
   anchorX: number
   visualLeftX: number
   visualRightX: number
+  occupiedLeftX: number
+  occupiedRightX: number
   accidentalLeftX: number | null
+  accidentalLeftForSpacing: number | null
   projectedLeftExtraPx: number
   projectedRightExtraPx: number
 }
@@ -79,7 +84,12 @@ type StaffVisualBlockerRef = {
 type ProjectedVisualBlockerBounds = {
   visualLeftX: number
   visualRightX: number
+  occupiedLeftX: number
+  occupiedRightX: number
   accidentalLeftX: number | null
+  accidentalLeftForSpacing: number | null
+  accidentalCount: number
+  minAccidentalWidthPx: number | null
 }
 
 function getStandaloneFlagProjectionPx(duration: ScoreNote['duration']): number | null {
@@ -154,6 +164,10 @@ const ACCIDENTAL_PREALLOCATED_CLEARANCE_PX = 0
 const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
 const COLLISION_RIGHT_BODY_PADDING_PX = 1.0
 const ACCIDENTAL_COLLISION_SAFE_GAP_PX = 1
+const ACCIDENTAL_OWN_HEAD_CLEARANCE_PX = 2
+const ACCIDENTAL_SPACING_OUTLIER_EXTRA_GAP_PX = 4
+const STRUCTURAL_RESERVE_EPSILON_PX = 0.0001
+const MAX_SECOND_CHORD_STRUCTURAL_COMPENSATION_PX = 12
 const BASE_GAP_UNIT_PX = 3.5
 const DEFAULT_MIN_MEASURE_WIDTH_PX = 120
 const MIN_GAP_BEATS = 1 / 32
@@ -279,6 +293,127 @@ function getRenderedNoteAccidentalLeftX(vexNote: StaveNote): number | null {
     const accidentalX = getAccidentalVisualX(vexNote, accidental, renderedIndex)
     if (typeof accidentalX !== 'number' || !Number.isFinite(accidentalX)) return
     accidentalMinX = Math.min(accidentalMinX, accidentalX)
+  })
+  return Number.isFinite(accidentalMinX) ? accidentalMinX : null
+}
+
+function getRenderedNoteHeadLeftXByRenderedIndex(vexNote: StaveNote, renderedIndex: number): number | null {
+  const noteHead = (vexNote.noteHeads?.[renderedIndex] ?? null) as RenderedNoteHeadLike | null
+  if (!noteHead) return null
+  const bboxLeftX = noteHead.getBoundingBox?.()?.getX?.()
+  if (typeof bboxLeftX === 'number' && Number.isFinite(bboxLeftX)) return bboxLeftX
+  const anchorX = getRenderedNoteVisualX(vexNote)
+  if (!Number.isFinite(anchorX)) return null
+  const stemDirection = vexNote.getStemDirection()
+  const resolvedLeftX = getRenderedNoteHeadAbsoluteX({
+    noteHead,
+    anchorX,
+    stemDirection,
+  })
+  if (typeof resolvedLeftX === 'number' && Number.isFinite(resolvedLeftX)) {
+    return resolvedLeftX
+  }
+  return null
+}
+
+function getRenderedChordMaxHeadLeftX(vexNote: StaveNote): number | null {
+  const noteHeads = (vexNote.noteHeads ?? []) as RenderedNoteHeadLike[]
+  if (noteHeads.length === 0) return null
+  const anchorX = getRenderedNoteVisualX(vexNote)
+  if (!Number.isFinite(anchorX)) return null
+  const stemDirection = vexNote.getStemDirection()
+  let maxHeadLeftX = Number.NEGATIVE_INFINITY
+  noteHeads.forEach((noteHead) => {
+    const bboxLeftX = noteHead.getBoundingBox?.()?.getX?.()
+    if (typeof bboxLeftX === 'number' && Number.isFinite(bboxLeftX)) {
+      maxHeadLeftX = Math.max(maxHeadLeftX, bboxLeftX)
+      return
+    }
+    const resolvedLeftX = getRenderedNoteHeadAbsoluteX({
+      noteHead,
+      anchorX,
+      stemDirection,
+    })
+    if (typeof resolvedLeftX === 'number' && Number.isFinite(resolvedLeftX)) {
+      maxHeadLeftX = Math.max(maxHeadLeftX, resolvedLeftX)
+    }
+  })
+  return Number.isFinite(maxHeadLeftX) ? maxHeadLeftX : null
+}
+
+function getRenderedNoteAccidentalLeftForSpacing(vexNote: StaveNote): number | null {
+  const noteBaseX = getRenderedNoteVisualX(vexNote)
+  const stableNoteBaseX = Number.isFinite(noteBaseX) ? noteBaseX : null
+  const noteHeadBeginXRaw = vexNote.getNoteHeadBeginX()
+  const stableNoteHeadBeginX = Number.isFinite(noteHeadBeginXRaw) ? noteHeadBeginXRaw : null
+  const chordMaxHeadLeftX = getRenderedChordMaxHeadLeftX(vexNote)
+  const accidentalModifiers = vexNote
+    .getModifiersByType(Accidental.CATEGORY)
+    .map((modifier) => modifier as Accidental)
+  const hasSingleAccidental = accidentalModifiers.length === 1
+  let accidentalMinX = Number.POSITIVE_INFINITY
+  accidentalModifiers.forEach((accidental) => {
+    const renderedIndex = accidental.getIndex()
+    if (typeof renderedIndex !== 'number' || !Number.isFinite(renderedIndex)) return
+    const accidentalLeftX = getAccidentalVisualX(vexNote, accidental, renderedIndex)
+    const accidentalWidthRaw = accidental.getWidth()
+    const accidentalWidth =
+      typeof accidentalWidthRaw === 'number' && Number.isFinite(accidentalWidthRaw) && accidentalWidthRaw > 0
+        ? accidentalWidthRaw
+        : 0
+    const ownHeadLeftX = getRenderedNoteHeadLeftXByRenderedIndex(vexNote, renderedIndex)
+    const stableOwnHeadLeftX =
+      typeof ownHeadLeftX === 'number' && Number.isFinite(ownHeadLeftX)
+        ? Math.max(
+            ownHeadLeftX,
+            typeof stableNoteBaseX === 'number' && Number.isFinite(stableNoteBaseX) ? stableNoteBaseX : Number.NEGATIVE_INFINITY,
+            typeof stableNoteHeadBeginX === 'number' && Number.isFinite(stableNoteHeadBeginX)
+              ? stableNoteHeadBeginX
+              : Number.NEGATIVE_INFINITY,
+            typeof chordMaxHeadLeftX === 'number' && Number.isFinite(chordMaxHeadLeftX)
+              ? chordMaxHeadLeftX
+              : Number.NEGATIVE_INFINITY,
+          )
+        : Math.max(
+            typeof stableNoteBaseX === 'number' && Number.isFinite(stableNoteBaseX)
+              ? stableNoteBaseX
+              : Number.NEGATIVE_INFINITY,
+            typeof stableNoteHeadBeginX === 'number' && Number.isFinite(stableNoteHeadBeginX)
+              ? stableNoteHeadBeginX
+              : Number.NEGATIVE_INFINITY,
+            typeof chordMaxHeadLeftX === 'number' && Number.isFinite(chordMaxHeadLeftX)
+              ? chordMaxHeadLeftX
+              : Number.NEGATIVE_INFINITY,
+          )
+    const preferredLeftX =
+      typeof stableOwnHeadLeftX === 'number' && Number.isFinite(stableOwnHeadLeftX)
+        ? stableOwnHeadLeftX - accidentalWidth - ACCIDENTAL_OWN_HEAD_CLEARANCE_PX
+        : null
+
+    let candidateLeftX: number | null =
+      typeof accidentalLeftX === 'number' && Number.isFinite(accidentalLeftX) ? accidentalLeftX : null
+    if (
+      candidateLeftX !== null &&
+      typeof stableOwnHeadLeftX === 'number' &&
+      Number.isFinite(stableOwnHeadLeftX) &&
+      preferredLeftX !== null
+    ) {
+      if (hasSingleAccidental) {
+        candidateLeftX = Math.max(candidateLeftX, preferredLeftX)
+      } else {
+        const ownGapPx = stableOwnHeadLeftX - (candidateLeftX + accidentalWidth)
+        const outlierGapThresholdPx = ACCIDENTAL_OWN_HEAD_CLEARANCE_PX + ACCIDENTAL_SPACING_OUTLIER_EXTRA_GAP_PX
+        if (ownGapPx > outlierGapThresholdPx) {
+          candidateLeftX = preferredLeftX
+        }
+      }
+    } else if (candidateLeftX === null && preferredLeftX !== null) {
+      candidateLeftX = preferredLeftX
+    }
+
+    if (candidateLeftX !== null && Number.isFinite(candidateLeftX)) {
+      accidentalMinX = Math.min(accidentalMinX, candidateLeftX)
+    }
   })
   return Number.isFinite(accidentalMinX) ? accidentalMinX : null
 }
@@ -440,21 +575,57 @@ function buildTimeAxisRenderedRefs(params: {
   return refs
 }
 
-function resolveStaffVisualBlockerBounds(vexNote: StaveNote): { leftX: number; rightX: number } | null {
+function resolveStaffVisualBlockerBounds(vexNote: StaveNote): {
+  visualLeftX: number
+  visualRightX: number
+  occupiedLeftX: number
+  occupiedRightX: number
+} | null {
   const glyphBounds = getRenderedNoteGlyphBounds(vexNote)
   const occupiedBounds = getRenderedNoteOccupiedBounds(vexNote, {
     rightPaddingPx: 0,
   })
-  const leftCandidates = [glyphBounds?.leftX, occupiedBounds?.leftX].filter(
-    (value): value is number => typeof value === 'number' && Number.isFinite(value),
-  )
-  const rightCandidates = [glyphBounds?.rightX, occupiedBounds?.rightX].filter(
-    (value): value is number => typeof value === 'number' && Number.isFinite(value),
-  )
-  if (leftCandidates.length === 0 || rightCandidates.length === 0) return null
+  const visualLeftXRaw = glyphBounds?.leftX
+  const visualRightXRaw = glyphBounds?.rightX
+  const occupiedLeftXRaw = occupiedBounds?.leftX
+  const occupiedRightXRaw = occupiedBounds?.rightX
+  const visualLeftX =
+    typeof visualLeftXRaw === 'number' && Number.isFinite(visualLeftXRaw)
+      ? visualLeftXRaw
+      : typeof occupiedLeftXRaw === 'number' && Number.isFinite(occupiedLeftXRaw)
+        ? occupiedLeftXRaw
+        : null
+  const visualRightX =
+    typeof visualRightXRaw === 'number' && Number.isFinite(visualRightXRaw)
+      ? visualRightXRaw
+      : typeof occupiedRightXRaw === 'number' && Number.isFinite(occupiedRightXRaw)
+        ? occupiedRightXRaw
+        : null
+  const occupiedLeftX =
+    typeof occupiedLeftXRaw === 'number' && Number.isFinite(occupiedLeftXRaw)
+      ? occupiedLeftXRaw
+      : visualLeftX
+  const occupiedRightX =
+    typeof occupiedRightXRaw === 'number' && Number.isFinite(occupiedRightXRaw)
+      ? occupiedRightXRaw
+      : visualRightX
+  if (
+    typeof visualLeftX !== 'number' ||
+    !Number.isFinite(visualLeftX) ||
+    typeof visualRightX !== 'number' ||
+    !Number.isFinite(visualRightX) ||
+    typeof occupiedLeftX !== 'number' ||
+    !Number.isFinite(occupiedLeftX) ||
+    typeof occupiedRightX !== 'number' ||
+    !Number.isFinite(occupiedRightX)
+  ) {
+    return null
+  }
   return {
-    leftX: Math.min(...leftCandidates),
-    rightX: Math.max(...rightCandidates),
+    visualLeftX,
+    visualRightX,
+    occupiedLeftX,
+    occupiedRightX,
   }
 }
 
@@ -468,9 +639,18 @@ function buildStaffVisualBlockerRefs(refs: TimeAxisRenderedRef[]): Record<StaffK
     const blockerBounds = resolveStaffVisualBlockerBounds(ref.vexNote)
     if (!blockerBounds) return
     const anchorX = getRenderedNoteVisualX(ref.vexNote)
-    const visualLeftX = blockerBounds.leftX
-    const visualRightX = blockerBounds.rightX
+    const visualLeftX = blockerBounds.visualLeftX
+    const visualRightX = blockerBounds.visualRightX
     const accidentalLeftX = getRenderedNoteAccidentalLeftX(ref.vexNote)
+    const accidentalLeftForSpacing = getRenderedNoteAccidentalLeftForSpacing(ref.vexNote)
+    const accidentalModifiers = ref.vexNote
+      .getModifiersByType(Accidental.CATEGORY)
+      .map((modifier) => modifier as Accidental)
+    const minAccidentalWidthPx = accidentalModifiers.reduce((minValue, modifier) => {
+      const width = modifier.getWidth()
+      if (typeof width !== 'number' || !Number.isFinite(width) || width <= 0) return minValue
+      return Math.min(minValue, width)
+    }, Number.POSITIVE_INFINITY)
     const flagProjectionPx =
       ref.isRest !== true && ref.vexNote.hasFlag() && !ref.vexNote.getBeam()
         ? getStandaloneFlagProjectionPx(ref.duration)
@@ -487,10 +667,16 @@ function buildStaffVisualBlockerRefs(refs: TimeAxisRenderedRef[]): Record<StaffK
       hasNonRest: !ref.isRest,
       hasStandaloneFlaggedNote: flagProjectionPx !== null,
       hasRenderedAccidental: typeof accidentalLeftX === 'number' && Number.isFinite(accidentalLeftX),
-      anchorX: Number.isFinite(anchorX) ? anchorX : blockerBounds.leftX,
+      accidentalCount: accidentalModifiers.length,
+      minAccidentalWidthPx:
+        Number.isFinite(minAccidentalWidthPx) ? minAccidentalWidthPx : accidentalModifiers.length > 0 ? 10 : null,
+      anchorX: Number.isFinite(anchorX) ? anchorX : blockerBounds.visualLeftX,
       visualLeftX,
       visualRightX,
+      occupiedLeftX: blockerBounds.occupiedLeftX,
+      occupiedRightX: blockerBounds.occupiedRightX,
       accidentalLeftX,
+      accidentalLeftForSpacing,
       projectedLeftExtraPx,
       projectedRightExtraPx,
     })
@@ -1235,10 +1421,18 @@ function resolveProjectedVisualBlockerBounds(
   return {
     visualLeftX: blocker.visualLeftX + deltaX,
     visualRightX: blocker.visualRightX + deltaX,
+    occupiedLeftX: blocker.occupiedLeftX + deltaX,
+    occupiedRightX: blocker.occupiedRightX + deltaX,
     accidentalLeftX:
       typeof blocker.accidentalLeftX === 'number' && Number.isFinite(blocker.accidentalLeftX)
         ? blocker.accidentalLeftX + deltaX
         : null,
+    accidentalLeftForSpacing:
+      typeof blocker.accidentalLeftForSpacing === 'number' && Number.isFinite(blocker.accidentalLeftForSpacing)
+        ? blocker.accidentalLeftForSpacing + deltaX
+        : null,
+    accidentalCount: blocker.accidentalCount,
+    minAccidentalWidthPx: blocker.minAccidentalWidthPx,
   }
 }
 
@@ -1409,6 +1603,9 @@ function resolveCollisionDrivenOverlay(params: {
   ;(['treble', 'bass'] as StaffKind[]).forEach((staff) => {
     const staffBlockers = visualBlockersByStaff[staff] ?? []
     if (staffBlockers.length === 0) return
+    const staffCollisionMetricsByOnset = new Map<number, StaffOnsetCollisionMetrics>(
+      (staffOnsetCollisionMetricsByStaff[staff] ?? []).map((metrics) => [metrics.onsetTicks, metrics]),
+    )
 
     const firstBlocker = staffBlockers[0]
     if (firstBlocker && isBoundaryCollisionCandidate(firstBlocker)) {
@@ -1496,15 +1693,81 @@ function resolveCollisionDrivenOverlay(params: {
       const slotIndex = nextSharedIndex - 1
       const projectedPreviousBounds = resolveProjectedVisualBlockerBounds(previousBlocker, baseXByOnset)
       const projectedNextBounds = resolveProjectedVisualBlockerBounds(nextBlocker, baseXByOnset)
-      const accidentalLeftX = projectedNextBounds.accidentalLeftX
+      const nextBaseX = baseXByOnset.get(nextBlocker.onsetTicks)
+      const nextStructuralMetrics = staffCollisionMetricsByOnset.get(nextBlocker.onsetTicks)
+      const previousStructuralMetrics = staffCollisionMetricsByOnset.get(previousBlocker.onsetTicks)
+      const isSecondChordSensitiveSegment =
+        Math.max(0, previousStructuralMetrics?.rawRightReservePx ?? 0) > STRUCTURAL_RESERVE_EPSILON_PX ||
+        Math.max(0, nextStructuralMetrics?.rawLeftStructuralReservePx ?? 0) > STRUCTURAL_RESERVE_EPSILON_PX
+      const requiredGapPx = isSecondChordSensitiveSegment ? secondChordSafeGapPx : ACCIDENTAL_COLLISION_SAFE_GAP_PX
+      const accidentalReserveInsetPx =
+        typeof nextStructuralMetrics?.rawLeftReservePx === 'number' && Number.isFinite(nextStructuralMetrics.rawLeftReservePx)
+          ? Math.max(
+              0,
+              nextStructuralMetrics.rawLeftReservePx - Math.max(0, nextStructuralMetrics.rawLeftStructuralReservePx),
+            )
+          : null
+      const accidentalLeftByReserve =
+        typeof nextBaseX === 'number' &&
+        Number.isFinite(nextBaseX) &&
+        typeof accidentalReserveInsetPx === 'number' &&
+        Number.isFinite(accidentalReserveInsetPx)
+          ? nextBaseX - accidentalReserveInsetPx
+          : null
+      let accidentalLeftX =
+        typeof projectedNextBounds.accidentalLeftForSpacing === 'number' &&
+        Number.isFinite(projectedNextBounds.accidentalLeftForSpacing)
+          ? projectedNextBounds.accidentalLeftForSpacing
+          : projectedNextBounds.accidentalLeftX
+      if (
+        typeof accidentalLeftByReserve === 'number' &&
+        Number.isFinite(accidentalLeftByReserve) &&
+        typeof accidentalLeftX === 'number' &&
+        Number.isFinite(accidentalLeftX)
+      ) {
+        accidentalLeftX = Math.max(accidentalLeftX, accidentalLeftByReserve)
+      } else if (typeof accidentalLeftByReserve === 'number' && Number.isFinite(accidentalLeftByReserve)) {
+        accidentalLeftX = accidentalLeftByReserve
+      }
+      const accidentalLeftByAnchor =
+        isSecondChordSensitiveSegment &&
+        typeof nextBaseX === 'number' &&
+        Number.isFinite(nextBaseX) &&
+        typeof projectedNextBounds.minAccidentalWidthPx === 'number' &&
+        Number.isFinite(projectedNextBounds.minAccidentalWidthPx)
+          ? nextBaseX -
+            Math.min(12, Math.max(6, projectedNextBounds.minAccidentalWidthPx)) -
+            ACCIDENTAL_OWN_HEAD_CLEARANCE_PX
+          : null
+      if (
+        typeof accidentalLeftByAnchor === 'number' &&
+        Number.isFinite(accidentalLeftByAnchor) &&
+        typeof accidentalLeftX === 'number' &&
+        Number.isFinite(accidentalLeftX)
+      ) {
+        accidentalLeftX = Math.max(accidentalLeftX, accidentalLeftByAnchor)
+      } else if (typeof accidentalLeftByAnchor === 'number' && Number.isFinite(accidentalLeftByAnchor)) {
+        accidentalLeftX = accidentalLeftByAnchor
+      }
       if (typeof accidentalLeftX !== 'number' || !Number.isFinite(accidentalLeftX)) continue
-      const visibleGapPx = accidentalLeftX - projectedPreviousBounds.visualRightX
+      const previousOccupiedRightX =
+        typeof projectedPreviousBounds.occupiedRightX === 'number' && Number.isFinite(projectedPreviousBounds.occupiedRightX)
+          ? projectedPreviousBounds.occupiedRightX
+          : projectedPreviousBounds.visualRightX
+      const visibleGapPx = accidentalLeftX - previousOccupiedRightX
+      const structuralRightCompensationPx = isSecondChordSensitiveSegment
+        ? Math.min(
+            MAX_SECOND_CHORD_STRUCTURAL_COMPENSATION_PX,
+            Math.max(0, previousStructuralMetrics?.rawRightReservePx ?? 0),
+          )
+        : 0
+      const effectiveVisibleGapPx = visibleGapPx + structuralRightCompensationPx
       const currentVisibleGapPx = accidentalSegmentVisibleGaps[slotIndex]?.[staff]
       accidentalSegmentVisibleGaps[slotIndex]![staff] =
         typeof currentVisibleGapPx === 'number' && Number.isFinite(currentVisibleGapPx)
-          ? Math.min(currentVisibleGapPx, visibleGapPx)
-          : visibleGapPx
-      const requestPx = Math.max(0, ACCIDENTAL_COLLISION_SAFE_GAP_PX - visibleGapPx)
+          ? Math.min(currentVisibleGapPx, effectiveVisibleGapPx)
+          : effectiveVisibleGapPx
+      const requestPx = Math.max(0, requiredGapPx - effectiveVisibleGapPx)
       if (requestPx <= 0) continue
       accidentalSegmentRequests[slotIndex]![staff] = Math.max(accidentalSegmentRequests[slotIndex]![staff], requestPx)
     }
