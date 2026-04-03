@@ -56,10 +56,20 @@ const VALID_BEAM_DURATIONS = ['4', '8', '16', '32', '64'] as const
 const ACCIDENTAL_NOTEHEAD_CLEARANCE_PX = 2
 const ACCIDENTAL_PREVIOUS_NOTE_CLEARANCE_PX = 1
 const ACCIDENTAL_BLOCKER_NOTEHEAD_CLEARANCE_PX = 0
+const ACCIDENTAL_COLUMN_SAFE_GAP_PX = 1
+const MAX_ACCIDENTAL_COLUMNS = 6
 const ACCIDENTAL_MAX_LEFT_GAP_FROM_HEAD_PX = 96
 const ACCIDENTAL_STATIC_PREFERRED_TOLERANCE_PX = 2
 const ACCIDENTAL_TARGET_EPSILON_PX = 0.001
 const ACCIDENTAL_BBOX_POSITION_TOLERANCE_PX = 24
+const ACCIDENTAL_COLUMN_PRIORITY = [2, 3, 1, 4, 0, 5] as const
+const ACCIDENTAL_FULL_CONFLICT_PATTERNS: Partial<Record<number, readonly number[]>> = {
+  2: [1, 2],
+  3: [2, 1, 3],
+  4: [2, 3, 1, 4],
+  5: [3, 2, 4, 1, 5],
+  6: [3, 4, 2, 5, 1, 6],
+}
 const NOTEHEAD_BOUNDS_MIN_WIDTH_PX = 4
 const NOTEHEAD_BOUNDS_MAX_WIDTH_PX = 10
 const NOTEHEAD_MAX_OFFSET_FROM_BASE_PX = 45
@@ -78,6 +88,15 @@ const NOTEHEAD_NUMERAL_MIN_FONT_PX = 3
 const NOTEHEAD_NUMERAL_MAX_FONT_PX = 18
 const NOTEHEAD_NUMERAL_CLIP_INSET_X_PX = 0.8
 const NOTEHEAD_NUMERAL_CLIP_INSET_Y_PX = 0.65
+const DIATONIC_STEP_INDEX: Record<string, number> = {
+  C: 0,
+  D: 1,
+  E: 2,
+  F: 3,
+  G: 4,
+  A: 5,
+  B: 6,
+}
 
 function getRestAnchorPitch(staff: StaffKind): Pitch {
   return staff === 'treble' ? 'b/4' : 'd/3'
@@ -618,6 +637,34 @@ function resolvePreviousNoteOccupiedRightX(params: {
       if (resolvedBounds && Number.isFinite(resolvedBounds.rightX)) {
         occupiedRightXCandidates.push(resolvedBounds.rightX)
       }
+
+      const rawAbsoluteLeftX = getRenderedNoteHeadAbsoluteX({
+        noteHead,
+        anchorX: previousNoteBaseX,
+        stemDirection: previousStemDirection,
+      })
+      const rawWidth = noteHead.getWidth?.()
+      if (
+        Number.isFinite(rawAbsoluteLeftX) &&
+        Number.isFinite(rawWidth) &&
+        (rawWidth as number) > 0 &&
+        (rawWidth as number) <= NOTEHEAD_MAX_OFFSET_FROM_BASE_PX
+      ) {
+        occupiedRightXCandidates.push((rawAbsoluteLeftX as number) + (rawWidth as number))
+      }
+
+      const bbox = noteHead.getBoundingBox?.() ?? null
+      const bboxLeftX = bbox?.getX?.()
+      const bboxWidth = bbox?.getW?.()
+      if (
+        Number.isFinite(bboxLeftX) &&
+        Number.isFinite(bboxWidth) &&
+        (bboxWidth as number) > 0 &&
+        Math.abs((bboxLeftX as number) - previousNoteBaseX) <=
+          NOTEHEAD_MAX_OFFSET_FROM_BASE_PX + NOTEHEAD_BOUNDS_MAX_WIDTH_PX
+      ) {
+        occupiedRightXCandidates.push((bboxLeftX as number) + (bboxWidth as number))
+      }
     })
 
     const previousAccidentalModifiers = previousVexNote
@@ -642,18 +689,20 @@ function resolvePreviousNoteOccupiedRightX(params: {
       }
     })
 
-    const headEndX = previousVexNote.getNoteHeadEndX()
-    if (Number.isFinite(headEndX)) {
-      occupiedRightXCandidates.push(headEndX)
-    }
-    const visualBounds = getRenderedNoteGlyphBounds(previousVexNote)
-    const visualRightX = visualBounds?.rightX
-    if (typeof visualRightX === 'number' && Number.isFinite(visualRightX)) {
-      occupiedRightXCandidates.push(visualRightX)
-    }
-    const previousGlyphWidth = previousVexNote.getGlyphWidth()
-    if (Number.isFinite(previousNoteBaseX) && Number.isFinite(previousGlyphWidth)) {
-      occupiedRightXCandidates.push(previousNoteBaseX + previousGlyphWidth)
+    if (occupiedRightXCandidates.length === 0) {
+      const headEndX = previousVexNote.getNoteHeadEndX()
+      if (Number.isFinite(headEndX)) {
+        occupiedRightXCandidates.push(headEndX)
+      }
+      const visualBounds = getRenderedNoteGlyphBounds(previousVexNote)
+      const visualRightX = visualBounds?.rightX
+      if (typeof visualRightX === 'number' && Number.isFinite(visualRightX)) {
+        occupiedRightXCandidates.push(visualRightX)
+      }
+      const previousGlyphWidth = previousVexNote.getGlyphWidth()
+      if (Number.isFinite(previousNoteBaseX) && Number.isFinite(previousGlyphWidth)) {
+        occupiedRightXCandidates.push(previousNoteBaseX + previousGlyphWidth)
+      }
     }
 
     const previousOccupiedRightX = occupiedRightXCandidates.reduce(
@@ -860,6 +909,407 @@ function resolveAccidentalLeftAfterChordHeadAvoidance(params: {
   return {
     leftX: resolvedLeftX,
     clamped,
+  }
+}
+
+type AccidentalColumnNode = {
+  rowKey: string
+  renderedIndex: number
+  keyRenderedIndex: number
+  keyIndex: number
+  pitch: Pitch
+  diatonicOrdinal: number
+  modifier: Accidental
+  width: number
+  baseLeftX: number
+  minLeftX: number | null
+  maxLeftX: number | null
+}
+
+type AccidentalColumnPlan = {
+  placementByRenderedIndex: Map<number, { columnIndex: number; componentId: number }>
+  hasStagger: boolean
+  overflowInfeasible: boolean
+}
+
+type AccidentalColumnTargetResult = {
+  targetLeftByRenderedIndex: Map<number, number>
+  overflowInfeasible: boolean
+  hardInfeasibleByRenderedIndex: Map<number, boolean>
+}
+
+function resolvePitchDiatonicOrdinal(pitch: Pitch): number | null {
+  const { step, octave } = getStepOctaveAlterFromPitch(pitch)
+  const stepIndex = DIATONIC_STEP_INDEX[step]
+  if (!Number.isFinite(octave) || !Number.isFinite(stepIndex)) return null
+  return octave * 7 + stepIndex
+}
+
+function isAccidentalConflictByDiatonicDistance(leftOrdinal: number, rightOrdinal: number): boolean {
+  const distance = Math.abs(leftOrdinal - rightOrdinal)
+  return distance >= 1 && distance <= 5
+}
+
+function resolveAccidentalColumnPlan(params: {
+  nodes: readonly AccidentalColumnNode[]
+}): AccidentalColumnPlan {
+  const { nodes } = params
+  const placementByRenderedIndex = new Map<number, { columnIndex: number; componentId: number }>()
+  if (nodes.length <= 1) {
+    return {
+      placementByRenderedIndex,
+      hasStagger: false,
+      overflowInfeasible: false,
+    }
+  }
+
+  const orderedNodeIndices = nodes
+    .map((_, index) => index)
+    .sort((left, right) => {
+      const leftNode = nodes[left]!
+      const rightNode = nodes[right]!
+      if (leftNode.diatonicOrdinal !== rightNode.diatonicOrdinal) {
+        return leftNode.diatonicOrdinal - rightNode.diatonicOrdinal
+      }
+      if (leftNode.renderedIndex !== rightNode.renderedIndex) {
+        return leftNode.renderedIndex - rightNode.renderedIndex
+      }
+      return leftNode.keyIndex - rightNode.keyIndex
+    })
+
+  const size = orderedNodeIndices.length
+  const conflictMatrix = Array.from({ length: size }, () => new Array<boolean>(size).fill(false))
+  for (let left = 0; left < size; left += 1) {
+    const leftNode = nodes[orderedNodeIndices[left]!]!
+    for (let right = left + 1; right < size; right += 1) {
+      const rightNode = nodes[orderedNodeIndices[right]!]!
+      const conflict = isAccidentalConflictByDiatonicDistance(leftNode.diatonicOrdinal, rightNode.diatonicOrdinal)
+      conflictMatrix[left]![right] = conflict
+      conflictMatrix[right]![left] = conflict
+    }
+  }
+
+  const visited = new Array<boolean>(size).fill(false)
+  const components: number[][] = []
+  for (let start = 0; start < size; start += 1) {
+    if (visited[start]) continue
+    const stack = [start]
+    visited[start] = true
+    const component: number[] = []
+    while (stack.length > 0) {
+      const current = stack.pop() as number
+      component.push(current)
+      for (let next = 0; next < size; next += 1) {
+        if (visited[next]) continue
+        if (!conflictMatrix[current]![next]) continue
+        visited[next] = true
+        stack.push(next)
+      }
+    }
+    component.sort((left, right) => left - right)
+    components.push(component)
+  }
+
+  let hasStagger = false
+  let overflowInfeasible = false
+
+  components.forEach((component, componentId) => {
+    if (component.length <= 1) {
+      const localIndex = component[0]
+      if (typeof localIndex === 'number') {
+        const node = nodes[orderedNodeIndices[localIndex]!]!
+        placementByRenderedIndex.set(node.renderedIndex, {
+          columnIndex: 0,
+          componentId,
+        })
+      }
+      return
+    }
+    let componentColumnByLocalIndex = new Map<number, number>()
+    const completeEdgeCount = (component.length * (component.length - 1)) / 2
+    let componentEdgeCount = 0
+    for (let left = 0; left < component.length; left += 1) {
+      for (let right = left + 1; right < component.length; right += 1) {
+        if (conflictMatrix[component[left]!]![component[right]!]) {
+          componentEdgeCount += 1
+        }
+      }
+    }
+    const isCompleteConflictComponent = componentEdgeCount === completeEdgeCount
+    const template = isCompleteConflictComponent ? ACCIDENTAL_FULL_CONFLICT_PATTERNS[component.length] : null
+
+    if (template && template.length === component.length) {
+      template.forEach((columnOneBased, localOrderIndex) => {
+        const localIndex = component[localOrderIndex]
+        if (typeof localIndex !== 'number') return
+        componentColumnByLocalIndex.set(localIndex, Math.max(0, columnOneBased - 1))
+      })
+    } else {
+      component.forEach((localIndex, componentOrderIndex) => {
+        const currentNode = nodes[orderedNodeIndices[localIndex]!]!
+        const blockedColumns = new Set<number>()
+        for (let previousOrderIndex = 0; previousOrderIndex < componentOrderIndex; previousOrderIndex += 1) {
+          const previousLocalIndex = component[previousOrderIndex]!
+          if (!conflictMatrix[localIndex]![previousLocalIndex]) continue
+          const previousColumn = componentColumnByLocalIndex.get(previousLocalIndex)
+          if (typeof previousColumn === 'number') {
+            blockedColumns.add(previousColumn)
+          }
+        }
+
+        const preferredColumns: number[] = []
+        for (let previousOrderIndex = componentOrderIndex - 1; previousOrderIndex >= 0; previousOrderIndex -= 1) {
+          const previousLocalIndex = component[previousOrderIndex]!
+          const previousNode = nodes[orderedNodeIndices[previousLocalIndex]!]!
+          const diatonicDistance = currentNode.diatonicOrdinal - previousNode.diatonicOrdinal
+          if (diatonicDistance <= 0) continue
+          if (diatonicDistance % 7 !== 0) continue
+          const previousSameStepColumn = componentColumnByLocalIndex.get(previousLocalIndex)
+          if (typeof previousSameStepColumn === 'number') {
+            preferredColumns.push(previousSameStepColumn)
+            break
+          }
+        }
+        const previousSixthOrderIndex = componentOrderIndex - MAX_ACCIDENTAL_COLUMNS
+        if (previousSixthOrderIndex >= 0) {
+          const previousSixthLocalIndex = component[previousSixthOrderIndex]!
+          const preferredReuseColumn = componentColumnByLocalIndex.get(previousSixthLocalIndex)
+          if (typeof preferredReuseColumn === 'number') {
+            preferredColumns.push(preferredReuseColumn)
+          }
+        }
+        ACCIDENTAL_COLUMN_PRIORITY.forEach((column) => preferredColumns.push(column))
+        for (let column = 0; column < MAX_ACCIDENTAL_COLUMNS; column += 1) {
+          preferredColumns.push(column)
+        }
+        const dedupedPreferredColumns = [...new Set(preferredColumns)].filter(
+          (column) => Number.isFinite(column) && column >= 0 && column < MAX_ACCIDENTAL_COLUMNS,
+        )
+
+        const availableColumn = dedupedPreferredColumns.find((column) => !blockedColumns.has(column))
+        if (typeof availableColumn === 'number') {
+          componentColumnByLocalIndex.set(localIndex, availableColumn)
+          return
+        }
+
+        overflowInfeasible = true
+        let selectedColumn = 0
+        let selectedScore = Number.POSITIVE_INFINITY
+        dedupedPreferredColumns.forEach((column) => {
+          let conflictScore = 0
+          for (let previousOrderIndex = 0; previousOrderIndex < componentOrderIndex; previousOrderIndex += 1) {
+            const previousLocalIndex = component[previousOrderIndex]!
+            const previousColumn = componentColumnByLocalIndex.get(previousLocalIndex)
+            if (!conflictMatrix[localIndex]![previousLocalIndex]) continue
+            if (previousColumn === column) {
+              conflictScore += 1
+            }
+          }
+          if (conflictScore + ACCIDENTAL_TARGET_EPSILON_PX < selectedScore) {
+            selectedScore = conflictScore
+            selectedColumn = column
+          }
+        })
+        componentColumnByLocalIndex.set(localIndex, selectedColumn)
+      })
+    }
+
+    componentColumnByLocalIndex.forEach((columnIndex, localIndex) => {
+      const node = nodes[orderedNodeIndices[localIndex]!]!
+      placementByRenderedIndex.set(node.renderedIndex, {
+        columnIndex,
+        componentId,
+      })
+    })
+
+    for (let left = 0; left < component.length; left += 1) {
+      const leftLocalIndex = component[left]!
+      const leftColumn = componentColumnByLocalIndex.get(leftLocalIndex)
+      if (typeof leftColumn !== 'number' || !Number.isFinite(leftColumn)) continue
+      for (let right = left + 1; right < component.length; right += 1) {
+        const rightLocalIndex = component[right]!
+        if (!conflictMatrix[leftLocalIndex]![rightLocalIndex]) continue
+        const rightColumn = componentColumnByLocalIndex.get(rightLocalIndex)
+        if (typeof rightColumn !== 'number' || !Number.isFinite(rightColumn)) continue
+        if (leftColumn === rightColumn) {
+          overflowInfeasible = true
+        }
+      }
+    }
+
+    const usedColumns = new Set<number>(componentColumnByLocalIndex.values())
+    if (usedColumns.size > 1) {
+      hasStagger = true
+    }
+  })
+
+  return {
+    placementByRenderedIndex,
+    hasStagger,
+    overflowInfeasible,
+  }
+}
+
+function resolveAccidentalColumnTargets(params: {
+  nodes: readonly AccidentalColumnNode[]
+  columnPlan: AccidentalColumnPlan
+}): AccidentalColumnTargetResult {
+  const { nodes, columnPlan } = params
+  const targetLeftByRenderedIndex = new Map<number, number>()
+  const hardInfeasibleByRenderedIndex = new Map<number, boolean>()
+  if (!columnPlan.hasStagger || nodes.length <= 1) {
+    return {
+      targetLeftByRenderedIndex,
+      overflowInfeasible: columnPlan.overflowInfeasible,
+      hardInfeasibleByRenderedIndex,
+    }
+  }
+
+  const nodesByComponent = new Map<number, AccidentalColumnNode[]>()
+  nodes.forEach((node) => {
+    const placement = columnPlan.placementByRenderedIndex.get(node.renderedIndex)
+    if (!placement) return
+    const existing = nodesByComponent.get(placement.componentId)
+    if (existing) {
+      existing.push(node)
+      return
+    }
+    nodesByComponent.set(placement.componentId, [node])
+  })
+
+  let overflowInfeasible = columnPlan.overflowInfeasible
+  nodesByComponent.forEach((componentNodes) => {
+    if (componentNodes.length <= 1) return
+    const columnNodes = new Map<number, AccidentalColumnNode[]>()
+    componentNodes.forEach((node) => {
+      const placement = columnPlan.placementByRenderedIndex.get(node.renderedIndex)
+      if (!placement) return
+      const existing = columnNodes.get(placement.columnIndex)
+      if (existing) {
+        existing.push(node)
+        return
+      }
+      columnNodes.set(placement.columnIndex, [node])
+    })
+    const orderedColumns = [...columnNodes.keys()].sort((left, right) => left - right)
+    if (orderedColumns.length <= 1) return
+
+    const columnLeftByIndex = new Map<number, number>()
+    const hardInfeasibleColumns = new Set<number>()
+    for (let orderIndex = orderedColumns.length - 1; orderIndex >= 0; orderIndex -= 1) {
+      const columnIndex = orderedColumns[orderIndex]!
+      const members = columnNodes.get(columnIndex) ?? []
+      const columnWidth = members.reduce((maxValue, member) => Math.max(maxValue, member.width), 0)
+      const fallbackColumnMaxLeft = members.reduce(
+        (minValue, member) => Math.min(minValue, member.baseLeftX),
+        Number.POSITIVE_INFINITY,
+      )
+      const columnMaxLeftRaw = members.reduce((minValue, member) => {
+        const boundedMaxLeft =
+          typeof member.maxLeftX === 'number' && Number.isFinite(member.maxLeftX)
+            ? member.maxLeftX
+            : member.baseLeftX
+        return Math.min(minValue, boundedMaxLeft)
+      }, Number.POSITIVE_INFINITY)
+      const columnMaxLeft = Number.isFinite(columnMaxLeftRaw) ? columnMaxLeftRaw : fallbackColumnMaxLeft
+      const columnMinLeft = members.reduce((maxValue, member) => {
+        if (typeof member.minLeftX !== 'number' || !Number.isFinite(member.minLeftX)) return maxValue
+        return Math.max(maxValue, member.minLeftX)
+      }, Number.NEGATIVE_INFINITY)
+      const rightNeighborColumnIndex = orderIndex < orderedColumns.length - 1 ? orderedColumns[orderIndex + 1] : null
+      const rightNeighborLeftX =
+        typeof rightNeighborColumnIndex === 'number' ? columnLeftByIndex.get(rightNeighborColumnIndex) : undefined
+      const rightConstraint =
+        typeof rightNeighborLeftX === 'number' && Number.isFinite(rightNeighborLeftX)
+          ? rightNeighborLeftX - columnWidth - ACCIDENTAL_COLUMN_SAFE_GAP_PX
+          : Number.POSITIVE_INFINITY
+      const maxAllowedLeftX = Math.min(columnMaxLeft, rightConstraint)
+      let resolvedLeftX = maxAllowedLeftX
+      if (
+        typeof columnMinLeft === 'number' &&
+        Number.isFinite(columnMinLeft) &&
+        maxAllowedLeftX < columnMinLeft - ACCIDENTAL_TARGET_EPSILON_PX
+      ) {
+        resolvedLeftX = maxAllowedLeftX
+        hardInfeasibleColumns.add(columnIndex)
+        overflowInfeasible = true
+      }
+      if (!Number.isFinite(resolvedLeftX)) {
+        resolvedLeftX = Number.isFinite(columnMaxLeft) ? columnMaxLeft : fallbackColumnMaxLeft
+        if (!Number.isFinite(resolvedLeftX)) {
+          overflowInfeasible = true
+          hardInfeasibleColumns.add(columnIndex)
+        }
+      }
+      columnLeftByIndex.set(columnIndex, resolvedLeftX)
+    }
+
+    for (let orderIndex = 0; orderIndex < orderedColumns.length - 1; orderIndex += 1) {
+      const leftColumnIndex = orderedColumns[orderIndex]!
+      const rightColumnIndex = orderedColumns[orderIndex + 1]!
+      const leftMembers = columnNodes.get(leftColumnIndex) ?? []
+      const leftWidth = leftMembers.reduce((maxValue, member) => Math.max(maxValue, member.width), 0)
+      const leftColumnLeftX = columnLeftByIndex.get(leftColumnIndex)
+      const rightColumnLeftX = columnLeftByIndex.get(rightColumnIndex)
+      if (
+        typeof leftColumnLeftX !== 'number' ||
+        !Number.isFinite(leftColumnLeftX) ||
+        typeof rightColumnLeftX !== 'number' ||
+        !Number.isFinite(rightColumnLeftX)
+      ) {
+        continue
+      }
+      if (leftColumnLeftX + leftWidth + ACCIDENTAL_COLUMN_SAFE_GAP_PX > rightColumnLeftX + ACCIDENTAL_TARGET_EPSILON_PX) {
+        overflowInfeasible = true
+        hardInfeasibleColumns.add(leftColumnIndex)
+        hardInfeasibleColumns.add(rightColumnIndex)
+      }
+    }
+
+    orderedColumns.forEach((columnIndex) => {
+      const columnLeftX = columnLeftByIndex.get(columnIndex)
+      if (typeof columnLeftX !== 'number' || !Number.isFinite(columnLeftX)) {
+        overflowInfeasible = true
+        return
+      }
+      const members = columnNodes.get(columnIndex) ?? []
+      const columnMinLeft = members.reduce((maxValue, member) => {
+        if (typeof member.minLeftX !== 'number' || !Number.isFinite(member.minLeftX)) return maxValue
+        return Math.max(maxValue, member.minLeftX)
+      }, Number.NEGATIVE_INFINITY)
+      const columnMaxLeft = members.reduce((minValue, member) => {
+        const boundedMaxLeft =
+          typeof member.maxLeftX === 'number' && Number.isFinite(member.maxLeftX)
+            ? member.maxLeftX
+            : member.baseLeftX
+        return Math.min(minValue, boundedMaxLeft)
+      }, Number.POSITIVE_INFINITY)
+      if (Number.isFinite(columnMinLeft) && columnLeftX < columnMinLeft - ACCIDENTAL_TARGET_EPSILON_PX) {
+        hardInfeasibleColumns.add(columnIndex)
+        overflowInfeasible = true
+      }
+      if (Number.isFinite(columnMaxLeft) && columnLeftX > columnMaxLeft + ACCIDENTAL_TARGET_EPSILON_PX) {
+        overflowInfeasible = true
+        hardInfeasibleColumns.add(columnIndex)
+      }
+    })
+
+    componentNodes.forEach((node) => {
+      const placement = columnPlan.placementByRenderedIndex.get(node.renderedIndex)
+      if (!placement) return
+      const resolvedLeftX = columnLeftByIndex.get(placement.columnIndex)
+      if (typeof resolvedLeftX !== 'number' || !Number.isFinite(resolvedLeftX)) return
+      targetLeftByRenderedIndex.set(node.renderedIndex, resolvedLeftX)
+      if (hardInfeasibleColumns.has(placement.columnIndex)) {
+        hardInfeasibleByRenderedIndex.set(node.renderedIndex, true)
+      }
+    })
+  })
+
+  return {
+    targetLeftByRenderedIndex,
+    overflowInfeasible,
+    hardInfeasibleByRenderedIndex,
   }
 }
 
@@ -1110,6 +1560,18 @@ type AccidentalLockState = {
   reason: string
   previousOccupiedRightX?: number | null
   previousGapMeasured?: number | null
+  columnIndex?: number | null
+  columnBaseLeftX?: number | null
+  columnTargetLeftX?: number | null
+  columnAppliedDeltaX?: number | null
+  columnCountMeasured?: number | null
+  leftMostMeasured?: number | null
+}
+
+type AccidentalAlignPassResult = {
+  maxLeftShiftPx: number
+  hardConstraintViolationCount: number
+  requiresSpacingReflow: boolean
 }
 
 function drawRenderedNoteHeadNumerals(params: {
@@ -1824,9 +2286,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     })
   }
 
-  let appliedSpacingMetrics: AppliedTimeAxisSpacingMetrics | null = null
-  if (spacingLayoutMode === 'custom') {
-    appliedSpacingMetrics = applyUnifiedTimeAxisSpacing({
+  const applyTimeAxisSpacingPass = (): AppliedTimeAxisSpacingMetrics | null =>
+    applyUnifiedTimeAxisSpacing({
       measure,
       noteStartX: trebleStave.getNoteStartX(),
       formatWidth,
@@ -1846,9 +2307,10 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       preferMeasureEndBarlineAxis,
       enableEdgeGapCap,
     })
-  }
-  if (onSpacingMetrics) {
-    onSpacingMetrics(appliedSpacingMetrics)
+
+  let appliedSpacingMetrics: AppliedTimeAxisSpacingMetrics | null = null
+  if (spacingLayoutMode === 'custom') {
+    appliedSpacingMetrics = applyTimeAxisSpacingPass()
   }
 
   if (staticAnchorXById && staticAnchorXById.size > 0) {
@@ -1908,9 +2370,39 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     renderedBySourceIndex: Map<number, RenderedMeasureNote>,
     options?: {
       captureLockState?: boolean
+      reasonSuffix?: string
     },
-  ) {
+  ): AccidentalAlignPassResult {
     const captureLockState = options?.captureLockState ?? true
+    const reasonSuffix = typeof options?.reasonSuffix === 'string' ? options.reasonSuffix.trim() : ''
+    const passResult: AccidentalAlignPassResult = {
+      maxLeftShiftPx: 0,
+      hardConstraintViolationCount: 0,
+      requiresSpacingReflow: false,
+    }
+    const trackLeftShift = (baseLeftX: number | null, finalLeftX: number | null) => {
+      if (
+        typeof baseLeftX !== 'number' ||
+        !Number.isFinite(baseLeftX) ||
+        typeof finalLeftX !== 'number' ||
+        !Number.isFinite(finalLeftX)
+      ) {
+        return
+      }
+      const shiftPx = baseLeftX - finalLeftX
+      if (shiftPx > ACCIDENTAL_TARGET_EPSILON_PX) {
+        passResult.maxLeftShiftPx = Math.max(passResult.maxLeftShiftPx, shiftPx)
+        passResult.requiresSpacingReflow = true
+      }
+    }
+    const markHardConstraintViolation = () => {
+      passResult.hardConstraintViolationCount += 1
+      passResult.requiresSpacingReflow = true
+    }
+    const appendReasonSuffix = (baseReason: string): string => {
+      if (!reasonSuffix) return baseReason
+      return baseReason.includes(reasonSuffix) ? baseReason : `${baseReason}+${reasonSuffix}`
+    }
     const setAccidentalLockState = (
       rowKey: string,
       value: AccidentalLockState,
@@ -1945,7 +2437,12 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           setAccidentalLockState(rowKey, {
             targetRightX: null,
             applied: false,
-            reason: 'no-modifier',
+            reason: appendReasonSuffix('no-modifier'),
+            columnBaseLeftX: null,
+            columnTargetLeftX: null,
+            columnAppliedDeltaX: null,
+            columnCountMeasured: null,
+            leftMostMeasured: null,
           })
           return
         }
@@ -2071,8 +2568,11 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         if (resolvedChordBlockerHeads.usedFallback) lockReasonSuffixes.push('chord-blocker-fallback')
         if (staticOutlierRejected) lockReasonSuffixes.push('static-outlier-fallback')
         if (nativeOutlierRejected) lockReasonSuffixes.push('native-outlier-fallback')
-        const buildLockReason = (base: string): string =>
-          lockReasonSuffixes.length === 0 ? base : `${base}+${lockReasonSuffixes.join('+')}`
+        const buildLockReason = (base: string): string => {
+          const baseWithFallback =
+            lockReasonSuffixes.length === 0 ? base : `${base}+${lockReasonSuffixes.join('+')}`
+          return appendReasonSuffix(baseWithFallback)
+        }
 
         if (chosenTargetX === null) {
           setAccidentalLockState(rowKey, {
@@ -2081,6 +2581,11 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
             reason: buildLockReason('no-target'),
             previousOccupiedRightX: previousNoteOccupiedRightX,
             previousGapMeasured: null,
+            columnBaseLeftX: null,
+            columnTargetLeftX: null,
+            columnAppliedDeltaX: null,
+            columnCountMeasured: null,
+            leftMostMeasured: null,
           })
           return
         }
@@ -2132,7 +2637,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
 
         if (effectiveCurrentRightX === null) {
           const invalidCurrentReasonBase = infeasibleCorridor
-            ? 'infeasible-corridor-invalid-current-x'
+            ? 'hard-infeasible-invalid-current-x'
             : clampedByChordBoundary || chosenTargetSource === 'head-safe'
               ? 'chord-collision-clamped-invalid-current-x'
             : clampedByPreviousBoundary || chosenTargetSource === 'previous-safe'
@@ -2149,11 +2654,18 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
               typeof previousNoteOccupiedRightX === 'number' && Number.isFinite(previousNoteOccupiedRightX)
                 ? clampedTargetRightX - previousNoteOccupiedRightX
                 : null,
+            columnBaseLeftX: null,
+            columnTargetLeftX: null,
+            columnAppliedDeltaX: null,
+            columnCountMeasured: null,
+            leftMostMeasured: null,
           })
+          markHardConstraintViolation()
           return
         }
 
         const delta = clampedTargetRightX - effectiveCurrentRightX
+        const baseLeftXBeforeAlign = effectiveCurrentRightX
         if (Math.abs(delta) >= ACCIDENTAL_TARGET_EPSILON_PX) {
           applyAccidentalLeftXTarget({
             vexNote: renderedEntry.vexNote,
@@ -2344,7 +2856,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           setPreviewAccidentalRightX(rowKey, clampedTargetRightX)
         }
         const reasonBase = infeasibleCorridor
-          ? 'infeasible-corridor'
+          ? 'hard-infeasible'
           : clampedByChordBoundary || chosenTargetSource === 'head-safe'
             ? 'chord-collision-clamped'
             : clampedByPreviousBoundary || chosenTargetSource === 'previous-safe'
@@ -2360,19 +2872,527 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           finalAccidentalBounds
             ? finalAccidentalBounds.leftX - previousNoteOccupiedRightX
             : null
+        trackLeftShift(
+          baseLeftXBeforeAlign,
+          finalAccidentalBounds && Number.isFinite(finalAccidentalBounds.leftX) ? finalAccidentalBounds.leftX : null,
+        )
+        if (
+          typeof previousGapMeasured === 'number' &&
+          Number.isFinite(previousGapMeasured) &&
+          previousGapMeasured < ACCIDENTAL_PREVIOUS_NOTE_CLEARANCE_PX - ACCIDENTAL_TARGET_EPSILON_PX
+        ) {
+          infeasibleCorridor = true
+          markHardConstraintViolation()
+        }
+        if (infeasibleCorridor) {
+          markHardConstraintViolation()
+        }
         setAccidentalLockState(rowKey, {
           targetRightX: clampedTargetRightX,
           applied: true,
           reason: buildLockReason(reasonBase),
           previousOccupiedRightX: previousNoteOccupiedRightX,
           previousGapMeasured,
+          columnBaseLeftX: null,
+          columnTargetLeftX: null,
+          columnAppliedDeltaX: null,
+          columnCountMeasured: null,
+          leftMostMeasured:
+            finalAccidentalBounds && Number.isFinite(finalAccidentalBounds.leftX)
+              ? finalAccidentalBounds.leftX
+              : null,
         })
       })
+
+      const previousOccupiedRightXForColumns = resolvePreviousNoteOccupiedRightX({
+        sourceNotes,
+        renderedBySourceIndex,
+        noteIndex,
+      })
+      const minAccidentalLeftXForColumns =
+        typeof previousOccupiedRightXForColumns === 'number' && Number.isFinite(previousOccupiedRightXForColumns)
+          ? previousOccupiedRightXForColumns + ACCIDENTAL_PREVIOUS_NOTE_CLEARANCE_PX
+          : null
+      const accidentalColumnNodes: AccidentalColumnNode[] = []
+      renderedEntry.renderedKeys.forEach((renderedKey, renderedIndex) => {
+        if (!renderedKey.accidental) return
+        const rowKey = `${layoutKey}|${renderedKey.keyIndex}`
+        const { modifier, keyRenderedIndex } = resolveAccidentalModifierForRenderedKey({
+          accidentalModifiers,
+          renderedKeys: renderedEntry.renderedKeys,
+          renderedKey,
+          fallbackRenderedIndex: renderedIndex,
+        })
+        if (!modifier) return
+        const fallbackWidth = resolveAccidentalWidth({
+          modifier,
+          accidentalCode: renderedKey.accidental,
+        })
+        const measuredBounds = resolveMeasuredAccidentalBounds({
+          vexNote: renderedEntry.vexNote,
+          modifier,
+          renderedIndex: keyRenderedIndex,
+          fallbackWidth,
+        })
+        if (!measuredBounds) return
+        const resolvedOwnHeadForColumn = resolveOwnHeadLeftX({
+          vexNote: renderedEntry.vexNote,
+          renderedIndex: keyRenderedIndex,
+          noteBaseX,
+        })
+        const resolvedBlockerHeadsForColumn = resolveChordBlockerHeadBounds({
+          vexNote: renderedEntry.vexNote,
+          renderedIndex: keyRenderedIndex,
+          noteBaseX,
+        })
+        const maxLeftCandidateByOwnHead =
+          typeof resolvedOwnHeadForColumn.ownHeadLeftX === 'number' &&
+          Number.isFinite(resolvedOwnHeadForColumn.ownHeadLeftX)
+            ? resolvedOwnHeadForColumn.ownHeadLeftX - measuredBounds.width - ACCIDENTAL_NOTEHEAD_CLEARANCE_PX
+            : measuredBounds.leftX
+        const resolvedMaxLeftByBlocker = resolveAccidentalLeftAfterChordHeadAvoidance({
+          candidateLeftX: maxLeftCandidateByOwnHead,
+          modifierWidth: measuredBounds.width,
+          blockerHeadBounds: resolvedBlockerHeadsForColumn.blockerHeadBounds,
+        })
+        const maxLeftXForColumn =
+          Number.isFinite(resolvedMaxLeftByBlocker.leftX) && Number.isFinite(maxLeftCandidateByOwnHead)
+            ? Math.min(resolvedMaxLeftByBlocker.leftX, maxLeftCandidateByOwnHead)
+            : measuredBounds.leftX
+        const diatonicOrdinal = resolvePitchDiatonicOrdinal(renderedKey.pitch)
+        if (typeof diatonicOrdinal !== 'number' || !Number.isFinite(diatonicOrdinal)) return
+        accidentalColumnNodes.push({
+          rowKey,
+          renderedIndex,
+          keyRenderedIndex,
+          keyIndex: renderedKey.keyIndex,
+          pitch: renderedKey.pitch,
+          diatonicOrdinal,
+          modifier,
+          width: measuredBounds.width,
+          baseLeftX: measuredBounds.leftX,
+          minLeftX: minAccidentalLeftXForColumns,
+          maxLeftX: maxLeftXForColumn,
+        })
+      })
+
+      if (accidentalColumnNodes.length > 1) {
+        const columnPlan = resolveAccidentalColumnPlan({
+          nodes: accidentalColumnNodes,
+        })
+        if (captureLockState) {
+          accidentalColumnNodes.forEach((node) => {
+            const placement = columnPlan.placementByRenderedIndex.get(node.renderedIndex)
+            if (!placement) return
+            const existingLockState = accidentalLockByRowKey.get(node.rowKey)
+            if (!existingLockState) return
+            setAccidentalLockState(node.rowKey, {
+              ...existingLockState,
+              columnIndex: placement.columnIndex,
+            })
+          })
+        }
+
+        if (columnPlan.hasStagger) {
+          const columnTargets = resolveAccidentalColumnTargets({
+            nodes: accidentalColumnNodes,
+            columnPlan,
+          })
+
+          accidentalColumnNodes.forEach((node) => {
+            const placement = columnPlan.placementByRenderedIndex.get(node.renderedIndex)
+            if (!placement) return
+            const targetLeftX = columnTargets.targetLeftByRenderedIndex.get(node.renderedIndex)
+            const currentBounds = resolveMeasuredAccidentalBounds({
+              vexNote: renderedEntry.vexNote,
+              modifier: node.modifier,
+              renderedIndex: node.keyRenderedIndex,
+              fallbackWidth: node.width,
+            })
+            const baseLeftXForColumn =
+              currentBounds && Number.isFinite(currentBounds.leftX) ? currentBounds.leftX : node.baseLeftX
+            let columnAppliedDeltaX: number | null = null
+            let columnMoveApplied = false
+            if (typeof targetLeftX === 'number' && Number.isFinite(targetLeftX)) {
+              const deltaToTarget = targetLeftX - baseLeftXForColumn
+              if (Math.abs(deltaToTarget) >= ACCIDENTAL_TARGET_EPSILON_PX) {
+                const appliedResult = applyAccidentalLeftXTarget({
+                  vexNote: renderedEntry.vexNote,
+                  modifier: node.modifier,
+                  renderedIndex: node.keyRenderedIndex,
+                  targetLeftX,
+                })
+                const resolvedAfterBounds = resolveMeasuredAccidentalBounds({
+                  vexNote: renderedEntry.vexNote,
+                  modifier: node.modifier,
+                  renderedIndex: node.keyRenderedIndex,
+                  fallbackWidth: node.width,
+                })
+                const resolvedAfterLeftX =
+                  resolvedAfterBounds && Number.isFinite(resolvedAfterBounds.leftX)
+                    ? resolvedAfterBounds.leftX
+                    : targetLeftX
+                columnAppliedDeltaX = resolvedAfterLeftX - baseLeftXForColumn
+                columnMoveApplied =
+                  appliedResult.applied ||
+                  Math.abs(columnAppliedDeltaX) >= ACCIDENTAL_TARGET_EPSILON_PX
+              } else {
+                columnAppliedDeltaX = 0
+              }
+            }
+
+            const postColumnBlockerBounds = resolveChordBlockerHeadBounds({
+              vexNote: renderedEntry.vexNote,
+              renderedIndex: node.keyRenderedIndex,
+              noteBaseX,
+            })
+            const columnTargetMarkedInfeasible =
+              columnTargets.hardInfeasibleByRenderedIndex.get(node.renderedIndex) === true
+            if (columnTargetMarkedInfeasible) {
+              passResult.requiresSpacingReflow = true
+            }
+            let postColumnHardAdjusted = false
+            let hardConstraintViolation = false
+            const hardClampMaxIterations = Math.max(
+              3,
+              postColumnBlockerBounds.blockerHeadBounds.length + 3,
+            )
+            for (let iteration = 0; iteration < hardClampMaxIterations; iteration += 1) {
+              const measuredBounds = resolveMeasuredAccidentalBounds({
+                vexNote: renderedEntry.vexNote,
+                modifier: node.modifier,
+                renderedIndex: node.keyRenderedIndex,
+                fallbackWidth: node.width,
+              })
+              const measuredOwnHead = resolveOwnHeadLeftX({
+                vexNote: renderedEntry.vexNote,
+                renderedIndex: node.keyRenderedIndex,
+                noteBaseX,
+              })
+              if (!measuredBounds) break
+              let nextLeftX = measuredBounds.leftX
+              let requiresAdjustment = false
+              const minLeftHard =
+                typeof node.minLeftX === 'number' && Number.isFinite(node.minLeftX)
+                  ? node.minLeftX
+                  : Number.NEGATIVE_INFINITY
+              const ownMaxLeftX =
+                typeof measuredOwnHead.ownHeadLeftX === 'number' &&
+                Number.isFinite(measuredOwnHead.ownHeadLeftX)
+                  ? measuredOwnHead.ownHeadLeftX - measuredBounds.width - ACCIDENTAL_NOTEHEAD_CLEARANCE_PX
+                  : Number.POSITIVE_INFINITY
+              const chordMaxLeftX = resolveAccidentalLeftAfterChordHeadAvoidance({
+                candidateLeftX:
+                  Number.isFinite(ownMaxLeftX) && ownMaxLeftX < Number.POSITIVE_INFINITY
+                    ? ownMaxLeftX
+                    : measuredBounds.leftX,
+                modifierWidth: measuredBounds.width,
+                blockerHeadBounds: postColumnBlockerBounds.blockerHeadBounds,
+              }).leftX
+              const maxLeftHard = Math.min(ownMaxLeftX, chordMaxLeftX)
+              if (
+                Number.isFinite(minLeftHard) &&
+                Number.isFinite(maxLeftHard) &&
+                minLeftHard > maxLeftHard + ACCIDENTAL_TARGET_EPSILON_PX
+              ) {
+                hardConstraintViolation = true
+                nextLeftX = maxLeftHard
+                requiresAdjustment = true
+              } else {
+                if (Number.isFinite(minLeftHard) && nextLeftX < minLeftHard - ACCIDENTAL_TARGET_EPSILON_PX) {
+                  nextLeftX = minLeftHard
+                  requiresAdjustment = true
+                }
+                if (Number.isFinite(maxLeftHard) && nextLeftX > maxLeftHard + ACCIDENTAL_TARGET_EPSILON_PX) {
+                  nextLeftX = maxLeftHard
+                  requiresAdjustment = true
+                }
+              }
+
+              if (
+                typeof measuredOwnHead.ownHeadLeftX === 'number' &&
+                Number.isFinite(measuredOwnHead.ownHeadLeftX)
+              ) {
+                const ownGapPx = measuredOwnHead.ownHeadLeftX - measuredBounds.rightX
+                if (ownGapPx < ACCIDENTAL_NOTEHEAD_CLEARANCE_PX - ACCIDENTAL_TARGET_EPSILON_PX) {
+                  nextLeftX = Math.min(
+                    nextLeftX,
+                    measuredBounds.leftX - (ACCIDENTAL_NOTEHEAD_CLEARANCE_PX - ownGapPx),
+                  )
+                  requiresAdjustment = true
+                }
+              }
+
+              const chordAdjustedLeft = resolveAccidentalLeftAfterChordHeadAvoidance({
+                candidateLeftX: nextLeftX,
+                modifierWidth: measuredBounds.width,
+                blockerHeadBounds: postColumnBlockerBounds.blockerHeadBounds,
+              })
+              if (chordAdjustedLeft.leftX < nextLeftX - ACCIDENTAL_TARGET_EPSILON_PX) {
+                nextLeftX = chordAdjustedLeft.leftX
+                requiresAdjustment = true
+              }
+
+              if (!requiresAdjustment) {
+                break
+              }
+              if (Math.abs(nextLeftX - measuredBounds.leftX) < ACCIDENTAL_TARGET_EPSILON_PX) {
+                hardConstraintViolation = true
+                break
+              }
+              const hardApplyResult = applyAccidentalLeftXTarget({
+                vexNote: renderedEntry.vexNote,
+                modifier: node.modifier,
+                renderedIndex: node.keyRenderedIndex,
+                targetLeftX: nextLeftX,
+              })
+              if (hardApplyResult.applied) {
+                postColumnHardAdjusted = true
+              }
+            }
+
+            const finalColumnBounds = resolveMeasuredAccidentalBounds({
+              vexNote: renderedEntry.vexNote,
+              modifier: node.modifier,
+              renderedIndex: node.keyRenderedIndex,
+              fallbackWidth: node.width,
+            })
+            const finalColumnOwnHead = resolveOwnHeadLeftX({
+              vexNote: renderedEntry.vexNote,
+              renderedIndex: node.keyRenderedIndex,
+              noteBaseX,
+            })
+            if (
+              finalColumnBounds &&
+              typeof finalColumnOwnHead.ownHeadLeftX === 'number' &&
+              Number.isFinite(finalColumnOwnHead.ownHeadLeftX)
+            ) {
+              const finalOwnGap = finalColumnOwnHead.ownHeadLeftX - finalColumnBounds.rightX
+              if (finalOwnGap < ACCIDENTAL_NOTEHEAD_CLEARANCE_PX - ACCIDENTAL_TARGET_EPSILON_PX) {
+                hardConstraintViolation = true
+              }
+            }
+            if (finalColumnBounds) {
+              const finalChordCheck = resolveAccidentalLeftAfterChordHeadAvoidance({
+                candidateLeftX: finalColumnBounds.leftX,
+                modifierWidth: finalColumnBounds.width,
+                blockerHeadBounds: postColumnBlockerBounds.blockerHeadBounds,
+              })
+              if (finalChordCheck.leftX < finalColumnBounds.leftX - ACCIDENTAL_TARGET_EPSILON_PX) {
+                hardConstraintViolation = true
+              }
+              if (
+                typeof node.minLeftX === 'number' &&
+                Number.isFinite(node.minLeftX) &&
+                finalColumnBounds.leftX < node.minLeftX - ACCIDENTAL_TARGET_EPSILON_PX
+              ) {
+                hardConstraintViolation = true
+              }
+            }
+
+            if (finalColumnBounds) {
+              columnAppliedDeltaX = finalColumnBounds.leftX - baseLeftXForColumn
+              if (Math.abs(columnAppliedDeltaX) >= ACCIDENTAL_TARGET_EPSILON_PX) {
+                columnMoveApplied = true
+              }
+              trackLeftShift(baseLeftXForColumn, finalColumnBounds.leftX)
+            }
+            if (hardConstraintViolation) {
+              markHardConstraintViolation()
+            }
+            if (!captureLockState) return
+            const existingLockState = accidentalLockByRowKey.get(node.rowKey)
+            const columnReasonSuffix = hardConstraintViolation
+              ? 'hard-infeasible'
+              : columnMoveApplied
+                ? 'column-staggered'
+                : 'column-assigned-only'
+            const nextReasonBase = existingLockState?.reason ?? 'preferred-own-head-aligned'
+            const nextReason = nextReasonBase.includes(columnReasonSuffix)
+              ? nextReasonBase
+              : `${nextReasonBase}+${columnReasonSuffix}`
+            const nextReasonWithSuffix = appendReasonSuffix(nextReason)
+            const columnPreviousGapMeasured =
+              typeof previousOccupiedRightXForColumns === 'number' &&
+              Number.isFinite(previousOccupiedRightXForColumns) &&
+              finalColumnBounds &&
+              Number.isFinite(finalColumnBounds.leftX)
+                ? finalColumnBounds.leftX - previousOccupiedRightXForColumns
+                : existingLockState?.previousGapMeasured ?? null
+            const previewRightX = getAccidentalVisualX(renderedEntry.vexNote, node.modifier, node.keyRenderedIndex)
+            if (typeof previewRightX === 'number' && Number.isFinite(previewRightX)) {
+              setPreviewAccidentalRightX(node.rowKey, previewRightX)
+            }
+            setAccidentalLockState(node.rowKey, {
+              targetRightX:
+                existingLockState?.targetRightX ??
+                (typeof targetLeftX === 'number' && Number.isFinite(targetLeftX) ? targetLeftX : node.baseLeftX),
+              applied:
+                typeof existingLockState?.applied === 'boolean'
+                  ? existingLockState.applied || columnMoveApplied || postColumnHardAdjusted
+                  : columnMoveApplied || postColumnHardAdjusted,
+              reason: nextReasonWithSuffix,
+              previousOccupiedRightX: existingLockState?.previousOccupiedRightX ?? previousOccupiedRightXForColumns,
+              previousGapMeasured: columnPreviousGapMeasured,
+              columnIndex: placement.columnIndex,
+              columnBaseLeftX: baseLeftXForColumn,
+              columnTargetLeftX:
+                typeof targetLeftX === 'number' && Number.isFinite(targetLeftX) ? targetLeftX : null,
+              columnAppliedDeltaX,
+              columnCountMeasured: null,
+              leftMostMeasured:
+                finalColumnBounds && Number.isFinite(finalColumnBounds.leftX)
+                  ? finalColumnBounds.leftX
+                  : null,
+            })
+          })
+
+          const hardInfeasibleRowKeys = new Set<string>()
+          const markNodeHardInfeasible = (node: AccidentalColumnNode) => {
+            hardInfeasibleRowKeys.add(node.rowKey)
+          }
+          const resolveNodeBounds = (node: AccidentalColumnNode) =>
+            resolveMeasuredAccidentalBounds({
+              vexNote: renderedEntry.vexNote,
+              modifier: node.modifier,
+              renderedIndex: node.keyRenderedIndex,
+              fallbackWidth: node.width,
+            })
+
+          const normalizeColumnsByMeasuredGeometry = () => {
+            const normalizedNodes: AccidentalColumnNode[] = []
+            accidentalColumnNodes.forEach((node) => {
+              const measuredBounds = resolveNodeBounds(node)
+              if (!measuredBounds) return
+              const resolvedOwnHead = resolveOwnHeadLeftX({
+                vexNote: renderedEntry.vexNote,
+                renderedIndex: node.keyRenderedIndex,
+                noteBaseX,
+              })
+              const ownMaxLeftX =
+                typeof resolvedOwnHead.ownHeadLeftX === 'number' && Number.isFinite(resolvedOwnHead.ownHeadLeftX)
+                  ? resolvedOwnHead.ownHeadLeftX - measuredBounds.width - ACCIDENTAL_NOTEHEAD_CLEARANCE_PX
+                  : measuredBounds.leftX
+              const blockerBounds = resolveChordBlockerHeadBounds({
+                vexNote: renderedEntry.vexNote,
+                renderedIndex: node.keyRenderedIndex,
+                noteBaseX,
+              })
+              const blockerMaxLeftX = resolveAccidentalLeftAfterChordHeadAvoidance({
+                candidateLeftX: ownMaxLeftX,
+                modifierWidth: measuredBounds.width,
+                blockerHeadBounds: blockerBounds.blockerHeadBounds,
+              }).leftX
+              normalizedNodes.push({
+                ...node,
+                baseLeftX: measuredBounds.leftX,
+                width: measuredBounds.width,
+                minLeftX: node.minLeftX,
+                maxLeftX: Math.min(ownMaxLeftX, blockerMaxLeftX),
+              })
+            })
+            if (normalizedNodes.length <= 1) return
+            const normalizedTargets = resolveAccidentalColumnTargets({
+              nodes: normalizedNodes,
+              columnPlan,
+            })
+            normalizedNodes.forEach((node) => {
+              const targetLeftX = normalizedTargets.targetLeftByRenderedIndex.get(node.renderedIndex)
+              if (typeof targetLeftX !== 'number' || !Number.isFinite(targetLeftX)) return
+              const currentBounds = resolveNodeBounds(node)
+              if (!currentBounds) return
+              if (Math.abs(targetLeftX - currentBounds.leftX) < ACCIDENTAL_TARGET_EPSILON_PX) return
+              applyAccidentalLeftXTarget({
+                vexNote: renderedEntry.vexNote,
+                modifier: node.modifier,
+                renderedIndex: node.keyRenderedIndex,
+                targetLeftX,
+              })
+              const updatedBounds = resolveNodeBounds(node)
+              trackLeftShift(
+                currentBounds.leftX,
+                updatedBounds && Number.isFinite(updatedBounds.leftX) ? updatedBounds.leftX : null,
+              )
+            })
+          }
+
+          normalizeColumnsByMeasuredGeometry()
+
+          for (let leftIndex = 0; leftIndex < accidentalColumnNodes.length; leftIndex += 1) {
+            const leftNode = accidentalColumnNodes[leftIndex]!
+            const leftPlacement = columnPlan.placementByRenderedIndex.get(leftNode.renderedIndex)
+            if (!leftPlacement) continue
+            for (let rightIndex = leftIndex + 1; rightIndex < accidentalColumnNodes.length; rightIndex += 1) {
+              const rightNode = accidentalColumnNodes[rightIndex]!
+              if (!isAccidentalConflictByDiatonicDistance(leftNode.diatonicOrdinal, rightNode.diatonicOrdinal)) {
+                continue
+              }
+              const rightPlacement = columnPlan.placementByRenderedIndex.get(rightNode.renderedIndex)
+              if (!rightPlacement) continue
+              if (leftPlacement.columnIndex === rightPlacement.columnIndex) {
+                markNodeHardInfeasible(leftNode)
+                markNodeHardInfeasible(rightNode)
+                continue
+              }
+              const leftBounds = resolveNodeBounds(leftNode)
+              const rightBounds = resolveNodeBounds(rightNode)
+              if (!leftBounds || !rightBounds) {
+                markNodeHardInfeasible(leftNode)
+                markNodeHardInfeasible(rightNode)
+                continue
+              }
+              const overlapStillExists =
+                leftBounds.rightX > rightBounds.leftX + ACCIDENTAL_TARGET_EPSILON_PX &&
+                leftBounds.leftX < rightBounds.rightX - ACCIDENTAL_TARGET_EPSILON_PX
+              if (overlapStillExists) {
+                markNodeHardInfeasible(leftNode)
+                markNodeHardInfeasible(rightNode)
+              }
+            }
+          }
+
+          hardInfeasibleRowKeys.forEach((rowKey) => {
+            markHardConstraintViolation()
+            if (!captureLockState) return
+            const existingLockState = accidentalLockByRowKey.get(rowKey)
+            if (!existingLockState) return
+            const nextReasonBase = existingLockState.reason.includes('hard-infeasible')
+              ? existingLockState.reason
+              : `${existingLockState.reason}+hard-infeasible`
+            setAccidentalLockState(rowKey, {
+              ...existingLockState,
+              reason: appendReasonSuffix(nextReasonBase),
+            })
+          })
+        }
+      }
     })
+    return passResult
   }
 
-  alignRenderedAccidentalOffset('treble', measure.treble, trebleRenderedBySourceIndex)
-  alignRenderedAccidentalOffset('bass', measure.bass, bassRenderedBySourceIndex)
+  let finalTrebleAlignResult = alignRenderedAccidentalOffset('treble', measure.treble, trebleRenderedBySourceIndex)
+  let finalBassAlignResult = alignRenderedAccidentalOffset('bass', measure.bass, bassRenderedBySourceIndex)
+  if (spacingLayoutMode === 'custom') {
+    const maxReflowPasses = 3
+    let reflowPass = 0
+    while (
+      reflowPass < maxReflowPasses &&
+      (finalTrebleAlignResult.requiresSpacingReflow || finalBassAlignResult.requiresSpacingReflow)
+    ) {
+      reflowPass += 1
+      appliedSpacingMetrics = applyTimeAxisSpacingPass()
+      finalTrebleAlignResult = alignRenderedAccidentalOffset('treble', measure.treble, trebleRenderedBySourceIndex, {
+        reasonSuffix: 'spacing-reflow-applied',
+      })
+      finalBassAlignResult = alignRenderedAccidentalOffset('bass', measure.bass, bassRenderedBySourceIndex, {
+        reasonSuffix: 'spacing-reflow-applied',
+      })
+    }
+  }
+
+  if (onSpacingMetrics) {
+    onSpacingMetrics(appliedSpacingMetrics)
+  }
 
   if (debugCapture) {
     const rows: DragDebugRow[] = []
@@ -3234,6 +4254,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   const trebleNoteLayouts = trebleRendered.flatMap(({ vexNote, renderedKeys, sourceNoteIndex }) => {
       const sourceNote = measure.treble[sourceNoteIndex]
       if (!sourceNote) return []
+      const layoutKey = getLayoutNoteKey('treble', sourceNote.id)
       const ys = vexNote.getYs()
       const noteBaseX = getRenderedNoteVisualX(vexNote)
       const renderedHeadXByIndex = new Map<number, number>()
@@ -3247,8 +4268,10 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       const accidentalModifiers = vexNote
         .getModifiersByType(Accidental.CATEGORY)
         .map((modifier) => modifier as Accidental)
-      const accidentalLayouts = renderedKeys.flatMap((entry, renderedIndex) => {
+      let accidentalLayouts = renderedKeys.flatMap((entry, renderedIndex) => {
         if (!entry.accidental) return []
+        const rowKey = `${layoutKey}|${entry.keyIndex}`
+        const lockInfo = accidentalLockByRowKey.get(rowKey)
         const { modifier, keyRenderedIndex } = resolveAccidentalModifierForRenderedKey({
           accidentalModifiers,
           renderedKeys,
@@ -3300,6 +4323,23 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
             visualRightXExact,
             ownHeadLeftXExact,
             ownGapPxExact,
+            reason: lockInfo?.reason,
+            columnIndex:
+              typeof lockInfo?.columnIndex === 'number' && Number.isFinite(lockInfo.columnIndex)
+                ? lockInfo.columnIndex
+                : undefined,
+            columnBaseLeftX:
+              typeof lockInfo?.columnBaseLeftX === 'number' && Number.isFinite(lockInfo.columnBaseLeftX)
+                ? lockInfo.columnBaseLeftX
+                : undefined,
+            columnTargetLeftX:
+              typeof lockInfo?.columnTargetLeftX === 'number' && Number.isFinite(lockInfo.columnTargetLeftX)
+                ? lockInfo.columnTargetLeftX
+                : undefined,
+            columnAppliedDeltaX:
+              typeof lockInfo?.columnAppliedDeltaX === 'number' && Number.isFinite(lockInfo.columnAppliedDeltaX)
+                ? lockInfo.columnAppliedDeltaX
+                : undefined,
             ...buildAccidentalHitGeometry({
               centerX,
               centerY,
@@ -3308,6 +4348,31 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           },
         ]
       })
+      const distinctMeasuredColumns = new Set(
+        accidentalLayouts
+          .map((layout) => layout.columnIndex)
+          .filter((columnIndex): columnIndex is number => typeof columnIndex === 'number' && Number.isFinite(columnIndex)),
+      )
+      const columnCountMeasured =
+        distinctMeasuredColumns.size > 0
+          ? distinctMeasuredColumns.size
+          : accidentalLayouts.length > 0
+            ? 1
+            : null
+      const leftMostMeasured = accidentalLayouts.reduce((minValue, layout) => {
+        const candidateLeftX =
+          typeof layout.visualLeftXExact === 'number' && Number.isFinite(layout.visualLeftXExact)
+            ? layout.visualLeftXExact
+            : typeof layout.hitMinX === 'number' && Number.isFinite(layout.hitMinX)
+              ? layout.hitMinX
+              : Number.POSITIVE_INFINITY
+        return Math.min(minValue, candidateLeftX)
+      }, Number.POSITIVE_INFINITY)
+      accidentalLayouts = accidentalLayouts.map((layout) => ({
+        ...layout,
+        columnCountMeasured,
+        leftMostMeasured: Number.isFinite(leftMostMeasured) ? leftMostMeasured : null,
+      }))
       renderedKeys.forEach((entry, renderedIndex) => {
         if (!entry.accidental) return
         const { keyRenderedIndex } = resolveAccidentalModifierForRenderedKey({
@@ -3346,7 +4411,6 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         noteHeads,
         accidentalLayouts,
       })
-      const layoutKey = getLayoutNoteKey('treble', sourceNote.id)
       return {
         id: sourceNote.id,
         staff: 'treble' as const,
@@ -3375,6 +4439,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   const bassNoteLayouts = bassRendered.flatMap(({ vexNote, renderedKeys, sourceNoteIndex }) => {
       const sourceNote = measure.bass[sourceNoteIndex]
       if (!sourceNote) return []
+      const layoutKey = getLayoutNoteKey('bass', sourceNote.id)
       const ys = vexNote.getYs()
       const noteBaseX = getRenderedNoteVisualX(vexNote)
       const renderedHeadXByIndex = new Map<number, number>()
@@ -3388,8 +4453,10 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       const accidentalModifiers = vexNote
         .getModifiersByType(Accidental.CATEGORY)
         .map((modifier) => modifier as Accidental)
-      const accidentalLayouts = renderedKeys.flatMap((entry, renderedIndex) => {
+      let accidentalLayouts = renderedKeys.flatMap((entry, renderedIndex) => {
         if (!entry.accidental) return []
+        const rowKey = `${layoutKey}|${entry.keyIndex}`
+        const lockInfo = accidentalLockByRowKey.get(rowKey)
         const { modifier, keyRenderedIndex } = resolveAccidentalModifierForRenderedKey({
           accidentalModifiers,
           renderedKeys,
@@ -3441,6 +4508,23 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
             visualRightXExact,
             ownHeadLeftXExact,
             ownGapPxExact,
+            reason: lockInfo?.reason,
+            columnIndex:
+              typeof lockInfo?.columnIndex === 'number' && Number.isFinite(lockInfo.columnIndex)
+                ? lockInfo.columnIndex
+                : undefined,
+            columnBaseLeftX:
+              typeof lockInfo?.columnBaseLeftX === 'number' && Number.isFinite(lockInfo.columnBaseLeftX)
+                ? lockInfo.columnBaseLeftX
+                : undefined,
+            columnTargetLeftX:
+              typeof lockInfo?.columnTargetLeftX === 'number' && Number.isFinite(lockInfo.columnTargetLeftX)
+                ? lockInfo.columnTargetLeftX
+                : undefined,
+            columnAppliedDeltaX:
+              typeof lockInfo?.columnAppliedDeltaX === 'number' && Number.isFinite(lockInfo.columnAppliedDeltaX)
+                ? lockInfo.columnAppliedDeltaX
+                : undefined,
             ...buildAccidentalHitGeometry({
               centerX,
               centerY,
@@ -3449,6 +4533,31 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           },
         ]
       })
+      const distinctMeasuredColumns = new Set(
+        accidentalLayouts
+          .map((layout) => layout.columnIndex)
+          .filter((columnIndex): columnIndex is number => typeof columnIndex === 'number' && Number.isFinite(columnIndex)),
+      )
+      const columnCountMeasured =
+        distinctMeasuredColumns.size > 0
+          ? distinctMeasuredColumns.size
+          : accidentalLayouts.length > 0
+            ? 1
+            : null
+      const leftMostMeasured = accidentalLayouts.reduce((minValue, layout) => {
+        const candidateLeftX =
+          typeof layout.visualLeftXExact === 'number' && Number.isFinite(layout.visualLeftXExact)
+            ? layout.visualLeftXExact
+            : typeof layout.hitMinX === 'number' && Number.isFinite(layout.hitMinX)
+              ? layout.hitMinX
+              : Number.POSITIVE_INFINITY
+        return Math.min(minValue, candidateLeftX)
+      }, Number.POSITIVE_INFINITY)
+      accidentalLayouts = accidentalLayouts.map((layout) => ({
+        ...layout,
+        columnCountMeasured,
+        leftMostMeasured: Number.isFinite(leftMostMeasured) ? leftMostMeasured : null,
+      }))
       renderedKeys.forEach((entry, renderedIndex) => {
         if (!entry.accidental) return
         const { keyRenderedIndex } = resolveAccidentalModifierForRenderedKey({
@@ -3487,7 +4596,6 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         noteHeads,
         accidentalLayouts,
       })
-      const layoutKey = getLayoutNoteKey('bass', sourceNote.id)
       return {
         id: sourceNote.id,
         staff: 'bass' as const,

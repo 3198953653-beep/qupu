@@ -2650,8 +2650,9 @@ function buildEnharmonicParityFixtureResult(params: {
   baseFixture: FixtureResult
   targetFixture: FixtureResult
   compareAccidentalSegment: boolean
+  expectTargetNotSmaller?: boolean
 }): FixtureResult {
-  const { key, baseFixture, targetFixture, compareAccidentalSegment } = params
+  const { key, baseFixture, targetFixture, compareAccidentalSegment, expectTargetNotSmaller = false } = params
   const failures: string[] = []
   const compareMetric = (
     metricName: string,
@@ -2660,6 +2661,12 @@ function buildEnharmonicParityFixtureResult(params: {
   ) => {
     if (baseValue === null || baseValue === undefined || targetValue === null || targetValue === undefined) {
       pushFailure(failures, `${metricName}-missing`, `${baseValue ?? 'null'}!=${targetValue ?? 'null'}`)
+      return
+    }
+    if (expectTargetNotSmaller) {
+      if (targetValue + 0.5 < baseValue) {
+        pushFailure(failures, `${metricName}-target-smaller`, `${targetValue}<${baseValue}`)
+      }
       return
     }
     if (Math.abs(baseValue - targetValue) > 0.5) {
@@ -2872,6 +2879,7 @@ async function main(): Promise<void> {
         baseFixture: enharmonicPreviousDSharpFixture,
         targetFixture: enharmonicPreviousESharpFixture,
         compareAccidentalSegment: true,
+        expectTargetNotSmaller: true,
       }),
     )
 
@@ -2904,6 +2912,7 @@ async function main(): Promise<void> {
         baseFixture: enharmonicBarlineDSharpFixture,
         targetFixture: enharmonicBarlineESharpFixture,
         compareAccidentalSegment: false,
+        expectTargetNotSmaller: true,
       }),
     )
 

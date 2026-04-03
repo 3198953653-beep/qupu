@@ -173,6 +173,36 @@ export function buildMeasureCoordinateDebugReport(params: {
                     : null
               return {
                 keyIndex,
+                columnIndex:
+                  typeof accidentalLayout?.columnIndex === 'number' && Number.isFinite(accidentalLayout.columnIndex)
+                    ? accidentalLayout.columnIndex
+                    : null,
+                reason: typeof accidentalLayout?.reason === 'string' ? accidentalLayout.reason : null,
+                columnBaseLeftX:
+                  typeof accidentalLayout?.columnBaseLeftX === 'number' &&
+                  Number.isFinite(accidentalLayout.columnBaseLeftX)
+                    ? accidentalLayout.columnBaseLeftX
+                    : null,
+                columnTargetLeftX:
+                  typeof accidentalLayout?.columnTargetLeftX === 'number' &&
+                  Number.isFinite(accidentalLayout.columnTargetLeftX)
+                    ? accidentalLayout.columnTargetLeftX
+                    : null,
+                columnAppliedDeltaX:
+                  typeof accidentalLayout?.columnAppliedDeltaX === 'number' &&
+                  Number.isFinite(accidentalLayout.columnAppliedDeltaX)
+                    ? accidentalLayout.columnAppliedDeltaX
+                    : null,
+                columnCountMeasured:
+                  typeof accidentalLayout?.columnCountMeasured === 'number' &&
+                  Number.isFinite(accidentalLayout.columnCountMeasured)
+                    ? accidentalLayout.columnCountMeasured
+                    : null,
+                leftMostMeasured:
+                  typeof accidentalLayout?.leftMostMeasured === 'number' &&
+                  Number.isFinite(accidentalLayout.leftMostMeasured)
+                    ? accidentalLayout.leftMostMeasured
+                    : null,
                 rightX: leftX,
                 leftX:
                   typeof accidentalLayout?.hitMinX === 'number' && Number.isFinite(accidentalLayout.hitMinX)

@@ -150,6 +150,13 @@ export type AccidentalLayout = {
   x: number
   y: number
   renderedAccidental: string
+  columnIndex?: number
+  reason?: string
+  columnBaseLeftX?: number
+  columnTargetLeftX?: number
+  columnAppliedDeltaX?: number
+  columnCountMeasured?: number
+  leftMostMeasured?: number
   visualLeftXExact?: number
   visualRightXExact?: number
   ownHeadLeftXExact?: number

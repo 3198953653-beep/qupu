@@ -10,6 +10,13 @@ type ImportFeedback = {
 
 type DumpAccidentalCoord = {
   keyIndex: number
+  columnIndex?: number | null
+  reason?: string | null
+  columnBaseLeftX?: number | null
+  columnTargetLeftX?: number | null
+  columnAppliedDeltaX?: number | null
+  columnCountMeasured?: number | null
+  leftMostMeasured?: number | null
   rightX: number
   leftX?: number | null
   visualRightX?: number | null
@@ -99,6 +106,16 @@ type FixtureScenario =
     }
   | {
       key: string
+      kind: 'accidental-columns'
+      onsetTicks: number
+      expectedMaxColumns: number
+      expectedPattern?: string
+      expectSameColumnPitchPairs?: Array<[string, string]>
+      expectDifferentColumnPitchPairs?: Array<[string, string]>
+      xmlText: string
+    }
+  | {
+      key: string
       kind: 'leading'
       targetPitch: string
       xmlText: string
@@ -132,6 +149,7 @@ type FixtureResult =
   | SameOnsetChordFixtureResult
   | PreviousBoundaryFixtureResult
   | ThresholdGapFixtureResult
+  | AccidentalColumnFixtureResult
 type SameOnsetChordFixtureResult = {
   key: string
   kind: 'same-onset-chord'
@@ -171,6 +189,17 @@ type ThresholdGapFixtureResult = {
   failureReasons: string[]
 }
 
+type AccidentalColumnFixtureResult = {
+  key: string
+  kind: 'accidental-columns'
+  onsetTicks: number
+  accidentalCount: number
+  columnCount: number
+  maxColumnIndex: number
+  passed: boolean
+  failureReasons: string[]
+}
+
 type DesktopTargetResult = {
   segmentKey: string
   finalGapPx: number
@@ -189,6 +218,24 @@ type DesktopKeySignatureResult = {
   failureReasons: string[]
 }
 
+type UserFileColumnSpreadResult = {
+  checkedOnsetCount: number
+  hardInfeasibleCount: number
+  conflictSameColumnCount: number
+  overlapConflictCount: number
+  passed: boolean
+  failureReasons: string[]
+}
+
+type UserFileHardConstraintResult = {
+  checkedAccidentalCount: number
+  ownGapViolationCount: number
+  blockerOverlapViolationCount: number
+  previousGapViolationCount: number
+  passed: boolean
+  failureReasons: string[]
+}
+
 type FinalReport = {
   generatedAt: string
   xmlPath: string
@@ -196,6 +243,8 @@ type FinalReport = {
   desktopKeySignatureCases: DesktopKeySignatureResult[]
   fixtureResults: FixtureResult[]
   userFileBeat2ToBeat3Boundary: PreviousBoundaryFixtureResult | null
+  userFileColumnSpread: UserFileColumnSpreadResult | null
+  userFileHardConstraints: UserFileHardConstraintResult | null
 }
 
 const DEV_HOST = '127.0.0.1'
@@ -203,6 +252,7 @@ const DEV_PORT = 4186
 const DEV_URL = `http://${DEV_HOST}:${DEV_PORT}`
 const DEFAULT_XML_PATH = String.raw`C:\Users\76743\Desktop\1234.musicxml`
 const ACCIDENTAL_SAFE_GAP_PX = 1
+const ACCIDENTAL_COLUMN_SAFE_GAP_PX = 1
 const ACCIDENTAL_OWN_HEAD_SAFE_GAP_PX = 2
 const ACCIDENTAL_BLOCKER_SAFE_GAP_PX = 0
 const SAME_ONSET_VISIBILITY_TOLERANCE_PX = 2
@@ -212,6 +262,7 @@ const APPROX_ACCIDENTAL_WIDTH_PX = 9
 const APPROX_NOTEHEAD_WIDTH_PX = 9
 const DEFAULT_LEADING_BARLINE_GAP_PX = 9.7
 const USER_FILE_BEAT_BOUNDARY_NAME = '二度变音记号问题.musicxml'
+const USER_FILE_COLUMN_SPREAD_NAME = '变音记号问题.musicxml'
 
 function durationTypeFromCode(durationCode: DurationCode): 'whole' | 'half' | 'quarter' | 'eighth' | '16th' | '32nd' {
   switch (durationCode) {
@@ -520,7 +571,7 @@ const FIXTURE_SCENARIOS: FixtureScenario[] = [
     targetPitch: 'B#4',
     requiredGapPx: 3,
     expectedRequest: 'positive',
-    maxRequestedExtraPx: 12,
+    maxRequestedExtraPx: 28,
     xmlText: buildFixtureXml([
       buildPitchNoteXml({ durationCode: '4', step: 'C', octave: 5, stem: 'down' }),
       buildChordPitchNoteXml({ durationCode: '4', step: 'D', octave: 5, stem: 'down' }),
@@ -539,7 +590,8 @@ const FIXTURE_SCENARIOS: FixtureScenario[] = [
     targetOnsetTicks: 32,
     targetPitch: 'B#4',
     requiredGapPx: 1,
-    expectedRequest: 'zero',
+    expectedRequest: 'positive',
+    maxRequestedExtraPx: 28,
     xmlText: buildFixtureXml([
       buildPitchNoteXml({ durationCode: '4', step: 'C', octave: 5, stem: 'down' }),
       buildChordPitchNoteXml({ durationCode: '4', step: 'D', octave: 5, stem: 'down' }),
@@ -549,6 +601,123 @@ const FIXTURE_SCENARIOS: FixtureScenario[] = [
       buildChordPitchNoteXml({ durationCode: '4', step: 'D', alter: 1, octave: 5, stem: 'down' }),
       buildPitchNoteXml({ durationCode: '4', step: 'C', octave: 5, stem: 'down' }),
       buildChordPitchNoteXml({ durationCode: '4', step: 'D', octave: 5, stem: 'down' }),
+    ]),
+  },
+  {
+    key: 'fixture-accidental-columns-interval-second',
+    kind: 'accidental-columns',
+    onsetTicks: 0,
+    expectedMaxColumns: 6,
+    expectedPattern: '12',
+    expectDifferentColumnPitchPairs: [['C#4', 'D#4']],
+    xmlText: buildFixtureXml([
+      buildPitchNoteXml({ durationCode: '4', step: 'C', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'D', alter: 1, octave: 4, stem: 'up' }),
+      ...buildRemainingTrebleRestsXml(24),
+    ]),
+  },
+  {
+    key: 'fixture-accidental-columns-interval-sixth',
+    kind: 'accidental-columns',
+    onsetTicks: 0,
+    expectedMaxColumns: 6,
+    expectedPattern: '12',
+    expectDifferentColumnPitchPairs: [['C#4', 'A#4']],
+    xmlText: buildFixtureXml([
+      buildPitchNoteXml({ durationCode: '4', step: 'C', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'A', alter: 1, octave: 4, stem: 'up' }),
+      ...buildRemainingTrebleRestsXml(24),
+    ]),
+  },
+  {
+    key: 'fixture-accidental-columns-interval-seventh-reuse',
+    kind: 'accidental-columns',
+    onsetTicks: 0,
+    expectedMaxColumns: 6,
+    expectSameColumnPitchPairs: [['C#4', 'B#4']],
+    xmlText: buildFixtureXml([
+      buildPitchNoteXml({ durationCode: '4', step: 'C', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'B', alter: 1, octave: 4, stem: 'up' }),
+      ...buildRemainingTrebleRestsXml(24),
+    ]),
+  },
+  {
+    key: 'fixture-accidental-columns-pattern-3',
+    kind: 'accidental-columns',
+    onsetTicks: 0,
+    expectedMaxColumns: 6,
+    expectedPattern: '213',
+    xmlText: buildFixtureXml([
+      buildPitchNoteXml({ durationCode: '4', step: 'C', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'D', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'E', alter: 1, octave: 4, stem: 'up' }),
+      ...buildRemainingTrebleRestsXml(24),
+    ]),
+  },
+  {
+    key: 'fixture-accidental-columns-pattern-4',
+    kind: 'accidental-columns',
+    onsetTicks: 0,
+    expectedMaxColumns: 6,
+    expectedPattern: '2314',
+    xmlText: buildFixtureXml([
+      buildPitchNoteXml({ durationCode: '4', step: 'C', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'D', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'E', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'F', alter: 1, octave: 4, stem: 'up' }),
+      ...buildRemainingTrebleRestsXml(24),
+    ]),
+  },
+  {
+    key: 'fixture-accidental-columns-pattern-5',
+    kind: 'accidental-columns',
+    onsetTicks: 0,
+    expectedMaxColumns: 6,
+    expectedPattern: '32415',
+    xmlText: buildFixtureXml([
+      buildPitchNoteXml({ durationCode: '4', step: 'C', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'D', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'E', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'F', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'G', alter: 1, octave: 4, stem: 'up' }),
+      ...buildRemainingTrebleRestsXml(24),
+    ]),
+  },
+  {
+    key: 'fixture-accidental-columns-pattern-6',
+    kind: 'accidental-columns',
+    onsetTicks: 0,
+    expectedMaxColumns: 6,
+    expectedPattern: '342516',
+    xmlText: buildFixtureXml([
+      buildPitchNoteXml({ durationCode: '4', step: 'C', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'D', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'E', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'F', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'G', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'A', alter: 1, octave: 4, stem: 'up' }),
+      ...buildRemainingTrebleRestsXml(24),
+    ]),
+  },
+  {
+    key: 'fixture-accidental-columns-overflow-8',
+    kind: 'accidental-columns',
+    onsetTicks: 0,
+    expectedMaxColumns: 6,
+    expectSameColumnPitchPairs: [
+      ['C#4', 'B#4'],
+      ['D#4', 'C#5'],
+    ],
+    xmlText: buildFixtureXml([
+      buildPitchNoteXml({ durationCode: '4', step: 'C', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'D', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'E', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'F', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'G', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'A', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'B', alter: 1, octave: 4, stem: 'up' }),
+      buildChordPitchNoteXml({ durationCode: '4', step: 'C', alter: 1, octave: 5, stem: 'up' }),
+      ...buildRemainingTrebleRestsXml(24),
     ]),
   },
 ]
@@ -688,6 +857,105 @@ async function dumpAllMeasureCoordinates(page: Page): Promise<MeasureDump> {
 
 function normalizePitch(pitch: string | null | undefined): string {
   return (pitch ?? '').replace(/[^A-Ga-g#bxB0-9-]/g, '').toUpperCase()
+}
+
+const DIATONIC_STEP_INDEX: Record<string, number> = {
+  C: 0,
+  D: 1,
+  E: 2,
+  F: 3,
+  G: 4,
+  A: 5,
+  B: 6,
+}
+
+type OnsetAccidentalEntry = {
+  pitch: string
+  keyIndex: number
+  columnIndex: number | null
+  reason: string | null
+  leftX: number
+  rightX: number
+}
+
+function resolveDiatonicOrdinalFromPitchText(pitch: string | null | undefined): number | null {
+  const normalized = normalizePitch(pitch)
+  if (!normalized) return null
+  const step = normalized[0]
+  const stepIndex = DIATONIC_STEP_INDEX[step]
+  if (!Number.isFinite(stepIndex)) return null
+  const octaveMatch = normalized.match(/-?\d+$/)
+  if (!octaveMatch) return null
+  const octave = Number(octaveMatch[0])
+  if (!Number.isFinite(octave)) return null
+  return octave * 7 + stepIndex
+}
+
+function resolveAccidentalBounds(accidental: DumpAccidentalCoord): { leftX: number; rightX: number } | null {
+  const leftX =
+    typeof accidental.accidentalVisualLeftXExact === 'number' && Number.isFinite(accidental.accidentalVisualLeftXExact)
+      ? accidental.accidentalVisualLeftXExact
+      : typeof accidental.leftX === 'number' && Number.isFinite(accidental.leftX)
+        ? accidental.leftX
+        : typeof accidental.rightX === 'number' && Number.isFinite(accidental.rightX)
+          ? accidental.rightX - APPROX_ACCIDENTAL_WIDTH_PX
+          : Number.NaN
+  const rightX =
+    typeof accidental.accidentalVisualRightXExact === 'number' && Number.isFinite(accidental.accidentalVisualRightXExact)
+      ? accidental.accidentalVisualRightXExact
+      : typeof accidental.visualRightX === 'number' && Number.isFinite(accidental.visualRightX)
+        ? accidental.visualRightX
+        : typeof accidental.rightX === 'number' && Number.isFinite(accidental.rightX)
+          ? accidental.rightX
+          : Number.isFinite(leftX)
+            ? leftX + APPROX_ACCIDENTAL_WIDTH_PX
+            : Number.NaN
+  if (!Number.isFinite(leftX) || !Number.isFinite(rightX)) return null
+  return {
+    leftX,
+    rightX,
+  }
+}
+
+function collectTrebleOnsetAccidentals(params: {
+  row: MeasureDumpRow
+  onsetTicks: number
+}): OnsetAccidentalEntry[] {
+  const { row, onsetTicks } = params
+  const entries: OnsetAccidentalEntry[] = []
+  row.notes
+    .filter(
+      (note) =>
+        note.staff === 'treble' &&
+        typeof note.onsetTicksInMeasure === 'number' &&
+        Math.round(note.onsetTicksInMeasure) === onsetTicks,
+    )
+    .forEach((note) => {
+      ;(note.accidentalCoords ?? []).forEach((accidental) => {
+        const bounds = resolveAccidentalBounds(accidental)
+        if (!bounds) return
+        const headPitch =
+          (note.noteHeads ?? []).find(
+            (head) =>
+              typeof head.keyIndex === 'number' && Number.isFinite(head.keyIndex) && head.keyIndex === accidental.keyIndex,
+          )?.pitch ?? note.pitch
+        const pitchText = typeof headPitch === 'string' ? headPitch : note.pitch
+        if (!pitchText) return
+        const columnIndex =
+          typeof accidental.columnIndex === 'number' && Number.isFinite(accidental.columnIndex)
+            ? Math.max(0, Math.round(accidental.columnIndex))
+            : null
+        entries.push({
+          pitch: pitchText,
+          keyIndex: accidental.keyIndex,
+          columnIndex,
+          reason: typeof accidental.reason === 'string' ? accidental.reason : null,
+          leftX: bounds.leftX,
+          rightX: bounds.rightX,
+        })
+      })
+    })
+  return entries
 }
 
 function assertFinite(value: number | null | undefined, label: string): number {
@@ -1387,6 +1655,380 @@ function analyzeThresholdGapFixtureScenario(params: {
   }
 }
 
+function analyzeAccidentalColumnFixtureScenario(params: {
+  row: MeasureDumpRow
+  scenario: Extract<FixtureScenario, { kind: 'accidental-columns' }>
+}): AccidentalColumnFixtureResult {
+  const { row, scenario } = params
+  const failures: string[] = []
+  const entries = collectTrebleOnsetAccidentals({
+    row,
+    onsetTicks: scenario.onsetTicks,
+  })
+  if (entries.length === 0) {
+    failures.push(`missing-onset-accidentals:${scenario.onsetTicks}`)
+  }
+  entries.forEach((entry) => {
+    if (typeof entry.columnIndex !== 'number' || !Number.isFinite(entry.columnIndex)) {
+      failures.push(`missing-column-index:${entry.pitch}[${entry.keyIndex}]`)
+    }
+  })
+
+  const columnIndices = entries
+    .map((entry) => entry.columnIndex)
+    .filter((columnIndex): columnIndex is number => typeof columnIndex === 'number' && Number.isFinite(columnIndex))
+  const distinctColumns = new Set<number>(columnIndices)
+  const maxColumnIndex =
+    columnIndices.length > 0 ? Math.max(...columnIndices) : Number.NaN
+  if (distinctColumns.size > scenario.expectedMaxColumns) {
+    failures.push(`column-count-too-large:${distinctColumns.size}>${scenario.expectedMaxColumns}`)
+  }
+
+  const entriesWithOrdinal = entries
+    .map((entry) => ({
+      ...entry,
+      diatonicOrdinal: resolveDiatonicOrdinalFromPitchText(entry.pitch),
+    }))
+    .filter((entry) => typeof entry.diatonicOrdinal === 'number' && Number.isFinite(entry.diatonicOrdinal))
+    .sort((left, right) => {
+      if (left.diatonicOrdinal !== right.diatonicOrdinal) {
+        return left.diatonicOrdinal - right.diatonicOrdinal
+      }
+      return left.keyIndex - right.keyIndex
+    })
+
+  if (scenario.expectedPattern) {
+    const expectedLength = scenario.expectedPattern.length
+    if (entriesWithOrdinal.length < expectedLength) {
+      failures.push(`pattern-entry-count-too-small:${entriesWithOrdinal.length}<${expectedLength}`)
+    } else {
+      const actualPattern = entriesWithOrdinal
+        .slice(0, expectedLength)
+        .map((entry) =>
+          typeof entry.columnIndex === 'number' && Number.isFinite(entry.columnIndex)
+            ? String(entry.columnIndex + 1)
+            : '?',
+        )
+        .join('')
+      if (actualPattern !== scenario.expectedPattern) {
+        failures.push(`column-pattern-mismatch:${actualPattern}!=${scenario.expectedPattern}`)
+      }
+    }
+  }
+
+  const resolveEntryByPitch = (pitch: string): (typeof entriesWithOrdinal)[number] | null => {
+    const normalizedPitch = normalizePitch(pitch)
+    return entriesWithOrdinal.find((entry) => normalizePitch(entry.pitch) === normalizedPitch) ?? null
+  }
+
+  scenario.expectSameColumnPitchPairs?.forEach(([leftPitch, rightPitch]) => {
+    const leftEntry = resolveEntryByPitch(leftPitch)
+    const rightEntry = resolveEntryByPitch(rightPitch)
+    if (!leftEntry || !rightEntry) {
+      failures.push(`same-column-pair-not-found:${leftPitch},${rightPitch}`)
+      return
+    }
+    if (leftEntry.columnIndex !== rightEntry.columnIndex) {
+      failures.push(
+        `same-column-violation:${leftPitch}[${leftEntry.columnIndex}]!=${rightPitch}[${rightEntry.columnIndex}]`,
+      )
+    }
+  })
+
+  scenario.expectDifferentColumnPitchPairs?.forEach(([leftPitch, rightPitch]) => {
+    const leftEntry = resolveEntryByPitch(leftPitch)
+    const rightEntry = resolveEntryByPitch(rightPitch)
+    if (!leftEntry || !rightEntry) {
+      failures.push(`different-column-pair-not-found:${leftPitch},${rightPitch}`)
+      return
+    }
+    if (leftEntry.columnIndex === rightEntry.columnIndex) {
+      failures.push(`different-column-violation:${leftPitch},${rightPitch}`)
+    }
+  })
+
+  for (let left = 0; left < entriesWithOrdinal.length; left += 1) {
+    const leftEntry = entriesWithOrdinal[left]!
+    for (let right = left + 1; right < entriesWithOrdinal.length; right += 1) {
+      const rightEntry = entriesWithOrdinal[right]!
+      const diatonicDistance = Math.abs(rightEntry.diatonicOrdinal - leftEntry.diatonicOrdinal)
+      if (diatonicDistance < 1 || diatonicDistance > 5) continue
+      if (leftEntry.columnIndex === rightEntry.columnIndex) {
+        failures.push(`conflict-same-column:${leftEntry.pitch},${rightEntry.pitch}`)
+        continue
+      }
+      const horizontalGap = Math.max(
+        rightEntry.leftX - leftEntry.rightX,
+        leftEntry.leftX - rightEntry.rightX,
+      )
+      if (horizontalGap < ACCIDENTAL_COLUMN_SAFE_GAP_PX - GAP_EPSILON_PX) {
+        failures.push(`conflict-gap-too-small:${leftEntry.pitch},${rightEntry.pitch}:${horizontalGap.toFixed(3)}`)
+      }
+    }
+  }
+
+  if (distinctColumns.size > 1) {
+    const distinctVisualLeftX = entriesWithOrdinal
+      .map((entry) => entry.leftX)
+      .sort((left, right) => left - right)
+      .reduce<number[]>((result, value) => {
+        const last = result[result.length - 1]
+        if (typeof last !== 'number' || Math.abs(value - last) > 0.5) {
+          result.push(value)
+        }
+        return result
+      }, [])
+    if (distinctVisualLeftX.length < 2) {
+      failures.push(`column-visual-collapse:${distinctVisualLeftX.length}<2`)
+    }
+  }
+
+  return {
+    key: scenario.key,
+    kind: 'accidental-columns',
+    onsetTicks: scenario.onsetTicks,
+    accidentalCount: entries.length,
+    columnCount: distinctColumns.size,
+    maxColumnIndex: Number.isFinite(maxColumnIndex) ? Number(maxColumnIndex.toFixed(3)) : Number.NaN,
+    passed: failures.length === 0,
+    failureReasons: failures,
+  }
+}
+
+function analyzeUserFileColumnSpread(params: {
+  dump: MeasureDump
+}): UserFileColumnSpreadResult {
+  const { dump } = params
+  const failures: string[] = []
+  let checkedOnsetCount = 0
+  let hardInfeasibleCount = 0
+  let conflictSameColumnCount = 0
+  let overlapConflictCount = 0
+
+  dump.rows.forEach((row) => {
+    const trebleOnsets = [...new Set(
+      row.notes
+        .filter(
+          (note) =>
+            note.staff === 'treble' &&
+            typeof note.onsetTicksInMeasure === 'number' &&
+            Number.isFinite(note.onsetTicksInMeasure),
+        )
+        .map((note) => Math.round(note.onsetTicksInMeasure as number)),
+    )]
+      .sort((left, right) => left - right)
+
+    trebleOnsets.forEach((onsetTicks) => {
+      const entries = collectTrebleOnsetAccidentals({
+        row,
+        onsetTicks,
+      })
+      if (entries.length <= 1) return
+      const distinctColumns = new Set(
+        entries
+          .map((entry) => entry.columnIndex)
+          .filter((columnIndex): columnIndex is number => typeof columnIndex === 'number' && Number.isFinite(columnIndex)),
+      )
+
+      const entriesWithOrdinal = entries
+        .map((entry) => ({
+          ...entry,
+          diatonicOrdinal: resolveDiatonicOrdinalFromPitchText(entry.pitch),
+        }))
+        .filter((entry) => typeof entry.diatonicOrdinal === 'number' && Number.isFinite(entry.diatonicOrdinal))
+      const hardInfeasibleTagged = entries.some((entry) => {
+        const reason = typeof entry.reason === 'string' ? entry.reason : ''
+        return reason.includes('hard-infeasible')
+      })
+      if (hardInfeasibleTagged) {
+        hardInfeasibleCount += 1
+        failures.push(`pair${row.pairIndex}-onset${onsetTicks}:hard-infeasible`)
+      }
+
+      for (let left = 0; left < entriesWithOrdinal.length; left += 1) {
+        const leftEntry = entriesWithOrdinal[left]!
+        for (let right = left + 1; right < entriesWithOrdinal.length; right += 1) {
+          const rightEntry = entriesWithOrdinal[right]!
+          const diatonicDistance = Math.abs(rightEntry.diatonicOrdinal - leftEntry.diatonicOrdinal)
+          if (diatonicDistance < 1 || diatonicDistance > 5) continue
+          if (leftEntry.columnIndex === rightEntry.columnIndex) {
+            conflictSameColumnCount += 1
+            failures.push(`pair${row.pairIndex}-onset${onsetTicks}:conflict-same-column:${leftEntry.pitch},${rightEntry.pitch}`)
+            continue
+          }
+          const horizontalOverlap =
+            leftEntry.rightX > rightEntry.leftX + GAP_EPSILON_PX &&
+            leftEntry.leftX < rightEntry.rightX - GAP_EPSILON_PX
+          if (horizontalOverlap) {
+            overlapConflictCount += 1
+            failures.push(`pair${row.pairIndex}-onset${onsetTicks}:conflict-overlap:${leftEntry.pitch},${rightEntry.pitch}`)
+          }
+        }
+      }
+
+      checkedOnsetCount += 1
+      if (distinctColumns.size > 1) {
+        const distinctVisualLeftX = entries
+          .map((entry) => entry.leftX)
+          .sort((left, right) => left - right)
+          .reduce<number[]>((result, value) => {
+            const last = result[result.length - 1]
+            if (typeof last !== 'number' || Math.abs(value - last) > 0.5) {
+              result.push(value)
+            }
+            return result
+          }, [])
+        const minimumDistinctVisualColumns = Math.min(distinctColumns.size, 3)
+        if (distinctVisualLeftX.length < minimumDistinctVisualColumns) {
+          failures.push(
+            `pair${row.pairIndex}-onset${onsetTicks}:visual-columns-${distinctVisualLeftX.length}<${minimumDistinctVisualColumns}`,
+          )
+        }
+      }
+    })
+  })
+
+  return {
+    checkedOnsetCount,
+    hardInfeasibleCount,
+    conflictSameColumnCount,
+    overlapConflictCount,
+    passed: failures.length === 0,
+    failureReasons: failures,
+  }
+}
+
+function analyzeUserFileHardConstraints(params: {
+  dump: MeasureDump
+}): UserFileHardConstraintResult {
+  const { dump } = params
+  const failures: string[] = []
+  let checkedAccidentalCount = 0
+  let ownGapViolationCount = 0
+  let blockerOverlapViolationCount = 0
+  let previousGapViolationCount = 0
+
+  const targetRows = (dump.rows ?? []).filter(
+    (row) => row && (row.pairIndex === 0 || row.pairIndex === 1),
+  )
+  targetRows.forEach((row) => {
+    const trebleNotes = row.notes.filter((note) => note.staff === 'treble')
+    const onsetTicksList = [...new Set(
+      trebleNotes
+        .map((note) =>
+          typeof note.onsetTicksInMeasure === 'number' && Number.isFinite(note.onsetTicksInMeasure)
+            ? Math.round(note.onsetTicksInMeasure)
+            : null,
+        )
+        .filter((value): value is number => typeof value === 'number' && Number.isFinite(value)),
+    )].sort((left, right) => left - right)
+    trebleNotes.forEach((note) => {
+        const noteHeads = note.noteHeads ?? []
+        const accidentalCoords = note.accidentalCoords ?? []
+        const noteOnsetTicks =
+          typeof note.onsetTicksInMeasure === 'number' && Number.isFinite(note.onsetTicksInMeasure)
+            ? Math.round(note.onsetTicksInMeasure)
+            : null
+        const previousOnsetTicks =
+          typeof noteOnsetTicks === 'number'
+            ? onsetTicksList.filter((onset) => onset < noteOnsetTicks).slice(-1)[0] ?? null
+            : null
+        const previousOnsetNotes =
+          typeof previousOnsetTicks === 'number'
+            ? trebleNotes.filter((candidate) => {
+                const candidateOnset =
+                  typeof candidate.onsetTicksInMeasure === 'number' && Number.isFinite(candidate.onsetTicksInMeasure)
+                    ? Math.round(candidate.onsetTicksInMeasure)
+                    : null
+                return candidateOnset === previousOnsetTicks
+              })
+            : []
+        const previousOccupiedRightX = previousOnsetNotes.reduce((maxValue, previousNote) => {
+          const occupiedRight = getNoteOccupiedRightX(previousNote)
+          if (occupiedRight === null || !Number.isFinite(occupiedRight)) return maxValue
+          return Math.max(maxValue, occupiedRight)
+        }, Number.NEGATIVE_INFINITY)
+        accidentalCoords.forEach((accidental) => {
+          checkedAccidentalCount += 1
+          const ownHead =
+            noteHeads.find(
+              (head) =>
+                typeof head.keyIndex === 'number' &&
+                Number.isFinite(head.keyIndex) &&
+                head.keyIndex === accidental.keyIndex,
+            ) ?? null
+          const ownPitch = ownHead?.pitch ?? note.pitch
+          const ownOrdinal = resolveDiatonicOrdinalFromPitchText(ownPitch)
+          const ownHeadLeftX = resolveNoteHeadLeftWithSanity(ownHead)
+          const accidentalBounds = resolveAccidentalBounds(accidental)
+
+          const ownGapMeasured =
+            typeof accidental.ownGapPxExact === 'number' && Number.isFinite(accidental.ownGapPxExact)
+              ? accidental.ownGapPxExact
+              : ownHeadLeftX !== null && accidentalBounds
+                ? ownHeadLeftX - accidentalBounds.rightX
+                : Number.NaN
+          if (Number.isFinite(ownGapMeasured) && ownGapMeasured < ACCIDENTAL_OWN_HEAD_SAFE_GAP_PX - GAP_EPSILON_PX) {
+            ownGapViolationCount += 1
+            failures.push(
+              `pair${row.pairIndex}-onset${note.onsetTicksInMeasure}-key${accidental.keyIndex}:own-gap-too-small:${Number(ownGapMeasured).toFixed(3)}`,
+            )
+          }
+
+          if (!accidentalBounds || typeof ownOrdinal !== 'number' || !Number.isFinite(ownOrdinal)) {
+            return
+          }
+
+          if (Number.isFinite(previousOccupiedRightX)) {
+            const previousGapPx = accidentalBounds.leftX - previousOccupiedRightX
+            if (previousGapPx < ACCIDENTAL_SAFE_GAP_PX - GAP_EPSILON_PX) {
+              previousGapViolationCount += 1
+              failures.push(
+                `pair${row.pairIndex}-onset${note.onsetTicksInMeasure}-key${accidental.keyIndex}:previous-gap-too-small:${previousGapPx.toFixed(3)}`,
+              )
+            }
+          }
+
+          noteHeads.forEach((blockerHead) => {
+            if (
+              typeof blockerHead.keyIndex === 'number' &&
+              Number.isFinite(blockerHead.keyIndex) &&
+              blockerHead.keyIndex === accidental.keyIndex
+            ) {
+              return
+            }
+            const blockerPitch = blockerHead.pitch
+            const blockerOrdinal = resolveDiatonicOrdinalFromPitchText(blockerPitch)
+            if (typeof blockerOrdinal !== 'number' || !Number.isFinite(blockerOrdinal)) return
+            const diatonicDistance = Math.abs(blockerOrdinal - ownOrdinal)
+            if (diatonicDistance < 1 || diatonicDistance > 5) return
+            const blockerLeftX = resolveNoteHeadLeftWithSanity(blockerHead)
+            const blockerRightX = resolveNoteHeadRightWithSanity(blockerHead)
+            if (blockerLeftX === null || blockerRightX === null) return
+            const horizontalOverlap =
+              accidentalBounds.rightX > blockerLeftX + GAP_EPSILON_PX &&
+              accidentalBounds.leftX < blockerRightX - GAP_EPSILON_PX
+            if (horizontalOverlap) {
+              blockerOverlapViolationCount += 1
+              failures.push(
+                `pair${row.pairIndex}-onset${note.onsetTicksInMeasure}-key${accidental.keyIndex}:blocker-overlap:${ownPitch},${blockerPitch}`,
+              )
+            }
+          })
+        })
+      })
+  })
+
+  return {
+    checkedAccidentalCount,
+    ownGapViolationCount,
+    blockerOverlapViolationCount,
+    previousGapViolationCount,
+    passed: failures.length === 0,
+    failureReasons: failures,
+  }
+}
+
 function analyzeFixtureScenario(row: MeasureDumpRow, scenario: FixtureScenario): FixtureResult {
   if (scenario.kind === 'leading') {
     return analyzeLeadingFixtureScenario({
@@ -1396,6 +2038,12 @@ function analyzeFixtureScenario(row: MeasureDumpRow, scenario: FixtureScenario):
   }
   if (scenario.kind === 'threshold-gap') {
     return analyzeThresholdGapFixtureScenario({
+      row,
+      scenario,
+    })
+  }
+  if (scenario.kind === 'accidental-columns') {
+    return analyzeAccidentalColumnFixtureScenario({
       row,
       scenario,
     })
@@ -1577,6 +2225,18 @@ async function main(): Promise<void> {
           },
         })
       : null
+    const isUserFileColumnSpreadTarget =
+      path.basename(path.resolve(xmlPath)).toLowerCase() === USER_FILE_COLUMN_SPREAD_NAME.toLowerCase()
+    const userFileColumnSpread = isUserFileColumnSpreadTarget
+      ? analyzeUserFileColumnSpread({
+          dump,
+        })
+      : null
+    const userFileHardConstraints = isUserFileColumnSpreadTarget
+      ? analyzeUserFileHardConstraints({
+          dump,
+        })
+      : null
 
     const failedDesktopCases = [
       ...(desktopTarget.passed ? [] : [`desktop-target:${desktopTarget.failureReasons.join(',')}`]),
@@ -1585,6 +2245,12 @@ async function main(): Promise<void> {
         .map((entry) => `desktop-${entry.pitch}:${entry.failureReasons.join(',')}`),
       ...(userFileBeat2ToBeat3Boundary && !userFileBeat2ToBeat3Boundary.passed
         ? [`user-file-beat2-to-beat3:${userFileBeat2ToBeat3Boundary.failureReasons.join(',')}`]
+        : []),
+      ...(userFileColumnSpread && !userFileColumnSpread.passed
+        ? [`user-file-column-spread:${userFileColumnSpread.failureReasons.join(',')}`]
+        : []),
+      ...(userFileHardConstraints && !userFileHardConstraints.passed
+        ? [`user-file-hard-constraints:${userFileHardConstraints.failureReasons.join(',')}`]
         : []),
     ]
     const failedFixtures = fixtureResults
@@ -1622,6 +2288,8 @@ async function main(): Promise<void> {
       desktopKeySignatureCases,
       fixtureResults,
       userFileBeat2ToBeat3Boundary,
+      userFileColumnSpread,
+      userFileHardConstraints,
     }
 
     console.log(JSON.stringify(report, null, 2))

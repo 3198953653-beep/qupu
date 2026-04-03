@@ -165,7 +165,8 @@ const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
 const COLLISION_RIGHT_BODY_PADDING_PX = 1.0
 const ACCIDENTAL_COLLISION_SAFE_GAP_PX = 1
 const ACCIDENTAL_OWN_HEAD_CLEARANCE_PX = 2
-const ACCIDENTAL_SPACING_OUTLIER_EXTRA_GAP_PX = 4
+const ACCIDENTAL_COLUMN_SAFE_GAP_PX = 1
+const MAX_ACCIDENTAL_COLUMNS = 6
 const STRUCTURAL_RESERVE_EPSILON_PX = 0.0001
 const MAX_SECOND_CHORD_STRUCTURAL_COMPENSATION_PX = 12
 const BASE_GAP_UNIT_PX = 3.5
@@ -173,6 +174,15 @@ const DEFAULT_MIN_MEASURE_WIDTH_PX = 120
 const MIN_GAP_BEATS = 1 / 32
 const GAP_GAMMA = 0.7
 const GAP_BASE_WEIGHT = 0.45
+const DIATONIC_STEP_INDEX: Record<string, number> = {
+  C: 0,
+  D: 1,
+  E: 2,
+  F: 3,
+  G: 4,
+  A: 5,
+  B: 6,
+}
 
 export type TimeAxisSpacingConfig = {
   minGapBeats: number
@@ -341,6 +351,21 @@ function getRenderedChordMaxHeadLeftX(vexNote: StaveNote): number | null {
   return Number.isFinite(maxHeadLeftX) ? maxHeadLeftX : null
 }
 
+function resolvePitchDiatonicOrdinalFromKeyText(keyText: string | null | undefined): number | null {
+  if (!keyText) return null
+  const match = /^([a-gA-G])(?:[#bxn]*)?\/(-?\d+)$/.exec(keyText.trim())
+  if (!match) return null
+  const stepIndex = DIATONIC_STEP_INDEX[match[1]!.toUpperCase()]
+  const octave = Number.parseInt(match[2]!, 10)
+  if (!Number.isFinite(stepIndex) || !Number.isFinite(octave)) return null
+  return octave * 7 + stepIndex
+}
+
+function isAccidentalConflictByDiatonicDistance(leftOrdinal: number, rightOrdinal: number): boolean {
+  const distance = Math.abs(leftOrdinal - rightOrdinal)
+  return distance >= 1 && distance <= 5
+}
+
 function getRenderedNoteAccidentalLeftForSpacing(vexNote: StaveNote): number | null {
   const noteBaseX = getRenderedNoteVisualX(vexNote)
   const stableNoteBaseX = Number.isFinite(noteBaseX) ? noteBaseX : null
@@ -350,7 +375,14 @@ function getRenderedNoteAccidentalLeftForSpacing(vexNote: StaveNote): number | n
   const accidentalModifiers = vexNote
     .getModifiersByType(Accidental.CATEGORY)
     .map((modifier) => modifier as Accidental)
-  const hasSingleAccidental = accidentalModifiers.length === 1
+  const keyTexts = vexNote.getKeys?.() ?? []
+  const spacingNodes: Array<{
+    renderedIndex: number
+    width: number
+    actualLeftX: number | null
+    preferredLeftX: number | null
+    diatonicOrdinal: number | null
+  }> = []
   let accidentalMinX = Number.POSITIVE_INFINITY
   accidentalModifiers.forEach((accidental) => {
     const renderedIndex = accidental.getIndex()
@@ -396,17 +428,10 @@ function getRenderedNoteAccidentalLeftForSpacing(vexNote: StaveNote): number | n
       candidateLeftX !== null &&
       typeof stableOwnHeadLeftX === 'number' &&
       Number.isFinite(stableOwnHeadLeftX) &&
-      preferredLeftX !== null
+      preferredLeftX !== null &&
+      accidentalModifiers.length === 1
     ) {
-      if (hasSingleAccidental) {
-        candidateLeftX = Math.max(candidateLeftX, preferredLeftX)
-      } else {
-        const ownGapPx = stableOwnHeadLeftX - (candidateLeftX + accidentalWidth)
-        const outlierGapThresholdPx = ACCIDENTAL_OWN_HEAD_CLEARANCE_PX + ACCIDENTAL_SPACING_OUTLIER_EXTRA_GAP_PX
-        if (ownGapPx > outlierGapThresholdPx) {
-          candidateLeftX = preferredLeftX
-        }
-      }
+      candidateLeftX = Math.max(candidateLeftX, preferredLeftX)
     } else if (candidateLeftX === null && preferredLeftX !== null) {
       candidateLeftX = preferredLeftX
     }
@@ -414,8 +439,125 @@ function getRenderedNoteAccidentalLeftForSpacing(vexNote: StaveNote): number | n
     if (candidateLeftX !== null && Number.isFinite(candidateLeftX)) {
       accidentalMinX = Math.min(accidentalMinX, candidateLeftX)
     }
+
+    spacingNodes.push({
+      renderedIndex,
+      width: accidentalWidth > 0 ? accidentalWidth : 10,
+      actualLeftX:
+        typeof accidentalLeftX === 'number' && Number.isFinite(accidentalLeftX) ? accidentalLeftX : null,
+      preferredLeftX:
+        typeof preferredLeftX === 'number' && Number.isFinite(preferredLeftX) ? preferredLeftX : null,
+      diatonicOrdinal: resolvePitchDiatonicOrdinalFromKeyText(keyTexts[renderedIndex] ?? null),
+    })
   })
-  return Number.isFinite(accidentalMinX) ? accidentalMinX : null
+  if (!Number.isFinite(accidentalMinX)) {
+    return null
+  }
+  if (spacingNodes.length <= 1) {
+    return accidentalMinX
+  }
+
+  const orderedNodeIndices = spacingNodes
+    .map((_, index) => index)
+    .sort((left, right) => {
+      const leftNode = spacingNodes[left]!
+      const rightNode = spacingNodes[right]!
+      const leftOrdinal = leftNode.diatonicOrdinal
+      const rightOrdinal = rightNode.diatonicOrdinal
+      if (
+        typeof leftOrdinal === 'number' &&
+        Number.isFinite(leftOrdinal) &&
+        typeof rightOrdinal === 'number' &&
+        Number.isFinite(rightOrdinal) &&
+        leftOrdinal !== rightOrdinal
+      ) {
+        return leftOrdinal - rightOrdinal
+      }
+      return leftNode.renderedIndex - rightNode.renderedIndex
+    })
+
+  const assignedColumnByNodeIndex = new Map<number, number>()
+  orderedNodeIndices.forEach((nodeIndex, orderedIndex) => {
+    const node = spacingNodes[nodeIndex]!
+    const blockedColumns = new Set<number>()
+    for (let previousOrderIndex = 0; previousOrderIndex < orderedIndex; previousOrderIndex += 1) {
+      const previousNodeIndex = orderedNodeIndices[previousOrderIndex]!
+      const previousNode = spacingNodes[previousNodeIndex]!
+      const previousColumn = assignedColumnByNodeIndex.get(previousNodeIndex)
+      if (typeof previousColumn !== 'number' || !Number.isFinite(previousColumn)) continue
+      const currentOrdinal = node.diatonicOrdinal
+      const previousOrdinal = previousNode.diatonicOrdinal
+      const conflict =
+        typeof currentOrdinal === 'number' &&
+        Number.isFinite(currentOrdinal) &&
+        typeof previousOrdinal === 'number' &&
+        Number.isFinite(previousOrdinal)
+          ? isAccidentalConflictByDiatonicDistance(currentOrdinal, previousOrdinal)
+          : true
+      if (conflict) {
+        blockedColumns.add(previousColumn)
+      }
+    }
+    let selectedColumn: number | null = null
+    for (let column = 0; column < MAX_ACCIDENTAL_COLUMNS; column += 1) {
+      if (blockedColumns.has(column)) continue
+      selectedColumn = column
+      break
+    }
+    if (selectedColumn === null) {
+      selectedColumn = 0
+    }
+    assignedColumnByNodeIndex.set(nodeIndex, selectedColumn)
+  })
+
+  const widthByColumn = new Map<number, number>()
+  const preferredLeftByColumn = new Map<number, number>()
+  assignedColumnByNodeIndex.forEach((columnIndex, nodeIndex) => {
+    const node = spacingNodes[nodeIndex]!
+    const width = Number.isFinite(node.width) && node.width > 0 ? node.width : 10
+    const preferredLeft =
+      typeof node.preferredLeftX === 'number' && Number.isFinite(node.preferredLeftX)
+        ? node.preferredLeftX
+        : typeof node.actualLeftX === 'number' && Number.isFinite(node.actualLeftX)
+          ? node.actualLeftX
+          : Number.POSITIVE_INFINITY
+    widthByColumn.set(columnIndex, Math.max(widthByColumn.get(columnIndex) ?? 0, width))
+    preferredLeftByColumn.set(
+      columnIndex,
+      Math.min(preferredLeftByColumn.get(columnIndex) ?? Number.POSITIVE_INFINITY, preferredLeft),
+    )
+  })
+
+  const orderedColumns = [...widthByColumn.keys()].sort((left, right) => left - right)
+  const columnLeftByIndex = new Map<number, number>()
+  for (let orderIndex = orderedColumns.length - 1; orderIndex >= 0; orderIndex -= 1) {
+    const columnIndex = orderedColumns[orderIndex]!
+    const preferredLeft = preferredLeftByColumn.get(columnIndex) ?? Number.POSITIVE_INFINITY
+    const rightNeighbor = orderIndex < orderedColumns.length - 1 ? orderedColumns[orderIndex + 1] : null
+    const rightNeighborLeftX =
+      typeof rightNeighbor === 'number' ? columnLeftByIndex.get(rightNeighbor) : undefined
+    const rightConstraint =
+      typeof rightNeighborLeftX === 'number' && Number.isFinite(rightNeighborLeftX)
+        ? rightNeighborLeftX - (widthByColumn.get(columnIndex) ?? 10) - ACCIDENTAL_COLUMN_SAFE_GAP_PX
+        : Number.POSITIVE_INFINITY
+    let columnLeftX = Math.min(preferredLeft, rightConstraint)
+    if (!Number.isFinite(columnLeftX)) {
+      columnLeftX = Number.isFinite(preferredLeft) ? preferredLeft : rightConstraint
+    }
+    if (!Number.isFinite(columnLeftX)) {
+      columnLeftX = accidentalMinX
+    }
+    columnLeftByIndex.set(columnIndex, columnLeftX)
+  }
+
+  const estimatedLeftMost = [...columnLeftByIndex.values()].reduce(
+    (minValue, value) => Math.min(minValue, value),
+    Number.POSITIVE_INFINITY,
+  )
+  if (Number.isFinite(estimatedLeftMost)) {
+    return Math.min(accidentalMinX, estimatedLeftMost)
+  }
+  return accidentalMinX
 }
 
 function getNoteRawReserveExtents(vexNote: StaveNote): {
@@ -1714,21 +1856,12 @@ function resolveCollisionDrivenOverlay(params: {
         Number.isFinite(accidentalReserveInsetPx)
           ? nextBaseX - accidentalReserveInsetPx
           : null
+      const useMeasuredLeftMostForSpacing = nextBlocker.accidentalCount > 1
       let accidentalLeftX =
         typeof projectedNextBounds.accidentalLeftForSpacing === 'number' &&
         Number.isFinite(projectedNextBounds.accidentalLeftForSpacing)
           ? projectedNextBounds.accidentalLeftForSpacing
           : projectedNextBounds.accidentalLeftX
-      if (
-        typeof accidentalLeftByReserve === 'number' &&
-        Number.isFinite(accidentalLeftByReserve) &&
-        typeof accidentalLeftX === 'number' &&
-        Number.isFinite(accidentalLeftX)
-      ) {
-        accidentalLeftX = Math.max(accidentalLeftX, accidentalLeftByReserve)
-      } else if (typeof accidentalLeftByReserve === 'number' && Number.isFinite(accidentalLeftByReserve)) {
-        accidentalLeftX = accidentalLeftByReserve
-      }
       const accidentalLeftByAnchor =
         isSecondChordSensitiveSegment &&
         typeof nextBaseX === 'number' &&
@@ -1739,15 +1872,35 @@ function resolveCollisionDrivenOverlay(params: {
             Math.min(12, Math.max(6, projectedNextBounds.minAccidentalWidthPx)) -
             ACCIDENTAL_OWN_HEAD_CLEARANCE_PX
           : null
-      if (
-        typeof accidentalLeftByAnchor === 'number' &&
-        Number.isFinite(accidentalLeftByAnchor) &&
-        typeof accidentalLeftX === 'number' &&
-        Number.isFinite(accidentalLeftX)
+      if (!useMeasuredLeftMostForSpacing) {
+        if (
+          typeof accidentalLeftByReserve === 'number' &&
+          Number.isFinite(accidentalLeftByReserve) &&
+          typeof accidentalLeftX === 'number' &&
+          Number.isFinite(accidentalLeftX)
+        ) {
+          accidentalLeftX = Math.max(accidentalLeftX, accidentalLeftByReserve)
+        } else if (typeof accidentalLeftByReserve === 'number' && Number.isFinite(accidentalLeftByReserve)) {
+          accidentalLeftX = accidentalLeftByReserve
+        }
+        if (
+          typeof accidentalLeftByAnchor === 'number' &&
+          Number.isFinite(accidentalLeftByAnchor) &&
+          typeof accidentalLeftX === 'number' &&
+          Number.isFinite(accidentalLeftX)
+        ) {
+          accidentalLeftX = Math.max(accidentalLeftX, accidentalLeftByAnchor)
+        } else if (typeof accidentalLeftByAnchor === 'number' && Number.isFinite(accidentalLeftByAnchor)) {
+          accidentalLeftX = accidentalLeftByAnchor
+        }
+      } else if (
+        !(typeof accidentalLeftX === 'number' && Number.isFinite(accidentalLeftX))
       ) {
-        accidentalLeftX = Math.max(accidentalLeftX, accidentalLeftByAnchor)
-      } else if (typeof accidentalLeftByAnchor === 'number' && Number.isFinite(accidentalLeftByAnchor)) {
-        accidentalLeftX = accidentalLeftByAnchor
+        if (typeof accidentalLeftByReserve === 'number' && Number.isFinite(accidentalLeftByReserve)) {
+          accidentalLeftX = accidentalLeftByReserve
+        } else if (typeof accidentalLeftByAnchor === 'number' && Number.isFinite(accidentalLeftByAnchor)) {
+          accidentalLeftX = accidentalLeftByAnchor
+        }
       }
       if (typeof accidentalLeftX !== 'number' || !Number.isFinite(accidentalLeftX)) continue
       const previousOccupiedRightX =
