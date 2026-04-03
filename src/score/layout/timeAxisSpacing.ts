@@ -424,15 +424,7 @@ function getRenderedNoteAccidentalLeftForSpacing(vexNote: StaveNote): number | n
 
     let candidateLeftX: number | null =
       typeof accidentalLeftX === 'number' && Number.isFinite(accidentalLeftX) ? accidentalLeftX : null
-    if (
-      candidateLeftX !== null &&
-      typeof stableOwnHeadLeftX === 'number' &&
-      Number.isFinite(stableOwnHeadLeftX) &&
-      preferredLeftX !== null &&
-      accidentalModifiers.length === 1
-    ) {
-      candidateLeftX = Math.max(candidateLeftX, preferredLeftX)
-    } else if (candidateLeftX === null && preferredLeftX !== null) {
+    if (candidateLeftX === null && preferredLeftX !== null) {
       candidateLeftX = preferredLeftX
     }
 
@@ -1856,12 +1848,14 @@ function resolveCollisionDrivenOverlay(params: {
         Number.isFinite(accidentalReserveInsetPx)
           ? nextBaseX - accidentalReserveInsetPx
           : null
-      const useMeasuredLeftMostForSpacing = nextBlocker.accidentalCount > 1
       let accidentalLeftX =
         typeof projectedNextBounds.accidentalLeftForSpacing === 'number' &&
         Number.isFinite(projectedNextBounds.accidentalLeftForSpacing)
           ? projectedNextBounds.accidentalLeftForSpacing
-          : projectedNextBounds.accidentalLeftX
+          : typeof projectedNextBounds.accidentalLeftX === 'number' &&
+              Number.isFinite(projectedNextBounds.accidentalLeftX)
+            ? projectedNextBounds.accidentalLeftX
+            : null
       const accidentalLeftByAnchor =
         isSecondChordSensitiveSegment &&
         typeof nextBaseX === 'number' &&
@@ -1872,30 +1866,7 @@ function resolveCollisionDrivenOverlay(params: {
             Math.min(12, Math.max(6, projectedNextBounds.minAccidentalWidthPx)) -
             ACCIDENTAL_OWN_HEAD_CLEARANCE_PX
           : null
-      if (!useMeasuredLeftMostForSpacing) {
-        if (
-          typeof accidentalLeftByReserve === 'number' &&
-          Number.isFinite(accidentalLeftByReserve) &&
-          typeof accidentalLeftX === 'number' &&
-          Number.isFinite(accidentalLeftX)
-        ) {
-          accidentalLeftX = Math.max(accidentalLeftX, accidentalLeftByReserve)
-        } else if (typeof accidentalLeftByReserve === 'number' && Number.isFinite(accidentalLeftByReserve)) {
-          accidentalLeftX = accidentalLeftByReserve
-        }
-        if (
-          typeof accidentalLeftByAnchor === 'number' &&
-          Number.isFinite(accidentalLeftByAnchor) &&
-          typeof accidentalLeftX === 'number' &&
-          Number.isFinite(accidentalLeftX)
-        ) {
-          accidentalLeftX = Math.max(accidentalLeftX, accidentalLeftByAnchor)
-        } else if (typeof accidentalLeftByAnchor === 'number' && Number.isFinite(accidentalLeftByAnchor)) {
-          accidentalLeftX = accidentalLeftByAnchor
-        }
-      } else if (
-        !(typeof accidentalLeftX === 'number' && Number.isFinite(accidentalLeftX))
-      ) {
+      if (!(typeof accidentalLeftX === 'number' && Number.isFinite(accidentalLeftX))) {
         if (typeof accidentalLeftByReserve === 'number' && Number.isFinite(accidentalLeftByReserve)) {
           accidentalLeftX = accidentalLeftByReserve
         } else if (typeof accidentalLeftByAnchor === 'number' && Number.isFinite(accidentalLeftByAnchor)) {
@@ -1908,12 +1879,18 @@ function resolveCollisionDrivenOverlay(params: {
           ? projectedPreviousBounds.occupiedRightX
           : projectedPreviousBounds.visualRightX
       const visibleGapPx = accidentalLeftX - previousOccupiedRightX
-      const structuralRightCompensationPx = isSecondChordSensitiveSegment
+      const baseStructuralRightCompensationPx = isSecondChordSensitiveSegment
         ? Math.min(
             MAX_SECOND_CHORD_STRUCTURAL_COMPENSATION_PX,
             Math.max(0, previousStructuralMetrics?.rawRightReservePx ?? 0),
           )
         : 0
+      // Compensation can relax over-pessimistic structural reserve, but it must never
+      // turn an actual overlap into an apparently-safe positive gap.
+      const structuralRightCompensationPx = Math.min(
+        baseStructuralRightCompensationPx,
+        Math.max(0, -visibleGapPx),
+      )
       const effectiveVisibleGapPx = visibleGapPx + structuralRightCompensationPx
       const currentVisibleGapPx = accidentalSegmentVisibleGaps[slotIndex]?.[staff]
       accidentalSegmentVisibleGaps[slotIndex]![staff] =

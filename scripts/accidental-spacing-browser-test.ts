@@ -236,6 +236,14 @@ type UserFileHardConstraintResult = {
   failureReasons: string[]
 }
 
+type UserFileNaturalBoundaryResult = {
+  checkedSegmentCount: number
+  previousGapViolationCount: number
+  missingRequestCount: number
+  passed: boolean
+  failureReasons: string[]
+}
+
 type FinalReport = {
   generatedAt: string
   xmlPath: string
@@ -245,6 +253,7 @@ type FinalReport = {
   userFileBeat2ToBeat3Boundary: PreviousBoundaryFixtureResult | null
   userFileColumnSpread: UserFileColumnSpreadResult | null
   userFileHardConstraints: UserFileHardConstraintResult | null
+  userFileNaturalBoundary: UserFileNaturalBoundaryResult | null
 }
 
 const DEV_HOST = '127.0.0.1'
@@ -263,6 +272,7 @@ const APPROX_NOTEHEAD_WIDTH_PX = 9
 const DEFAULT_LEADING_BARLINE_GAP_PX = 9.7
 const USER_FILE_BEAT_BOUNDARY_NAME = '二度变音记号问题.musicxml'
 const USER_FILE_COLUMN_SPREAD_NAME = '变音记号问题.musicxml'
+const USER_FILE_NATURAL_BOUNDARY_NAME = '变音记号问题2.musicxml'
 
 function durationTypeFromCode(durationCode: DurationCode): 'whole' | 'half' | 'quarter' | 'eighth' | '16th' | '32nd' {
   switch (durationCode) {
@@ -2029,6 +2039,107 @@ function analyzeUserFileHardConstraints(params: {
   }
 }
 
+function analyzeUserFileNaturalBoundary(params: {
+  dump: MeasureDump
+}): UserFileNaturalBoundaryResult {
+  const { dump } = params
+  const failures: string[] = []
+  let checkedSegmentCount = 0
+  let previousGapViolationCount = 0
+  let missingRequestCount = 0
+
+  const targetRows = (dump.rows ?? []).filter((row) => row && row.pairIndex === 2)
+  targetRows.forEach((row) => {
+    const trebleNotes = row.notes.filter((note) => note.staff === 'treble')
+    const onsetTicksList = [...new Set(
+      trebleNotes
+        .map((note) =>
+          typeof note.onsetTicksInMeasure === 'number' && Number.isFinite(note.onsetTicksInMeasure)
+            ? Math.round(note.onsetTicksInMeasure)
+            : null,
+        )
+        .filter((value): value is number => typeof value === 'number' && Number.isFinite(value)),
+    )].sort((left, right) => left - right)
+    const segmentsByKey = buildSegmentsByKey(row)
+    ;[32, 48].forEach((targetOnsetTicks) => {
+      const targetNote =
+        trebleNotes.find((note) => {
+          if (!(typeof note.onsetTicksInMeasure === 'number' && Number.isFinite(note.onsetTicksInMeasure))) {
+            return false
+          }
+          return Math.round(note.onsetTicksInMeasure) === targetOnsetTicks
+        }) ?? null
+      if (!targetNote) {
+        failures.push(`pair${row.pairIndex}-onset${targetOnsetTicks}:missing-target-note`)
+        return
+      }
+
+      const previousOnsetTicks = onsetTicksList.filter((onsetTicks) => onsetTicks < targetOnsetTicks).slice(-1)[0] ?? null
+      if (typeof previousOnsetTicks !== 'number' || !Number.isFinite(previousOnsetTicks)) {
+        failures.push(`pair${row.pairIndex}-onset${targetOnsetTicks}:missing-previous-onset`)
+        return
+      }
+
+      const previousOnsetNotes = trebleNotes.filter((note) => {
+        if (!(typeof note.onsetTicksInMeasure === 'number' && Number.isFinite(note.onsetTicksInMeasure))) {
+          return false
+        }
+        return Math.round(note.onsetTicksInMeasure) === previousOnsetTicks
+      })
+      const previousOccupiedRightX = previousOnsetNotes.reduce((maxValue, previousNote) => {
+        const occupiedRightX = getNoteOccupiedRightX(previousNote)
+        if (typeof occupiedRightX !== 'number' || !Number.isFinite(occupiedRightX)) return maxValue
+        return Math.max(maxValue, occupiedRightX)
+      }, Number.NEGATIVE_INFINITY)
+      if (!(typeof previousOccupiedRightX === 'number' && Number.isFinite(previousOccupiedRightX))) {
+        failures.push(`pair${row.pairIndex}-onset${targetOnsetTicks}:missing-previous-occupied-right`)
+        return
+      }
+
+      const targetAccidentalLeftX = getAccidentalLeftX(targetNote)
+      if (!(typeof targetAccidentalLeftX === 'number' && Number.isFinite(targetAccidentalLeftX))) {
+        failures.push(`pair${row.pairIndex}-onset${targetOnsetTicks}:missing-target-accidental-left`)
+        return
+      }
+
+      checkedSegmentCount += 1
+      const previousGapPx = targetAccidentalLeftX - previousOccupiedRightX
+      if (previousGapPx < ACCIDENTAL_SAFE_GAP_PX - GAP_EPSILON_PX) {
+        previousGapViolationCount += 1
+        failures.push(`pair${row.pairIndex}-onset${targetOnsetTicks}:previous-gap-too-small:${previousGapPx.toFixed(3)}`)
+      }
+
+      const segmentKey = `${previousOnsetTicks}-${targetOnsetTicks}`
+      const segment = segmentsByKey.get(segmentKey)
+      if (!segment) {
+        failures.push(`pair${row.pairIndex}-segment${segmentKey}:missing-spacing-segment`)
+        return
+      }
+      const accidentalRequestedExtraPx =
+        typeof segment.accidentalRequestedExtraPx === 'number' && Number.isFinite(segment.accidentalRequestedExtraPx)
+          ? segment.accidentalRequestedExtraPx
+          : Number.NaN
+      if (!Number.isFinite(accidentalRequestedExtraPx)) {
+        failures.push(`pair${row.pairIndex}-segment${segmentKey}:invalid-requested-extra`)
+        return
+      }
+      const needsExtraRequest = previousGapPx < ACCIDENTAL_SAFE_GAP_PX - GAP_EPSILON_PX
+      if (needsExtraRequest && !(accidentalRequestedExtraPx > GAP_EPSILON_PX)) {
+        missingRequestCount += 1
+        failures.push(`pair${row.pairIndex}-segment${segmentKey}:missing-requested-extra:${accidentalRequestedExtraPx.toFixed(3)}`)
+      }
+    })
+  })
+
+  return {
+    checkedSegmentCount,
+    previousGapViolationCount,
+    missingRequestCount,
+    passed: failures.length === 0,
+    failureReasons: failures,
+  }
+}
+
 function analyzeFixtureScenario(row: MeasureDumpRow, scenario: FixtureScenario): FixtureResult {
   if (scenario.kind === 'leading') {
     return analyzeLeadingFixtureScenario({
@@ -2237,6 +2348,13 @@ async function main(): Promise<void> {
           dump,
         })
       : null
+    const isUserFileNaturalBoundaryTarget =
+      path.basename(path.resolve(xmlPath)).toLowerCase() === USER_FILE_NATURAL_BOUNDARY_NAME.toLowerCase()
+    const userFileNaturalBoundary = isUserFileNaturalBoundaryTarget
+      ? analyzeUserFileNaturalBoundary({
+          dump,
+        })
+      : null
 
     const failedDesktopCases = [
       ...(desktopTarget.passed ? [] : [`desktop-target:${desktopTarget.failureReasons.join(',')}`]),
@@ -2251,6 +2369,9 @@ async function main(): Promise<void> {
         : []),
       ...(userFileHardConstraints && !userFileHardConstraints.passed
         ? [`user-file-hard-constraints:${userFileHardConstraints.failureReasons.join(',')}`]
+        : []),
+      ...(userFileNaturalBoundary && !userFileNaturalBoundary.passed
+        ? [`user-file-natural-boundary:${userFileNaturalBoundary.failureReasons.join(',')}`]
         : []),
     ]
     const failedFixtures = fixtureResults
@@ -2290,6 +2411,7 @@ async function main(): Promise<void> {
       userFileBeat2ToBeat3Boundary,
       userFileColumnSpread,
       userFileHardConstraints,
+      userFileNaturalBoundary,
     }
 
     console.log(JSON.stringify(report, null, 2))
