@@ -98,6 +98,11 @@ const CHORD_LABEL_LEFT_INSET_PX = 6
 const SCORE_STAGE_BORDER_PX = 1
 const THREE_PART_MUSIC_XML_PATH = 'C:\\Users\\76743\\Desktop\\三个声部.musicxml'
 const THREE_PART_D_MAJOR_MUSIC_XML_PATH = 'C:\\Users\\76743\\Desktop\\三个声部（D调）.musicxml'
+type ChordToneSpec = {
+  step: string
+  octave: number
+  alter?: number
+}
 
 function assertChordDegreeConversionExamples(): void {
   const cases = [
@@ -189,6 +194,92 @@ function buildDecorationChangeImportXml(): string {
       { beats: 2, beatType: 2 },
     ],
   })
+}
+
+function buildSingleChordMarkerImportXml(tones: [ChordToneSpec, ChordToneSpec, ChordToneSpec]): string {
+  const toPitchXml = (tone: ChordToneSpec) => {
+    const maybeAlter =
+      typeof tone.alter === 'number' && tone.alter !== 0 ? `<alter>${Math.trunc(tone.alter)}</alter>` : ''
+    return [
+      '<pitch>',
+      `<step>${tone.step.toUpperCase()}</step>`,
+      maybeAlter,
+      `<octave>${Math.trunc(tone.octave)}</octave>`,
+      '</pitch>',
+    ]
+      .filter((line) => line.length > 0)
+      .join('')
+  }
+
+  const chordNotesXml = tones
+    .map((tone, index) =>
+      [
+        '<note>',
+        index > 0 ? '<chord/>' : '',
+        '<staff>1</staff>',
+        toPitchXml(tone),
+        '<duration>4</duration>',
+        '<type>whole</type>',
+        '</note>',
+      ]
+        .filter((line) => line.length > 0)
+        .join(''),
+    )
+    .join('')
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="3.1">
+  <part-list>
+    <score-part id="P1"><part-name>Piano</part-name></score-part>
+    <score-part id="P2"><part-name>ChordPart</part-name></score-part>
+    <score-part id="P3"><part-name>Segments</part-name></score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>1</divisions>
+        <staves>2</staves>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <clef number="1"><sign>G</sign><line>2</line></clef>
+        <clef number="2"><sign>F</sign><line>4</line></clef>
+      </attributes>
+      <note>
+        <staff>1</staff>
+        <pitch><step>C</step><octave>5</octave></pitch>
+        <duration>4</duration>
+        <type>whole</type>
+      </note>
+      <backup><duration>4</duration></backup>
+      <note>
+        <staff>2</staff>
+        <pitch><step>C</step><octave>3</octave></pitch>
+        <duration>4</duration>
+        <type>whole</type>
+      </note>
+    </measure>
+  </part>
+  <part id="P2">
+    <measure number="1">
+      <attributes>
+        <divisions>1</divisions>
+      </attributes>
+      ${chordNotesXml}
+    </measure>
+  </part>
+  <part id="P3">
+    <measure number="1">
+      <attributes>
+        <divisions>1</divisions>
+      </attributes>
+      <note>
+        <pitch><step>C</step><octave>4</octave></pitch>
+        <duration>4</duration>
+        <type>whole</type>
+      </note>
+    </measure>
+  </part>
+</score-partwise>`
 }
 
 function sleep(ms: number): Promise<void> {
@@ -832,6 +923,45 @@ async function waitForImportedChordStaffMusicXml(page: Page): Promise<void> {
   })
 }
 
+async function assertImportedSingleChordMarkerLabel(params: {
+  page: Page
+  xmlText: string
+  expectedLabel: string
+  scenario: string
+}): Promise<void> {
+  const { page, xmlText, expectedLabel, scenario } = params
+  await importMusicXmlViaDebugApi(page, xmlText)
+  await page.waitForFunction(
+    (expected) => {
+      const api = (window as unknown as {
+        __scoreDebug: {
+          getChordRulerMarkers: () => ChordRulerMarkerDebugRow[]
+        }
+      }).__scoreDebug
+      const markers = api.getChordRulerMarkers()
+      const marker = markers.find((row) => row.pairIndex === 0 && row.positionText === '第1拍')
+      return (
+        !!marker &&
+        marker.label === expected &&
+        marker.sourceLabel === expected &&
+        marker.displayLabel === expected
+      )
+    },
+    expectedLabel,
+  )
+
+  const markers = await getChordMarkers(page)
+  const marker = findMarkerByPositionText(markers, 0, '第1拍')
+  if (marker.label !== expectedLabel || marker.sourceLabel !== expectedLabel || marker.displayLabel !== expectedLabel) {
+    throw new Error(
+      `${scenario} should resolve to ${expectedLabel}, got label/source/display = ${marker.label}/${marker.sourceLabel}/${marker.displayLabel}.`,
+    )
+  }
+  if (marker.label === 'Unknown') {
+    throw new Error(`${scenario} should not be Unknown.`)
+  }
+}
+
 async function waitForRestSelectionImport(page: Page): Promise<void> {
   await page.waitForFunction(() => {
     const api = (window as unknown as {
@@ -934,11 +1064,43 @@ function getRequiredTrailingGap(row: MeasureCoordinateReport['rows'][number], la
   return row.trailingGapPx
 }
 
+function normalizeLegacyTwoPartChordImportXml(xmlText: string): string {
+  const partIds = [...xmlText.matchAll(/<part\b[^>]*id="([^"]+)"[^>]*>/g)].map((match) => match[1])
+  if (partIds.length !== 2) return xmlText
+  if (!partIds.includes('P1') || !partIds.includes('P3')) return xmlText
+  if (xmlText.includes('<score-part id="P99">') || xmlText.includes('<part id="P99">')) return xmlText
+
+  const withSyntheticScorePart = xmlText.replace(
+    '</part-list>',
+    '  <score-part id="P99"><part-name>Segments</part-name></score-part>\n  </part-list>',
+  )
+  if (withSyntheticScorePart === xmlText) return xmlText
+
+  const syntheticSegmentPart = [
+    '  <part id="P99">',
+    '    <measure number="1">',
+    '      <attributes><divisions>1</divisions></attributes>',
+    '      <note>',
+    '        <rest/>',
+    '        <duration>4</duration>',
+    '        <type>whole</type>',
+    '      </note>',
+    '    </measure>',
+    '  </part>',
+  ].join('\n')
+
+  return withSyntheticScorePart.replace('</score-partwise>', `${syntheticSegmentPart}\n</score-partwise>`)
+}
+
 async function main() {
   const outputPath = process.argv[2] ?? path.resolve('debug', 'chord-marker-browser-report.json')
   assertChordDegreeConversionExamples()
-  const importedChordPartXml = await readFile(THREE_PART_MUSIC_XML_PATH, 'utf8')
-  const importedChordPartDMajorXml = await readFile(THREE_PART_D_MAJOR_MUSIC_XML_PATH, 'utf8')
+  const importedChordPartXml = normalizeLegacyTwoPartChordImportXml(
+    await readFile(THREE_PART_MUSIC_XML_PATH, 'utf8'),
+  )
+  const importedChordPartDMajorXml = normalizeLegacyTwoPartChordImportXml(
+    await readFile(THREE_PART_D_MAJOR_MUSIC_XML_PATH, 'utf8'),
+  )
   const devServer = startDevServer()
   let browser: Browser | null = null
   devServer.stdout?.on('data', (chunk) => {
@@ -1731,6 +1893,42 @@ async function main() {
     })
 
     await setChordDegreeDisplay(page, false)
+
+    const importedCMajorTriadXml = buildSingleChordMarkerImportXml([
+      { step: 'C', octave: 4 },
+      { step: 'E', octave: 4 },
+      { step: 'G', octave: 4 },
+    ])
+    await assertImportedSingleChordMarkerLabel({
+      page,
+      xmlText: importedCMajorTriadXml,
+      expectedLabel: 'C',
+      scenario: 'Imported C-E-G triad',
+    })
+
+    const importedAMinorTriadXml = buildSingleChordMarkerImportXml([
+      { step: 'A', octave: 3 },
+      { step: 'C', octave: 4 },
+      { step: 'E', octave: 4 },
+    ])
+    await assertImportedSingleChordMarkerLabel({
+      page,
+      xmlText: importedAMinorTriadXml,
+      expectedLabel: 'Am',
+      scenario: 'Imported A-C-E triad',
+    })
+
+    const importedCMinorTriadXml = buildSingleChordMarkerImportXml([
+      { step: 'C', octave: 4 },
+      { step: 'E', alter: -1, octave: 4 },
+      { step: 'G', octave: 4 },
+    ])
+    await assertImportedSingleChordMarkerLabel({
+      page,
+      xmlText: importedCMinorTriadXml,
+      expectedLabel: 'Cm',
+      scenario: 'Imported C-Eb-G triad',
+    })
 
     const restSelectionImportXml = buildRestSelectionImportXml()
     await importMusicXmlViaDebugApi(page, restSelectionImportXml)

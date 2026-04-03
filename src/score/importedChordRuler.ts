@@ -15,7 +15,7 @@ const NOTE_NAMES_DEFAULT = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A'
 const NOTE_NAMES_SHARP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 const NOTE_NAMES_FLAT = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B']
 
-const CHORD_QUALITY_BY_INTERVALS = new Map<string, string>([
+const CHORD_QUALITY_BY_INTERVAL_SET = new Map<string, string>([
   ['0,4,7', ''],
   ['0,3,7', 'm'],
   ['0,3,6', 'mb5'],
@@ -62,6 +62,28 @@ function getPreferredNoteName(pitchClass: number, prefer: 'sharp' | 'flat' | nul
   return NOTE_NAMES_DEFAULT[safePitchClass] ?? 'C'
 }
 
+function getIntervalSetKey(intervals: Set<number>): string {
+  return [...intervals].sort((left, right) => left - right).join(',')
+}
+
+function resolveChordNameByPitchClass(params: {
+  rootPitchClass: number
+  bassPitchClass: number
+  quality: string
+  pitchClassToSourceName: Map<number, string>
+  prefer: 'sharp' | 'flat' | null
+}): { inversionPenalty: number; name: string } {
+  const { rootPitchClass, bassPitchClass, quality, pitchClassToSourceName, prefer } = params
+  const rootName =
+    pitchClassToSourceName.get(rootPitchClass) ?? getPreferredNoteName(rootPitchClass, prefer)
+  const bassName =
+    pitchClassToSourceName.get(bassPitchClass) ?? getPreferredNoteName(bassPitchClass, prefer)
+  const inversionPenalty = rootPitchClass === bassPitchClass ? 0 : 1
+  const name =
+    inversionPenalty === 0 ? `${rootName}${quality}` : `${rootName}${quality}/${bassName}`
+  return { inversionPenalty, name }
+}
+
 export function identifyImportedChordLabel(notes: ImportedChordPitch[]): string {
   if (notes.length === 0) return 'Rest'
 
@@ -82,26 +104,51 @@ export function identifyImportedChordLabel(notes: ImportedChordPitch[]): string 
   const hasSharp = sourceNames.some((name) => name.includes('#'))
   const hasFlat = sourceNames.some((name) => name.includes('b'))
   const prefer = hasSharp && !hasFlat ? 'sharp' : hasFlat && !hasSharp ? 'flat' : null
-  const orderedPitchClasses = [...uniquePitchClasses].sort((left, right) => left - right)
-
   const matches: Array<{ inversionPenalty: number; name: string }> = []
+  const orderedPitchClasses = [...uniquePitchClasses].sort((left, right) => left - right)
   orderedPitchClasses.forEach((potentialRootPitchClass) => {
-    const intervals = orderedPitchClasses
-      .map((pitchClass) => (pitchClass - potentialRootPitchClass + 12) % 12)
-      .sort((left, right) => left - right)
-    const quality = CHORD_QUALITY_BY_INTERVALS.get(intervals.join(','))
-    if (!quality) return
-
-    const rootName =
-      pitchClassToSourceName.get(potentialRootPitchClass) ?? getPreferredNoteName(potentialRootPitchClass, prefer)
-    const bassName = pitchClassToSourceName.get(bassPitchClass) ?? getPreferredNoteName(bassPitchClass, prefer)
-    const inversionPenalty = potentialRootPitchClass === bassPitchClass ? 0 : 1
-    const chordName = inversionPenalty === 0 ? `${rootName}${quality}` : `${rootName}${quality}/${bassName}`
-    matches.push({
-      inversionPenalty,
-      name: chordName,
+    const intervals = new Set<number>()
+    uniquePitchClasses.forEach((pitchClass) => {
+      intervals.add((pitchClass - potentialRootPitchClass + 12) % 12)
     })
+    const quality = CHORD_QUALITY_BY_INTERVAL_SET.get(getIntervalSetKey(intervals))
+    // Empty string quality is valid for major triads (e.g. C-E-G => "C").
+    if (quality === undefined) return
+    matches.push(
+      resolveChordNameByPitchClass({
+        rootPitchClass: potentialRootPitchClass,
+        bassPitchClass,
+        quality,
+        pitchClassToSourceName,
+        prefer,
+      }),
+    )
   })
+
+  // Legacy compatibility: retain add9 / madd9 fallback for extended pitch-class sets.
+  if (matches.length === 0) {
+    orderedPitchClasses.forEach((potentialRootPitchClass) => {
+      const intervals = new Set<number>()
+      uniquePitchClasses.forEach((pitchClass) => {
+        intervals.add((pitchClass - potentialRootPitchClass + 12) % 12)
+      })
+      if (!intervals.has(0) || !intervals.has(7) || !intervals.has(2)) return
+      if (intervals.has(10) || intervals.has(11)) return
+      let quality: string | null = null
+      if (intervals.has(4)) quality = 'add9'
+      if (quality === null && intervals.has(3)) quality = 'madd9'
+      if (quality === null) return
+      matches.push(
+        resolveChordNameByPitchClass({
+          rootPitchClass: potentialRootPitchClass,
+          bassPitchClass,
+          quality,
+          pitchClassToSourceName,
+          prefer,
+        }),
+      )
+    })
+  }
 
   if (matches.length === 0) return 'Unknown'
   matches.sort((left, right) => left.inversionPenalty - right.inversionPenalty || left.name.localeCompare(right.name))
