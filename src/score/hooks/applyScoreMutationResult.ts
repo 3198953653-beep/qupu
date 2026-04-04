@@ -10,6 +10,7 @@ export function applyScoreMutationResult(params: {
   nextSelection: Selection
   nextSelections?: Selection[]
   source?: 'default' | 'midi-step'
+  skipUndoSnapshot?: boolean
   options?: { collapseScopesToAdd?: MeasureStaffScope[] }
   measurePairsRef: MutableRefObject<MeasurePair[]>
   measurePairsFromImportRef: MutableRefObject<MeasurePair[] | null>
@@ -34,6 +35,7 @@ export function applyScoreMutationResult(params: {
     nextSelection,
     nextSelections = [nextSelection],
     source = 'default',
+    skipUndoSnapshot = false,
     options,
     measurePairsRef,
     measurePairsFromImportRef,
@@ -56,7 +58,7 @@ export function applyScoreMutationResult(params: {
 
   const sourcePairs = measurePairsRef.current
   const collapseScopesToAdd = options?.collapseScopesToAdd ?? []
-  if (nextPairs !== sourcePairs) {
+  if (!skipUndoSnapshot && nextPairs !== sourcePairs) {
     pushUndoSnapshot(sourcePairs)
   }
   if (nextPairs !== sourcePairs || collapseScopesToAdd.length > 0) {

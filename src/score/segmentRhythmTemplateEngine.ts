@@ -18,7 +18,7 @@ export type TimelineSegmentScope = {
   endPairIndexInclusive: number
 }
 
-type SegmentChordEvent = {
+export type SegmentChordEvent = {
   pairIndex: number
   relativePairIndex: number
   measureNumber: number
@@ -170,7 +170,7 @@ function noteNameToPitch(name: string): Pitch {
   return toPitchFromStepAlter(parsed.step, parsed.alter, parsed.octave)
 }
 
-function splitPatternTokens(pattern: string): string[] {
+export function splitPatternTokens(pattern: string): string[] {
   return String(pattern ?? '')
     .replaceAll('_', ',')
     .split(',')
@@ -178,7 +178,7 @@ function splitPatternTokens(pattern: string): string[] {
     .filter((entry) => entry.length > 0)
 }
 
-function parseRhythmDurations(rhythm: string): number[] {
+export function parseRhythmDurations(rhythm: string): number[] {
   return String(rhythm ?? '')
     .split(',')
     .map((entry) => parseBeatValue(entry))
@@ -224,7 +224,7 @@ export function parseTimelineSegmentScopeKey(scopeKey: string): TimelineSegmentS
   }
 }
 
-function buildSegmentChordEvents(params: {
+export function buildSegmentChordEvents(params: {
   scope: TimelineSegmentScope
   chordRulerEntriesByPair: ChordRulerEntry[][] | null
   measureTimeSignaturesByMeasure: TimeSignature[] | null
@@ -723,7 +723,7 @@ function transposeAbsoluteGroup(params: {
   }).join('+')
 }
 
-function transposeNotesPattern(params: {
+export function transposeNotesPattern(params: {
   pattern: string
   targetChord: string
   sourceChordType: string | null

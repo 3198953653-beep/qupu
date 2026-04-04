@@ -39,6 +39,7 @@ export function useScoreWorkspaceController(params: {
   clearActiveChordSelection: () => void
   clearActivePedalSelection: () => void
   onTrebleSelectionDoubleTap?: (selection: Selection) => void
+  onBassSelectionDoubleTap?: (selection: Selection) => void
   onTimelineSegmentDoubleClick?: (scopeKey: string) => void
   pushUndoSnapshot: (sourcePairs: import('../types').MeasurePair[]) => void
   handlePreviewScoreNote: ReturnType<typeof import('./useScoreAudioPreviewController').useScoreAudioPreviewController>['handlePreviewScoreNote']
@@ -70,6 +71,7 @@ export function useScoreWorkspaceController(params: {
     clearActiveChordSelection,
     clearActivePedalSelection,
     onTrebleSelectionDoubleTap,
+    onBassSelectionDoubleTap,
     onTimelineSegmentDoubleClick,
     pushUndoSnapshot,
     handlePreviewScoreNote,
@@ -93,6 +95,7 @@ export function useScoreWorkspaceController(params: {
     sessionHelpers,
     clearActiveChordSelection,
     onTrebleSelectionDoubleTap,
+    onBassSelectionDoubleTap,
     pushUndoSnapshot,
     buildSelectionsForMeasureStaff,
   })

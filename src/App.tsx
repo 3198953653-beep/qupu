@@ -25,6 +25,7 @@ import { RhythmTemplateLoadModal } from './score/components/RhythmTemplateLoadMo
 import { SmartChordToneModal } from './score/components/SmartChordToneModal'
 import { PedalApplyModal } from './score/components/PedalApplyModal'
 import { PlaybackVolumeModal } from './score/components/PlaybackVolumeModal'
+import { AccompanimentNoteModal } from './score/components/AccompanimentNoteModal'
 import { clampPlaybackVolumePercent } from './score/playbackVolume'
 import type { Pitch, ScoreNote } from './score/types'
 import { Renderer } from 'vexflow'
@@ -100,6 +101,7 @@ function App() {
     editorUi,
     playback,
     smartChordToneDialog,
+    accompanimentNoteDialog,
     rhythmTemplateLoadModal,
     pedalApplyDialog,
     canOpenPedalModal,
@@ -183,6 +185,30 @@ function App() {
         onToggleFilterOption={smartChordToneDialog.toggleFilterOption}
         onPreviewCandidate={smartChordToneDialog.previewCandidate}
         onApplyCandidate={smartChordToneDialog.applyCandidate}
+      />
+
+      <AccompanimentNoteModal
+        isOpen={accompanimentNoteDialog.isOpen}
+        target={
+          accompanimentNoteDialog.target
+            ? {
+                measureNumber: accompanimentNoteDialog.target.measureNumber,
+                chordName: accompanimentNoteDialog.target.chordName,
+                keyFifths: accompanimentNoteDialog.target.keyFifths,
+              }
+            : null
+        }
+        renderMeasures={accompanimentNoteDialog.renderMeasures}
+        candidateMeasureMap={accompanimentNoteDialog.candidateMeasureMap}
+        selectedCandidateKey={accompanimentNoteDialog.selectedCandidateKey}
+        errorMessage={accompanimentNoteDialog.errorMessage}
+        onClose={accompanimentNoteDialog.closeDialog}
+        onPreviewCandidate={(candidateKey) => {
+          void accompanimentNoteDialog.previewCandidate(candidateKey)
+        }}
+        onApplyCandidate={(candidateKey) => {
+          void accompanimentNoteDialog.applyCandidate(candidateKey)
+        }}
       />
 
       <RhythmTemplateLoadModal

@@ -35,6 +35,7 @@ export function useScoreWorkspaceSelectionBindings(params: {
   sessionHelpers: ReturnType<typeof useScoreEditingSessionHelpers>
   clearActiveChordSelection: () => void
   onTrebleSelectionDoubleTap?: (selection: Selection) => void
+  onBassSelectionDoubleTap?: (selection: Selection) => void
   pushUndoSnapshot: (sourcePairs: MeasurePair[]) => void
   buildSelectionsForMeasureStaff: (
     pair: MeasurePair,
@@ -48,14 +49,25 @@ export function useScoreWorkspaceSelectionBindings(params: {
     sessionHelpers,
     clearActiveChordSelection,
     onTrebleSelectionDoubleTap,
+    onBassSelectionDoubleTap,
     pushUndoSnapshot,
     buildSelectionsForMeasureStaff,
   } = params
   const lastTrebleTapRef = useRef<{ selection: Selection; atMs: number } | null>(null)
+  const lastBassTapRef = useRef<{ selection: Selection; atMs: number } | null>(null)
 
   const clearTrebleTapCandidate = useCallback(() => {
     lastTrebleTapRef.current = null
   }, [])
+
+  const clearBassTapCandidate = useCallback(() => {
+    lastBassTapRef.current = null
+  }, [])
+
+  const clearDoubleTapCandidates = useCallback(() => {
+    clearTrebleTapCandidate()
+    clearBassTapCandidate()
+  }, [clearBassTapCandidate, clearTrebleTapCandidate])
 
   const logNoteClickGeometry = useCallback((selection: Selection) => {
     if (!import.meta.env.DEV) return
@@ -134,6 +146,25 @@ export function useScoreWorkspaceSelectionBindings(params: {
     return normalizedSelection
   }, [editorRefs.importedNoteLookupRef, editorRefs.measurePairsRef])
 
+  const normalizeBassDialogSelection = useCallback((selection: Selection): Selection | null => {
+    if (selection.staff !== 'bass') return null
+    const normalizedSelection: Selection = {
+      noteId: selection.noteId,
+      staff: 'bass',
+      keyIndex: 0,
+    }
+    const location = findSelectionLocationInPairs({
+      pairs: editorRefs.measurePairsRef.current,
+      selection: normalizedSelection,
+      importedNoteLookup: editorRefs.importedNoteLookupRef.current,
+    })
+    if (!location || location.staff !== 'bass') return null
+    const pair = editorRefs.measurePairsRef.current[location.pairIndex]
+    const note = pair?.bass[location.noteIndex]
+    if (!note || note.isRest) return null
+    return normalizedSelection
+  }, [editorRefs.importedNoteLookupRef, editorRefs.measurePairsRef])
+
   const onSelectionPointerDown = useCallback((
     _selection: Selection,
     nextSelections: Selection[],
@@ -172,34 +203,58 @@ export function useScoreWorkspaceSelectionBindings(params: {
     logNoteClickGeometry(selection)
 
     const normalizedSelection = normalizeTrebleDialogSelection(selection)
-    if (!normalizedSelection) {
-      clearTrebleTapCandidate()
-      return
-    }
-
     const nowMs = Date.now()
-    const lastTap = lastTrebleTapRef.current
-    const isRepeatedTrebleTap =
-      lastTap &&
-      isSameSelection(lastTap.selection, normalizedSelection) &&
-      nowMs - lastTap.atMs <= 350
+    if (normalizedSelection) {
+      const lastTap = lastTrebleTapRef.current
+      const isRepeatedTrebleTap =
+        lastTap &&
+        isSameSelection(lastTap.selection, normalizedSelection) &&
+        nowMs - lastTap.atMs <= 350
 
-    if (isRepeatedTrebleTap) {
-      clearTrebleTapCandidate()
-      onTrebleSelectionDoubleTap?.(normalizedSelection)
+      if (isRepeatedTrebleTap) {
+        clearDoubleTapCandidates()
+        onTrebleSelectionDoubleTap?.(normalizedSelection)
+        return
+      }
+      lastTrebleTapRef.current = {
+        selection: normalizedSelection,
+        atMs: nowMs,
+      }
+      clearBassTapCandidate()
       return
     }
 
-    lastTrebleTapRef.current = {
-      selection: normalizedSelection,
-      atMs: nowMs,
+    const normalizedBassSelection = normalizeBassDialogSelection(selection)
+    if (normalizedBassSelection) {
+      const lastTap = lastBassTapRef.current
+      const isRepeatedBassTap =
+        lastTap &&
+        isSameSelection(lastTap.selection, normalizedBassSelection) &&
+        nowMs - lastTap.atMs <= 350
+      if (isRepeatedBassTap) {
+        clearDoubleTapCandidates()
+        onBassSelectionDoubleTap?.(normalizedBassSelection)
+        return
+      }
+      lastBassTapRef.current = {
+        selection: normalizedBassSelection,
+        atMs: nowMs,
+      }
+      clearTrebleTapCandidate()
+      return
     }
+
+    clearDoubleTapCandidates()
   }, [
     appState,
     clearActiveChordSelection,
+    clearBassTapCandidate,
+    clearDoubleTapCandidates,
     clearTrebleTapCandidate,
     logNoteClickGeometry,
+    normalizeBassDialogSelection,
     normalizeTrebleDialogSelection,
+    onBassSelectionDoubleTap,
     onTrebleSelectionDoubleTap,
     sessionHelpers,
   ])
@@ -215,8 +270,8 @@ export function useScoreWorkspaceSelectionBindings(params: {
     appState.setDraggingSelection(null)
     appState.setSelectedSelections([])
     appState.setIsSelectionVisible(false)
-    clearTrebleTapCandidate()
-  }, [appState, clearActiveChordSelection, clearTrebleTapCandidate, logAccidentalClickGeometry, sessionHelpers])
+    clearDoubleTapCandidates()
+  }, [appState, clearActiveChordSelection, clearDoubleTapCandidates, logAccidentalClickGeometry, sessionHelpers])
 
   const onTiePointerDown = useCallback((selection: TieSelection) => {
     sessionHelpers.resetMidiStepChain()
@@ -228,8 +283,8 @@ export function useScoreWorkspaceSelectionBindings(params: {
     appState.setDraggingSelection(null)
     appState.setSelectedSelections([])
     appState.setIsSelectionVisible(false)
-    clearTrebleTapCandidate()
-  }, [appState, clearActiveChordSelection, clearTrebleTapCandidate, sessionHelpers])
+    clearDoubleTapCandidates()
+  }, [appState, clearActiveChordSelection, clearDoubleTapCandidates, sessionHelpers])
 
   const onBeforeApplyScoreChange = useCallback((sourcePairs: MeasurePair[]) => {
     pushUndoSnapshot(sourcePairs)
@@ -261,7 +316,7 @@ export function useScoreWorkspaceSelectionBindings(params: {
       appState.setIsSelectionVisible(false)
       appState.setSelectedSelections([])
       appState.setSelectedMeasureScope(null)
-      clearTrebleTapCandidate()
+      clearDoubleTapCandidates()
       return
     }
     const targetPair = editorRefs.measurePairsRef.current[pairIndex]
@@ -269,7 +324,7 @@ export function useScoreWorkspaceSelectionBindings(params: {
       appState.setIsSelectionVisible(false)
       appState.setSelectedSelections([])
       appState.setSelectedMeasureScope(null)
-      clearTrebleTapCandidate()
+      clearDoubleTapCandidates()
       return
     }
     const timeSignature = resolvePairTimeSignature(pairIndex, editorRefs.measureTimeSignaturesFromImportRef.current)
@@ -284,18 +339,18 @@ export function useScoreWorkspaceSelectionBindings(params: {
       appState.setIsSelectionVisible(false)
       appState.setSelectedSelections([])
       appState.setSelectedMeasureScope(null)
-      clearTrebleTapCandidate()
+      clearDoubleTapCandidates()
       return
     }
     appState.setIsSelectionVisible(true)
     appState.setSelectedSelections(nextSelections)
     appState.setActiveSelection(nextSelections[0])
     appState.setSelectedMeasureScope({ pairIndex, staff })
-    clearTrebleTapCandidate()
+    clearDoubleTapCandidates()
   }, [
     appState,
     buildSelectionsForMeasureStaff,
-    clearTrebleTapCandidate,
+    clearDoubleTapCandidates,
     clearActiveChordSelection,
     editorRefs.measurePairsRef,
     editorRefs.measureTimeSignaturesFromImportRef,
@@ -321,8 +376,8 @@ export function useScoreWorkspaceSelectionBindings(params: {
     appState.setDraggingSelection(null)
     appState.setSelectedSelections([])
     appState.setIsSelectionVisible(false)
-    clearTrebleTapCandidate()
-  }, [appState, clearActiveChordSelection, clearTrebleTapCandidate, sessionHelpers])
+    clearDoubleTapCandidates()
+  }, [appState, clearActiveChordSelection, clearDoubleTapCandidates, sessionHelpers])
 
   return {
     onSelectionPointerDown,

@@ -71,6 +71,12 @@ export function useScoreMutationController(params: {
     options?: { collapseScopesToAdd?: MeasureStaffScope[] },
   ) => void
   applyMidiReplacementByNoteNumber: (midiNoteNumber: number) => void
+  applyTemporaryKeyboardEditResult: (
+    nextPairs: MeasurePair[],
+    nextSelection: Selection,
+    nextSelections?: Selection[],
+    options?: { collapseScopesToAdd?: MeasureStaffScope[] },
+  ) => void
 } {
   const {
     measurePairsRef,
@@ -225,10 +231,62 @@ export function useScoreMutationController(params: {
     setMeasureTimeSignaturesFromImport,
   })
 
+  const applyTemporaryKeyboardEditResult = useCallback((
+    nextPairs: MeasurePair[],
+    nextSelection: Selection,
+    nextSelections: Selection[] = [nextSelection],
+    options?: { collapseScopesToAdd?: MeasureStaffScope[] },
+  ) => {
+    applyScoreMutationResult({
+      nextPairs,
+      nextSelection,
+      nextSelections,
+      source: 'default',
+      skipUndoSnapshot: true,
+      options,
+      measurePairsRef,
+      measurePairsFromImportRef,
+      importedNoteLookupRef,
+      pushUndoSnapshot,
+      resetMidiStepChain,
+      clearActiveAccidentalSelection,
+      clearActiveTieSelection,
+      clearSelectedMeasureScope,
+      clearActiveChordSelection,
+      setMeasurePairsFromImport,
+      setNotes,
+      setBassNotes,
+      setIsSelectionVisible,
+      setFullMeasureRestCollapseScopeKeys,
+      setActiveSelection,
+      setSelectedSelections,
+      setIsRhythmLinked,
+    })
+  }, [
+    clearActiveAccidentalSelection,
+    clearActiveChordSelection,
+    clearActiveTieSelection,
+    clearSelectedMeasureScope,
+    importedNoteLookupRef,
+    measurePairsFromImportRef,
+    measurePairsRef,
+    pushUndoSnapshot,
+    resetMidiStepChain,
+    setActiveSelection,
+    setBassNotes,
+    setFullMeasureRestCollapseScopeKeys,
+    setIsRhythmLinked,
+    setIsSelectionVisible,
+    setMeasurePairsFromImport,
+    setNotes,
+    setSelectedSelections,
+  ])
+
   return {
     pushUndoSnapshot,
     undoLastScoreEdit,
     applyKeyboardEditResult,
     applyMidiReplacementByNoteNumber,
+    applyTemporaryKeyboardEditResult,
   }
 }

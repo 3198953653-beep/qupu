@@ -11,6 +11,7 @@ import { useScoreEditorRefs } from './useScoreEditorRefs'
 import { useHorizontalScoreLayout } from './useHorizontalScoreLayout'
 import { useScoreCoreEditingController } from './useScoreCoreEditingController'
 import { useSmartChordToneDialogController } from './useSmartChordToneDialogController'
+import { useAccompanimentNoteDialogController } from './useAccompanimentNoteDialogController'
 import { useImportedSegmentRhythmTemplateController } from './useImportedSegmentRhythmTemplateController'
 import { usePedalApplyController } from './usePedalApplyController'
 import { usePlaybackVolumeController } from './usePlaybackVolumeController'
@@ -66,6 +67,19 @@ export function useScoreInteractionRuntimeController(params: {
     clearSelectedMeasureScope: coreEditing.sessionHelpers.clearSelectedMeasureScope,
     clearActiveChordSelection: coreEditing.chordMarker.clearActiveChordSelection,
     resetMidiStepChain: coreEditing.sessionHelpers.resetMidiStepChain,
+  })
+
+  const accompanimentNoteDialog = useAccompanimentNoteDialogController({
+    measurePairsRef: editorRefs.measurePairsRef,
+    importedNoteLookupRef: editorRefs.importedNoteLookupRef,
+    chordRulerEntriesByPair: layout.chordRulerEntriesByPair,
+    measureTimeSignaturesByMeasure: appState.measureTimeSignaturesFromImport,
+    measureKeyFifthsByMeasure: appState.measureKeyFifthsFromImport,
+    segmentRhythmTemplateBindings: appState.segmentRhythmTemplateBindings,
+    setSegmentRhythmTemplateBindings: appState.setSegmentRhythmTemplateBindings,
+    handlePreviewPitchStack: audioPreview.handlePreviewPitchStack,
+    applyKeyboardEditResult: coreEditing.mutation.applyKeyboardEditResult,
+    applyTemporaryKeyboardEditResult: coreEditing.mutation.applyTemporaryKeyboardEditResult,
   })
 
   const importedSegmentRhythmTemplate = useImportedSegmentRhythmTemplateController({
@@ -141,6 +155,7 @@ export function useScoreInteractionRuntimeController(params: {
     previewStartThresholdPx,
     workspacePlaybackHandlers: playbackBridge.workspacePlaybackHandlers,
     onTrebleSelectionDoubleTap: smartChordToneDialog.openSmartChordToneDialogForSelection,
+    onBassSelectionDoubleTap: accompanimentNoteDialog.openAccompanimentDialogForSelection,
     onTimelineSegmentDoubleClick: importedSegmentRhythmTemplate.onTimelineSegmentDoubleClick,
   })
 
@@ -152,6 +167,7 @@ export function useScoreInteractionRuntimeController(params: {
     editorUi,
     playback: playbackBridge.playback,
     smartChordToneDialog: smartChordToneDialog.smartChordToneDialog,
+    accompanimentNoteDialog: accompanimentNoteDialog.accompanimentNoteDialog,
     rhythmTemplateLoadModal: importedSegmentRhythmTemplate.rhythmTemplateLoadModal,
     pedalApplyDialog: pedalApply.pedalApplyDialog,
     canOpenPedalModal: pedalApply.canOpenPedalModal,

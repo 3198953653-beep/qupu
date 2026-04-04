@@ -10,6 +10,13 @@ export type RhythmTemplateRow = {
   durationCombo: string | null
 }
 
+export type AccompanimentOptionRow = {
+  notes: string
+  chordType: string
+  sourceChordType: string
+  specialTags: string
+}
+
 const RHYTHM_DB_ASSET_PATH = `${import.meta.env.BASE_URL}rhythm-db/app_data.db`
 const RHYTHM_DB_WASM_PATH = `${import.meta.env.BASE_URL}rhythm-db/sql-wasm.wasm`
 
@@ -54,6 +61,12 @@ function resolveDirectionAliases(direction: string | null): string[] | null {
   if (direction === '上上上上') return ['上上上上', '上行']
   if (direction === '下下下下') return ['下下下下', '下行']
   return [direction]
+}
+
+function normalizeStructureFilter(structure: string | null | undefined): string | null {
+  const text = String(structure ?? '').trim()
+  if (!text || text === '不限制') return null
+  return text
 }
 
 export function collectRhythmTemplateTagSets(rows: RhythmTemplateRow[]): {
@@ -177,4 +190,60 @@ export async function fetchNotesFromRhythmLibrary(params: {
   }
 
   return null
+}
+
+export async function queryAccompanimentOptionRows(params: {
+  chordFamily: string
+  noteCount: number
+  direction: string | null
+  structure: string | null
+  limit?: number
+}): Promise<AccompanimentOptionRow[]> {
+  const { chordFamily, noteCount, direction, structure, limit = 20 } = params
+  if (!Number.isFinite(noteCount) || noteCount <= 0) return []
+
+  const database = await loadDatabase()
+  const directionAliases = resolveDirectionAliases(direction)
+  const normalizedStructure = normalizeStructureFilter(structure)
+  const rows: AccompanimentOptionRow[] = []
+  const seenNotes = new Set<string>()
+
+  for (const chordType of buildChordTypeFallbacks(chordFamily)) {
+    const sqlParams: Array<string | number> = [chordType, Math.max(1, Math.round(noteCount))]
+    let sql = 'SELECT notes, chord_type, special_tags FROM "伴奏音符库" WHERE chord_type = ? AND note_count = ? '
+
+    if (directionAliases && directionAliases.length > 0) {
+      sql += `AND note_direction IN (${directionAliases.map(() => '?').join(',')}) `
+      sqlParams.push(...directionAliases)
+    }
+
+    if (normalizedStructure) {
+      sql += 'AND structure = ? '
+      sqlParams.push(normalizedStructure)
+    }
+
+    sql += 'ORDER BY created_at DESC LIMIT ?'
+    sqlParams.push(Math.max(1, Math.round(limit)))
+
+    const result = database.exec(sql, sqlParams)
+    const matchedRows = result[0]?.values ?? []
+    matchedRows.forEach((rawRow) => {
+      const row = rawRow as Array<string | number | Uint8Array | null>
+      const notes = String(row[0] ?? '').trim()
+      if (!notes || seenNotes.has(notes)) return
+      seenNotes.add(notes)
+      rows.push({
+        notes,
+        chordType: String(row[1] ?? chordType),
+        sourceChordType: chordType,
+        specialTags: String(row[2] ?? ''),
+      })
+    })
+
+    if (rows.length >= limit) {
+      return rows.slice(0, limit)
+    }
+  }
+
+  return rows.slice(0, limit)
 }
