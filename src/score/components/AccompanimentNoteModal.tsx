@@ -1,4 +1,7 @@
 import { useEffect } from 'react'
+import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
+import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
+import type { SpacingLayoutMode } from '../types'
 import { AccompanimentNoteNotationStrip } from './AccompanimentNoteNotationStrip'
 import type { AccompanimentRenderMeasure } from '../hooks/useAccompanimentNoteDialogController'
 
@@ -12,6 +15,9 @@ export function AccompanimentNoteModal(props: {
   renderMeasures: AccompanimentRenderMeasure[]
   candidateMeasureMap: Map<number, string>
   selectedCandidateKey: string | null
+  timeAxisSpacingConfig: TimeAxisSpacingConfig
+  spacingLayoutMode: SpacingLayoutMode
+  grandStaffLayoutMetrics: GrandStaffLayoutMetrics
   errorMessage: string | null
   onClose: () => void
   onPreviewCandidate: (candidateKey: string) => void
@@ -23,6 +29,9 @@ export function AccompanimentNoteModal(props: {
     renderMeasures,
     candidateMeasureMap,
     selectedCandidateKey,
+    timeAxisSpacingConfig,
+    spacingLayoutMode,
+    grandStaffLayoutMetrics,
     errorMessage,
     onClose,
     onPreviewCandidate,
@@ -85,6 +94,9 @@ export function AccompanimentNoteModal(props: {
             <AccompanimentNoteNotationStrip
               measures={renderMeasures}
               selectedCandidateKey={selectedCandidateKey}
+              timeAxisSpacingConfig={timeAxisSpacingConfig}
+              spacingLayoutMode={spacingLayoutMode}
+              grandStaffLayoutMetrics={grandStaffLayoutMetrics}
               onPreviewByMeasure={(measureNumber) => {
                 const candidateKey = candidateMeasureMap.get(measureNumber)
                 if (!candidateKey) return

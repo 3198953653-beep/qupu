@@ -1496,6 +1496,7 @@
 
 .smart-chord-notation-svg {
   line-height: 0;
+  display: block;
 }
 
 .smart-chord-notation-svg svg {

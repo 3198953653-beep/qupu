@@ -179,6 +179,9 @@ function App() {
         filterOptions={smartChordToneDialog.filterOptions}
         candidates={smartChordToneDialog.candidates}
         selectedCandidateKey={smartChordToneDialog.selectedCandidateKey}
+        timeAxisSpacingConfig={appState.timeAxisSpacingConfig}
+        spacingLayoutMode={layout.spacingLayoutMode}
+        grandStaffLayoutMetrics={layout.grandStaffLayoutMetrics}
         onClose={smartChordToneDialog.closeSmartChordToneDialog}
         onToggleOctaveOption={smartChordToneDialog.toggleOctaveOption}
         onToggleChordCountOption={smartChordToneDialog.toggleChordCountOption}
@@ -201,6 +204,9 @@ function App() {
         renderMeasures={accompanimentNoteDialog.renderMeasures}
         candidateMeasureMap={accompanimentNoteDialog.candidateMeasureMap}
         selectedCandidateKey={accompanimentNoteDialog.selectedCandidateKey}
+        timeAxisSpacingConfig={appState.timeAxisSpacingConfig}
+        spacingLayoutMode={layout.spacingLayoutMode}
+        grandStaffLayoutMetrics={layout.grandStaffLayoutMetrics}
         errorMessage={accompanimentNoteDialog.errorMessage}
         onClose={accompanimentNoteDialog.closeDialog}
         onPreviewCandidate={(candidateKey) => {

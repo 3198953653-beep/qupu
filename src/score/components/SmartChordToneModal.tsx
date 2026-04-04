@@ -6,6 +6,9 @@ import type {
   SmartChordToneOctaveOption,
 } from '../smartChordToneCandidates'
 import type { SmartChordToneDialogTarget } from '../hooks/useSmartChordToneDialogController'
+import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
+import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
+import type { SpacingLayoutMode } from '../types'
 import { SmartChordToneNotationStrip } from './SmartChordToneNotationStrip'
 
 const OCTAVE_OPTIONS: Array<{ key: SmartChordToneOctaveOption; label: string }> = [
@@ -35,6 +38,9 @@ export function SmartChordToneModal(props: {
   filterOptions: SmartChordToneFilterOption[]
   candidates: SmartChordToneCandidate[]
   selectedCandidateKey: string | null
+  timeAxisSpacingConfig: TimeAxisSpacingConfig
+  spacingLayoutMode: SpacingLayoutMode
+  grandStaffLayoutMetrics: GrandStaffLayoutMetrics
   onClose: () => void
   onToggleOctaveOption: (option: SmartChordToneOctaveOption) => void
   onToggleChordCountOption: (option: SmartChordToneCountOption) => void
@@ -50,6 +56,9 @@ export function SmartChordToneModal(props: {
     filterOptions,
     candidates,
     selectedCandidateKey,
+    timeAxisSpacingConfig,
+    spacingLayoutMode,
+    grandStaffLayoutMetrics,
     onClose,
     onToggleOctaveOption,
     onToggleChordCountOption,
@@ -219,6 +228,9 @@ export function SmartChordToneModal(props: {
                     target={target}
                     candidates={candidates}
                     selectedCandidateKey={selectedCandidateKey}
+                    timeAxisSpacingConfig={timeAxisSpacingConfig}
+                    spacingLayoutMode={spacingLayoutMode}
+                    grandStaffLayoutMetrics={grandStaffLayoutMetrics}
                     onPreviewCandidate={onPreviewCandidate}
                     onApplyCandidate={onApplyCandidate}
                   />
