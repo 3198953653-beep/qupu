@@ -12,7 +12,7 @@ export function AccompanimentNoteModal(props: {
     chordName: string
     keyFifths: number
   } | null
-  renderMeasures: AccompanimentRenderMeasure[]
+  previewCandidates: AccompanimentRenderMeasure[]
   candidateMeasureMap: Map<number, string>
   selectedCandidateKey: string | null
   timeAxisSpacingConfig: TimeAxisSpacingConfig
@@ -26,7 +26,7 @@ export function AccompanimentNoteModal(props: {
   const {
     isOpen,
     target,
-    renderMeasures,
+    previewCandidates,
     candidateMeasureMap,
     selectedCandidateKey,
     timeAxisSpacingConfig,
@@ -85,14 +85,14 @@ export function AccompanimentNoteModal(props: {
           <section className="smart-chord-empty-state">{errorMessage}</section>
         )}
 
-        {!errorMessage && renderMeasures.length > 0 && (
+        {!errorMessage && previewCandidates.length > 0 && (
           <section className="smart-chord-candidate-section">
             <div className="smart-chord-option-header">
               <h4>候选列表</h4>
               <span>每个小节对应一个候选：单击预览，双击应用</span>
             </div>
             <AccompanimentNoteNotationStrip
-              measures={renderMeasures}
+              measures={previewCandidates}
               selectedCandidateKey={selectedCandidateKey}
               timeAxisSpacingConfig={timeAxisSpacingConfig}
               spacingLayoutMode={spacingLayoutMode}

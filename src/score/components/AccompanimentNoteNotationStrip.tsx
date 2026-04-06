@@ -1,11 +1,12 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { Renderer } from 'vexflow'
 import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
+import { solveHorizontalMeasureWidths } from '../layout/horizontalMeasureWidthSolver'
 import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
-import { toPitchFromStepAlter } from '../pitchMath'
-import { renderPreviewWithMainLayout } from './previewNotationAdapter'
+import { resolveActualStartDecorationWidths, resolveStartDecorationDisplayMetas } from '../layout/startDecorationReserve'
+import { drawMeasureToContext } from '../render/drawMeasure'
 import type { AccompanimentRenderMeasure } from '../hooks/useAccompanimentNoteDialogController'
-import type { Pitch, ScoreNote, SpacingLayoutMode } from '../types'
+import type { SpacingLayoutMode } from '../types'
 
 type MeasureSlotLayout = {
   measureNumber: number
@@ -14,47 +15,55 @@ type MeasureSlotLayout = {
   widthPx: number
 }
 
-const STRIP_PADDING_X_PX = 18
-const STRIP_RENDER_HEIGHT_PX = 140
-const STRIP_VIEWPORT_HEIGHT_PX = 180
-const ROOT_NOTE_RE = /^([A-G])((?:##|bb|x|#|b)?)(-?\d+)$/
-
-function parseNoteNameToPitch(name: string): Pitch | null {
-  const match = ROOT_NOTE_RE.exec(String(name ?? '').trim())
-  if (!match) return null
-  const step = match[1]?.toUpperCase() ?? 'C'
-  const accidentalText = (match[2] ?? '').replace('x', '##')
-  const octave = Number(match[3])
-  if (!Number.isFinite(octave)) return null
-  const alter = (accidentalText.match(/#/g)?.length ?? 0) - (accidentalText.match(/b/g)?.length ?? 0)
-  return toPitchFromStepAlter(step, alter, Math.trunc(octave))
+type StaffLineBounds = {
+  trebleLineTopY: number
+  trebleLineBottomY: number
+  bassLineTopY: number
+  bassLineBottomY: number
 }
 
-function buildAccompanimentMeasureNotes(measure: AccompanimentRenderMeasure): ScoreNote[] {
-  return measure.durationPlan.map((entry, index) => {
-    const parts = entry.token
-      .split('+')
-      .map((item) => item.trim())
-      .filter((item) => item.length > 0 && item.toUpperCase() !== 'R')
-    const pitches = parts
-      .map((item) => parseNoteNameToPitch(item))
-      .filter((item): item is Pitch => item !== null)
-    if (pitches.length === 0) {
-      return {
-        id: `accomp-preview-note-${measure.measureNumber}-${index}`,
-        pitch: 'd/3',
-        duration: entry.duration,
-        isRest: true,
-      }
-    }
-    const [pitch, ...chordPitches] = pitches
-    return {
-      id: `accomp-preview-note-${measure.measureNumber}-${index}`,
-      pitch,
-      duration: entry.duration,
-      chordPitches: chordPitches.length > 0 ? chordPitches : undefined,
-    }
-  })
+const STRIP_PADDING_X_PX = 18
+const BARLINE_GAP_PX = 3
+const BARLINE_THIN_WIDTH_PX = 1
+const BARLINE_THICK_WIDTH_PX = 3
+
+function getRenderHeightPx(grandStaffLayoutMetrics: GrandStaffLayoutMetrics): number {
+  return Math.max(220, Math.ceil(grandStaffLayoutMetrics.systemHeightPx + 20))
+}
+
+function getViewportHeightPx(grandStaffLayoutMetrics: GrandStaffLayoutMetrics): number {
+  return Math.max(260, Math.ceil(grandStaffLayoutMetrics.systemHeightPx + 44))
+}
+
+function drawCandidateEndSeparator(params: {
+  context: ReturnType<Renderer['getContext']>
+  x: number
+  topY: number
+  bottomY: number
+}): void {
+  const { context, x, topY, bottomY } = params
+  const context2D = (context as unknown as { context2D?: CanvasRenderingContext2D }).context2D
+  if (!context2D) return
+
+  const safeTopY = Math.min(topY, bottomY)
+  const safeBottomY = Math.max(topY, bottomY)
+  context2D.save()
+  context2D.strokeStyle = '#2f2f2f'
+  context2D.lineCap = 'butt'
+
+  context2D.lineWidth = BARLINE_THIN_WIDTH_PX
+  context2D.beginPath()
+  context2D.moveTo(x - BARLINE_GAP_PX, safeTopY)
+  context2D.lineTo(x - BARLINE_GAP_PX, safeBottomY)
+  context2D.stroke()
+
+  context2D.lineWidth = BARLINE_THICK_WIDTH_PX
+  context2D.beginPath()
+  context2D.moveTo(x, safeTopY)
+  context2D.lineTo(x, safeBottomY)
+  context2D.stroke()
+
+  context2D.restore()
 }
 
 export function AccompanimentNoteNotationStrip(props: {
@@ -77,76 +86,139 @@ export function AccompanimentNoteNotationStrip(props: {
   } = props
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [slots, setSlots] = useState<MeasureSlotLayout[]>([])
+  const renderHeightPx = getRenderHeightPx(grandStaffLayoutMetrics)
+  const viewportHeightPx = getViewportHeightPx(grandStaffLayoutMetrics)
 
   useLayoutEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return undefined
     if (measures.length === 0) {
       const context = canvas.getContext('2d')
-      if (context) {
-        context.clearRect(0, 0, canvas.width, canvas.height)
-      }
+      if (context) context.clearRect(0, 0, canvas.width, canvas.height)
       setSlots([])
       return undefined
     }
 
     const renderer = new Renderer(canvas, Renderer.Backends.CANVAS)
-    renderer.resize(1, STRIP_RENDER_HEIGHT_PX)
+    renderer.resize(1, renderHeightPx)
     const context = renderer.getContext()
-    context.clearRect(0, 0, canvas.width, STRIP_RENDER_HEIGHT_PX)
+    context.clearRect(0, 0, canvas.width, renderHeightPx)
 
-    const definitions = measures.map((measure, index) => {
-      const bassNotes = buildAccompanimentMeasureNotes(measure)
-      return {
-        pairIndex: index,
-        notes: bassNotes,
-        clef: 'bass' as const,
-        keyFifths: measure.keyFifths,
-        timeSignature: { beats: 4, beatType: 4 },
-        showKeySignature: index === 0 && measure.keyFifths !== 0,
-        showTimeSignature: false,
-      }
-    })
-
-    let previewResult = renderPreviewWithMainLayout({
+    const measurePairs = measures.map((entry) => entry.measurePair)
+    const keyFifthsByPair = measures.map((entry) => entry.keyFifths)
+    const timeSignaturesByPair = measures.map((entry) => entry.timeSignature)
+    const contentWidths = solveHorizontalMeasureWidths({
       context,
-      renderHeight: STRIP_RENDER_HEIGHT_PX,
-      definitions,
-      paddingX: STRIP_PADDING_X_PX,
-      timeAxisSpacingConfig,
-      spacingLayoutMode,
+      measurePairs,
+      measureKeyFifthsByPair: keyFifthsByPair,
+      measureTimeSignaturesByPair: timeSignaturesByPair,
+      spacingConfig: timeAxisSpacingConfig,
       grandStaffLayoutMetrics,
     })
-    if (canvas.width !== previewResult.totalWidth || canvas.height !== STRIP_RENDER_HEIGHT_PX) {
-      renderer.resize(previewResult.totalWidth, STRIP_RENDER_HEIGHT_PX)
-      context.clearRect(0, 0, previewResult.totalWidth, STRIP_RENDER_HEIGHT_PX)
-      previewResult = renderPreviewWithMainLayout({
+    const displayMetas = resolveStartDecorationDisplayMetas({
+      measureCount: measures.length,
+      keyFifthsByPair,
+      timeSignaturesByPair,
+    })
+    const { actualStartDecorationWidthPxByPair } = resolveActualStartDecorationWidths({
+      metas: displayMetas,
+      grandStaffLayoutMetrics,
+    })
+
+    let cursorX = STRIP_PADDING_X_PX
+    const measureFrames = measures.map((_, index) => {
+      const contentWidth = Number.isFinite(contentWidths[index]) ? Math.max(1, contentWidths[index] as number) : 1
+      const startDecorationWidth = Math.max(
+        0,
+        Number.isFinite(actualStartDecorationWidthPxByPair[index])
+          ? (actualStartDecorationWidthPxByPair[index] as number)
+          : 0,
+      )
+      const frame = {
+        measureX: cursorX,
+        measureWidth: Math.max(1, Math.ceil(contentWidth + startDecorationWidth)),
+      }
+      cursorX += frame.measureWidth
+      return frame
+    })
+    const totalWidth = Math.max(1, Math.ceil(cursorX + STRIP_PADDING_X_PX))
+
+    if (canvas.width !== totalWidth || canvas.height !== renderHeightPx) {
+      renderer.resize(totalWidth, renderHeightPx)
+      context.clearRect(0, 0, totalWidth, renderHeightPx)
+    }
+
+    const systemTopY = Math.round((renderHeightPx - grandStaffLayoutMetrics.systemHeightPx) / 2)
+    const trebleY = systemTopY + grandStaffLayoutMetrics.trebleOffsetY
+    const bassY = systemTopY + grandStaffLayoutMetrics.bassOffsetY
+
+    const staffBoundsByMeasure: Array<StaffLineBounds | null> = measures.map(() => null)
+
+    measures.forEach((measure, index) => {
+      const frame = measureFrames[index]
+      if (!frame) return
+      const highlightSelections = measure.highlightSelections
+      const activeSelection = highlightSelections[0] ?? null
+      const activeSelections = highlightSelections.length > 0 ? highlightSelections : null
+      drawMeasureToContext({
         context,
-        renderHeight: STRIP_RENDER_HEIGHT_PX,
-        definitions,
-        paddingX: STRIP_PADDING_X_PX,
+        measure: measure.measurePair,
+        pairIndex: measure.pairIndex,
+        measureX: frame.measureX,
+        measureWidth: frame.measureWidth,
+        trebleY,
+        bassY,
+        isSystemStart: index === 0,
+        keyFifths: measure.keyFifths,
+        showKeySignature: index === 0 && measure.keyFifths !== 0,
+        timeSignature: measure.timeSignature,
+        showTimeSignature: index === 0,
+        activeSelection,
+        draggingSelection: null,
+        activeSelections,
+        draggingSelections: null,
+        collectLayouts: false,
+        showMeasureNumberLabel: false,
         timeAxisSpacingConfig,
         spacingLayoutMode,
-        grandStaffLayoutMetrics,
+        forceLeadingConnector: index > 0,
+        onStaffLineBounds: (bounds) => {
+          staffBoundsByMeasure[index] = bounds
+        },
+      })
+    })
+
+    for (let index = 0; index < measureFrames.length - 1; index += 1) {
+      const frame = measureFrames[index]
+      if (!frame) continue
+      const bounds = staffBoundsByMeasure[index]
+      const separatorTopY = bounds?.trebleLineTopY ?? trebleY
+      const separatorBottomY = bounds?.bassLineBottomY ?? (bassY + grandStaffLayoutMetrics.staffLineSpanPx)
+      drawCandidateEndSeparator({
+        context,
+        x: frame.measureX + frame.measureWidth,
+        topY: separatorTopY,
+        bottomY: separatorBottomY,
       })
     }
 
-    const nextSlots: MeasureSlotLayout[] = measures.map((measure, index) => {
-      const frame = previewResult.measureFrames[index]
-      return {
-        measureNumber: measure.measureNumber,
-        candidateKey: measure.candidateKey,
-        leftPx: frame?.measureX ?? STRIP_PADDING_X_PX,
-        widthPx: Math.max(1, frame?.measureWidth ?? 1),
-      }
-    })
+    setSlots(
+      measures.map((measure, index) => {
+        const frame = measureFrames[index]
+        return {
+          measureNumber: measure.measureNumber,
+          candidateKey: measure.candidateKey,
+          leftPx: frame?.measureX ?? STRIP_PADDING_X_PX,
+          widthPx: Math.max(1, frame?.measureWidth ?? 1),
+        }
+      }),
+    )
 
-    setSlots(nextSlots)
     return undefined
   }, [
     grandStaffLayoutMetrics,
     measures,
-    selectedCandidateKey,
+    renderHeightPx,
     spacingLayoutMode,
     timeAxisSpacingConfig,
   ])
@@ -154,7 +226,7 @@ export function AccompanimentNoteNotationStrip(props: {
   return (
     <div className="smart-chord-notation-strip">
       <div className="smart-chord-notation-scroll">
-        <div className="smart-chord-notation-stage-wrap" style={{ height: `${STRIP_VIEWPORT_HEIGHT_PX}px` }}>
+        <div className="smart-chord-notation-stage-wrap" style={{ height: `${viewportHeightPx}px` }}>
           <div className="smart-chord-notation-stage">
             <canvas ref={canvasRef} className="smart-chord-notation-svg" />
             <div className="smart-chord-notation-hit-layer">
@@ -167,7 +239,7 @@ export function AccompanimentNoteNotationStrip(props: {
                     left: `${slot.leftPx}px`,
                     width: `${slot.widthPx}px`,
                     top: '0px',
-                    height: `${STRIP_RENDER_HEIGHT_PX}px`,
+                    height: `${renderHeightPx}px`,
                   }}
                   onClick={() => onPreviewByMeasure(slot.measureNumber)}
                   onDoubleClick={() => onApplyByMeasure(slot.measureNumber)}

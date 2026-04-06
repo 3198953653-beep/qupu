@@ -5,22 +5,19 @@ import {
   type AccompanimentNoteCandidate,
 } from '../accompanimentNoteCandidates'
 import { findSelectionLocationInPairs } from '../keyboardEdits'
-import { resolvePairKeyFifths } from '../measureRestUtils'
+import { resolvePairKeyFifths, resolvePairTimeSignature } from '../measureRestUtils'
 import { buildStaffOnsetTicks } from '../selectionTimelineRange'
 import { getStepOctaveAlterFromPitch } from '../pitchMath'
 import { queryAccompanimentOptionRows } from '../rhythmTemplateDb'
-import { beatsToTicks, splitTicksToDurations } from '../scoreOps'
 import {
   buildSegmentChordEvents,
   buildSegmentRhythmTemplateApplication,
   normalizeChordForSearch,
   parseTimelineSegmentScopeKey,
-  splitPatternTokens,
 } from '../segmentRhythmTemplateEngine'
 import type {
   ImportedNoteLocation,
   MeasurePair,
-  NoteDuration,
   SegmentRhythmTemplateBinding,
   Selection,
   TimeSignature,
@@ -51,17 +48,14 @@ type AppliedSegmentResult = {
 }
 
 export type AccompanimentRenderMeasure = {
-  measureNumber: number
   candidateKey: string
-  notes: string
-  rhythm: string
+  measureNumber: number
+  pairIndex: number
+  measurePair: MeasurePair
+  playbackMeasurePair: MeasurePair
+  timeSignature: TimeSignature
   keyFifths: number
-  durationPlan: AccompanimentRenderDurationPlanEntry[]
-}
-
-export type AccompanimentRenderDurationPlanEntry = {
-  token: string
-  duration: NoteDuration
+  highlightSelections: Selection[]
 }
 
 function pitchToMidi(pitch: string): number | null {
@@ -204,44 +198,33 @@ function resolveTrebleOverlapUpperMidi(params: {
   return Math.min(BASS_RANGE_MAX_MIDI, maxMidi)
 }
 
-function parseRhythmValues(rhythm: string): number[] {
-  const values = String(rhythm ?? '')
-    .split(',')
-    .map((entry) => Number(entry.trim()))
-    .filter((value) => Number.isFinite(value) && value > 0)
-  return values.length > 0 ? values : [1]
-}
+function buildChordRangeHighlightSelections(params: {
+  pair: MeasurePair
+  startTick: number
+  endTick: number
+}): Selection[] {
+  const { pair, startTick, endTick } = params
+  const selections: Selection[] = []
+  const onsetTicks = buildStaffOnsetTicks(pair.bass)
 
-function buildDurationPlan(params: {
-  notesPattern: string
-  rhythm: string
-}): AccompanimentRenderDurationPlanEntry[] {
-  const { notesPattern, rhythm } = params
-  const rhythmValues = parseRhythmValues(rhythm)
-  const tokens = splitPatternTokens(notesPattern)
-  const fallbackToken = tokens[0] ?? 'R'
-  const normalizedTokens =
-    tokens.length > 0
-      ? tokens.slice(0, rhythmValues.length)
-      : [fallbackToken]
-
-  while (normalizedTokens.length < rhythmValues.length) {
-    normalizedTokens.push(normalizedTokens[normalizedTokens.length - 1] ?? fallbackToken)
-  }
-
-  const durationPlan: AccompanimentRenderDurationPlanEntry[] = []
-  normalizedTokens.forEach((token, index) => {
-    const rhythmBeats = rhythmValues[index] ?? 1
-    const splitDurations = splitTicksToDurations(beatsToTicks(rhythmBeats))
-    const durations: NoteDuration[] = splitDurations.length > 0 ? splitDurations : ['q']
-    durations.forEach((duration) => {
-      durationPlan.push({
-        token,
-        duration,
+  pair.bass.forEach((note, noteIndex) => {
+    if (note.isRest) return
+    const onsetTick = onsetTicks[noteIndex]
+    const durationTicks = DURATION_TICKS[note.duration] ?? 0
+    const noteEndTick = onsetTick + Math.max(1, durationTicks)
+    const overlaps = onsetTick < endTick && noteEndTick > startTick
+    if (!overlaps) return
+    const keyCount = 1 + (note.chordPitches?.length ?? 0)
+    for (let keyIndex = 0; keyIndex < keyCount; keyIndex += 1) {
+      selections.push({
+        noteId: note.id,
+        staff: 'bass',
+        keyIndex,
       })
-    })
+    }
   })
-  return durationPlan
+
+  return selections
 }
 
 export function useAccompanimentNoteDialogController(params: {
@@ -256,7 +239,7 @@ export function useAccompanimentNoteDialogController(params: {
       | Record<string, SegmentRhythmTemplateBinding>
       | ((current: Record<string, SegmentRhythmTemplateBinding>) => Record<string, SegmentRhythmTemplateBinding>),
   ) => void
-  handlePreviewPitchStack: (params: { pitches: string[]; mode: 'click' | 'drag' }) => void
+  playPreviewMeasureTimeline: (params: { measurePair: MeasurePair; timeSignature: TimeSignature }) => Promise<void> | void
   applyKeyboardEditResult: (
     nextPairs: MeasurePair[],
     nextSelection: Selection,
@@ -279,7 +262,7 @@ export function useAccompanimentNoteDialogController(params: {
     measureKeyFifthsByMeasure,
     segmentRhythmTemplateBindings,
     setSegmentRhythmTemplateBindings,
-    handlePreviewPitchStack,
+    playPreviewMeasureTimeline,
     applyKeyboardEditResult,
     applyTemporaryKeyboardEditResult,
   } = params
@@ -288,7 +271,7 @@ export function useAccompanimentNoteDialogController(params: {
   const [target, setTarget] = useState<ResolvedTarget | null>(null)
   const [candidates, setCandidates] = useState<AccompanimentNoteCandidate[]>([])
   const [selectedCandidateKey, setSelectedCandidateKey] = useState<string | null>(null)
-  const [renderMeasures, setRenderMeasures] = useState<AccompanimentRenderMeasure[]>([])
+  const [previewCandidates, setPreviewCandidates] = useState<AccompanimentRenderMeasure[]>([])
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const baselinePairsRef = useRef<MeasurePair[] | null>(null)
   const baselineSelectionRef = useRef<Selection | null>(null)
@@ -312,7 +295,7 @@ export function useAccompanimentNoteDialogController(params: {
     setTarget(null)
     setCandidates([])
     setSelectedCandidateKey(null)
-    setRenderMeasures([])
+    setPreviewCandidates([])
     previewStateRef.current = null
     baselinePairsRef.current = null
     baselineSelectionRef.current = null
@@ -377,17 +360,17 @@ export function useAccompanimentNoteDialogController(params: {
     )
     setSelectedCandidateKey(candidateKey)
 
-    if (candidate.previewPitches.length > 0) {
-      handlePreviewPitchStack({
-        pitches: candidate.previewPitches,
-        mode: 'click',
-      })
-    }
+    await playPreviewMeasureTimeline({
+      measurePair: applied.nextPairs[target.pairIndex] ?? measurePairsRef.current[target.pairIndex] ?? measurePairsRef.current[0] ?? { treble: [], bass: [] },
+      timeSignature: resolvePairTimeSignature(target.pairIndex, measureTimeSignaturesByMeasure),
+    })
   }, [
     applyTemporaryKeyboardEditResult,
     buildAppliedResult,
     candidates,
-    handlePreviewPitchStack,
+    measurePairsRef,
+    measureTimeSignaturesByMeasure,
+    playPreviewMeasureTimeline,
     target,
   ])
 
@@ -519,22 +502,36 @@ export function useAccompanimentNoteDialogController(params: {
     setTarget(resolvedTarget)
     setCandidates(nextCandidates)
     setSelectedCandidateKey(null)
-    setRenderMeasures(
-      nextCandidates.map((candidate, index) => ({
-        measureNumber: index + 1,
-        candidateKey: candidate.key,
-        notes: candidate.notes,
-        rhythm,
-        keyFifths: resolvedTarget.keyFifths,
-        durationPlan: buildDurationPlan({
-          notesPattern: candidate.notes,
-          rhythm,
-        }),
-      })),
+
+    const previewMeasures = await Promise.all(
+      nextCandidates.map(async (candidate, index) => {
+        const applied = await buildAppliedResult(resolvedTarget, candidate)
+        const candidatePair =
+          applied.nextPairs[resolvedTarget.pairIndex] ??
+          measurePairsRef.current[resolvedTarget.pairIndex] ??
+          { treble: [], bass: [] }
+        return {
+          measureNumber: index + 1,
+          candidateKey: candidate.key,
+          pairIndex: resolvedTarget.pairIndex,
+          measurePair: candidatePair,
+          playbackMeasurePair: candidatePair,
+          timeSignature: resolvePairTimeSignature(resolvedTarget.pairIndex, measureTimeSignaturesByMeasure),
+          keyFifths: resolvedTarget.keyFifths,
+          highlightSelections: buildChordRangeHighlightSelections({
+            pair: candidatePair,
+            startTick: resolvedTarget.chordStartTick,
+            endTick: resolvedTarget.chordEndTick,
+          }),
+        } satisfies AccompanimentRenderMeasure
+      }),
     )
+
+    setPreviewCandidates(previewMeasures)
     setIsOpen(true)
     setErrorMessage(null)
   }, [
+    buildAppliedResult,
     chordRulerEntriesByPair,
     importedNoteLookupRef,
     measurePairsRef,
@@ -550,8 +547,8 @@ export function useAccompanimentNoteDialogController(params: {
       target,
       candidates,
       selectedCandidateKey,
-      renderMeasures,
-      candidateMeasureMap: new Map(renderMeasures.map((entry) => [entry.measureNumber, entry.candidateKey])),
+      previewCandidates,
+      candidateMeasureMap: new Map(previewCandidates.map((entry) => [entry.measureNumber, entry.candidateKey])),
       errorMessage,
       closeDialog,
       previewCandidate,

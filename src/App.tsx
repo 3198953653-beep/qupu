@@ -201,7 +201,7 @@ function App() {
               }
             : null
         }
-        renderMeasures={accompanimentNoteDialog.renderMeasures}
+        previewCandidates={accompanimentNoteDialog.previewCandidates}
         candidateMeasureMap={accompanimentNoteDialog.candidateMeasureMap}
         selectedCandidateKey={accompanimentNoteDialog.selectedCandidateKey}
         timeAxisSpacingConfig={appState.timeAxisSpacingConfig}
