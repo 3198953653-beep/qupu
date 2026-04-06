@@ -102,6 +102,7 @@ function App() {
     playback,
     smartChordToneDialog,
     accompanimentNoteDialog,
+    accompanimentPreviewPlayback,
     rhythmTemplateLoadModal,
     pedalApplyDialog,
     canOpenPedalModal,
@@ -207,6 +208,7 @@ function App() {
         timeAxisSpacingConfig={appState.timeAxisSpacingConfig}
         spacingLayoutMode={layout.spacingLayoutMode}
         grandStaffLayoutMetrics={layout.grandStaffLayoutMetrics}
+        accompanimentPreviewPlayback={accompanimentPreviewPlayback}
         errorMessage={accompanimentNoteDialog.errorMessage}
         onClose={accompanimentNoteDialog.closeDialog}
         onPreviewCandidate={(candidateKey) => {

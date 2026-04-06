@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useRef } from 'react'
 import { useScoreAudioPreviewController } from './useScoreAudioPreviewController'
 import { useScoreEditorUiRuntime } from './useScoreEditorUiRuntime'
 import {
@@ -15,8 +15,7 @@ import { useAccompanimentNoteDialogController } from './useAccompanimentNoteDial
 import { useImportedSegmentRhythmTemplateController } from './useImportedSegmentRhythmTemplateController'
 import { usePedalApplyController } from './usePedalApplyController'
 import { usePlaybackVolumeController } from './usePlaybackVolumeController'
-import { playScoreAction } from '../editorActions'
-import { buildPlaybackTimeline } from '../playbackTimeline'
+import { useAccompanimentPreviewPlaybackController } from './useAccompanimentPreviewPlaybackController'
 import type { Pitch, ScoreNote, Selection, TimeSignature } from '../types'
 
 export function useScoreInteractionRuntimeController(params: {
@@ -129,39 +128,6 @@ export function useScoreInteractionRuntimeController(params: {
     workspaceRuntimeRefs,
   })
 
-  const playPreviewMeasureTimeline = useCallback(async (params: {
-    measurePair: import('../types').MeasurePair
-    timeSignature: TimeSignature
-  }) => {
-    const events = buildPlaybackTimeline({
-      measurePairs: [params.measurePair],
-      timeSignaturesByMeasure: [params.timeSignature],
-      pedalSpans: [],
-    })
-    await playScoreAction({
-      synthRef: editorRefs.synthRef,
-      playbackTimelineEvents: events,
-      playbackTrebleVolumePercent: appState.playbackTrebleVolumePercent,
-      playbackBassVolumePercent: appState.playbackBassVolumePercent,
-      stopPlayTimerRef: editorRefs.stopPlayTimerRef,
-      playbackPointTimerIdsRef: editorRefs.playbackPointTimerIdsRef,
-      playbackSessionIdRef: editorRefs.playbackSessionIdRef,
-      setIsPlaying: appState.setIsPlaying,
-      onPlaybackStart: playbackBridge.playback.handlePlaybackStart,
-      onPlaybackPoint: playbackBridge.playback.handlePlaybackPoint,
-      onPlaybackComplete: playbackBridge.playback.handlePlaybackComplete,
-    })
-  }, [
-    appState.playbackBassVolumePercent,
-    appState.playbackTrebleVolumePercent,
-    appState.setIsPlaying,
-    editorRefs.playbackPointTimerIdsRef,
-    editorRefs.playbackSessionIdRef,
-    editorRefs.stopPlayTimerRef,
-    editorRefs.synthRef,
-    playbackBridge.playback,
-  ])
-
   const accompanimentNoteDialog = useAccompanimentNoteDialogController({
     measurePairsRef: editorRefs.measurePairsRef,
     importedNoteLookupRef: editorRefs.importedNoteLookupRef,
@@ -170,9 +136,14 @@ export function useScoreInteractionRuntimeController(params: {
     measureKeyFifthsByMeasure: appState.measureKeyFifthsFromImport,
     segmentRhythmTemplateBindings: appState.segmentRhythmTemplateBindings,
     setSegmentRhythmTemplateBindings: appState.setSegmentRhythmTemplateBindings,
-    playPreviewMeasureTimeline,
     applyKeyboardEditResult: coreEditing.mutation.applyKeyboardEditResult,
     applyTemporaryKeyboardEditResult: coreEditing.mutation.applyTemporaryKeyboardEditResult,
+  })
+
+  const accompanimentPreviewPlayback = useAccompanimentPreviewPlaybackController({
+    synthRef: editorRefs.synthRef,
+    playbackTrebleVolumePercent: appState.playbackTrebleVolumePercent,
+    playbackBassVolumePercent: appState.playbackBassVolumePercent,
   })
 
   const workspace = useScoreWorkspaceRuntime({
@@ -203,6 +174,7 @@ export function useScoreInteractionRuntimeController(params: {
     playback: playbackBridge.playback,
     smartChordToneDialog: smartChordToneDialog.smartChordToneDialog,
     accompanimentNoteDialog: accompanimentNoteDialog.accompanimentNoteDialog,
+    accompanimentPreviewPlayback,
     rhythmTemplateLoadModal: importedSegmentRhythmTemplate.rhythmTemplateLoadModal,
     pedalApplyDialog: pedalApply.pedalApplyDialog,
     canOpenPedalModal: pedalApply.canOpenPedalModal,
