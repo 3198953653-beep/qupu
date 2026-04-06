@@ -1,12 +1,21 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { Renderer } from 'vexflow'
 import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
+import { resolveEffectiveBoundary } from '../layout/effectiveBoundary'
 import { solveHorizontalMeasureWidths } from '../layout/horizontalMeasureWidthSolver'
-import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
+import {
+  type AppliedTimeAxisSpacingMetrics,
+  attachMeasureTimelineAxisLayout,
+  buildMeasureTimelineBundle,
+  resolvePublicAxisLayoutForConsumption,
+  type TimeAxisSpacingConfig,
+} from '../layout/timeAxisSpacing'
 import { resolveActualStartDecorationWidths, resolveStartDecorationDisplayMetas } from '../layout/startDecorationReserve'
+import { drawPedalSpans } from '../render/drawPedalSpans'
 import { drawMeasureToContext } from '../render/drawMeasure'
 import type { AccompanimentRenderMeasure } from '../hooks/useAccompanimentNoteDialogController'
-import type { SpacingLayoutMode } from '../types'
+import type { MeasureLayout, NoteLayout, PedalSpan, PlaybackCursorRect, SpacingLayoutMode } from '../types'
+import type { MeasureTimelineBundle } from '../timeline/types'
 
 type MeasureSlotLayout = {
   measureNumber: number
@@ -22,10 +31,27 @@ type StaffLineBounds = {
   bassLineBottomY: number
 }
 
+type MeasurePlaybackGeometry = {
+  measureNumber: number
+  candidateKey: string
+  playheadRect: PlaybackCursorRect
+  highlightRect: PlaybackCursorRect
+  measureTicks: number
+  tickXs: Array<{ tick: number; x: number }>
+}
+
 const STRIP_PADDING_X_PX = 18
 const BARLINE_GAP_PX = 3
 const BARLINE_THIN_WIDTH_PX = 1
 const BARLINE_THICK_WIDTH_PX = 3
+
+function consumeInteractionEvent(event: {
+  preventDefault: () => void
+  stopPropagation: () => void
+}): void {
+  event.preventDefault()
+  event.stopPropagation()
+}
 
 function getRenderHeightPx(grandStaffLayoutMetrics: GrandStaffLayoutMetrics): number {
   return Math.max(220, Math.ceil(grandStaffLayoutMetrics.systemHeightPx + 20))
@@ -66,9 +92,34 @@ function drawCandidateEndSeparator(params: {
   context2D.restore()
 }
 
+function resolvePlayheadX(params: {
+  geometry: MeasurePlaybackGeometry
+  playbackTick: number
+}): number {
+  const { geometry, playbackTick } = params
+  const tickXs = geometry.tickXs
+  if (tickXs.length === 0) return geometry.playheadRect.x
+  const clampedTick = Math.max(0, Math.min(geometry.measureTicks, playbackTick))
+  if (clampedTick <= tickXs[0]!.tick) return tickXs[0]!.x
+
+  for (let index = 1; index < tickXs.length; index += 1) {
+    const left = tickXs[index - 1]!
+    const right = tickXs[index]!
+    if (clampedTick <= right.tick) {
+      const span = Math.max(1, right.tick - left.tick)
+      const ratio = Math.max(0, Math.min(1, (clampedTick - left.tick) / span))
+      return left.x + (right.x - left.x) * ratio
+    }
+  }
+
+  return tickXs[tickXs.length - 1]!.x
+}
+
 export function AccompanimentNoteNotationStrip(props: {
   measures: AccompanimentRenderMeasure[]
   selectedCandidateKey: string | null
+  playingMeasureNumber: number | null
+  playbackTick: number | null
   timeAxisSpacingConfig: TimeAxisSpacingConfig
   spacingLayoutMode: SpacingLayoutMode
   grandStaffLayoutMetrics: GrandStaffLayoutMetrics
@@ -78,6 +129,8 @@ export function AccompanimentNoteNotationStrip(props: {
   const {
     measures,
     selectedCandidateKey,
+    playingMeasureNumber,
+    playbackTick,
     timeAxisSpacingConfig,
     spacingLayoutMode,
     grandStaffLayoutMetrics,
@@ -86,6 +139,7 @@ export function AccompanimentNoteNotationStrip(props: {
   } = props
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [slots, setSlots] = useState<MeasureSlotLayout[]>([])
+  const [playbackGeometries, setPlaybackGeometries] = useState<MeasurePlaybackGeometry[]>([])
   const renderHeightPx = getRenderHeightPx(grandStaffLayoutMetrics)
   const viewportHeightPx = getViewportHeightPx(grandStaffLayoutMetrics)
 
@@ -96,6 +150,7 @@ export function AccompanimentNoteNotationStrip(props: {
       const context = canvas.getContext('2d')
       if (context) context.clearRect(0, 0, canvas.width, canvas.height)
       setSlots([])
+      setPlaybackGeometries([])
       return undefined
     }
 
@@ -153,17 +208,48 @@ export function AccompanimentNoteNotationStrip(props: {
     const bassY = systemTopY + grandStaffLayoutMetrics.bassOffsetY
 
     const staffBoundsByMeasure: Array<StaffLineBounds | null> = measures.map(() => null)
+    const nextPlaybackGeometries: MeasurePlaybackGeometry[] = []
+    const nextMeasureLayouts = new Map<number, MeasureLayout>()
+    const nextMeasureTimelineBundles = new Map<number, MeasureTimelineBundle>()
+    const nextNoteLayoutsByPair = new Map<number, NoteLayout[]>()
+    const aggregatedPreviewPedalSpans: PedalSpan[] = []
 
     measures.forEach((measure, index) => {
       const frame = measureFrames[index]
       if (!frame) return
+      const localPairIndex = index
       const highlightSelections = measure.highlightSelections
       const activeSelection = highlightSelections[0] ?? null
       const activeSelections = highlightSelections.length > 0 ? highlightSelections : null
-      drawMeasureToContext({
+      const effectiveBoundary = resolveEffectiveBoundary({
+        measureX: frame.measureX,
+        measureWidth: frame.measureWidth,
+        noteStartX: frame.measureX,
+        noteEndX: frame.measureX + frame.measureWidth,
+        showStartDecorations: true,
+        showEndDecorations: false,
+      })
+      const timelineBundle = attachMeasureTimelineAxisLayout({
+        bundle: buildMeasureTimelineBundle({
+          measure: measure.measurePair,
+          measureIndex: localPairIndex,
+          timeSignature: measure.timeSignature,
+          spacingConfig: timeAxisSpacingConfig,
+          timelineMode: 'merged',
+          supplementalSpacingTicks: null,
+        }),
+        effectiveBoundaryStartX: effectiveBoundary.effectiveStartX,
+        effectiveBoundaryEndX: effectiveBoundary.effectiveEndX,
+        widthPx: frame.measureWidth,
+        spacingConfig: timeAxisSpacingConfig,
+      })
+      nextMeasureTimelineBundles.set(localPairIndex, timelineBundle)
+      const publicAxisLayout = resolvePublicAxisLayoutForConsumption(timelineBundle)
+      let spacingMetrics: AppliedTimeAxisSpacingMetrics | null = null
+      const noteLayouts = drawMeasureToContext({
         context,
         measure: measure.measurePair,
-        pairIndex: measure.pairIndex,
+        pairIndex: localPairIndex,
         measureX: frame.measureX,
         measureWidth: frame.measureWidth,
         trebleY,
@@ -177,15 +263,116 @@ export function AccompanimentNoteNotationStrip(props: {
         draggingSelection: null,
         activeSelections,
         draggingSelections: null,
-        collectLayouts: false,
+        collectLayouts: true,
         showMeasureNumberLabel: false,
         timeAxisSpacingConfig,
         spacingLayoutMode,
+        timelineBundle,
+        publicAxisLayout,
+        spacingAnchorTicks: timelineBundle.spacingAnchorTicks,
         forceLeadingConnector: index > 0,
+        onSpacingMetrics: (metrics) => {
+          spacingMetrics = metrics
+        },
         onStaffLineBounds: (bounds) => {
           staffBoundsByMeasure[index] = bounds
         },
       })
+      nextNoteLayoutsByPair.set(localPairIndex, noteLayouts)
+
+      const bounds = staffBoundsByMeasure[index]
+      const tickXs = publicAxisLayout
+        ? [...publicAxisLayout.tickToX.entries()]
+            .map(([tick, x]) => ({ tick, x }))
+            .sort((left, right) => left.tick - right.tick)
+        : [
+            { tick: 0, x: frame.measureX },
+            { tick: Math.max(1, timelineBundle.measureTicks), x: frame.measureX + frame.measureWidth },
+          ]
+      const topY = bounds?.trebleLineTopY ?? trebleY
+      const bottomY = bounds?.bassLineBottomY ?? (bassY + grandStaffLayoutMetrics.staffLineSpanPx)
+      const currentSpacingMetrics = spacingMetrics as AppliedTimeAxisSpacingMetrics | null
+      nextMeasureLayouts.set(localPairIndex, {
+        pairIndex: localPairIndex,
+        measureX: frame.measureX,
+        measureWidth: frame.measureWidth,
+        contentMeasureWidth: frame.measureWidth,
+        renderedMeasureWidth: frame.measureWidth,
+        trebleY,
+        bassY,
+        trebleLineTopY: bounds?.trebleLineTopY ?? trebleY,
+        trebleLineBottomY: bounds?.trebleLineBottomY ?? (trebleY + grandStaffLayoutMetrics.staffLineSpanPx),
+        bassLineTopY: bounds?.bassLineTopY ?? bassY,
+        bassLineBottomY: bounds?.bassLineBottomY ?? (bassY + grandStaffLayoutMetrics.staffLineSpanPx),
+        systemTop: systemTopY,
+        isSystemStart: index === 0,
+        keyFifths: measure.keyFifths,
+        showKeySignature: index === 0 && measure.keyFifths !== 0,
+        timeSignature: measure.timeSignature,
+        showTimeSignature: index === 0,
+        endTimeSignature: null,
+        showEndTimeSignature: false,
+        includeMeasureStartDecorations: true,
+        noteStartX: effectiveBoundary.effectiveStartX,
+        noteEndX: effectiveBoundary.effectiveEndX,
+        formatWidth: frame.measureWidth,
+        sharedStartDecorationReservePx: actualStartDecorationWidthPxByPair[index] ?? 0,
+        actualStartDecorationWidthPx: actualStartDecorationWidthPxByPair[index] ?? 0,
+        effectiveBoundaryStartX: effectiveBoundary.effectiveStartX,
+        effectiveBoundaryEndX: effectiveBoundary.effectiveEndX,
+        effectiveLeftGapPx: 0,
+        effectiveRightGapPx: 0,
+        leadingGapPx: currentSpacingMetrics?.leadingGapPx,
+        trailingTailTicks: currentSpacingMetrics?.trailingTailTicks,
+        trailingGapPx: currentSpacingMetrics?.trailingGapPx,
+        spacingOccupiedLeftX: currentSpacingMetrics?.spacingOccupiedLeftX,
+        spacingOccupiedRightX: currentSpacingMetrics?.spacingOccupiedRightX,
+        spacingAnchorGapFirstToLastPx: currentSpacingMetrics?.spacingAnchorGapFirstToLastPx,
+        spacingOnsetReserves: currentSpacingMetrics?.spacingOnsetReserves,
+        spacingSegments: currentSpacingMetrics?.spacingSegments,
+        overlayRect: {
+          x: frame.measureX,
+          y: topY,
+          width: frame.measureWidth,
+          height: Math.max(1, bottomY - topY),
+        },
+      })
+      measure.previewPedalSpans.forEach((span) => {
+        aggregatedPreviewPedalSpans.push({
+          ...span,
+          startPairIndex: localPairIndex,
+          endPairIndex: localPairIndex,
+        })
+      })
+      nextPlaybackGeometries.push({
+        measureNumber: measure.measureNumber,
+        candidateKey: measure.candidateKey,
+        playheadRect: {
+          x: frame.measureX,
+          y: topY,
+          width: 2,
+          height: Math.max(1, bottomY - topY),
+        },
+        highlightRect: {
+          x: frame.measureX,
+          y: Math.max(0, topY - 6),
+          width: frame.measureWidth,
+          height: Math.max(1, bottomY - topY + 12),
+        },
+        measureTicks: Math.max(1, timelineBundle.measureTicks),
+        tickXs,
+      })
+    })
+
+    const context2D = (context as unknown as { context2D?: CanvasRenderingContext2D }).context2D
+    drawPedalSpans({
+      context2D,
+      measurePairs,
+      pedalSpans: aggregatedPreviewPedalSpans,
+      measureLayouts: nextMeasureLayouts,
+      measureTimelineBundles: nextMeasureTimelineBundles,
+      noteLayoutsByPair: nextNoteLayoutsByPair,
+      chordRulerEntriesByPair: null,
     })
 
     for (let index = 0; index < measureFrames.length - 1; index += 1) {
@@ -213,6 +400,7 @@ export function AccompanimentNoteNotationStrip(props: {
         }
       }),
     )
+    setPlaybackGeometries(nextPlaybackGeometries)
 
     return undefined
   }, [
@@ -229,6 +417,43 @@ export function AccompanimentNoteNotationStrip(props: {
         <div className="smart-chord-notation-stage-wrap" style={{ height: `${viewportHeightPx}px` }}>
           <div className="smart-chord-notation-stage">
             <canvas ref={canvasRef} className="smart-chord-notation-svg" />
+            {playbackGeometries.map((geometry) => {
+              const isSelected = selectedCandidateKey === geometry.candidateKey
+              if (!isSelected) return null
+              return (
+                <div
+                  key={`highlight-${geometry.candidateKey}`}
+                  className="accompaniment-preview-highlight"
+                  style={{
+                    left: `${geometry.highlightRect.x}px`,
+                    top: `${geometry.highlightRect.y}px`,
+                    width: `${geometry.highlightRect.width}px`,
+                    height: `${geometry.highlightRect.height}px`,
+                  }}
+                  aria-hidden="true"
+                />
+              )
+            })}
+            {playbackGeometries.map((geometry) => {
+              if (playingMeasureNumber !== geometry.measureNumber || playbackTick === null) return null
+              const playheadX = resolvePlayheadX({
+                geometry,
+                playbackTick,
+              })
+              return (
+                <div
+                  key={`playhead-${geometry.candidateKey}`}
+                  className="score-playhead is-playing"
+                  style={{
+                    left: `${playheadX}px`,
+                    top: `${geometry.playheadRect.y}px`,
+                    width: `${geometry.playheadRect.width}px`,
+                    height: `${geometry.playheadRect.height}px`,
+                  }}
+                  aria-hidden="true"
+                />
+              )
+            })}
             <div className="smart-chord-notation-hit-layer">
               {slots.map((slot) => (
                 <button
@@ -241,8 +466,20 @@ export function AccompanimentNoteNotationStrip(props: {
                     top: '0px',
                     height: `${renderHeightPx}px`,
                   }}
-                  onClick={() => onPreviewByMeasure(slot.measureNumber)}
-                  onDoubleClick={() => onApplyByMeasure(slot.measureNumber)}
+                  onPointerDown={(event) => {
+                    consumeInteractionEvent(event)
+                  }}
+                  onMouseDown={(event) => {
+                    consumeInteractionEvent(event)
+                  }}
+                  onClick={(event) => {
+                    consumeInteractionEvent(event)
+                    onPreviewByMeasure(slot.measureNumber)
+                  }}
+                  onDoubleClick={(event) => {
+                    consumeInteractionEvent(event)
+                    onApplyByMeasure(slot.measureNumber)
+                  }}
                   title={`候选 ${slot.measureNumber}`}
                   aria-label={`候选小节 ${slot.measureNumber}`}
                   aria-pressed={selectedCandidateKey === slot.candidateKey}

@@ -134,6 +134,7 @@ export function useScoreInteractionRuntimeController(params: {
     chordRulerEntriesByPair: layout.chordRulerEntriesByPair,
     measureTimeSignaturesByMeasure: appState.measureTimeSignaturesFromImport,
     measureKeyFifthsByMeasure: appState.measureKeyFifthsFromImport,
+    pedalSpans: appState.pedalSpans,
     segmentRhythmTemplateBindings: appState.segmentRhythmTemplateBindings,
     setSegmentRhythmTemplateBindings: appState.setSegmentRhythmTemplateBindings,
     applyKeyboardEditResult: coreEditing.mutation.applyKeyboardEditResult,

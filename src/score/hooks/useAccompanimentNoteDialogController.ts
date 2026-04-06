@@ -4,8 +4,10 @@ import {
   enumerateAccompanimentNoteCandidates,
   type AccompanimentNoteCandidate,
 } from '../accompanimentNoteCandidates'
+import { getMeasureTicksFromTimeSignature } from '../chordRuler'
 import { findSelectionLocationInPairs } from '../keyboardEdits'
 import { resolvePairKeyFifths, resolvePairTimeSignature } from '../measureRestUtils'
+import { buildPlaybackTimeline, type PlaybackTimelineEvent } from '../playbackTimeline'
 import { buildStaffOnsetTicks } from '../selectionTimelineRange'
 import { getStepOctaveAlterFromPitch } from '../pitchMath'
 import { queryAccompanimentOptionRows } from '../rhythmTemplateDb'
@@ -18,6 +20,7 @@ import {
 import type {
   ImportedNoteLocation,
   MeasurePair,
+  PedalSpan,
   SegmentRhythmTemplateBinding,
   Selection,
   TimeSignature,
@@ -54,6 +57,9 @@ export type AccompanimentRenderMeasure = {
   measurePair: MeasurePair
   playbackMeasurePair: MeasurePair
   timeSignature: TimeSignature
+  playbackTimelineEvents: PlaybackTimelineEvent[]
+  playbackMeasureTicks: number
+  previewPedalSpans: PedalSpan[]
   keyFifths: number
   highlightSelections: Selection[]
 }
@@ -227,19 +233,49 @@ function buildChordRangeHighlightSelections(params: {
   return selections
 }
 
+function buildPreviewPedalSpansForMeasure(params: {
+  pedalSpans: PedalSpan[]
+  pairIndex: number
+  timeSignature: TimeSignature
+}): PedalSpan[] {
+  const { pedalSpans, pairIndex, timeSignature } = params
+  const measureTicks = Math.max(1, getMeasureTicksFromTimeSignature(timeSignature))
+
+  return pedalSpans.flatMap((span) => {
+    if (span.endPairIndex < pairIndex || span.startPairIndex > pairIndex) return []
+
+    const startTick = span.startPairIndex < pairIndex
+      ? 0
+      : Math.max(0, Math.min(measureTicks, Math.round(span.startTick)))
+    const endTick = span.endPairIndex > pairIndex
+      ? measureTicks
+      : Math.max(0, Math.min(measureTicks, Math.round(span.endTick)))
+    const clampedEndTick = Math.max(startTick + 1, endTick)
+    if (clampedEndTick <= startTick) return []
+
+    return [{
+      ...span,
+      startPairIndex: 0,
+      endPairIndex: 0,
+      startTick,
+      endTick: clampedEndTick,
+    }]
+  })
+}
+
 export function useAccompanimentNoteDialogController(params: {
   measurePairsRef: MutableRefObject<MeasurePair[]>
   importedNoteLookupRef: MutableRefObject<Map<string, ImportedNoteLocation>>
   chordRulerEntriesByPair: import('../chordRuler').ChordRulerEntry[][] | null
   measureTimeSignaturesByMeasure: TimeSignature[] | null
   measureKeyFifthsByMeasure: number[] | null
+  pedalSpans: PedalSpan[]
   segmentRhythmTemplateBindings: Record<string, SegmentRhythmTemplateBinding>
   setSegmentRhythmTemplateBindings: (
     next:
       | Record<string, SegmentRhythmTemplateBinding>
       | ((current: Record<string, SegmentRhythmTemplateBinding>) => Record<string, SegmentRhythmTemplateBinding>),
   ) => void
-  playPreviewMeasureTimeline: (params: { measurePair: MeasurePair; timeSignature: TimeSignature }) => Promise<void> | void
   applyKeyboardEditResult: (
     nextPairs: MeasurePair[],
     nextSelection: Selection,
@@ -260,9 +296,9 @@ export function useAccompanimentNoteDialogController(params: {
     chordRulerEntriesByPair,
     measureTimeSignaturesByMeasure,
     measureKeyFifthsByMeasure,
+    pedalSpans,
     segmentRhythmTemplateBindings,
     setSegmentRhythmTemplateBindings,
-    playPreviewMeasureTimeline,
     applyKeyboardEditResult,
     applyTemporaryKeyboardEditResult,
   } = params
@@ -360,17 +396,10 @@ export function useAccompanimentNoteDialogController(params: {
     )
     setSelectedCandidateKey(candidateKey)
 
-    await playPreviewMeasureTimeline({
-      measurePair: applied.nextPairs[target.pairIndex] ?? measurePairsRef.current[target.pairIndex] ?? measurePairsRef.current[0] ?? { treble: [], bass: [] },
-      timeSignature: resolvePairTimeSignature(target.pairIndex, measureTimeSignaturesByMeasure),
-    })
   }, [
     applyTemporaryKeyboardEditResult,
     buildAppliedResult,
     candidates,
-    measurePairsRef,
-    measureTimeSignaturesByMeasure,
-    playPreviewMeasureTimeline,
     target,
   ])
 
@@ -510,13 +539,30 @@ export function useAccompanimentNoteDialogController(params: {
           applied.nextPairs[resolvedTarget.pairIndex] ??
           measurePairsRef.current[resolvedTarget.pairIndex] ??
           { treble: [], bass: [] }
+        const timeSignature = resolvePairTimeSignature(resolvedTarget.pairIndex, measureTimeSignaturesByMeasure)
+        const previewPedalSpans = buildPreviewPedalSpansForMeasure({
+          pedalSpans,
+          pairIndex: resolvedTarget.pairIndex,
+          timeSignature,
+        })
+        const playbackTimelineEvents = buildPlaybackTimeline({
+          measurePairs: [candidatePair],
+          timeSignaturesByMeasure: [timeSignature],
+          pedalSpans: previewPedalSpans,
+        })
         return {
           measureNumber: index + 1,
           candidateKey: candidate.key,
           pairIndex: resolvedTarget.pairIndex,
           measurePair: candidatePair,
           playbackMeasurePair: candidatePair,
-          timeSignature: resolvePairTimeSignature(resolvedTarget.pairIndex, measureTimeSignaturesByMeasure),
+          timeSignature,
+          playbackTimelineEvents,
+          playbackMeasureTicks: Math.max(
+            1,
+            playbackTimelineEvents[0]?.measureTicks ?? getMeasureTicksFromTimeSignature(timeSignature),
+          ),
+          previewPedalSpans,
           keyFifths: resolvedTarget.keyFifths,
           highlightSelections: buildChordRangeHighlightSelections({
             pair: candidatePair,
@@ -537,6 +583,7 @@ export function useAccompanimentNoteDialogController(params: {
     measurePairsRef,
     measureTimeSignaturesByMeasure,
     measureKeyFifthsByMeasure,
+    pedalSpans,
     segmentRhythmTemplateBindings,
   ])
 

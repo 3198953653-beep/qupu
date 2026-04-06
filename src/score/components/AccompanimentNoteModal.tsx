@@ -44,9 +44,15 @@ export function AccompanimentNoteModal(props: {
   useEffect(() => {
     onCloseRef.current = onClose
   }, [onClose])
+  const hasVisiblePreviewPedals = useMemo(
+    () => previewCandidates.some((candidate) => candidate.previewPedalSpans.length > 0),
+    [previewCandidates],
+  )
   const previewGrandStaffLayoutMetrics = useMemo(
-    () => getGrandStaffLayoutMetrics(grandStaffLayoutMetrics.staffInterGapPx, { includePedalLane: false }),
-    [grandStaffLayoutMetrics.staffInterGapPx],
+    () => getGrandStaffLayoutMetrics(grandStaffLayoutMetrics.staffInterGapPx, {
+      includePedalLane: hasVisiblePreviewPedals,
+    }),
+    [grandStaffLayoutMetrics.staffInterGapPx, hasVisiblePreviewPedals],
   )
   const {
     activeCandidateKey,
