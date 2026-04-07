@@ -62,6 +62,7 @@ export function useKeyboardCommandController(params: {
   setSelectedSelections: Dispatch<SetStateAction<Selection[]>>
   setSelectedMeasureScope: Dispatch<SetStateAction<MeasureScope>>
   setActiveSelection: Dispatch<SetStateAction<Selection>>
+  setSelectionFrameIntent: Dispatch<SetStateAction<import('../types').SelectionFrameIntent>>
   setActiveTieSelection: Dispatch<SetStateAction<TieSelection | null>>
   setActiveAccidentalSelection: Dispatch<SetStateAction<Selection | null>>
   setActivePedalSelection: Dispatch<SetStateAction<ActivePedalSelection | null>>
@@ -103,6 +104,7 @@ export function useKeyboardCommandController(params: {
     setSelectedSelections,
     setSelectedMeasureScope,
     setActiveSelection,
+    setSelectionFrameIntent,
     setActiveTieSelection,
     setActiveAccidentalSelection,
     setActivePedalSelection,
@@ -137,6 +139,7 @@ export function useKeyboardCommandController(params: {
       setIsSelectionVisible,
       setActiveSelection,
       setSelectedSelections,
+      setSelectionFrameIntent,
     })
   }, [
     activeSelectionRef,
@@ -155,6 +158,7 @@ export function useKeyboardCommandController(params: {
     setIsSelectionVisible,
     setMeasurePairsFromImport,
     setNotes,
+    setSelectionFrameIntent,
     setSelectedSelections,
   ])
 
@@ -178,6 +182,7 @@ export function useKeyboardCommandController(params: {
       setIsSelectionVisible,
       setActiveSelection,
       setSelectedSelections,
+      setSelectionFrameIntent,
     })
   }, [
     activeSelectionRef,
@@ -196,6 +201,7 @@ export function useKeyboardCommandController(params: {
     setIsSelectionVisible,
     setMeasurePairsFromImport,
     setNotes,
+    setSelectionFrameIntent,
     setSelectedSelections,
   ])
 
@@ -228,9 +234,18 @@ export function useKeyboardCommandController(params: {
     setActiveTieSelection,
     setActiveAccidentalSelection,
     setActivePedalSelection,
-    setIsSelectionVisible,
-    setSelectedSelections,
-    setSelectedMeasureScope,
+    setIsSelectionVisible: (value) => {
+      setSelectionFrameIntent('default')
+      setIsSelectionVisible(value)
+    },
+    setSelectedSelections: (value) => {
+      setSelectionFrameIntent('default')
+      setSelectedSelections(value)
+    },
+    setSelectedMeasureScope: (value) => {
+      setSelectionFrameIntent('default')
+      setSelectedMeasureScope(value)
+    },
     setNotationPaletteLastAction,
   })
 }

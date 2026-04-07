@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
+import { useEffect, useMemo, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 import { buildNotationPaletteDerivedDisplay, type NotationPaletteDerivedDisplay, type NotationPaletteResolvedSelection } from '../notationPaletteConfig'
 import { findSelectionLocationInPairs } from '../keyboardEdits'
 import { toDisplayPitch } from '../pitchUtils'
@@ -22,6 +22,38 @@ function appendUniqueSelection(current: Selection[], next: Selection): Selection
   return [...current, next]
 }
 
+function serializeNullableString(value: string | null | undefined): string {
+  return value ?? ''
+}
+
+function serializeNullableNumber(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value) ? String(value) : ''
+}
+
+function buildScoreNoteContentSignature(notes: ScoreNote[]): string {
+  return notes
+    .map((note) => [
+      note.id,
+      note.pitch,
+      note.duration,
+      note.isRest === true ? '1' : '0',
+      serializeNullableString(note.accidental),
+      (note.chordPitches ?? []).join(','),
+      (note.chordAccidentals ?? []).map((value) => serializeNullableString(value)).join(','),
+      note.tieStart === true ? '1' : '0',
+      note.tieStop === true ? '1' : '0',
+      (note.chordTieStarts ?? []).map((value) => (value === true ? '1' : '0')).join(','),
+      (note.chordTieStops ?? []).map((value) => (value === true ? '1' : '0')).join(','),
+      serializeNullableString(note.tieFrozenIncomingPitch),
+      serializeNullableString(note.tieFrozenIncomingFromNoteId),
+      serializeNullableNumber(note.tieFrozenIncomingFromKeyIndex),
+      (note.chordTieFrozenIncomingPitches ?? []).map((value) => serializeNullableString(value)).join(','),
+      (note.chordTieFrozenIncomingFromNoteIds ?? []).map((value) => serializeNullableString(value)).join(','),
+      (note.chordTieFrozenIncomingFromKeyIndices ?? []).map((value) => serializeNullableNumber(value)).join(','),
+    ].join('|'))
+    .join('||')
+}
+
 export function useScoreSelectionController(params: {
   notes: ScoreNote[]
   bassNotes: ScoreNote[]
@@ -34,6 +66,7 @@ export function useScoreSelectionController(params: {
   activePedalSelection: ActivePedalSelection | null
   isSelectionVisible: boolean
   draggingSelection: Selection | null
+  selectionFrameIntent: import('../types').SelectionFrameIntent
   importFeedback: ImportFeedback
   fallbackSelectionNote: ScoreNote
   trebleNoteById: Map<string, ScoreNote>
@@ -56,6 +89,7 @@ export function useScoreSelectionController(params: {
   setSelectedMeasureScope: (scope: { pairIndex: number; staff: Selection['staff'] } | null) => void
   setActiveTieSelection: (selection: TieSelection | null) => void
   setActivePedalSelection: (selection: ActivePedalSelection | null) => void
+  setSelectionFrameIntent: Dispatch<SetStateAction<import('../types').SelectionFrameIntent>>
 }): {
   currentSelection: ScoreNote
   currentSelectionPosition: number
@@ -75,6 +109,7 @@ export function useScoreSelectionController(params: {
     activePedalSelection,
     isSelectionVisible,
     draggingSelection,
+    selectionFrameIntent,
     importFeedback,
     fallbackSelectionNote,
     trebleNoteById,
@@ -97,7 +132,24 @@ export function useScoreSelectionController(params: {
     setSelectedMeasureScope,
     setActiveTieSelection,
     setActivePedalSelection,
+    setSelectionFrameIntent,
   } = params
+
+  const notesContentSignature = useMemo(() => buildScoreNoteContentSignature(notes), [notes])
+  const bassNotesContentSignature = useMemo(() => buildScoreNoteContentSignature(bassNotes), [bassNotes])
+  const previousNotesContentSignatureRef = useRef(notesContentSignature)
+  const previousBassNotesContentSignatureRef = useRef(bassNotesContentSignature)
+
+  useEffect(() => {
+    const notesChanged =
+      previousNotesContentSignatureRef.current !== notesContentSignature ||
+      previousBassNotesContentSignatureRef.current !== bassNotesContentSignature
+    previousNotesContentSignatureRef.current = notesContentSignature
+    previousBassNotesContentSignatureRef.current = bassNotesContentSignature
+    if (!notesChanged) return
+    if (selectionFrameIntent === 'default') return
+    setSelectionFrameIntent('default')
+  }, [bassNotesContentSignature, notesContentSignature, selectionFrameIntent, setSelectionFrameIntent])
 
   useEffect(() => {
     const hasActiveTreble = notes.some((note) => note.id === activeSelection.noteId)

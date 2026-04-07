@@ -285,6 +285,8 @@ export type Selection = {
   keyIndex: number
 }
 
+export type SelectionFrameIntent = 'default' | 'shift-range-tight'
+
 export type PlaybackPoint = {
   pairIndex: number
   onsetTick: number

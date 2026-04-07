@@ -168,16 +168,16 @@ export function useScoreWorkspaceSelectionBindings(params: {
   const onSelectionPointerDown = useCallback((
     _selection: Selection,
     nextSelections: Selection[],
-    _mode: string,
+    mode: string,
   ) => {
     void _selection
-    void _mode
     sessionHelpers.resetMidiStepChain()
     appState.setActiveAccidentalSelection(null)
     appState.setActiveTieSelection(null)
     appState.setActivePedalSelection(null)
     appState.setSelectedMeasureScope(null)
     clearActiveChordSelection()
+    appState.setSelectionFrameIntent(mode === 'range' && nextSelections.length > 0 ? 'shift-range-tight' : 'default')
     const nextTargetSelections = nextSelections
     appState.setSelectedSelections((current) => {
       if (
@@ -197,6 +197,7 @@ export function useScoreWorkspaceSelectionBindings(params: {
     appState.setActivePedalSelection(null)
     appState.setSelectedMeasureScope(null)
     clearActiveChordSelection()
+    appState.setSelectionFrameIntent('default')
     appState.setSelectedSelections([selection])
     appState.setActiveSelection(selection)
     appState.setIsSelectionVisible(true)
@@ -267,6 +268,7 @@ export function useScoreWorkspaceSelectionBindings(params: {
     appState.setActivePedalSelection(null)
     appState.setSelectedMeasureScope(null)
     clearActiveChordSelection()
+    appState.setSelectionFrameIntent('default')
     appState.setDraggingSelection(null)
     appState.setSelectedSelections([])
     appState.setIsSelectionVisible(false)
@@ -280,6 +282,7 @@ export function useScoreWorkspaceSelectionBindings(params: {
     appState.setActivePedalSelection(null)
     appState.setSelectedMeasureScope(null)
     clearActiveChordSelection()
+    appState.setSelectionFrameIntent('default')
     appState.setDraggingSelection(null)
     appState.setSelectedSelections([])
     appState.setIsSelectionVisible(false)
@@ -312,6 +315,7 @@ export function useScoreWorkspaceSelectionBindings(params: {
     appState.setActiveTieSelection(null)
     appState.setActivePedalSelection(null)
     clearActiveChordSelection()
+    appState.setSelectionFrameIntent('default')
     if (pairIndex === null || staff === null) {
       appState.setIsSelectionVisible(false)
       appState.setSelectedSelections([])
@@ -373,6 +377,7 @@ export function useScoreWorkspaceSelectionBindings(params: {
     appState.setActiveTieSelection(null)
     appState.setSelectedMeasureScope(null)
     clearActiveChordSelection()
+    appState.setSelectionFrameIntent('default')
     appState.setDraggingSelection(null)
     appState.setSelectedSelections([])
     appState.setIsSelectionVisible(false)

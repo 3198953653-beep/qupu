@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type MutableRefObject } from 'react'
 import { collectMeasureTickRangeNotes } from '../chordRangeNoteCoverage'
-import type { MeasurePair, Selection } from '../types'
+import type { MeasurePair, Selection, SelectionFrameIntent } from '../types'
 import type { ActiveChordSelection, ChordRulerMarkerMeta } from './chordMarkerTypes'
 
 function buildSelectionsForMeasureTickRange(
@@ -33,6 +33,7 @@ export function useChordMarkerSelection(params: {
   setIsSelectionVisible: (visible: boolean) => void
   setSelectedSelections: (selections: Selection[]) => void
   setActiveSelection: (selection: Selection) => void
+  setSelectionFrameIntent: (intent: SelectionFrameIntent) => void
   clearActiveAccidentalSelection: () => void
   clearActiveTieSelection: () => void
   clearActivePedalSelection: () => void
@@ -46,6 +47,7 @@ export function useChordMarkerSelection(params: {
     setIsSelectionVisible,
     setSelectedSelections,
     setActiveSelection,
+    setSelectionFrameIntent,
     clearActiveAccidentalSelection,
     clearActiveTieSelection,
     clearActivePedalSelection,
@@ -86,6 +88,7 @@ export function useChordMarkerSelection(params: {
     clearActivePedalSelection()
     clearSelectedMeasureScope()
     clearDraggingSelection()
+    setSelectionFrameIntent('default')
     if (nextSelections.length > 0) {
       setIsSelectionVisible(true)
       setSelectedSelections(nextSelections)
@@ -111,6 +114,7 @@ export function useChordMarkerSelection(params: {
     resetMidiStepChain,
     setActiveSelection,
     setIsSelectionVisible,
+    setSelectionFrameIntent,
     setSelectedSelections,
   ])
 

@@ -4,13 +4,18 @@ import {
   getMeasureTickRangeLayoutBounds,
 } from '../chordRangeNoteCoverage'
 import {
+  buildSelectedNoteLayoutsHighlightRect,
   buildMeasureSurfaceHighlightRect,
   resolveCombinedStaffLineBounds,
 } from '../highlightRect'
-import type { MeasureFrame, MeasureLayout, MeasurePair, NoteLayout } from '../types'
+import type { MeasureFrame, MeasureLayout, MeasurePair, NoteLayout, Selection, SelectionFrameIntent } from '../types'
 import type { ActiveChordSelection, ActiveTimelineSegmentHighlight, MeasureSelectionScope } from './chordMarkerTypes'
 
 export function useChordMarkerHighlight(params: {
+  selectionFrameIntent: SelectionFrameIntent
+  isSelectionVisible: boolean
+  activeSelection: Selection
+  selectedSelections: Selection[]
   activeChordSelection: ActiveChordSelection | null
   activeTimelineSegmentHighlight: ActiveTimelineSegmentHighlight | null
   selectedMeasureScope: MeasureSelectionScope | null
@@ -29,6 +34,10 @@ export function useChordMarkerHighlight(params: {
   chordMarkerLayoutRevision: number
 }) {
   const {
+    selectionFrameIntent,
+    isSelectionVisible,
+    activeSelection,
+    selectedSelections,
     activeChordSelection,
     activeTimelineSegmentHighlight,
     selectedMeasureScope,
@@ -70,11 +79,77 @@ export function useChordMarkerHighlight(params: {
     return getMeasureTickRangeLayoutBounds(coverage, 'selection')
   }, [measurePairsRef, noteLayoutsByPairRef])
 
+  const resolveShiftRangeHighlightRect = useCallback(() => {
+    if (selectionFrameIntent !== 'shift-range-tight' || !isSelectionVisible) return null
+
+    const effectiveSelections: Selection[] = []
+    const seenSelectionKeys = new Set<string>()
+    const appendSelection = (selection: Selection) => {
+      const key = `${selection.staff}:${selection.noteId}:${selection.keyIndex}`
+      if (seenSelectionKeys.has(key)) return
+      seenSelectionKeys.add(key)
+      effectiveSelections.push(selection)
+    }
+
+    selectedSelections.forEach(appendSelection)
+    appendSelection(activeSelection)
+    if (effectiveSelections.length <= 1) return null
+
+    const noteLayoutBySelectionKey = new Map<string, NoteLayout>()
+    noteLayoutsByPairRef.current.forEach((pairLayouts) => {
+      pairLayouts.forEach((layout) => {
+        noteLayoutBySelectionKey.set(`${layout.staff}:${layout.id}`, layout)
+      })
+    })
+
+    const selectedNoteLayouts: NoteLayout[] = []
+    const seenNoteLayoutKeys = new Set<string>()
+    effectiveSelections.forEach((selection) => {
+      const layout = noteLayoutBySelectionKey.get(`${selection.staff}:${selection.noteId}`) ?? null
+      if (!layout) return
+      const layoutKey = `${layout.staff}:${layout.id}:${layout.pairIndex}:${layout.noteIndex}`
+      if (seenNoteLayoutKeys.has(layoutKey)) return
+      seenNoteLayoutKeys.add(layoutKey)
+      selectedNoteLayouts.push(layout)
+    })
+
+    if (selectedNoteLayouts.length === 0) return null
+
+    return buildSelectedNoteLayoutsHighlightRect({
+      selectedNoteLayouts,
+      measureLayoutsByPair: measureLayoutsRef.current,
+      scaleX: scoreScaleX,
+      scaleY: scoreScaleY,
+      offsetX: scoreSurfaceOffsetXPx + stageBorderPx,
+      offsetY: scoreSurfaceOffsetYPx + stageBorderPx,
+      padX: 2,
+      padY: chordHighlightPadYPx,
+    })
+  }, [
+    activeSelection,
+    chordHighlightPadYPx,
+    isSelectionVisible,
+    measureLayoutsRef,
+    noteLayoutsByPairRef,
+    scoreScaleX,
+    scoreScaleY,
+    scoreSurfaceOffsetXPx,
+    scoreSurfaceOffsetYPx,
+    selectedSelections,
+    selectionFrameIntent,
+    stageBorderPx,
+  ])
+
   return useMemo(() => {
     void layoutStabilityKey
     void chordMarkerLayoutRevision
     const measurePadX = 6
     const measurePadY = 4
+
+    const shiftRangeHighlightRect = resolveShiftRangeHighlightRect()
+    if (shiftRangeHighlightRect !== null) {
+      return shiftRangeHighlightRect
+    }
 
     if (activeChordSelection !== null) {
       const measureLayout = measureLayoutsRef.current.get(activeChordSelection.pairIndex) ?? null
@@ -167,13 +242,17 @@ export function useChordMarkerHighlight(params: {
     chordHighlightPadYPx,
     chordMarkerLayoutRevision,
     horizontalMeasureFramesByPair,
+    isSelectionVisible,
     layoutStabilityKey,
     measureLayoutsRef,
     resolveChordHighlightContentBounds,
+    resolveShiftRangeHighlightRect,
     scoreScaleX,
     scoreScaleY,
     scoreSurfaceOffsetXPx,
     scoreSurfaceOffsetYPx,
+    selectedSelections,
+    selectionFrameIntent,
     selectedMeasureScope,
     stageBorderPx,
   ])

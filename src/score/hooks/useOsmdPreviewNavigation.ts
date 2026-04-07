@@ -33,6 +33,7 @@ export function useOsmdPreviewNavigation(params: {
   setSelectedSelections: StateSetter<Selection[]>
   setDraggingSelection: StateSetter<Selection | null>
   setSelectedMeasureScope: StateSetter<{ pairIndex: number; staff: Selection['staff'] } | null>
+  setSelectionFrameIntent: StateSetter<import('../types').SelectionFrameIntent>
   clearActiveChordSelection: () => void
 }) {
   const {
@@ -55,6 +56,7 @@ export function useOsmdPreviewNavigation(params: {
     setSelectedSelections,
     setDraggingSelection,
     setSelectedMeasureScope,
+    setSelectionFrameIntent,
     clearActiveChordSelection,
   } = params
 
@@ -117,6 +119,7 @@ export function useOsmdPreviewNavigation(params: {
     setSelectedSelections,
     setDraggingSelection,
     setSelectedMeasureScope,
+    setSelectionFrameIntent,
     clearActiveChordSelection,
     osmdPreviewNoteLookupByDomIdRef,
     osmdPreviewSelectedSelectionKeyRef,

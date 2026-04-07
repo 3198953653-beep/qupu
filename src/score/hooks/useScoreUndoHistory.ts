@@ -8,6 +8,7 @@ import type {
   MusicXmlMetadata,
   PedalSpan,
   Selection,
+  SelectionFrameIntent,
   TimeSignature,
 } from '../types'
 import { cloneMeasurePairs, clonePedalSpans, type UndoSnapshot } from './scoreMutationShared'
@@ -46,6 +47,7 @@ export function useScoreUndoHistory(params: {
   setActiveSelection: StateSetter<Selection>
   setActivePedalSelection: StateSetter<ActivePedalSelection | null>
   setSelectedSelections: StateSetter<Selection[]>
+  setSelectionFrameIntent: StateSetter<SelectionFrameIntent>
 }) {
   const {
     measurePairsFromImportRef,
@@ -79,6 +81,7 @@ export function useScoreUndoHistory(params: {
     setActiveSelection,
     setActivePedalSelection,
     setSelectedSelections,
+    setSelectionFrameIntent,
   } = params
 
   const undoHistoryRef = useRef<UndoSnapshot[]>([])
@@ -146,6 +149,7 @@ export function useScoreUndoHistory(params: {
     clearSelectedMeasureScope()
     clearActiveChordSelection()
     setFullMeasureRestCollapseScopeKeys(snapshot.fullMeasureRestCollapseScopeKeys)
+    setSelectionFrameIntent('default')
     setActiveSelection(snapshot.selection)
     setActivePedalSelection(
       snapshot.activePedalSelection &&
@@ -178,6 +182,7 @@ export function useScoreUndoHistory(params: {
     setNotes,
     setPedalSpans,
     setSelectedSelections,
+    setSelectionFrameIntent,
   ])
 
   return {

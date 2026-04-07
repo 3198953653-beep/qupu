@@ -17,6 +17,7 @@ import type {
   Pitch,
   ScoreNote,
   Selection,
+  SelectionFrameIntent,
 } from '../types'
 import {
   appendUniqueSelection,
@@ -48,6 +49,7 @@ export function moveSelectionsByKeyboardSteps(params: {
   setIsSelectionVisible: StateSetter<boolean>
   setActiveSelection: StateSetter<Selection>
   setSelectedSelections: StateSetter<Selection[]>
+  setSelectionFrameIntent: StateSetter<SelectionFrameIntent>
 }): boolean {
   const {
     direction,
@@ -70,6 +72,7 @@ export function moveSelectionsByKeyboardSteps(params: {
     setIsSelectionVisible,
     setActiveSelection,
     setSelectedSelections,
+    setSelectionFrameIntent,
   } = params
 
   const currentSelection = activeSelectionRef.current
@@ -202,6 +205,7 @@ export function moveSelectionsByKeyboardSteps(params: {
     setBassNotes(result.bassNotes)
   }
   setIsSelectionVisible(true)
+  setSelectionFrameIntent('default')
   setActiveSelection({
     noteId: currentSelection.noteId,
     staff: currentSelection.staff,

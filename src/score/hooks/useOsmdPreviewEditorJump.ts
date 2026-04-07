@@ -33,6 +33,7 @@ export function useOsmdPreviewEditorJump(params: {
   setSelectedSelections: StateSetter<Selection[]>
   setDraggingSelection: StateSetter<Selection | null>
   setSelectedMeasureScope: StateSetter<{ pairIndex: number; staff: Selection['staff'] } | null>
+  setSelectionFrameIntent: StateSetter<import('../types').SelectionFrameIntent>
   clearActiveChordSelection: () => void
   osmdPreviewNoteLookupByDomIdRef: MutableRefObject<Map<string, OsmdPreviewSelectionTarget>>
   osmdPreviewSelectedSelectionKeyRef: MutableRefObject<string | null>
@@ -57,6 +58,7 @@ export function useOsmdPreviewEditorJump(params: {
     setSelectedSelections,
     setDraggingSelection,
     setSelectedMeasureScope,
+    setSelectionFrameIntent,
     clearActiveChordSelection,
     osmdPreviewNoteLookupByDomIdRef,
     osmdPreviewSelectedSelectionKeyRef,
@@ -88,6 +90,7 @@ export function useOsmdPreviewEditorJump(params: {
     setSelectedSelections([selection])
     setDraggingSelection(null)
     setSelectedMeasureScope(null)
+    setSelectionFrameIntent('default')
     clearActiveChordSelection()
     closeOsmdPreviewRef.current?.()
 
@@ -156,6 +159,7 @@ export function useOsmdPreviewEditorJump(params: {
     setActiveSelection,
     setDraggingSelection,
     setIsSelectionVisible,
+    setSelectionFrameIntent,
     setSelectedMeasureScope,
     setSelectedSelections,
   ])

@@ -9,7 +9,8 @@ export type SelectionLocation = {
 
 export type SelectionTimelinePoint = SelectionLocation & {
   selection: Selection
-  onsetTicksInMeasure: number
+  startTickInclusive: number
+  endTickExclusive: number
 }
 
 function isSameSelection(left: Selection, right: Selection): boolean {
@@ -77,20 +78,29 @@ export function resolveSelectionTimelinePoint(params: {
   const pair = pairs[location.pairIndex]
   if (!pair) return null
   const notes = location.staff === 'treble' ? pair.treble : pair.bass
+  const note = notes[location.noteIndex]
+  if (!note) return null
   const onsetTicks = buildStaffOnsetTicks(notes)
-  const onsetTicksInMeasure = onsetTicks[location.noteIndex]
-  if (!Number.isFinite(onsetTicksInMeasure)) return null
+  const startTickInclusive = onsetTicks[location.noteIndex]
+  if (!Number.isFinite(startTickInclusive)) return null
+  const durationTicks = DURATION_TICKS[note.duration]
+  const safeDurationTicks = Number.isFinite(durationTicks) ? Math.max(1, durationTicks) : TICKS_PER_BEAT
+  const endTickExclusive = startTickInclusive + safeDurationTicks
   return {
     ...location,
     selection,
-    onsetTicksInMeasure,
+    startTickInclusive,
+    endTickExclusive,
   }
 }
 
 export function compareTimelinePoint(left: SelectionTimelinePoint, right: SelectionTimelinePoint): number {
   if (left.pairIndex !== right.pairIndex) return left.pairIndex - right.pairIndex
-  if (left.onsetTicksInMeasure !== right.onsetTicksInMeasure) {
-    return left.onsetTicksInMeasure - right.onsetTicksInMeasure
+  if (left.startTickInclusive !== right.startTickInclusive) {
+    return left.startTickInclusive - right.startTickInclusive
+  }
+  if (left.endTickExclusive !== right.endTickExclusive) {
+    return left.endTickExclusive - right.endTickExclusive
   }
   return 0
 }
@@ -115,20 +125,28 @@ export function buildSelectionsInTimelineRange(params: {
   if (resolvedAnchors.length === 0) return []
 
   let earliest = resolvedAnchors[0]
-  let latest = resolvedAnchors[0]
+  let latestEnding = resolvedAnchors[0]
   resolvedAnchors.forEach((entry) => {
     if (compareTimelinePoint(entry, earliest) < 0) earliest = entry
-    if (compareTimelinePoint(entry, latest) > 0) latest = entry
+    if (
+      entry.pairIndex > latestEnding.pairIndex ||
+      (entry.pairIndex === latestEnding.pairIndex && entry.endTickExclusive > latestEnding.endTickExclusive)
+    ) {
+      latestEnding = entry
+    }
   })
 
-  const selectedStaffs = new Set<StaffKind>(resolvedAnchors.map((entry) => entry.staff))
-  const staffsToScan: StaffKind[] =
-    selectedStaffs.size <= 1 ? [resolvedAnchors[0].staff] : ['treble', 'bass']
+  const rangeStartPairIndex = earliest.pairIndex
+  const rangeStartTickInclusive = earliest.startTickInclusive
+  const rangeEndPairIndex = latestEnding.pairIndex
+  const rangeEndTickExclusive = latestEnding.endTickExclusive
+
+  const staffsToScan: StaffKind[] = ['treble', 'bass']
 
   const nextSelections: Selection[] = []
   const seen = new Set<string>()
 
-  for (let pairIndex = earliest.pairIndex; pairIndex <= latest.pairIndex; pairIndex += 1) {
+  for (let pairIndex = rangeStartPairIndex; pairIndex <= rangeEndPairIndex; pairIndex += 1) {
     const pair = measurePairs[pairIndex]
     if (!pair) continue
 
@@ -138,8 +156,8 @@ export function buildSelectionsInTimelineRange(params: {
       notes.forEach((note, noteIndex) => {
         const onsetTicksInMeasure = onsetTicksByNoteIndex[noteIndex]
         if (!Number.isFinite(onsetTicksInMeasure)) return
-        if (pairIndex === earliest.pairIndex && onsetTicksInMeasure < earliest.onsetTicksInMeasure) return
-        if (pairIndex === latest.pairIndex && onsetTicksInMeasure > latest.onsetTicksInMeasure) return
+        if (pairIndex === rangeStartPairIndex && onsetTicksInMeasure < rangeStartTickInclusive) return
+        if (pairIndex === rangeEndPairIndex && onsetTicksInMeasure >= rangeEndTickExclusive) return
 
         const maxKeyIndex = note.chordPitches?.length ?? 0
         for (let keyIndex = 0; keyIndex <= maxKeyIndex; keyIndex += 1) {

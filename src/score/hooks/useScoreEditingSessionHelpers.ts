@@ -24,6 +24,10 @@ export function useScoreEditingSessionHelpers(params: {
     appState.setSelectedMeasureScope(null)
   }, [appState])
 
+  const clearSelectionFrameIntent = useCallback(() => {
+    appState.setSelectionFrameIntent('default')
+  }, [appState])
+
   const clearDraggingSelection = useCallback(() => {
     appState.setDraggingSelection(null)
   }, [appState])
@@ -46,6 +50,7 @@ export function useScoreEditingSessionHelpers(params: {
     clearActiveTieSelection,
     clearActivePedalSelection,
     clearSelectedMeasureScope,
+    clearSelectionFrameIntent,
     clearDraggingSelection,
     clearDragPreviewState,
     clearImportedChordRulerEntries,

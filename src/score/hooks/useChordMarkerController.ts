@@ -8,6 +8,7 @@ import type {
   MeasurePair,
   NoteLayout,
   Selection,
+  SelectionFrameIntent,
   TimeSignature,
   TimelineSegmentOverlayMode,
 } from '../types'
@@ -46,6 +47,7 @@ export function useChordMarkerController(params: {
   selectedMeasureScope: MeasureSelectionScope | null
   activeSelection: Selection
   selectedSelections: Selection[]
+  selectionFrameIntent: SelectionFrameIntent
   isSelectionVisible: boolean
   timelineSegmentOverlayMode: TimelineSegmentOverlayMode
   importedTimelineSegmentStartPairIndexes: number[] | null
@@ -59,6 +61,7 @@ export function useChordMarkerController(params: {
   setIsSelectionVisible: (visible: boolean) => void
   setSelectedSelections: (selections: Selection[]) => void
   setActiveSelection: (selection: Selection) => void
+  setSelectionFrameIntent: (intent: SelectionFrameIntent) => void
   clearActiveAccidentalSelection: () => void
   clearActiveTieSelection: () => void
   clearActivePedalSelection: () => void
@@ -86,6 +89,7 @@ export function useChordMarkerController(params: {
     selectedMeasureScope,
     activeSelection,
     selectedSelections,
+    selectionFrameIntent,
     isSelectionVisible,
     timelineSegmentOverlayMode,
     importedTimelineSegmentStartPairIndexes,
@@ -99,6 +103,7 @@ export function useChordMarkerController(params: {
     setIsSelectionVisible,
     setSelectedSelections,
     setActiveSelection,
+    setSelectionFrameIntent,
     clearActiveAccidentalSelection,
     clearActiveTieSelection,
     clearActivePedalSelection,
@@ -192,6 +197,7 @@ export function useChordMarkerController(params: {
     setIsSelectionVisible,
     setSelectedSelections,
     setActiveSelection,
+    setSelectionFrameIntent,
     clearActiveAccidentalSelection,
     clearActiveTieSelection,
     clearActivePedalSelection,
@@ -229,6 +235,10 @@ export function useChordMarkerController(params: {
   }, [timelineSegmentBlocks])
 
   const selectedMeasureHighlightRectPx = useChordMarkerHighlight({
+    selectionFrameIntent,
+    isSelectionVisible,
+    activeSelection,
+    selectedSelections,
     activeChordSelection,
     activeTimelineSegmentHighlight,
     selectedMeasureScope,
@@ -278,6 +288,7 @@ export function useChordMarkerController(params: {
     clearSelectedMeasureScope()
     clearDraggingSelection()
     clearActiveChordSelection()
+    setSelectionFrameIntent('default')
     if (nextSelections.length > 0) {
       setIsSelectionVisible(true)
       setSelectedSelections(nextSelections)
@@ -297,6 +308,7 @@ export function useChordMarkerController(params: {
     resetMidiStepChain,
     setActiveSelection,
     setIsSelectionVisible,
+    setSelectionFrameIntent,
     setSelectedSelections,
     timelineSegmentBlocks,
   ])

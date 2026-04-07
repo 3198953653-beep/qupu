@@ -55,6 +55,7 @@ export function useSmartChordToneDialogController(params: {
   setIsSelectionVisible: (visible: boolean) => void
   setSelectedSelections: (selections: Selection[]) => void
   setActiveSelection: (selection: Selection) => void
+  setSelectionFrameIntent: (intent: import('../types').SelectionFrameIntent) => void
   clearActiveAccidentalSelection: () => void
   clearActiveTieSelection: () => void
   clearSelectedMeasureScope: () => void
@@ -71,6 +72,7 @@ export function useSmartChordToneDialogController(params: {
     setIsSelectionVisible,
     setSelectedSelections,
     setActiveSelection,
+    setSelectionFrameIntent,
     clearActiveAccidentalSelection,
     clearActiveTieSelection,
     clearSelectedMeasureScope,
@@ -110,6 +112,7 @@ export function useSmartChordToneDialogController(params: {
     clearActiveTieSelection()
     clearSelectedMeasureScope()
     clearActiveChordSelection()
+    setSelectionFrameIntent('default')
     setIsSelectionVisible(true)
     setSelectedSelections([selection])
     setActiveSelection(selection)
@@ -121,6 +124,7 @@ export function useSmartChordToneDialogController(params: {
     resetMidiStepChain,
     setActiveSelection,
     setIsSelectionVisible,
+    setSelectionFrameIntent,
     setSelectedSelections,
   ])
 

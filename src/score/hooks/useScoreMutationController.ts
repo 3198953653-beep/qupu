@@ -55,6 +55,7 @@ export function useScoreMutationController(params: {
   setFullMeasureRestCollapseScopeKeys: Dispatch<SetStateAction<string[]>>
   setActiveSelection: Dispatch<SetStateAction<Selection>>
   setSelectedSelections: Dispatch<SetStateAction<Selection[]>>
+  setSelectionFrameIntent: Dispatch<SetStateAction<import('../types').SelectionFrameIntent>>
   setActivePedalSelection: Dispatch<SetStateAction<ActivePedalSelection | null>>
   setIsRhythmLinked: Dispatch<SetStateAction<boolean>>
   setMeasureKeyFifthsFromImport: Dispatch<SetStateAction<number[] | null>>
@@ -118,6 +119,7 @@ export function useScoreMutationController(params: {
     setFullMeasureRestCollapseScopeKeys,
     setActiveSelection,
     setSelectedSelections,
+    setSelectionFrameIntent,
     setActivePedalSelection,
     setIsRhythmLinked,
     setMeasureKeyFifthsFromImport,
@@ -157,6 +159,7 @@ export function useScoreMutationController(params: {
     setActiveSelection,
     setActivePedalSelection,
     setSelectedSelections,
+    setSelectionFrameIntent,
   })
 
   const applyKeyboardEditResult = useCallback((
@@ -188,6 +191,7 @@ export function useScoreMutationController(params: {
       setFullMeasureRestCollapseScopeKeys,
       setActiveSelection,
       setSelectedSelections,
+      setSelectionFrameIntent,
       setIsRhythmLinked,
     })
   }, [
@@ -207,6 +211,7 @@ export function useScoreMutationController(params: {
     setIsSelectionVisible,
     setMeasurePairsFromImport,
     setNotes,
+    setSelectionFrameIntent,
     setSelectedSelections,
   ])
 
@@ -260,6 +265,7 @@ export function useScoreMutationController(params: {
       setFullMeasureRestCollapseScopeKeys,
       setActiveSelection,
       setSelectedSelections,
+      setSelectionFrameIntent,
       setIsRhythmLinked,
     })
   }, [
@@ -279,6 +285,7 @@ export function useScoreMutationController(params: {
     setIsSelectionVisible,
     setMeasurePairsFromImport,
     setNotes,
+    setSelectionFrameIntent,
     setSelectedSelections,
   ])
 

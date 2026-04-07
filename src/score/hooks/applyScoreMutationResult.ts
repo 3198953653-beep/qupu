@@ -1,7 +1,7 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
 import { buildImportedNoteLookup, flattenBassFromPairs, flattenTrebleFromPairs } from '../scoreOps'
 import { mergeFullMeasureRestCollapseScopeKeys, type MeasureStaffScope } from '../fullMeasureRestCollapse'
-import type { ImportedNoteLocation, MeasurePair, ScoreNote, Selection } from '../types'
+import type { ImportedNoteLocation, MeasurePair, ScoreNote, Selection, SelectionFrameIntent } from '../types'
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>
 
@@ -28,6 +28,7 @@ export function applyScoreMutationResult(params: {
   setFullMeasureRestCollapseScopeKeys: StateSetter<string[]>
   setActiveSelection: StateSetter<Selection>
   setSelectedSelections: StateSetter<Selection[]>
+  setSelectionFrameIntent: StateSetter<SelectionFrameIntent>
   setIsRhythmLinked: StateSetter<boolean>
 }): void {
   const {
@@ -53,6 +54,7 @@ export function applyScoreMutationResult(params: {
     setFullMeasureRestCollapseScopeKeys,
     setActiveSelection,
     setSelectedSelections,
+    setSelectionFrameIntent,
     setIsRhythmLinked,
   } = params
 
@@ -87,6 +89,7 @@ export function applyScoreMutationResult(params: {
   clearActiveTieSelection()
   clearSelectedMeasureScope()
   clearActiveChordSelection()
+  setSelectionFrameIntent('default')
   setActiveSelection(nextSelection)
   setSelectedSelections(nextSelections)
 }

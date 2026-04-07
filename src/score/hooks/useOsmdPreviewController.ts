@@ -53,6 +53,7 @@ export function useOsmdPreviewController(params: {
   setSelectedSelections: StateSetter<Selection[]>
   setDraggingSelection: StateSetter<Selection | null>
   setSelectedMeasureScope: StateSetter<{ pairIndex: number; staff: Selection['staff'] } | null>
+  setSelectionFrameIntent: StateSetter<import('../types').SelectionFrameIntent>
   clearActiveChordSelection: () => void
   resetMidiStepChain: () => void
 }): {
@@ -117,6 +118,7 @@ export function useOsmdPreviewController(params: {
     setSelectedSelections,
     setDraggingSelection,
     setSelectedMeasureScope,
+    setSelectionFrameIntent,
     clearActiveChordSelection,
     resetMidiStepChain,
   } = params
@@ -143,6 +145,7 @@ export function useOsmdPreviewController(params: {
     setSelectedSelections,
     setDraggingSelection,
     setSelectedMeasureScope,
+    setSelectionFrameIntent,
     clearActiveChordSelection,
   })
   const lifecycle = useOsmdPreviewLifecycle({

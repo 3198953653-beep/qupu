@@ -31,6 +31,7 @@ import type {
   ScoreSourceKind,
   ScoreNote,
   Selection,
+  SelectionFrameIntent,
   SegmentRhythmTemplateBinding,
   TieSelection,
   TimelineSegmentOverlayMode,
@@ -56,6 +57,7 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
   const [selectedSelections, setSelectedSelections] = useState<Selection[]>([
     { noteId: INITIAL_NOTES[0].id, staff: 'treble', keyIndex: 0 },
   ])
+  const [selectionFrameIntent, setSelectionFrameIntent] = useState<SelectionFrameIntent>('default')
   const [selectedMeasureScope, setSelectedMeasureScope] = useState<{
     pairIndex: number
     staff: Selection['staff']
@@ -132,6 +134,8 @@ export function useScoreAppState(initialBassNotes: ScoreNote[]) {
     setActivePedalSelection,
     selectedSelections,
     setSelectedSelections,
+    selectionFrameIntent,
+    setSelectionFrameIntent,
     selectedMeasureScope,
     setSelectedMeasureScope,
     fullMeasureRestCollapseScopeKeys,

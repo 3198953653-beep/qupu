@@ -63,6 +63,7 @@ export function useScoreInteractionRuntimeController(params: {
     setIsSelectionVisible: appState.setIsSelectionVisible,
     setSelectedSelections: appState.setSelectedSelections,
     setActiveSelection: appState.setActiveSelection,
+    setSelectionFrameIntent: appState.setSelectionFrameIntent,
     clearActiveAccidentalSelection: coreEditing.sessionHelpers.clearActiveAccidentalSelection,
     clearActiveTieSelection: coreEditing.sessionHelpers.clearActiveTieSelection,
     clearSelectedMeasureScope: coreEditing.sessionHelpers.clearSelectedMeasureScope,
