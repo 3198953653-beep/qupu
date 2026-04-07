@@ -1569,19 +1569,6 @@
   display: block;
 }
 
-.accompaniment-preview-target-highlight-layer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-}
-
-.accompaniment-preview-target-highlight {
-  position: absolute;
-  border-radius: 999px;
-  background: rgba(88, 109, 134, 0.14);
-}
-
 .smart-chord-notation-hit-layer {
   position: absolute;
   inset: 0;

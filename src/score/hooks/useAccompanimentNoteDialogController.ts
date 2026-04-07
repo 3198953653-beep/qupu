@@ -61,11 +61,7 @@ export type AccompanimentRenderMeasure = {
   playbackMeasureTicks: number
   previewPedalSpans: PedalSpan[]
   keyFifths: number
-  targetHighlightRange: {
-    staff: 'bass'
-    startTick: number
-    endTick: number
-  } | null
+  highlightSelections: Selection[]
 }
 
 function pitchToMidi(pitch: string): number | null {
@@ -208,18 +204,33 @@ function resolveTrebleOverlapUpperMidi(params: {
   return Math.min(BASS_RANGE_MAX_MIDI, maxMidi)
 }
 
-function buildTargetHighlightRange(params: {
+function buildChordRangeHighlightSelections(params: {
+  pair: MeasurePair
   startTick: number
   endTick: number
-}): { staff: 'bass'; startTick: number; endTick: number } | null {
-  const safeStartTick = Math.max(0, Math.round(params.startTick))
-  const safeEndTick = Math.max(safeStartTick, Math.round(params.endTick))
-  if (safeEndTick <= safeStartTick) return null
-  return {
-    staff: 'bass',
-    startTick: safeStartTick,
-    endTick: safeEndTick,
-  }
+}): Selection[] {
+  const { pair, startTick, endTick } = params
+  const selections: Selection[] = []
+  const onsetTicks = buildStaffOnsetTicks(pair.bass)
+
+  pair.bass.forEach((note, noteIndex) => {
+    if (note.isRest) return
+    const onsetTick = onsetTicks[noteIndex]
+    const durationTicks = DURATION_TICKS[note.duration] ?? 0
+    const noteEndTick = onsetTick + Math.max(1, durationTicks)
+    const overlaps = onsetTick < endTick && noteEndTick > startTick
+    if (!overlaps) return
+    const keyCount = 1 + (note.chordPitches?.length ?? 0)
+    for (let keyIndex = 0; keyIndex < keyCount; keyIndex += 1) {
+      selections.push({
+        noteId: note.id,
+        staff: 'bass',
+        keyIndex,
+      })
+    }
+  })
+
+  return selections
 }
 
 function buildPreviewPedalSpansForMeasure(params: {
@@ -553,7 +564,8 @@ export function useAccompanimentNoteDialogController(params: {
           ),
           previewPedalSpans,
           keyFifths: resolvedTarget.keyFifths,
-          targetHighlightRange: buildTargetHighlightRange({
+          highlightSelections: buildChordRangeHighlightSelections({
+            pair: candidatePair,
             startTick: resolvedTarget.chordStartTick,
             endTick: resolvedTarget.chordEndTick,
           }),

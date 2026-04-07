@@ -1,9 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Renderer } from 'vexflow'
-import {
-  collectMeasureTickRangeLayoutCoverage,
-  getMeasureTickRangeLayoutBounds,
-} from '../chordRangeNoteCoverage'
 import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
 import { buildMeasureSurfaceHighlightRect } from '../highlightRect'
 import { resolveEffectiveBoundary } from '../layout/effectiveBoundary'
@@ -44,12 +40,6 @@ type MeasurePlaybackGeometry = {
   highlightRect: PlaybackCursorRect
   measureTicks: number
   tickXs: Array<{ tick: number; x: number }>
-}
-
-type MeasureTargetHighlightGeometry = {
-  measureNumber: number
-  candidateKey: string
-  rect: PlaybackCursorRect
 }
 
 const STRIP_PADDING_X_PX = 18
@@ -137,65 +127,6 @@ function resolvePlayheadX(params: {
   })
 }
 
-function buildTargetHighlightRect(params: {
-  measure: AccompanimentRenderMeasure
-  measureLayout: MeasureLayout
-  noteLayouts: NoteLayout[]
-  frame: { measureX: number; measureWidth: number }
-  tickXs: Array<{ tick: number; x: number }>
-}): PlaybackCursorRect | null {
-  const { measure, measureLayout, noteLayouts, frame, tickXs } = params
-  const range = measure.targetHighlightRange
-  if (!range) return null
-
-  const measureStartX = frame.measureX
-  const measureEndX = frame.measureX + frame.measureWidth
-  const rangeStartX = resolveTickX({
-    tickXs,
-    tick: range.startTick,
-    fallbackX: measureStartX,
-  })
-  const rangeEndX = resolveTickX({
-    tickXs,
-    tick: range.endTick,
-    fallbackX: measureEndX,
-  })
-  let leftX = Math.min(rangeStartX, rangeEndX)
-  let rightX = Math.max(rangeStartX, rangeEndX)
-
-  const coverage = collectMeasureTickRangeLayoutCoverage({
-    pair: measure.measurePair,
-    pairLayouts: noteLayouts,
-    startTickInclusive: range.startTick,
-    endTickExclusive: range.endTick,
-    includeRests: false,
-  }).filter((entry) => entry.staff === range.staff)
-  const coverageBounds = getMeasureTickRangeLayoutBounds(coverage, 'selection')
-  if (coverageBounds) {
-    leftX = Math.min(leftX, coverageBounds.leftXRaw)
-    rightX = Math.max(rightX, coverageBounds.rightXRaw)
-  }
-
-  const safeLeftX = Math.max(measureStartX + 2, leftX - 2)
-  const safeRightX = Math.min(measureEndX - 2, rightX + 2)
-  const width = safeRightX - safeLeftX
-  if (!Number.isFinite(width) || width <= 0) return null
-
-  const bassHeight = Math.max(1, measureLayout.bassLineBottomY - measureLayout.bassLineTopY)
-  const barHeight = Math.max(6, Math.min(10, Math.round(bassHeight * 0.18)))
-  const y = Math.max(
-    measureLayout.bassLineTopY + 2,
-    measureLayout.bassLineBottomY - barHeight - 4,
-  )
-
-  return {
-    x: safeLeftX,
-    y,
-    width: Math.max(6, width),
-    height: barHeight,
-  }
-}
-
 export function AccompanimentNoteNotationStrip(props: {
   measures: AccompanimentRenderMeasure[]
   selectedCandidateKey: string | null
@@ -221,7 +152,6 @@ export function AccompanimentNoteNotationStrip(props: {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [slots, setSlots] = useState<MeasureSlotLayout[]>([])
   const [playbackGeometries, setPlaybackGeometries] = useState<MeasurePlaybackGeometry[]>([])
-  const [targetHighlightGeometries, setTargetHighlightGeometries] = useState<MeasureTargetHighlightGeometry[]>([])
   const [surfaceWidthPx, setSurfaceWidthPx] = useState(1)
   const renderHeightPx = getRenderHeightPx(grandStaffLayoutMetrics)
 
@@ -253,7 +183,6 @@ export function AccompanimentNoteNotationStrip(props: {
       if (context) context.clearRect(0, 0, canvas.width, canvas.height)
       setSlots([])
       setPlaybackGeometries([])
-      setTargetHighlightGeometries([])
       setSurfaceWidthPx(1)
       return undefined
     }
@@ -314,7 +243,6 @@ export function AccompanimentNoteNotationStrip(props: {
 
     const staffBoundsByMeasure: Array<StaffLineBounds | null> = measures.map(() => null)
     const nextPlaybackGeometries: MeasurePlaybackGeometry[] = []
-    const nextTargetHighlightGeometries: MeasureTargetHighlightGeometry[] = []
     const nextMeasureLayouts = new Map<number, MeasureLayout>()
     const nextMeasureTimelineBundles = new Map<number, MeasureTimelineBundle>()
     const nextNoteLayoutsByPair = new Map<number, NoteLayout[]>()
@@ -324,6 +252,9 @@ export function AccompanimentNoteNotationStrip(props: {
       const frame = measureFrames[index]
       if (!frame) return
       const localPairIndex = index
+      const highlightSelections = measure.highlightSelections
+      const activeSelection = highlightSelections[0] ?? null
+      const activeSelections = highlightSelections.length > 0 ? highlightSelections : null
       const effectiveBoundary = resolveEffectiveBoundary({
         measureX: frame.measureX,
         measureWidth: frame.measureWidth,
@@ -362,9 +293,9 @@ export function AccompanimentNoteNotationStrip(props: {
         showKeySignature: index === 0 && measure.keyFifths !== 0,
         timeSignature: measure.timeSignature,
         showTimeSignature: index === 0,
-        activeSelection: null,
+        activeSelection,
         draggingSelection: null,
-        activeSelections: null,
+        activeSelections,
         draggingSelections: null,
         collectLayouts: true,
         showMeasureNumberLabel: false,
@@ -443,20 +374,6 @@ export function AccompanimentNoteNotationStrip(props: {
         },
       }
       nextMeasureLayouts.set(localPairIndex, nextMeasureLayout)
-      const targetHighlightRect = buildTargetHighlightRect({
-        measure,
-        measureLayout: nextMeasureLayout,
-        noteLayouts,
-        frame,
-        tickXs,
-      })
-      if (targetHighlightRect) {
-        nextTargetHighlightGeometries.push({
-          measureNumber: measure.measureNumber,
-          candidateKey: measure.candidateKey,
-          rect: targetHighlightRect,
-        })
-      }
       measure.previewPedalSpans.forEach((span) => {
         aggregatedPreviewPedalSpans.push({
           ...span,
@@ -528,7 +445,6 @@ export function AccompanimentNoteNotationStrip(props: {
       }),
     )
     setPlaybackGeometries(nextPlaybackGeometries)
-    setTargetHighlightGeometries(nextTargetHighlightGeometries)
 
     return undefined
   }, [
@@ -548,20 +464,6 @@ export function AccompanimentNoteNotationStrip(props: {
       playheadStatus={playheadRectPx ? 'playing' : 'idle'}
     >
       <canvas ref={canvasRef} className="smart-chord-notation-svg" />
-      <div className="accompaniment-preview-target-highlight-layer" aria-hidden="true">
-        {targetHighlightGeometries.map((geometry) => (
-          <div
-            key={geometry.candidateKey}
-            className="accompaniment-preview-target-highlight"
-            style={{
-              left: `${geometry.rect.x}px`,
-              top: `${geometry.rect.y}px`,
-              width: `${geometry.rect.width}px`,
-              height: `${geometry.rect.height}px`,
-            }}
-          />
-        ))}
-      </div>
       <div className="smart-chord-notation-hit-layer">
         {slots.map((slot) => (
           <button
