@@ -3,32 +3,12 @@ import {
   collectMeasureTickRangeLayoutCoverage,
   getMeasureTickRangeLayoutBounds,
 } from '../chordRangeNoteCoverage'
+import {
+  buildMeasureSurfaceHighlightRect,
+  resolveCombinedStaffLineBounds,
+} from '../highlightRect'
 import type { MeasureFrame, MeasureLayout, MeasurePair, NoteLayout } from '../types'
 import type { ActiveChordSelection, ActiveTimelineSegmentHighlight, MeasureSelectionScope } from './chordMarkerTypes'
-
-function resolveStaffLineBounds(measureLayout: MeasureLayout, staff: 'treble' | 'bass') {
-  const lineTopRaw =
-    staff === 'treble'
-      ? (Number.isFinite(measureLayout.trebleLineTopY) ? measureLayout.trebleLineTopY : measureLayout.trebleY)
-      : (Number.isFinite(measureLayout.bassLineTopY) ? measureLayout.bassLineTopY : measureLayout.bassY)
-  const lineBottomRaw =
-    staff === 'treble'
-      ? (Number.isFinite(measureLayout.trebleLineBottomY) ? measureLayout.trebleLineBottomY : measureLayout.trebleY + 40)
-      : (Number.isFinite(measureLayout.bassLineBottomY) ? measureLayout.bassLineBottomY : measureLayout.bassY + 40)
-  return {
-    lineTop: Math.min(lineTopRaw, lineBottomRaw),
-    lineBottom: Math.max(lineTopRaw, lineBottomRaw),
-  }
-}
-
-function resolveCombinedStaffLineBounds(measureLayout: MeasureLayout) {
-  const trebleBounds = resolveStaffLineBounds(measureLayout, 'treble')
-  const bassBounds = resolveStaffLineBounds(measureLayout, 'bass')
-  return {
-    lineTop: Math.min(trebleBounds.lineTop, bassBounds.lineTop),
-    lineBottom: Math.max(trebleBounds.lineBottom, bassBounds.lineBottom),
-  }
-}
 
 export function useChordMarkerHighlight(params: {
   activeChordSelection: ActiveChordSelection | null
@@ -167,27 +147,19 @@ export function useChordMarkerHighlight(params: {
     const measureLayout = measureLayoutsRef.current.get(selectedMeasureScope.pairIndex) ?? null
     if (!measureLayout) return null
     const frame = horizontalMeasureFramesByPair[selectedMeasureScope.pairIndex] ?? null
-    const x =
-      frame !== null
-        ? frame.measureX * scoreScaleX + stageBorderPx
-        : scoreSurfaceOffsetXPx + measureLayout.measureX * scoreScaleX + stageBorderPx
-    const { lineTop, lineBottom } = resolveStaffLineBounds(measureLayout, selectedMeasureScope.staff)
-    const y = scoreSurfaceOffsetYPx + lineTop * scoreScaleY + stageBorderPx
-    const width =
-      frame !== null
-        ? frame.measureWidth * scoreScaleX
-        : measureLayout.measureWidth * scoreScaleX
-    const height = (lineBottom - lineTop) * scoreScaleY
-    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height)) {
-      return null
-    }
-    if (width <= 0 || height <= 0) return null
-    return {
-      x: x - measurePadX,
-      y: y - measurePadY,
-      width: width + measurePadX * 2,
-      height: height + measurePadY * 2,
-    }
+    return buildMeasureSurfaceHighlightRect({
+      measureLayout,
+      frame,
+      staff: selectedMeasureScope.staff,
+      scaleX: scoreScaleX,
+      scaleY: scoreScaleY,
+      offsetX: frame !== null ? stageBorderPx : scoreSurfaceOffsetXPx + stageBorderPx,
+      offsetY: scoreSurfaceOffsetYPx + stageBorderPx,
+      padX: measurePadX,
+      padY: measurePadY,
+      preferFrameX: frame !== null,
+      preferFrameWidth: frame !== null,
+    })
   }, [
     activeChordSelection,
     activeTimelineSegmentHighlight,

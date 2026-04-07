@@ -1,5 +1,6 @@
 import { useEffect, useRef, type CSSProperties, type PointerEvent, type RefObject } from 'react'
 import { SelectionInspector } from './SelectionInspector'
+import { ScoreSurfaceStage } from './ScoreSurfaceStage'
 
 export function ScoreBoard(props: {
   scoreScrollRef: RefObject<HTMLDivElement | null>
@@ -204,10 +205,15 @@ export function ScoreBoard(props: {
             ))}
           </div>
         </div>
-        <div
-          className="score-stage horizontal-view"
-          ref={scoreStageRef}
-          style={{ width: `${displayScoreWidth}px`, height: `${displayScoreHeight}px` }}
+        <ScoreSurfaceStage
+          stageRef={scoreStageRef}
+          playheadRef={playheadRef}
+          displayWidth={displayScoreWidth}
+          displayHeight={displayScoreHeight}
+          selectedMeasureHighlightRectPx={selectedMeasureHighlightRectPx}
+          playheadRectPx={playheadRectPx}
+          playheadStatus={playheadStatus}
+          includeScrollWrapper={false}
         >
           <canvas
             className={`score-surface ${draggingSelection ? 'is-dragging' : ''}`}
@@ -239,32 +245,7 @@ export function ScoreBoard(props: {
               transformOrigin: 'left top',
             }}
           />
-          {selectedMeasureHighlightRectPx && (
-            <div
-              className="score-measure-highlight"
-              style={{
-                left: `${selectedMeasureHighlightRectPx.x}px`,
-                top: `${selectedMeasureHighlightRectPx.y}px`,
-                width: `${selectedMeasureHighlightRectPx.width}px`,
-                height: `${selectedMeasureHighlightRectPx.height}px`,
-              }}
-              aria-hidden="true"
-            />
-          )}
-          {playheadRectPx && (
-            <div
-              ref={playheadRef}
-              className={`score-playhead${playheadStatus === 'playing' ? ' is-playing' : ''}`}
-              style={{
-                left: `${playheadRectPx.x}px`,
-                top: `${playheadRectPx.y}px`,
-                width: `${playheadRectPx.width}px`,
-                height: `${playheadRectPx.height}px`,
-              }}
-              aria-hidden="true"
-            />
-          )}
-        </div>
+        </ScoreSurfaceStage>
       </div>
 
       <section className="playhead-debug-panel">

@@ -1,8 +1,16 @@
 .app-shell {
+  --selection-highlight-alpha: 0.42;
   max-width: 1100px;
   margin: 0 auto;
   display: grid;
   gap: 1rem;
+}
+
+.selection-highlight-opacity-row {
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #d6e0e5;
+  border-radius: 14px;
+  background: #f9fcff;
 }
 
 .control-row {
@@ -902,19 +910,7 @@
   z-index: 2.5;
   border: none;
   border-radius: 6px;
-  background: #CBDEFB;
-  box-sizing: border-box;
-}
-
-.accompaniment-preview-highlight {
-  position: absolute;
-  pointer-events: none;
-  z-index: 2.5;
-  border-radius: 10px;
-  border: none;
-  outline: none;
-  box-shadow: none;
-  background: rgba(203, 222, 251, 0.32);
+  background: rgba(203, 222, 251, var(--selection-highlight-alpha, 0.42));
   box-sizing: border-box;
 }
 
@@ -1562,18 +1558,35 @@
 }
 
 .smart-chord-notation-svg {
+  position: relative;
+  z-index: 1;
   line-height: 0;
   display: block;
+  background: transparent;
 }
 
 .smart-chord-notation-svg svg {
   display: block;
 }
 
+.accompaniment-preview-target-highlight-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.accompaniment-preview-target-highlight {
+  position: absolute;
+  border-radius: 999px;
+  background: rgba(88, 109, 134, 0.14);
+}
+
 .smart-chord-notation-hit-layer {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  z-index: 2;
 }
 
 .smart-chord-notation-slot {

@@ -1,4 +1,5 @@
 import './App.css'
+import { useState } from 'react'
 import {
   INITIAL_NOTES,
   PREVIEW_DEFAULT_ACCIDENTAL_OFFSET_PX,
@@ -34,11 +35,17 @@ const SCORE_RENDER_BACKEND = Renderer.Backends.CANVAS
 const SCORE_STAGE_BORDER_PX = 1
 const CHORD_HIGHLIGHT_PAD_X_PX = 4
 const CHORD_HIGHLIGHT_PAD_Y_PX = 4
+const DEFAULT_SELECTION_HIGHLIGHT_OPACITY_PERCENT = 42
+const MIN_SELECTION_HIGHLIGHT_OPACITY_PERCENT = 10
+const MAX_SELECTION_HIGHLIGHT_OPACITY_PERCENT = 80
 
 const PITCHES: Pitch[] = createPianoPitches()
 const INITIAL_BASS_NOTES: ScoreNote[] = buildBassMockNotes(INITIAL_NOTES)
 
 function App() {
+  const [selectionHighlightOpacityPercent, setSelectionHighlightOpacityPercent] = useState(
+    DEFAULT_SELECTION_HIGHLIGHT_OPACITY_PERCENT,
+  )
   const appState = useScoreAppState(INITIAL_BASS_NOTES)
 
   const editorRefs = useScoreEditorRefs({
@@ -127,7 +134,37 @@ function App() {
   })
 
   return (
-    <main className="app-shell">
+    <main
+      className="app-shell"
+      style={{
+        ['--selection-highlight-alpha' as string]: `${selectionHighlightOpacityPercent / 100}`,
+      }}
+    >
+      <section className="scale-row selection-highlight-opacity-row">
+        <label htmlFor="selection-highlight-opacity-range">蓝框透明度</label>
+        <input
+          id="selection-highlight-opacity-range"
+          type="range"
+          min={MIN_SELECTION_HIGHLIGHT_OPACITY_PERCENT}
+          max={MAX_SELECTION_HIGHLIGHT_OPACITY_PERCENT}
+          step={1}
+          value={selectionHighlightOpacityPercent}
+          onInput={(event) => setSelectionHighlightOpacityPercent(Number((event.target as HTMLInputElement).value))}
+          onChange={(event) => setSelectionHighlightOpacityPercent(Number(event.target.value))}
+        />
+        <input
+          className="scale-percent-input"
+          type="number"
+          min={MIN_SELECTION_HIGHLIGHT_OPACITY_PERCENT}
+          max={MAX_SELECTION_HIGHLIGHT_OPACITY_PERCENT}
+          step={1}
+          value={selectionHighlightOpacityPercent}
+          onInput={(event) => setSelectionHighlightOpacityPercent(Number((event.target as HTMLInputElement).value))}
+          onChange={(event) => setSelectionHighlightOpacityPercent(Number(event.target.value))}
+        />
+        <span className="scale-percent-label">%</span>
+      </section>
+
       <ScoreControls {...scoreControlsProps} />
 
       <ScoreBoard {...scoreBoardProps} />

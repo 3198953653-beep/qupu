@@ -61,7 +61,11 @@ export type AccompanimentRenderMeasure = {
   playbackMeasureTicks: number
   previewPedalSpans: PedalSpan[]
   keyFifths: number
-  highlightSelections: Selection[]
+  targetHighlightRange: {
+    staff: 'bass'
+    startTick: number
+    endTick: number
+  } | null
 }
 
 function pitchToMidi(pitch: string): number | null {
@@ -204,33 +208,18 @@ function resolveTrebleOverlapUpperMidi(params: {
   return Math.min(BASS_RANGE_MAX_MIDI, maxMidi)
 }
 
-function buildChordRangeHighlightSelections(params: {
-  pair: MeasurePair
+function buildTargetHighlightRange(params: {
   startTick: number
   endTick: number
-}): Selection[] {
-  const { pair, startTick, endTick } = params
-  const selections: Selection[] = []
-  const onsetTicks = buildStaffOnsetTicks(pair.bass)
-
-  pair.bass.forEach((note, noteIndex) => {
-    if (note.isRest) return
-    const onsetTick = onsetTicks[noteIndex]
-    const durationTicks = DURATION_TICKS[note.duration] ?? 0
-    const noteEndTick = onsetTick + Math.max(1, durationTicks)
-    const overlaps = onsetTick < endTick && noteEndTick > startTick
-    if (!overlaps) return
-    const keyCount = 1 + (note.chordPitches?.length ?? 0)
-    for (let keyIndex = 0; keyIndex < keyCount; keyIndex += 1) {
-      selections.push({
-        noteId: note.id,
-        staff: 'bass',
-        keyIndex,
-      })
-    }
-  })
-
-  return selections
+}): { staff: 'bass'; startTick: number; endTick: number } | null {
+  const safeStartTick = Math.max(0, Math.round(params.startTick))
+  const safeEndTick = Math.max(safeStartTick, Math.round(params.endTick))
+  if (safeEndTick <= safeStartTick) return null
+  return {
+    staff: 'bass',
+    startTick: safeStartTick,
+    endTick: safeEndTick,
+  }
 }
 
 function buildPreviewPedalSpansForMeasure(params: {
@@ -564,8 +553,7 @@ export function useAccompanimentNoteDialogController(params: {
           ),
           previewPedalSpans,
           keyFifths: resolvedTarget.keyFifths,
-          highlightSelections: buildChordRangeHighlightSelections({
-            pair: candidatePair,
+          targetHighlightRange: buildTargetHighlightRange({
             startTick: resolvedTarget.chordStartTick,
             endTick: resolvedTarget.chordEndTick,
           }),
