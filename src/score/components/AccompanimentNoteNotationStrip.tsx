@@ -297,6 +297,7 @@ export function AccompanimentNoteNotationStrip(props: {
         draggingSelection: null,
         activeSelections,
         draggingSelections: null,
+        beamHighlightFrameScope: measure.candidateKey === selectedCandidateKey ? 'combined' : null,
         collectLayouts: true,
         showMeasureNumberLabel: false,
         timeAxisSpacingConfig,
@@ -451,6 +452,7 @@ export function AccompanimentNoteNotationStrip(props: {
     grandStaffLayoutMetrics,
     measures,
     renderHeightPx,
+    selectedCandidateKey,
     spacingLayoutMode,
     timeAxisSpacingConfig,
   ])

@@ -5,6 +5,7 @@ import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
 import { buildHitGridIndex, type HitGridIndex } from '../layout/hitTest'
 import type { SystemMeasureRange } from '../layout/demand'
 import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
+import type { ActiveChordSelection, ActiveTimelineSegmentHighlight } from './chordMarkerTypes'
 import { renderVisibleSystems } from '../render/renderVisibleSystems'
 import type { MeasureTimelineBundle } from '../timeline/types'
 import type {
@@ -47,6 +48,8 @@ export function useScoreRenderEffect(params: {
   draggingSelection?: Selection | null
   activeSelections?: Selection[] | null
   draggingSelections?: Selection[] | null
+  activeChordSelection?: ActiveChordSelection | null
+  activeTimelineSegmentHighlight?: ActiveTimelineSegmentHighlight | null
   selectedMeasureScope?: { pairIndex: number; staff: 'treble' | 'bass' } | null
   fullMeasureRestCollapseScopeKeys?: string[]
   layoutReflowHintRef?: MutableRefObject<LayoutReflowHint | null>
@@ -97,6 +100,8 @@ export function useScoreRenderEffect(params: {
     draggingSelection = null,
     activeSelections = null,
     draggingSelections = null,
+    activeChordSelection = null,
+    activeTimelineSegmentHighlight = null,
     selectedMeasureScope = null,
     fullMeasureRestCollapseScopeKeys = [],
     layoutReflowHintRef,
@@ -200,6 +205,8 @@ export function useScoreRenderEffect(params: {
         draggingSelection,
         activeSelections,
         draggingSelections,
+        activeChordSelection,
+        activeTimelineSegmentHighlight,
         selectedMeasureScope,
         fullMeasureRestCollapseScopeKeys,
         layoutReflowHint,
@@ -248,6 +255,8 @@ export function useScoreRenderEffect(params: {
     draggingSelection,
     activeSelections,
     draggingSelections,
+    activeChordSelection,
+    activeTimelineSegmentHighlight,
     selectedMeasureScope,
     fullMeasureRestCollapseScopeKeys,
     layoutReflowHintRef,

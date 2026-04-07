@@ -278,6 +278,7 @@ function drawOverlayRange(params: {
       showEndTimeSignature: measureLayout.showEndTimeSignature,
       activeSelection,
       draggingSelection: null,
+      beamHighlightFrameScope: null,
       collectLayouts: true,
       suppressSystemDecorations: true,
       noteStartXOverride: measureLayout.noteStartX,

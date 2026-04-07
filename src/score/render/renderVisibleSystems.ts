@@ -52,6 +52,8 @@ import type {
   StaffKind,
   TimeSignature,
 } from '../types'
+import type { ActiveChordSelection, ActiveTimelineSegmentHighlight } from '../hooks/chordMarkerTypes'
+import type { BeamHighlightFrameScope } from './beamHighlightGate'
 
 const OVERFLOW_ANALYSIS_MAX_PASSES = 16
 const OVERFLOW_RECOVERY_PAD_PX = 2
@@ -320,6 +322,8 @@ export function renderVisibleSystems(params: {
   draggingSelection: Selection | null
   activeSelections?: Selection[] | null
   draggingSelections?: Selection[] | null
+  activeChordSelection?: ActiveChordSelection | null
+  activeTimelineSegmentHighlight?: ActiveTimelineSegmentHighlight | null
   selectedMeasureScope?: { pairIndex: number; staff: 'treble' | 'bass' } | null
   fullMeasureRestCollapseScopeKeys?: string[]
   previousNoteLayoutsByPair?: Map<number, NoteLayout[]> | null
@@ -365,6 +369,8 @@ export function renderVisibleSystems(params: {
     draggingSelection,
     activeSelections = null,
     draggingSelections = null,
+    activeChordSelection = null,
+    activeTimelineSegmentHighlight = null,
     selectedMeasureScope = null,
     fullMeasureRestCollapseScopeKeys = [],
     previousNoteLayoutsByPair = null,
@@ -383,6 +389,18 @@ export function renderVisibleSystems(params: {
   const collapseScopeKeySet = new Set(fullMeasureRestCollapseScopeKeys)
   const canCollapseFullMeasureRest = (pairIndex: number, staff: StaffKind): boolean =>
     collapseScopeKeySet.has(`${pairIndex}:${staff}`)
+  const resolveBeamHighlightFrameScopeForPair = (pairIndex: number): BeamHighlightFrameScope => {
+    if (activeChordSelection?.pairIndex === pairIndex) return 'combined'
+    if (
+      activeTimelineSegmentHighlight &&
+      pairIndex >= activeTimelineSegmentHighlight.startPairIndex &&
+      pairIndex <= activeTimelineSegmentHighlight.endPairIndexInclusive
+    ) {
+      return 'combined'
+    }
+    if (selectedMeasureScope?.pairIndex === pairIndex) return selectedMeasureScope.staff
+    return null
+  }
   const spacingConfig = timeAxisSpacingConfig ?? DEFAULT_TIME_AXIS_SPACING_CONFIG
   const systemHeightPx = grandStaffLayoutMetrics?.systemHeightPx ?? SYSTEM_HEIGHT
   const trebleOffsetY = grandStaffLayoutMetrics?.trebleOffsetY ?? SYSTEM_TREBLE_OFFSET_Y
@@ -853,6 +871,7 @@ export function renderVisibleSystems(params: {
             selectedMeasureScope && selectedMeasureScope.pairIndex === entry.pairIndex
               ? selectedMeasureScope.staff
               : null,
+          beamHighlightFrameScope: resolveBeamHighlightFrameScopeForPair(entry.pairIndex),
           noteStartXOverride: noteStartX,
           formatWidthOverride: formatWidth,
           timeAxisSpacingConfig: spacingConfig,
@@ -1080,12 +1099,13 @@ export function renderVisibleSystems(params: {
           draggingSelection,
           activeSelections,
           draggingSelections,
-        highlightStaff:
-          selectedMeasureScope && selectedMeasureScope.pairIndex === entry.pairIndex
-            ? selectedMeasureScope.staff
-            : null,
-        noteStartXOverride: noteStartX,
-        formatWidthOverride: formatWidth,
+          highlightStaff:
+            selectedMeasureScope && selectedMeasureScope.pairIndex === entry.pairIndex
+              ? selectedMeasureScope.staff
+              : null,
+          beamHighlightFrameScope: resolveBeamHighlightFrameScopeForPair(entry.pairIndex),
+          noteStartXOverride: noteStartX,
+          formatWidthOverride: formatWidth,
           timeAxisSpacingConfig: spacingConfig,
           spacingLayoutMode,
           timelineBundle,
@@ -1331,6 +1351,7 @@ export function renderVisibleSystems(params: {
           selectedMeasureScope && selectedMeasureScope.pairIndex === entry.pairIndex
             ? selectedMeasureScope.staff
             : null,
+        beamHighlightFrameScope: null,
         collectLayouts: true,
         skipPainting: true,
         noteStartXOverride: spacingLeftLimitX,
@@ -1460,6 +1481,7 @@ export function renderVisibleSystems(params: {
           selectedMeasureScope && selectedMeasureScope.pairIndex === entry.pairIndex
             ? selectedMeasureScope.staff
             : null,
+        beamHighlightFrameScope: resolveBeamHighlightFrameScopeForPair(entry.pairIndex),
         noteStartXOverride: noteStartX,
         formatWidthOverride: formatWidth,
         timeAxisSpacingConfig: spacingConfig,

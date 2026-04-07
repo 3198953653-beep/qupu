@@ -25,6 +25,7 @@ import { getStepOctaveAlterFromPitch } from '../pitchMath'
 import { buildPitchLineMap, createPianoPitches, getPitchLine, getStrictStemDirection } from '../pitchUtils'
 import { getTieFrozenIncoming } from '../tieFrozen'
 import { isStaffFullMeasureRest } from '../measureRestUtils'
+import { shouldHighlightBeamGroup, type BeamHighlightFrameScope } from './beamHighlightGate'
 import { getDragPreviewTargetKey } from './dragPreviewOverrides'
 import { getJianpuNumeralForPitch, hasFilledNoteHead } from './noteheadNumerals'
 import { buildTieLayout } from './tieLayoutGeometry'
@@ -1658,6 +1659,7 @@ export type DrawMeasureParams = {
   activeSelections?: Selection[] | null
   draggingSelections?: Selection[] | null
   highlightStaff?: StaffKind | null
+  beamHighlightFrameScope?: BeamHighlightFrameScope
   previewNotes?: PreviewNoteOverride[] | null
   previewNote?: { noteId: string; staff: StaffKind; pitch: Pitch; keyIndex: number } | null
   previewAccidentalStateBeforeNote?: Map<string, number> | null
@@ -1739,6 +1741,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     activeSelections = null,
     draggingSelections = null,
     highlightStaff = null,
+    beamHighlightFrameScope = null,
     previewNotes = null,
     previewNote = null,
     previewAccidentalStateBeforeNote = null,
@@ -2298,26 +2301,32 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     sourceNoteIndexByVexNote: Map<StaveNote, number>
   }): { fillStyle: string; strokeStyle: string } | null => {
     const { beam, staff, sourceNotes, sourceNoteIndexByVexNote } = params
-    let hasSelectedNote = highlightStaff === staff
-    let hasDraggingNote = false
+    const beamSourceNotes: ScoreNote[] = []
+    let isMappingComplete = true
 
     beam.getNotes().forEach((note) => {
       const sourceNoteIndex = sourceNoteIndexByVexNote.get(note as StaveNote)
-      if (sourceNoteIndex === undefined) return
-      const sourceNote = sourceNotes[sourceNoteIndex]
-      if (!sourceNote) return
-      const layoutKey = getLayoutNoteKey(staff, sourceNote.id)
-      if ((draggingKeySetByLayout.get(layoutKey)?.size ?? 0) > 0) {
-        hasDraggingNote = true
+      if (sourceNoteIndex === undefined) {
+        isMappingComplete = false
         return
       }
-      if ((selectionKeySetByLayout.get(layoutKey)?.size ?? 0) > 0) {
-        hasSelectedNote = true
+      const sourceNote = sourceNotes[sourceNoteIndex]
+      if (!sourceNote) {
+        isMappingComplete = false
+        return
       }
+      beamSourceNotes.push(sourceNote)
     })
 
-    if (hasDraggingNote) return draggingHighlightStyle
-    if (hasSelectedNote) return selectionHighlightStyle
+    if (!isMappingComplete) return null
+
+    const shouldHighlight = shouldHighlightBeamGroup({
+      staff,
+      beamSourceNotes,
+      selectionKeySetByLayout,
+      frameScope: beamHighlightFrameScope,
+    })
+    if (shouldHighlight) return selectionHighlightStyle
     return null
   }
 

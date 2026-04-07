@@ -5,6 +5,7 @@ import { useHorizontalScoreLayout } from './useHorizontalScoreLayout'
 import { useScoreWorkspaceSelectionBindings } from './useScoreWorkspaceSelectionBindings'
 import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
 import type { ChordRulerEntry } from '../chordRuler'
+import type { ActiveChordSelection, ActiveTimelineSegmentHighlight } from './chordMarkerTypes'
 import type { Pitch, ScoreNote } from '../types'
 import type { MeasurePair } from '../types'
 import type { useScoreAudioPreviewController } from './useScoreAudioPreviewController'
@@ -12,6 +13,8 @@ import type { useScoreAudioPreviewController } from './useScoreAudioPreviewContr
 export function useScoreWorkspaceSurfaceRuntime(params: {
   appState: ReturnType<typeof useScoreAppState>
   editorRefs: ReturnType<typeof useScoreEditorRefs>
+  activeChordSelection: ActiveChordSelection | null
+  activeTimelineSegmentHighlight: ActiveTimelineSegmentHighlight | null
   measurePairs: MeasurePair[]
   layout: {
     totalScoreWidth: number
@@ -45,6 +48,8 @@ export function useScoreWorkspaceSurfaceRuntime(params: {
   const {
     appState,
     editorRefs,
+    activeChordSelection,
+    activeTimelineSegmentHighlight,
     measurePairs,
     layout,
     onAfterScoreRender,
@@ -116,6 +121,8 @@ export function useScoreWorkspaceSurfaceRuntime(params: {
       draggingSelection: appState.draggingSelection,
       activeSelections: appState.isSelectionVisible ? appState.selectedSelections : [],
       draggingSelections: appState.draggingSelection ? [appState.draggingSelection] : [],
+      activeChordSelection,
+      activeTimelineSegmentHighlight,
       selectedMeasureScope: appState.selectedMeasureScope,
       fullMeasureRestCollapseScopeKeys: appState.fullMeasureRestCollapseScopeKeys,
       layoutReflowHintRef: editorRefs.layoutReflowHintRef,

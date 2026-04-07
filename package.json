@@ -21,6 +21,7 @@
     "test:pedal-drag:browser": "tsx scripts/pedal-drag-browser-test.ts",
     "test:staff-gap-drag:browser": "tsx scripts/staff-gap-drag-browser-test.ts",
     "test:chord-marker:browser": "tsx scripts/chord-marker-browser-test.ts",
+    "test:beam-highlight:gating": "tsx scripts/beam-highlight-gating-test.ts",
     "test:quarter-pulse:spacing:browser": "tsx scripts/quarter-pulse-spacing-browser-test.ts",
     "test:note-rest-flag:spacing:browser": "tsx scripts/note-rest-flag-spacing-browser-test.ts",
     "test:accidental-spacing:browser": "tsx scripts/accidental-spacing-browser-test.ts",

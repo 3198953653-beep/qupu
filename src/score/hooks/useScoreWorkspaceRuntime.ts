@@ -54,6 +54,8 @@ export function useScoreWorkspaceRuntime(params: {
     sessionHelpers: coreEditing.sessionHelpers,
     measurePairs: layout.measurePairs,
     playbackTimelineEvents: layout.playbackTimelineEvents,
+    activeChordSelection: coreEditing.chordMarker.activeChordSelection,
+    activeTimelineSegmentHighlight: coreEditing.chordMarker.activeTimelineSegmentHighlight,
     layout: {
       totalScoreWidth: layout.totalScoreWidth,
       displayScoreWidth: layout.displayScoreWidth,

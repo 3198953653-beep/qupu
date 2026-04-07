@@ -6,6 +6,7 @@ import { useScoreWorkspaceSelectionBindings } from './useScoreWorkspaceSelection
 import { useScoreWorkspaceSurfaceRuntime } from './useScoreWorkspaceSurfaceRuntime'
 import type { ChordRulerEntry } from '../chordRuler'
 import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
+import type { ActiveChordSelection, ActiveTimelineSegmentHighlight } from './chordMarkerTypes'
 import type { Pitch, ScoreNote, Selection, TimeSignature } from '../types'
 
 export function useScoreWorkspaceController(params: {
@@ -14,6 +15,8 @@ export function useScoreWorkspaceController(params: {
   sessionHelpers: ReturnType<typeof useScoreEditingSessionHelpers>
   measurePairs: ReturnType<typeof useScoreAppState>['measurePairsFromImport'] extends infer _ ? import('../types').MeasurePair[] : never
   playbackTimelineEvents: import('../playbackTimeline').PlaybackTimelineEvent[]
+  activeChordSelection: ActiveChordSelection | null
+  activeTimelineSegmentHighlight: ActiveTimelineSegmentHighlight | null
   layout: {
     totalScoreWidth: number
     displayScoreWidth: number
@@ -66,6 +69,8 @@ export function useScoreWorkspaceController(params: {
     sessionHelpers,
     measurePairs,
     playbackTimelineEvents,
+    activeChordSelection,
+    activeTimelineSegmentHighlight,
     layout,
     onAfterScoreRender,
     clearActiveChordSelection,
@@ -103,6 +108,8 @@ export function useScoreWorkspaceController(params: {
   const { clearDragOverlay, onSurfacePointerMove, endDrag, beginDrag } = useScoreWorkspaceSurfaceRuntime({
     appState,
     editorRefs,
+    activeChordSelection,
+    activeTimelineSegmentHighlight,
     measurePairs,
     layout,
     onAfterScoreRender,

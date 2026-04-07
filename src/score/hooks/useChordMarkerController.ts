@@ -310,6 +310,7 @@ export function useChordMarkerController(params: {
     chordRulerMarkerMetaByKey,
     chordRulerMarkers,
     timelineSegmentBlocks,
+    activeTimelineSegmentHighlight,
     applyChordSelectionRange,
     onChordRulerMarkerClick,
     onTimelineSegmentClick,

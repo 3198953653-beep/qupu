@@ -326,6 +326,7 @@ function probeMeasureSpacing(
     showEndTimeSignature: meta.showEndTimeSignature,
     activeSelection: null,
     draggingSelection: null,
+    beamHighlightFrameScope: null,
     collectLayouts: true,
     layoutDetail: 'spacing-only',
     skipPainting: true,
