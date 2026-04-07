@@ -2148,6 +2148,16 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     )
   }
 
+  const buildSourceNoteIndexByVexNote = (
+    rendered: RenderedMeasureNote[],
+  ): Map<StaveNote, number> => {
+    const sourceNoteIndexByVexNote = new Map<StaveNote, number>()
+    rendered.forEach(({ vexNote, sourceNoteIndex }) => {
+      sourceNoteIndexByVexNote.set(vexNote, sourceNoteIndex)
+    })
+    return sourceNoteIndexByVexNote
+  }
+
   const trebleRendered = buildRenderedStaffNotes(
     'treble',
     measure.treble,
@@ -2173,13 +2183,17 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   bassRendered.forEach((entry) => {
     bassRenderedBySourceIndex.set(entry.sourceNoteIndex, entry)
   })
+  const trebleSourceNoteIndexByVexNote = buildSourceNoteIndexByVexNote(trebleRendered)
+  const bassSourceNoteIndexByVexNote = buildSourceNoteIndexByVexNote(bassRendered)
+
+  const selectionHighlightStyle = { fillStyle: '#2437E8', strokeStyle: '#2437E8' }
+  const draggingHighlightStyle = { fillStyle: '#0e9ac7', strokeStyle: '#0e9ac7' }
 
   if (highlightStaff === 'treble' || highlightStaff === 'bass') {
-    const measureHighlightStyle = { fillStyle: '#2437E8', strokeStyle: '#2437E8' }
     if (highlightStaff === 'treble') {
-      trebleVexNotes.forEach((vexNote) => vexNote.setStyle(measureHighlightStyle))
+      trebleVexNotes.forEach((vexNote) => vexNote.setStyle(selectionHighlightStyle))
     } else {
-      bassVexNotes.forEach((vexNote) => vexNote.setStyle(measureHighlightStyle))
+      bassVexNotes.forEach((vexNote) => vexNote.setStyle(selectionHighlightStyle))
     }
   }
 
@@ -2192,9 +2206,9 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     const selectedKeySet = selectionKeySetByLayout.get(layoutKey)
     renderedKeys.forEach((entry, renderedIndex) => {
       if (draggingKeySet?.has(entry.keyIndex)) {
-        vexNote.setKeyStyle(Math.max(0, renderedIndex), { fillStyle: '#0e9ac7', strokeStyle: '#0e9ac7' })
+        vexNote.setKeyStyle(Math.max(0, renderedIndex), draggingHighlightStyle)
       } else if (selectedKeySet?.has(entry.keyIndex)) {
-        vexNote.setKeyStyle(Math.max(0, renderedIndex), { fillStyle: '#2437E8', strokeStyle: '#2437E8' })
+        vexNote.setKeyStyle(Math.max(0, renderedIndex), selectionHighlightStyle)
       }
     })
   })
@@ -2208,9 +2222,9 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     const selectedKeySet = selectionKeySetByLayout.get(layoutKey)
     renderedKeys.forEach((entry, renderedIndex) => {
       if (draggingKeySet?.has(entry.keyIndex)) {
-        vexNote.setKeyStyle(Math.max(0, renderedIndex), { fillStyle: '#0e9ac7', strokeStyle: '#0e9ac7' })
+        vexNote.setKeyStyle(Math.max(0, renderedIndex), draggingHighlightStyle)
       } else if (selectedKeySet?.has(entry.keyIndex)) {
-        vexNote.setKeyStyle(Math.max(0, renderedIndex), { fillStyle: '#2437E8', strokeStyle: '#2437E8' })
+        vexNote.setKeyStyle(Math.max(0, renderedIndex), selectionHighlightStyle)
       }
     })
   })
@@ -2241,7 +2255,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
           renderedKey: targetRenderedKey,
           fallbackRenderedIndex: renderedIndex,
         })
-        accidentalModifier?.setStyle({ fillStyle: '#2437E8', strokeStyle: '#2437E8' })
+        accidentalModifier?.setStyle(selectionHighlightStyle)
       })
     }
     applyAccidentalHighlight('treble', measure.treble, trebleRenderedBySourceIndex)
@@ -2276,6 +2290,36 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     vexNote.setStave(bassStave)
     vexNote.setContext(context)
   })
+
+  const resolveBeamHighlightStyle = (params: {
+    beam: Beam
+    staff: StaffKind
+    sourceNotes: ScoreNote[]
+    sourceNoteIndexByVexNote: Map<StaveNote, number>
+  }): { fillStyle: string; strokeStyle: string } | null => {
+    const { beam, staff, sourceNotes, sourceNoteIndexByVexNote } = params
+    let hasSelectedNote = highlightStaff === staff
+    let hasDraggingNote = false
+
+    beam.getNotes().forEach((note) => {
+      const sourceNoteIndex = sourceNoteIndexByVexNote.get(note as StaveNote)
+      if (sourceNoteIndex === undefined) return
+      const sourceNote = sourceNotes[sourceNoteIndex]
+      if (!sourceNote) return
+      const layoutKey = getLayoutNoteKey(staff, sourceNote.id)
+      if ((draggingKeySetByLayout.get(layoutKey)?.size ?? 0) > 0) {
+        hasDraggingNote = true
+        return
+      }
+      if ((selectionKeySetByLayout.get(layoutKey)?.size ?? 0) > 0) {
+        hasSelectedNote = true
+      }
+    })
+
+    if (hasDraggingNote) return draggingHighlightStyle
+    if (hasSelectedNote) return selectionHighlightStyle
+    return null
+  }
 
   if (spacingLayoutMode === 'custom') {
     alignRenderedAccidentalOffset('treble', measure.treble, trebleRenderedBySourceIndex, {
@@ -3476,8 +3520,34 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
   if (!skipPainting) {
     trebleVoice.draw(context, trebleStave)
     bassVoice.draw(context, bassStave)
-    trebleBeams.forEach((beam) => beam.setContext(context).draw())
-    bassBeams.forEach((beam) => beam.setContext(context).draw())
+    trebleBeams.forEach((beam) => {
+      const beamHighlightStyle = resolveBeamHighlightStyle({
+        beam,
+        staff: 'treble',
+        sourceNotes: measure.treble,
+        sourceNoteIndexByVexNote: trebleSourceNoteIndexByVexNote,
+      })
+      beam.setContext(context)
+      if (beamHighlightStyle) {
+        beam.setStyle(beamHighlightStyle).drawWithStyle()
+        return
+      }
+      beam.draw()
+    })
+    bassBeams.forEach((beam) => {
+      const beamHighlightStyle = resolveBeamHighlightStyle({
+        beam,
+        staff: 'bass',
+        sourceNotes: measure.bass,
+        sourceNoteIndexByVexNote: bassSourceNoteIndexByVexNote,
+      })
+      beam.setContext(context)
+      if (beamHighlightStyle) {
+        beam.setStyle(beamHighlightStyle).drawWithStyle()
+        return
+      }
+      beam.draw()
+    })
   }
 
   const getTieKeySpecs = (
@@ -3550,7 +3620,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     return rendered.renderedKeys.findIndex((entry) => entry.pitch === pitch)
   }
 
-  const tieHighlightFill = '#2437E8'
+  const tieHighlightFill = selectionHighlightStyle.fillStyle
   const createTieAnchorNote = (y: number): StaveNote => ({ getYs: () => [y] }) as unknown as StaveNote
 
   const drawTieCurveByAnchors = (
@@ -4241,15 +4311,6 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       bassPitchYMap[pitch] = bassStave.getYForNote(getPitchLine('bass', pitch))
     })
   }
-
-  const trebleSourceNoteIndexByVexNote = new Map<StaveNote, number>()
-  trebleRendered.forEach(({ vexNote, sourceNoteIndex }) => {
-    trebleSourceNoteIndexByVexNote.set(vexNote, sourceNoteIndex)
-  })
-  const bassSourceNoteIndexByVexNote = new Map<StaveNote, number>()
-  bassRendered.forEach(({ vexNote, sourceNoteIndex }) => {
-    bassSourceNoteIndexByVexNote.set(vexNote, sourceNoteIndex)
-  })
 
   const trebleNoteLayouts = trebleRendered.flatMap(({ vexNote, renderedKeys, sourceNoteIndex }) => {
       const sourceNote = measure.treble[sourceNoteIndex]

@@ -17,6 +17,7 @@
     "test:playhead:browser": "tsx scripts/playhead-browser-test.ts",
     "test:playback-volume:browser": "tsx scripts/playback-volume-browser-test.ts",
     "test:accompaniment-highlight:browser": "tsx scripts/accompaniment-highlight-browser-test.ts",
+    "test:musicxml-import:browser": "tsx scripts/musicxml-import-smoke-browser-test.ts",
     "test:pedal-drag:browser": "tsx scripts/pedal-drag-browser-test.ts",
     "test:staff-gap-drag:browser": "tsx scripts/staff-gap-drag-browser-test.ts",
     "test:chord-marker:browser": "tsx scripts/chord-marker-browser-test.ts",
