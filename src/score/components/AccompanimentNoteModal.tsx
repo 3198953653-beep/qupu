@@ -1,10 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { getGrandStaffLayoutMetrics, type GrandStaffLayoutMetrics } from '../grandStaffLayout'
 import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
 import type { SpacingLayoutMode } from '../types'
 import { AccompanimentNoteNotationStrip } from './AccompanimentNoteNotationStrip'
 import type { AccompanimentRenderMeasure } from '../hooks/useAccompanimentNoteDialogController'
 import type { AccompanimentPreviewPlaybackController } from '../hooks/useAccompanimentPreviewPlaybackController'
+
+const DEFAULT_MODAL_WIDTH_PX = 1400
+const MIN_MODAL_WIDTH_PX = 760
+const MAX_MODAL_WIDTH_PX = 1400
+const MODAL_WIDTH_STEP_PX = 20
 
 export function AccompanimentNoteModal(props: {
   isOpen: boolean
@@ -40,10 +45,15 @@ export function AccompanimentNoteModal(props: {
     onPreviewCandidate,
     onApplyCandidate,
   } = props
+  const [modalWidthPx, setModalWidthPx] = useState(DEFAULT_MODAL_WIDTH_PX)
   const onCloseRef = useRef(onClose)
   useEffect(() => {
     onCloseRef.current = onClose
   }, [onClose])
+  useEffect(() => {
+    if (!isOpen) return
+    setModalWidthPx(DEFAULT_MODAL_WIDTH_PX)
+  }, [isOpen])
   const hasVisiblePreviewPedals = useMemo(
     () => previewCandidates.some((candidate) => candidate.previewPedalSpans.length > 0),
     [previewCandidates],
@@ -155,11 +165,12 @@ export function AccompanimentNoteModal(props: {
       onClose()
     }}>
       <div
-        className="smart-chord-modal-card"
+        className="smart-chord-modal-card accompaniment-note-modal-card"
         role="dialog"
         aria-modal="true"
         aria-label="伴奏音符选择"
         onMouseDown={(event) => event.stopPropagation()}
+        style={{ '--accompaniment-modal-width': `${modalWidthPx}px` } as CSSProperties}
       >
         <header className="smart-chord-modal-header">
           <div>
@@ -188,6 +199,32 @@ export function AccompanimentNoteModal(props: {
             <span className="smart-chord-summary-label">和弦</span>
             <strong>{target.chordName}</strong>
           </div>
+        </section>
+
+        <section className="accompaniment-preview-size-panel" aria-label="预览窗口大小">
+          <div className="accompaniment-preview-size-panel-header">
+            <div>
+              <h4>窗口大小</h4>
+              <p>只放大当前伴奏预览窗口，五线谱本身不缩放。</p>
+            </div>
+            <strong>{modalWidthPx}px</strong>
+          </div>
+          <label className="accompaniment-preview-size-slider-row">
+            <span>左右宽度</span>
+            <input
+              type="range"
+              min={MIN_MODAL_WIDTH_PX}
+              max={MAX_MODAL_WIDTH_PX}
+              step={MODAL_WIDTH_STEP_PX}
+              value={modalWidthPx}
+              onChange={(event) => {
+                const nextWidthPx = Number(event.target.value)
+                if (!Number.isFinite(nextWidthPx)) return
+                setModalWidthPx(nextWidthPx)
+              }}
+              aria-label="调节伴奏预览窗口宽度"
+            />
+          </label>
         </section>
 
         {errorMessage && (
