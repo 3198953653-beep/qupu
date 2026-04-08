@@ -18,6 +18,7 @@ import type {
   NoteLayout,
   PedalSpan,
   Selection,
+  SelectionFrameIntent,
   SpacingLayoutMode,
   TimeSignature,
 } from '../types'
@@ -51,6 +52,8 @@ export function useScoreRenderEffect(params: {
   activeChordSelection?: ActiveChordSelection | null
   activeTimelineSegmentHighlight?: ActiveTimelineSegmentHighlight | null
   selectedMeasureScope?: { pairIndex: number; staff: 'treble' | 'bass' } | null
+  selectionFrameIntent?: SelectionFrameIntent
+  isSelectionVisible?: boolean
   fullMeasureRestCollapseScopeKeys?: string[]
   layoutReflowHintRef?: MutableRefObject<LayoutReflowHint | null>
   layoutStabilityKey?: string
@@ -103,6 +106,8 @@ export function useScoreRenderEffect(params: {
     activeChordSelection = null,
     activeTimelineSegmentHighlight = null,
     selectedMeasureScope = null,
+    selectionFrameIntent = 'default',
+    isSelectionVisible = false,
     fullMeasureRestCollapseScopeKeys = [],
     layoutReflowHintRef,
     layoutStabilityKey,
@@ -208,6 +213,8 @@ export function useScoreRenderEffect(params: {
         activeChordSelection,
         activeTimelineSegmentHighlight,
         selectedMeasureScope,
+        selectionFrameIntent,
+        isSelectionVisible,
         fullMeasureRestCollapseScopeKeys,
         layoutReflowHint,
         layoutStabilityKey,
@@ -258,6 +265,8 @@ export function useScoreRenderEffect(params: {
     activeChordSelection,
     activeTimelineSegmentHighlight,
     selectedMeasureScope,
+    selectionFrameIntent,
+    isSelectionVisible,
     fullMeasureRestCollapseScopeKeys,
     layoutReflowHintRef,
     layoutStabilityKey,

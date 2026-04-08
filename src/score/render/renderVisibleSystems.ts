@@ -48,12 +48,13 @@ import type {
   PedalSpan,
   ScoreNote,
   Selection,
+  SelectionFrameIntent,
   SpacingLayoutMode,
   StaffKind,
   TimeSignature,
 } from '../types'
 import type { ActiveChordSelection, ActiveTimelineSegmentHighlight } from '../hooks/chordMarkerTypes'
-import type { BeamHighlightFrameScope } from './beamHighlightGate'
+import type { BeamHighlightFrameScope, BeamHighlightMode } from './beamHighlightGate'
 
 const OVERFLOW_ANALYSIS_MAX_PASSES = 16
 const OVERFLOW_RECOVERY_PAD_PX = 2
@@ -325,6 +326,8 @@ export function renderVisibleSystems(params: {
   activeChordSelection?: ActiveChordSelection | null
   activeTimelineSegmentHighlight?: ActiveTimelineSegmentHighlight | null
   selectedMeasureScope?: { pairIndex: number; staff: 'treble' | 'bass' } | null
+  selectionFrameIntent?: SelectionFrameIntent
+  isSelectionVisible?: boolean
   fullMeasureRestCollapseScopeKeys?: string[]
   previousNoteLayoutsByPair?: Map<number, NoteLayout[]> | null
   previousMeasureLayouts?: Map<number, MeasureLayout> | null
@@ -372,6 +375,8 @@ export function renderVisibleSystems(params: {
     activeChordSelection = null,
     activeTimelineSegmentHighlight = null,
     selectedMeasureScope = null,
+    selectionFrameIntent = 'default',
+    isSelectionVisible = false,
     fullMeasureRestCollapseScopeKeys = [],
     previousNoteLayoutsByPair = null,
     previousMeasureLayouts = null,
@@ -401,6 +406,8 @@ export function renderVisibleSystems(params: {
     if (selectedMeasureScope?.pairIndex === pairIndex) return selectedMeasureScope.staff
     return null
   }
+  const beamHighlightMode: BeamHighlightMode =
+    isSelectionVisible && selectionFrameIntent === 'shift-range-tight' ? 'shift-first-note' : 'default'
   const spacingConfig = timeAxisSpacingConfig ?? DEFAULT_TIME_AXIS_SPACING_CONFIG
   const systemHeightPx = grandStaffLayoutMetrics?.systemHeightPx ?? SYSTEM_HEIGHT
   const trebleOffsetY = grandStaffLayoutMetrics?.trebleOffsetY ?? SYSTEM_TREBLE_OFFSET_Y
@@ -872,6 +879,7 @@ export function renderVisibleSystems(params: {
               ? selectedMeasureScope.staff
               : null,
           beamHighlightFrameScope: resolveBeamHighlightFrameScopeForPair(entry.pairIndex),
+          beamHighlightMode,
           noteStartXOverride: noteStartX,
           formatWidthOverride: formatWidth,
           timeAxisSpacingConfig: spacingConfig,
@@ -1104,6 +1112,7 @@ export function renderVisibleSystems(params: {
               ? selectedMeasureScope.staff
               : null,
           beamHighlightFrameScope: resolveBeamHighlightFrameScopeForPair(entry.pairIndex),
+          beamHighlightMode,
           noteStartXOverride: noteStartX,
           formatWidthOverride: formatWidth,
           timeAxisSpacingConfig: spacingConfig,
@@ -1352,6 +1361,7 @@ export function renderVisibleSystems(params: {
             ? selectedMeasureScope.staff
             : null,
         beamHighlightFrameScope: null,
+        beamHighlightMode: 'default',
         collectLayouts: true,
         skipPainting: true,
         noteStartXOverride: spacingLeftLimitX,
@@ -1482,6 +1492,7 @@ export function renderVisibleSystems(params: {
             ? selectedMeasureScope.staff
             : null,
         beamHighlightFrameScope: resolveBeamHighlightFrameScopeForPair(entry.pairIndex),
+        beamHighlightMode,
         noteStartXOverride: noteStartX,
         formatWidthOverride: formatWidth,
         timeAxisSpacingConfig: spacingConfig,

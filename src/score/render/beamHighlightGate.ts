@@ -2,6 +2,12 @@ import { getLayoutNoteKey } from '../layout/renderPosition'
 import type { ScoreNote, StaffKind } from '../types'
 
 export type BeamHighlightFrameScope = 'combined' | StaffKind | null
+export type BeamHighlightMode = 'default' | 'shift-first-note'
+
+export type BeamSourceNoteEntry = {
+  sourceNote: ScoreNote
+  sourceNoteIndex: number
+}
 
 function isSourceNoteFullySelected(params: {
   sourceNote: ScoreNote
@@ -22,16 +28,37 @@ function isSourceNoteFullySelected(params: {
 
 export function shouldHighlightBeamGroup(params: {
   staff: StaffKind
-  beamSourceNotes: ScoreNote[]
+  beamSourceNotes: BeamSourceNoteEntry[]
   selectionKeySetByLayout: Map<string, Set<number>>
   frameScope: BeamHighlightFrameScope
+  mode?: BeamHighlightMode
 }): boolean {
-  const { staff, beamSourceNotes, selectionKeySetByLayout, frameScope } = params
-  if (frameScope === null || beamSourceNotes.length === 0) return false
+  const {
+    staff,
+    beamSourceNotes,
+    selectionKeySetByLayout,
+    frameScope,
+    mode = 'default',
+  } = params
+  if (beamSourceNotes.length === 0) return false
+
+  if (mode === 'shift-first-note') {
+    const firstBeamSourceNote = beamSourceNotes.reduce((earliest, current) =>
+      current.sourceNoteIndex < earliest.sourceNoteIndex ? current : earliest,
+    )
+
+    return isSourceNoteFullySelected({
+      sourceNote: firstBeamSourceNote.sourceNote,
+      staff,
+      selectionKeySetByLayout,
+    })
+  }
+
+  if (frameScope === null) return false
   if (frameScope === staff) return true
   if (frameScope !== 'combined') return false
 
-  return beamSourceNotes.every((sourceNote) =>
+  return beamSourceNotes.every(({ sourceNote }) =>
     isSourceNoteFullySelected({
       sourceNote,
       staff,

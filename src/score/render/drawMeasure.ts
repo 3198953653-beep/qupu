@@ -25,7 +25,12 @@ import { getStepOctaveAlterFromPitch } from '../pitchMath'
 import { buildPitchLineMap, createPianoPitches, getPitchLine, getStrictStemDirection } from '../pitchUtils'
 import { getTieFrozenIncoming } from '../tieFrozen'
 import { isStaffFullMeasureRest } from '../measureRestUtils'
-import { shouldHighlightBeamGroup, type BeamHighlightFrameScope } from './beamHighlightGate'
+import {
+  shouldHighlightBeamGroup,
+  type BeamHighlightFrameScope,
+  type BeamHighlightMode,
+  type BeamSourceNoteEntry,
+} from './beamHighlightGate'
 import { getDragPreviewTargetKey } from './dragPreviewOverrides'
 import { getJianpuNumeralForPitch, hasFilledNoteHead } from './noteheadNumerals'
 import { buildTieLayout } from './tieLayoutGeometry'
@@ -1660,6 +1665,7 @@ export type DrawMeasureParams = {
   draggingSelections?: Selection[] | null
   highlightStaff?: StaffKind | null
   beamHighlightFrameScope?: BeamHighlightFrameScope
+  beamHighlightMode?: BeamHighlightMode
   previewNotes?: PreviewNoteOverride[] | null
   previewNote?: { noteId: string; staff: StaffKind; pitch: Pitch; keyIndex: number } | null
   previewAccidentalStateBeforeNote?: Map<string, number> | null
@@ -1742,6 +1748,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     draggingSelections = null,
     highlightStaff = null,
     beamHighlightFrameScope = null,
+    beamHighlightMode = 'default',
     previewNotes = null,
     previewNote = null,
     previewAccidentalStateBeforeNote = null,
@@ -2301,7 +2308,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     sourceNoteIndexByVexNote: Map<StaveNote, number>
   }): { fillStyle: string; strokeStyle: string } | null => {
     const { beam, staff, sourceNotes, sourceNoteIndexByVexNote } = params
-    const beamSourceNotes: ScoreNote[] = []
+    const beamSourceNotes: BeamSourceNoteEntry[] = []
     let isMappingComplete = true
 
     beam.getNotes().forEach((note) => {
@@ -2315,7 +2322,10 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         isMappingComplete = false
         return
       }
-      beamSourceNotes.push(sourceNote)
+      beamSourceNotes.push({
+        sourceNote,
+        sourceNoteIndex,
+      })
     })
 
     if (!isMappingComplete) return null
@@ -2325,6 +2335,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       beamSourceNotes,
       selectionKeySetByLayout,
       frameScope: beamHighlightFrameScope,
+      mode: beamHighlightMode,
     })
     if (shouldHighlight) return selectionHighlightStyle
     return null

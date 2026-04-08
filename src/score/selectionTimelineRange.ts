@@ -141,7 +141,7 @@ export function buildSelectionsInTimelineRange(params: {
   const rangeEndPairIndex = latestEnding.pairIndex
   const rangeEndTickExclusive = latestEnding.endTickExclusive
 
-  const staffsToScan: StaffKind[] = ['treble', 'bass']
+  const staffsToScan = [...new Set(resolvedAnchors.map((entry) => entry.staff))]
 
   const nextSelections: Selection[] = []
   const seen = new Set<string>()

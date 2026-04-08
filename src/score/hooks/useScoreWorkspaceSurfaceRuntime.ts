@@ -124,6 +124,8 @@ export function useScoreWorkspaceSurfaceRuntime(params: {
       activeChordSelection,
       activeTimelineSegmentHighlight,
       selectedMeasureScope: appState.selectedMeasureScope,
+      selectionFrameIntent: appState.selectionFrameIntent,
+      isSelectionVisible: appState.isSelectionVisible,
       fullMeasureRestCollapseScopeKeys: appState.fullMeasureRestCollapseScopeKeys,
       layoutReflowHintRef: editorRefs.layoutReflowHintRef,
       layoutStabilityKey: layout.layoutStabilityKey,
