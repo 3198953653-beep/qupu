@@ -245,6 +245,7 @@ function App() {
         timeAxisSpacingConfig={appState.timeAxisSpacingConfig}
         spacingLayoutMode={layout.spacingLayoutMode}
         grandStaffLayoutMetrics={layout.grandStaffLayoutMetrics}
+        showNoteHeadJianpuEnabled={appState.showNoteHeadJianpuEnabled}
         accompanimentPreviewPlayback={accompanimentPreviewPlayback}
         errorMessage={accompanimentNoteDialog.errorMessage}
         onClose={accompanimentNoteDialog.closeDialog}

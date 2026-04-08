@@ -24,6 +24,7 @@ export function AccompanimentNoteModal(props: {
   timeAxisSpacingConfig: TimeAxisSpacingConfig
   spacingLayoutMode: SpacingLayoutMode
   grandStaffLayoutMetrics: GrandStaffLayoutMetrics
+  showNoteHeadJianpuEnabled: boolean
   accompanimentPreviewPlayback: AccompanimentPreviewPlaybackController
   errorMessage: string | null
   onClose: () => void
@@ -39,6 +40,7 @@ export function AccompanimentNoteModal(props: {
     timeAxisSpacingConfig,
     spacingLayoutMode,
     grandStaffLayoutMetrics,
+    showNoteHeadJianpuEnabled,
     accompanimentPreviewPlayback,
     errorMessage,
     onClose,
@@ -245,6 +247,7 @@ export function AccompanimentNoteModal(props: {
               timeAxisSpacingConfig={timeAxisSpacingConfig}
               spacingLayoutMode={spacingLayoutMode}
               grandStaffLayoutMetrics={previewGrandStaffLayoutMetrics}
+              showNoteHeadJianpuEnabled={showNoteHeadJianpuEnabled}
               onPreviewByMeasure={handlePreviewByMeasure}
               onApplyByMeasure={handleApplyByMeasure}
             />

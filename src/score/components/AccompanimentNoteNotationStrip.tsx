@@ -135,6 +135,7 @@ export function AccompanimentNoteNotationStrip(props: {
   timeAxisSpacingConfig: TimeAxisSpacingConfig
   spacingLayoutMode: SpacingLayoutMode
   grandStaffLayoutMetrics: GrandStaffLayoutMetrics
+  showNoteHeadJianpuEnabled: boolean
   onPreviewByMeasure: (measureNumber: number) => void
   onApplyByMeasure: (measureNumber: number) => void
 }) {
@@ -146,6 +147,7 @@ export function AccompanimentNoteNotationStrip(props: {
     timeAxisSpacingConfig,
     spacingLayoutMode,
     grandStaffLayoutMetrics,
+    showNoteHeadJianpuEnabled,
     onPreviewByMeasure,
     onApplyByMeasure,
   } = props
@@ -300,6 +302,7 @@ export function AccompanimentNoteNotationStrip(props: {
         beamHighlightFrameScope: measure.candidateKey === selectedCandidateKey ? 'combined' : null,
         collectLayouts: true,
         showMeasureNumberLabel: false,
+        showNoteHeadJianpu: showNoteHeadJianpuEnabled,
         timeAxisSpacingConfig,
         spacingLayoutMode,
         timelineBundle,
@@ -453,6 +456,7 @@ export function AccompanimentNoteNotationStrip(props: {
     measures,
     renderHeightPx,
     selectedCandidateKey,
+    showNoteHeadJianpuEnabled,
     spacingLayoutMode,
     timeAxisSpacingConfig,
   ])
