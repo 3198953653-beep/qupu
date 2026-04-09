@@ -39,7 +39,7 @@ export type KeyboardMoveSelectionByKeyboardArrow = (direction: 'up' | 'down') =>
 
 export type KeyboardCommandEventParams = {
   event: KeyboardEvent
-  isOsmdPreviewOpen: boolean
+  isAnyPreviewOpen: boolean
   draggingSelection: Selection | null
   isSelectionVisible: boolean
   measurePairs: MeasurePair[]

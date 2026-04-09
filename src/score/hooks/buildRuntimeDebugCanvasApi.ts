@@ -17,6 +17,7 @@ import type { OsmdPreviewInstance, OsmdPreviewRebalanceStats } from './useOsmdPr
 export function buildRuntimeDebugCanvasApi(params: {
   dumpAllMeasureCoordinateReport: () => unknown
   dumpOsmdPreviewSystemMetrics: () => unknown
+  dumpNativePreviewLayoutDiagnostics: () => unknown
   osmdPreviewLastRebalanceStatsRef: MutableRefObject<OsmdPreviewRebalanceStats | null>
   osmdPreviewInstanceRef: MutableRefObject<OsmdPreviewInstance | null>
   dragDebugFramesRef: MutableRefObject<DragDebugSnapshot[]>
@@ -40,6 +41,7 @@ export function buildRuntimeDebugCanvasApi(params: {
   const {
     dumpAllMeasureCoordinateReport,
     dumpOsmdPreviewSystemMetrics,
+    dumpNativePreviewLayoutDiagnostics,
     osmdPreviewLastRebalanceStatsRef,
     osmdPreviewInstanceRef,
     dragDebugFramesRef,
@@ -64,6 +66,7 @@ export function buildRuntimeDebugCanvasApi(params: {
   return {
     dumpAllMeasureCoordinates: () => dumpAllMeasureCoordinateReport(),
     getOsmdPreviewSystemMetrics: () => dumpOsmdPreviewSystemMetrics(),
+    dumpNativePreviewLayoutDiagnostics: () => dumpNativePreviewLayoutDiagnostics(),
     getOsmdPreviewRebalanceStats: () => osmdPreviewLastRebalanceStatsRef.current,
     getOsmdPreviewInstance: () => osmdPreviewInstanceRef.current,
     getPedalRenderPlan: () => {

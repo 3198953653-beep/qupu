@@ -14,6 +14,7 @@
     "test:drag:multi-key-preview:browser": "tsx scripts/drag-multi-key-preview-browser-test.ts",
     "test:notehead:jianpu:browser": "tsx scripts/notehead-jianpu-browser-test.ts",
     "test:accompaniment:notehead:jianpu:browser": "tsx scripts/accompaniment-notehead-jianpu-browser-test.ts",
+    "test:native-preview:browser": "tsx scripts/native-preview-browser-test.ts",
     "test:preview:browser": "tsx scripts/note-preview-browser-test.ts",
     "test:playhead:browser": "tsx scripts/playhead-browser-test.ts",
     "test:playback-volume:browser": "tsx scripts/playback-volume-browser-test.ts",

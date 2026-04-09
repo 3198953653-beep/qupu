@@ -4,13 +4,13 @@ import { isTextInputTarget } from './keyboardCommandShared'
 
 export function shouldIgnoreKeyboardCommand(params: {
   event: KeyboardEvent
-  isOsmdPreviewOpen: boolean
+  isAnyPreviewOpen: boolean
   draggingSelection: Selection | null
   scoreScrollRef: MutableRefObject<HTMLDivElement | null>
 }): boolean {
-  const { event, isOsmdPreviewOpen, draggingSelection, scoreScrollRef } = params
+  const { event, isAnyPreviewOpen, draggingSelection, scoreScrollRef } = params
 
-  if (isOsmdPreviewOpen) return true
+  if (isAnyPreviewOpen) return true
   if (draggingSelection) return true
   if (isTextInputTarget(event.target)) return true
 

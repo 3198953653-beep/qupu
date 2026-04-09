@@ -25,6 +25,7 @@ export type ScoreControlsProps = {
   onLoadHalfNoteDemo: () => void
   onExportMusicXmlFile: () => void
   onOpenOsmdPreview: () => void
+  onOpenNativePreview: () => void
   onOpenBeamGroupingTool: () => void
   canOpenPedalModal: boolean
   onOpenPedalModal: () => void

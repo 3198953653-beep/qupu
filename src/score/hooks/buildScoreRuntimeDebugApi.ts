@@ -40,6 +40,7 @@ export function buildScoreRuntimeDebugApi(params: {
   setManualScalePercent: (nextPercent: number) => void
   dumpAllMeasureCoordinateReport: () => unknown
   dumpOsmdPreviewSystemMetrics: () => unknown
+  dumpNativePreviewLayoutDiagnostics: () => unknown
   osmdPreviewLastRebalanceStatsRef: MutableRefObject<OsmdPreviewRebalanceStats | null>
   osmdPreviewInstanceRef: MutableRefObject<OsmdPreviewInstance | null>
   dragDebugFramesRef: MutableRefObject<DragDebugSnapshot[]>
@@ -104,6 +105,7 @@ export function buildScoreRuntimeDebugApi(params: {
     ...buildRuntimeDebugCanvasApi({
       dumpAllMeasureCoordinateReport: params.dumpAllMeasureCoordinateReport,
       dumpOsmdPreviewSystemMetrics: params.dumpOsmdPreviewSystemMetrics,
+      dumpNativePreviewLayoutDiagnostics: params.dumpNativePreviewLayoutDiagnostics,
       osmdPreviewLastRebalanceStatsRef: params.osmdPreviewLastRebalanceStatsRef,
       osmdPreviewInstanceRef: params.osmdPreviewInstanceRef,
       dragDebugFramesRef: params.dragDebugFramesRef,

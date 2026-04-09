@@ -8,6 +8,7 @@ type ScoreOsmdPreviewControlsProps = Pick<
   | 'onOpenDirectOsmdFilePicker'
   | 'onExportMusicXmlFile'
   | 'onOpenOsmdPreview'
+  | 'onOpenNativePreview'
   | 'onOpenBeamGroupingTool'
   | 'canOpenPedalModal'
   | 'onOpenPedalModal'
@@ -37,6 +38,7 @@ export function ScoreOsmdPreviewControls(props: ScoreOsmdPreviewControlsProps) {
     onOpenDirectOsmdFilePicker,
     onExportMusicXmlFile,
     onOpenOsmdPreview,
+    onOpenNativePreview,
     onOpenBeamGroupingTool,
     canOpenPedalModal,
     onOpenPedalModal,
@@ -69,6 +71,7 @@ export function ScoreOsmdPreviewControls(props: ScoreOsmdPreviewControlsProps) {
         <button type="button" onClick={onOpenDirectOsmdFilePicker}>直接预览文件</button>
         <button type="button" onClick={onExportMusicXmlFile}>导出乐谱文件</button>
         <button type="button" onClick={onOpenOsmdPreview}>OSMD预览</button>
+        <button type="button" onClick={onOpenNativePreview}>五线谱预览</button>
         <button type="button" onClick={onOpenBeamGroupingTool}>音值组合</button>
         <button type="button" onClick={onOpenPedalModal} disabled={!canOpenPedalModal}>添加踏板</button>
         <div ref={notationPaletteAnchorRef} className="notation-palette-anchor">

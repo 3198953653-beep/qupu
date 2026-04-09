@@ -84,6 +84,7 @@ export function useScoreRuntimeDebugController(params: {
   scoreScaleY: number
   spacingLayoutMode: SpacingLayoutMode
   dumpOsmdPreviewSystemMetrics: () => unknown
+  dumpNativePreviewLayoutDiagnostics: () => unknown
   osmdPreviewLastRebalanceStatsRef: MutableRefObject<OsmdPreviewRebalanceStats | null>
   osmdPreviewInstanceRef: MutableRefObject<OsmdPreviewInstance | null>
 }): {
@@ -146,6 +147,7 @@ export function useScoreRuntimeDebugController(params: {
     scoreScaleY,
     spacingLayoutMode,
     dumpOsmdPreviewSystemMetrics,
+    dumpNativePreviewLayoutDiagnostics,
     osmdPreviewLastRebalanceStatsRef,
     osmdPreviewInstanceRef,
   } = params
@@ -186,6 +188,7 @@ export function useScoreRuntimeDebugController(params: {
     setManualScalePercent,
     dumpAllMeasureCoordinateReport,
     dumpOsmdPreviewSystemMetrics,
+    dumpNativePreviewLayoutDiagnostics,
     osmdPreviewLastRebalanceStatsRef,
     osmdPreviewInstanceRef,
     dragDebugFramesRef,
@@ -234,6 +237,7 @@ export function useScoreRuntimeDebugController(params: {
     dragDebugFramesRef,
     dragRef,
     dumpAllMeasureCoordinateReport,
+    dumpNativePreviewLayoutDiagnostics,
     dumpOsmdPreviewSystemMetrics,
     importFeedbackRef,
     importMusicXmlTextWithCollapseReset,

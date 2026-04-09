@@ -110,6 +110,7 @@ export function useScorePlaybackRuntimeBridge(params: {
         scoreScaleY: layout.scoreScaleY,
         spacingLayoutMode: layout.spacingLayoutMode,
         dumpOsmdPreviewSystemMetrics: editorUi.dumpOsmdPreviewSystemMetrics,
+        dumpNativePreviewLayoutDiagnostics: editorUi.dumpNativePreviewLayoutDiagnostics,
         osmdPreviewLastRebalanceStatsRef: editorUi.osmdPreviewLastRebalanceStatsRef,
         osmdPreviewInstanceRef: editorUi.osmdPreviewInstanceRef,
       },

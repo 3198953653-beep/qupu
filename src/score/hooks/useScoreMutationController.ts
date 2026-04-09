@@ -36,7 +36,7 @@ export function useScoreMutationController(params: {
   midiStepLastSelectionRef: MutableRefObject<Selection | null>
   dragRef: MutableRefObject<DragState | null>
   draggingSelectionRef: MutableRefObject<Selection | null>
-  isOsmdPreviewOpenRef: MutableRefObject<boolean>
+  isAnyPreviewOpenRef: MutableRefObject<boolean>
   clearDragOverlayRef: MutableRefObject<() => void>
   clearDragPreviewState: () => void
   clearDraggingSelection: () => void
@@ -100,7 +100,7 @@ export function useScoreMutationController(params: {
     midiStepLastSelectionRef,
     dragRef,
     draggingSelectionRef,
-    isOsmdPreviewOpenRef,
+    isAnyPreviewOpenRef,
     clearDragOverlayRef,
     clearDragPreviewState,
     clearDraggingSelection,
@@ -229,7 +229,7 @@ export function useScoreMutationController(params: {
     midiStepLastSelectionRef,
     dragRef,
     draggingSelectionRef,
-    isOsmdPreviewOpenRef,
+    isAnyPreviewOpenRef,
     applyKeyboardEditResult,
     setMeasureKeyFifthsFromImport,
     setMeasureDivisionsFromImport,

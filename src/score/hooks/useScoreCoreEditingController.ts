@@ -105,7 +105,7 @@ export function useScoreCoreEditingController(params: {
     midiStepLastSelectionRef: editorRefs.midiStepLastSelectionRef,
     dragRef: editorRefs.dragRef,
     draggingSelectionRef: editorRefs.draggingSelectionRef,
-    isOsmdPreviewOpenRef: editorRefs.isOsmdPreviewOpenRef,
+    isAnyPreviewOpenRef: editorRefs.isAnyPreviewOpenRef,
     clearDragOverlayRef: editorRefs.clearDragOverlayRef,
     clearDragPreviewState: sessionHelpers.clearDragPreviewState,
     clearDraggingSelection: sessionHelpers.clearDraggingSelection,

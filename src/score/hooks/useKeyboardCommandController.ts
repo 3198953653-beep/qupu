@@ -27,7 +27,7 @@ import { useKeyboardCommandEffect } from './useKeyboardCommandEffect'
 import { moveSelectionByKeyboardArrow, moveSelectionsByKeyboardSteps } from './keyboardSelectionCommands'
 
 export function useKeyboardCommandController(params: {
-  isOsmdPreviewOpen: boolean
+  isAnyPreviewOpen: boolean
   draggingSelection: Selection | null
   isSelectionVisible: boolean
   measurePairs: MeasurePair[]
@@ -69,7 +69,7 @@ export function useKeyboardCommandController(params: {
   setNotationPaletteLastAction: Dispatch<SetStateAction<string>>
 }): void {
   const {
-    isOsmdPreviewOpen,
+    isAnyPreviewOpen,
     draggingSelection,
     isSelectionVisible,
     measurePairs,
@@ -206,7 +206,7 @@ export function useKeyboardCommandController(params: {
   ])
 
   useKeyboardCommandEffect({
-    isOsmdPreviewOpen,
+    isAnyPreviewOpen,
     draggingSelection,
     isSelectionVisible,
     measurePairs,

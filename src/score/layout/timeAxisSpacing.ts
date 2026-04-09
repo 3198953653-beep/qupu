@@ -1406,6 +1406,13 @@ function mapTickGapToWeight(deltaTicks: number, config: TimeAxisSpacingConfig): 
   return base32GapPx * durationRatio * BASE_GAP_UNIT_PX
 }
 
+export function getTimeAxisGapWeightPx(
+  deltaTicks: number,
+  config: TimeAxisSpacingConfig = DEFAULT_TIME_AXIS_SPACING_CONFIG,
+): number {
+  return mapTickGapToWeight(deltaTicks, config)
+}
+
 function getDurationGapRatioByDeltaTicks(deltaTicks: number, ratios: DurationGapRatioConfig): number {
   const anchors: Array<{ ticks: number; ratio: number }> = [
     { ticks: 2, ratio: ratios.thirtySecond },

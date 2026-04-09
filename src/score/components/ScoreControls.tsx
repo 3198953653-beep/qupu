@@ -66,6 +66,7 @@ export function ScoreControls(props: ScoreControlsProps) {
     onOpenDirectOsmdFilePicker,
     onExportMusicXmlFile,
     onOpenOsmdPreview,
+    onOpenNativePreview,
     onOpenBeamGroupingTool,
     canOpenPedalModal,
     onOpenPedalModal,
@@ -158,6 +159,7 @@ export function ScoreControls(props: ScoreControlsProps) {
         onOpenDirectOsmdFilePicker={onOpenDirectOsmdFilePicker}
         onExportMusicXmlFile={onExportMusicXmlFile}
         onOpenOsmdPreview={onOpenOsmdPreview}
+        onOpenNativePreview={onOpenNativePreview}
         onOpenBeamGroupingTool={onOpenBeamGroupingTool}
         canOpenPedalModal={canOpenPedalModal}
         onOpenPedalModal={onOpenPedalModal}

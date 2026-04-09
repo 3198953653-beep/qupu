@@ -4,7 +4,7 @@ import type { KeyboardCommandEffectParams } from './keyboardCommandTypes'
 
 export function useKeyboardCommandEffect(params: KeyboardCommandEffectParams): void {
   const {
-    isOsmdPreviewOpen,
+    isAnyPreviewOpen,
     draggingSelection,
     isSelectionVisible,
     measurePairs,
@@ -42,7 +42,7 @@ export function useKeyboardCommandEffect(params: KeyboardCommandEffectParams): v
     const onKeyDown = (event: KeyboardEvent) => {
       handleKeyboardCommandEvent({
         event,
-        isOsmdPreviewOpen,
+        isAnyPreviewOpen,
         draggingSelection,
         isSelectionVisible,
         measurePairs,
@@ -91,7 +91,7 @@ export function useKeyboardCommandEffect(params: KeyboardCommandEffectParams): v
     handleMoveSelectionByKeyboardArrow,
     handleMoveSelectionsByKeyboardSteps,
     importedNoteLookupRef,
-    isOsmdPreviewOpen,
+    isAnyPreviewOpen,
     isSelectionVisible,
     measureKeyFifthsFromImport,
     measureKeyFifthsFromImportRef,

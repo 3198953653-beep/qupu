@@ -18,11 +18,11 @@ function finishKeyboardCommand(event: KeyboardEvent, result: KeyboardCommandResu
 }
 
 export function handleKeyboardCommandEvent(params: KeyboardCommandEventParams) {
-  const { event, isOsmdPreviewOpen, draggingSelection, scoreScrollRef, isSelectionVisible } = params
+  const { event, isAnyPreviewOpen, draggingSelection, scoreScrollRef, isSelectionVisible } = params
 
   if (shouldIgnoreKeyboardCommand({
     event,
-    isOsmdPreviewOpen,
+    isAnyPreviewOpen,
     draggingSelection,
     scoreScrollRef,
   })) {

@@ -91,6 +91,7 @@ export function useScoreEditorRefs(params: {
   const midiStepChainRef = useRef(false)
   const midiStepLastSelectionRef = useRef<Selection | null>(null)
   const isOsmdPreviewOpenRef = useRef(false)
+  const isAnyPreviewOpenRef = useRef(false)
 
   return {
     scoreRef,
@@ -142,5 +143,6 @@ export function useScoreEditorRefs(params: {
     midiStepChainRef,
     midiStepLastSelectionRef,
     isOsmdPreviewOpenRef,
+    isAnyPreviewOpenRef,
   }
 }

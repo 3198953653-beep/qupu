@@ -5,6 +5,7 @@ import { useScoreSelectionController } from './useScoreSelectionController'
 import {
   useEditorPreferencePersistence,
 } from './useEditorPreferencePersistence'
+import { useNativePreviewController } from './useNativePreviewController'
 import { useOsmdPreviewController } from './useOsmdPreviewController'
 import { useKeyboardCommandController } from './useKeyboardCommandController'
 import { toSequencePreview } from '../scorePresentation'
@@ -17,7 +18,7 @@ type NotationPaletteControllerBaseParams = Omit<
 
 type KeyboardCommandControllerBaseParams = Omit<
   Parameters<typeof useKeyboardCommandController>[0],
-  'isOsmdPreviewOpen'
+  'isAnyPreviewOpen'
 >
 
 export function useScoreEditorUiController(params: {
@@ -28,7 +29,9 @@ export function useScoreEditorUiController(params: {
   editorPreferencePersistence: Parameters<typeof useEditorPreferencePersistence>[0]
   midiInputController: Parameters<typeof useMidiInputController>[0]
   osmdPreviewController: Parameters<typeof useOsmdPreviewController>[0]
+  nativePreviewController: Parameters<typeof useNativePreviewController>[0]
   isOsmdPreviewOpenRef: MutableRefObject<boolean>
+  isAnyPreviewOpenRef: MutableRefObject<boolean>
   notationPaletteController: NotationPaletteControllerBaseParams
   keyboardCommandController: KeyboardCommandControllerBaseParams
 }) {
@@ -40,7 +43,9 @@ export function useScoreEditorUiController(params: {
     editorPreferencePersistence,
     midiInputController,
     osmdPreviewController,
+    nativePreviewController,
     isOsmdPreviewOpenRef,
+    isAnyPreviewOpenRef,
     notationPaletteController,
     keyboardCommandController,
   } = params
@@ -61,10 +66,15 @@ export function useScoreEditorUiController(params: {
   const midiSupported = midi.midiPermissionState !== 'unsupported'
 
   const osmd = useOsmdPreviewController(osmdPreviewController)
+  const nativePreview = useNativePreviewController(nativePreviewController)
 
   useEffect(() => {
     isOsmdPreviewOpenRef.current = osmd.isOsmdPreviewOpen
   }, [isOsmdPreviewOpenRef, osmd.isOsmdPreviewOpen])
+
+  useEffect(() => {
+    isAnyPreviewOpenRef.current = osmd.isOsmdPreviewOpen || nativePreview.isNativePreviewOpen
+  }, [isAnyPreviewOpenRef, nativePreview.isNativePreviewOpen, osmd.isOsmdPreviewOpen])
 
   const notation = useNotationPaletteController({
     ...notationPaletteController,
@@ -73,7 +83,7 @@ export function useScoreEditorUiController(params: {
 
   useKeyboardCommandController({
     ...keyboardCommandController,
-    isOsmdPreviewOpen: osmd.isOsmdPreviewOpen,
+    isAnyPreviewOpen: osmd.isOsmdPreviewOpen || nativePreview.isNativePreviewOpen,
   })
 
   return {
@@ -85,6 +95,7 @@ export function useScoreEditorUiController(params: {
     ...selection,
     ...midi,
     ...osmd,
+    ...nativePreview,
     ...notation,
   }
 }

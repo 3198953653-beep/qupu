@@ -341,6 +341,7 @@ export function renderVisibleSystems(params: {
   showInScoreMeasureNumbers?: boolean
   showNoteHeadJianpu?: boolean
   dragPreview?: DragState | null
+  systemTopOverridesPx?: number[] | null
 }): {
   nextLayouts: NoteLayout[]
   nextLayoutsByPair: Map<number, NoteLayout[]>
@@ -390,6 +391,7 @@ export function renderVisibleSystems(params: {
     showInScoreMeasureNumbers = false,
     showNoteHeadJianpu = false,
     dragPreview = null,
+    systemTopOverridesPx = null,
   } = params
   const collapseScopeKeySet = new Set(fullMeasureRestCollapseScopeKeys)
   const canCollapseFullMeasureRest = (pairIndex: number, staff: StaffKind): boolean =>
@@ -570,7 +572,12 @@ export function renderVisibleSystems(params: {
       : systemEndPairIndexExclusive
     if (renderEndPairIndexExclusive <= renderStartPairIndex) continue
 
-    const systemTop = SCORE_TOP_PADDING + (systemIndex - renderOriginSystemIndex) * (systemHeightPx + SYSTEM_GAP_Y)
+    const overrideSystemTop =
+      systemTopOverridesPx?.[systemIndex - renderOriginSystemIndex] ?? systemTopOverridesPx?.[systemIndex]
+    const systemTop =
+      typeof overrideSystemTop === 'number' && Number.isFinite(overrideSystemTop)
+        ? overrideSystemTop
+        : SCORE_TOP_PADDING + (systemIndex - renderOriginSystemIndex) * (systemHeightPx + SYSTEM_GAP_Y)
     const trebleY = systemTop + trebleOffsetY
     const bassY = systemTop + bassOffsetY
     const systemUsableWidth = Math.max(1, scoreWidth - pagePaddingX * 2)

@@ -41,7 +41,7 @@ export function useScoreMidiStepMutation(params: {
   midiStepLastSelectionRef: MutableRefObject<Selection | null>
   dragRef: MutableRefObject<DragState | null>
   draggingSelectionRef: MutableRefObject<Selection | null>
-  isOsmdPreviewOpenRef: MutableRefObject<boolean>
+  isAnyPreviewOpenRef: MutableRefObject<boolean>
   applyKeyboardEditResult: ApplyKeyboardEditResult
   setMeasureKeyFifthsFromImport: StateSetter<number[] | null>
   setMeasureDivisionsFromImport: StateSetter<number[] | null>
@@ -61,7 +61,7 @@ export function useScoreMidiStepMutation(params: {
     midiStepLastSelectionRef,
     dragRef,
     draggingSelectionRef,
-    isOsmdPreviewOpenRef,
+    isAnyPreviewOpenRef,
     applyKeyboardEditResult,
     setMeasureKeyFifthsFromImport,
     setMeasureDivisionsFromImport,
@@ -101,7 +101,7 @@ export function useScoreMidiStepMutation(params: {
   ])
 
   const applyMidiReplacementByNoteNumber = useCallback((midiNoteNumber: number) => {
-    if (isOsmdPreviewOpenRef.current) return
+    if (isAnyPreviewOpenRef.current) return
     if (dragRef.current || draggingSelectionRef.current) return
     if (!isSelectionVisibleRef.current) return
 
@@ -185,7 +185,7 @@ export function useScoreMidiStepMutation(params: {
     dragRef,
     draggingSelectionRef,
     importedNoteLookupRef,
-    isOsmdPreviewOpenRef,
+    isAnyPreviewOpenRef,
     isSelectionVisibleRef,
     measureDivisionsFromImportRef,
     measureKeyFifthsFromImportRef,

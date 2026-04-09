@@ -22,6 +22,7 @@ import {
 import { buildSelectionsForMeasureStaff } from './score/selectionBuilders'
 import { ImportProgressModal } from './score/components/ImportProgressModal'
 import { OsmdPreviewModal } from './score/components/OsmdPreviewModal'
+import { NativePreviewModal } from './score/components/NativePreviewModal'
 import { RhythmTemplateLoadModal } from './score/components/RhythmTemplateLoadModal'
 import { SmartChordToneModal } from './score/components/SmartChordToneModal'
 import { PedalApplyModal } from './score/components/PedalApplyModal'
@@ -207,6 +208,48 @@ function App() {
         onOsmdPreviewShowPageNumbersChange={editorUi.onOsmdPreviewShowPageNumbersChange}
         onOsmdPreviewSurfaceClick={editorUi.onOsmdPreviewSurfaceClick}
         onOsmdPreviewSurfaceDoubleClick={editorUi.onOsmdPreviewSurfaceDoubleClick}
+      />
+
+      <NativePreviewModal
+        isOpen={editorUi.isNativePreviewOpen}
+        error={editorUi.nativePreviewError}
+        statusText={editorUi.nativePreviewStatusText}
+        pageIndex={editorUi.nativePreviewPageIndex}
+        pageCount={editorUi.nativePreviewPageCount}
+        showPageNumbers={editorUi.nativePreviewShowPageNumbers}
+        safePaperScalePercent={editorUi.safeNativePreviewPaperScalePercent}
+        safeHorizontalMarginPx={editorUi.safeNativePreviewHorizontalMarginPx}
+        safeFirstPageTopMarginPx={editorUi.safeNativePreviewFirstPageTopMarginPx}
+        safeTopMarginPx={editorUi.safeNativePreviewTopMarginPx}
+        safeBottomMarginPx={editorUi.safeNativePreviewBottomMarginPx}
+        safeMinEighthGapPx={editorUi.safeNativePreviewMinEighthGapPx}
+        safeMinGrandStaffGapPx={editorUi.safeNativePreviewMinGrandStaffGapPx}
+        paperScale={editorUi.nativePreviewPaperScale}
+        paperWidthPx={editorUi.nativePreviewPaperWidthPx}
+        paperHeightPx={editorUi.nativePreviewPaperHeightPx}
+        currentPage={editorUi.nativePreviewCurrentPage}
+        metadata={editorUi.nativePreviewMetadata}
+        measurePairs={editorUi.nativePreviewMeasurePairs}
+        pedalSpans={editorUi.nativePreviewPedalSpans}
+        chordRulerEntriesByPair={editorUi.nativePreviewChordRulerEntriesByPair}
+        measureKeyFifthsFromImport={editorUi.nativePreviewMeasureKeyFifthsFromImport}
+        measureTimeSignaturesFromImport={editorUi.nativePreviewMeasureTimeSignaturesFromImport}
+        supplementalSpacingTicksByPair={editorUi.nativePreviewSupplementalSpacingTicksByPair}
+        timeAxisSpacingConfig={editorUi.nativePreviewTimeAxisSpacingConfig}
+        grandStaffLayoutMetrics={editorUi.nativePreviewGrandStaffLayoutMetrics}
+        showInScoreMeasureNumbers={editorUi.nativePreviewShowInScoreMeasureNumbers}
+        showNoteHeadJianpuEnabled={editorUi.nativePreviewShowNoteHeadJianpuEnabled}
+        closeNativePreview={editorUi.closeNativePreview}
+        goToPrevNativePreviewPage={editorUi.goToPrevNativePreviewPage}
+        goToNextNativePreviewPage={editorUi.goToNextNativePreviewPage}
+        onNativePreviewPaperScalePercentChange={editorUi.onNativePreviewPaperScalePercentChange}
+        onNativePreviewHorizontalMarginPxChange={editorUi.onNativePreviewHorizontalMarginPxChange}
+        onNativePreviewFirstPageTopMarginPxChange={editorUi.onNativePreviewFirstPageTopMarginPxChange}
+        onNativePreviewTopMarginPxChange={editorUi.onNativePreviewTopMarginPxChange}
+        onNativePreviewBottomMarginPxChange={editorUi.onNativePreviewBottomMarginPxChange}
+        onNativePreviewMinEighthGapPxChange={editorUi.onNativePreviewMinEighthGapPxChange}
+        onNativePreviewMinGrandStaffGapPxChange={editorUi.onNativePreviewMinGrandStaffGapPxChange}
+        onNativePreviewShowPageNumbersChange={editorUi.onNativePreviewShowPageNumbersChange}
       />
 
       <SmartChordToneModal
