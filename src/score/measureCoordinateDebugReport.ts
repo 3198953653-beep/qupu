@@ -139,6 +139,18 @@ export function buildMeasureCoordinateDebugReport(params: {
           anchorX: layout.anchorX,
           visualLeftX: layout.visualLeftX,
           visualRightX: layout.visualRightX,
+          headRightX:
+            typeof layout.headRightX === 'number' && Number.isFinite(layout.headRightX)
+              ? layout.headRightX
+              : null,
+          dotLeftX:
+            typeof layout.dotLeftX === 'number' && Number.isFinite(layout.dotLeftX)
+              ? layout.dotLeftX
+              : null,
+          dotRightX:
+            typeof layout.dotRightX === 'number' && Number.isFinite(layout.dotRightX)
+              ? layout.dotRightX
+              : null,
           rightX: layout.rightX,
           spacingRightX: layout.spacingRightX,
           noteHeads: layout.noteHeads.map((head) => ({

@@ -1,7 +1,8 @@
-import { Accidental, BarlineType, Dot, Formatter, Stave, StaveNote, Voice } from 'vexflow'
+import { Accidental, BarlineType, Beam, Dot, Formatter, Fraction, Stave, StaveNote, Voice } from 'vexflow'
 import { buildRenderedNoteKeys, getKeySignatureSpecFromFifths } from '../accidentals'
 import { getStrictStemDirection, getPitchLine } from '../pitchUtils'
 import { getDurationDots, toVexDuration, type MeasureRequiredWidthContext } from './demand'
+import { getRenderedNoteGlyphBounds, normalizeRenderedNoteDotPlacement } from './renderPosition'
 import type { ScoreNote, StaffKind } from '../types'
 
 const PROBE_MEASURE_WIDTH_PX = 1600
@@ -121,8 +122,33 @@ export function estimateRequiredMeasureWidth(context: MeasureRequiredWidthContex
 
   const formatter = new Formatter().joinVoices([trebleVoice]).joinVoices([bassVoice])
   const minContentWidth = Math.max(1, formatter.preCalculateMinTotalWidth([trebleVoice, bassVoice]))
+  formatter.format([trebleVoice, bassVoice], minContentWidth)
+  Beam.generateBeams(trebleVexNotes, {
+    groups: [new Fraction(1, 4)],
+  })
+  Beam.generateBeams(bassVexNotes, {
+    groups: [new Fraction(1, 4)],
+  })
+  trebleVexNotes.forEach((note) => note.setStave(trebleStave))
+  bassVexNotes.forEach((note) => note.setStave(bassStave))
+  // Keep the probe path aligned with the main render path: use the same
+  // post-beam dot normalization, with the current 4px notehead-to-dot target gap.
+  trebleVexNotes.forEach((note) => normalizeRenderedNoteDotPlacement(note, 4))
+  bassVexNotes.forEach((note) => normalizeRenderedNoteDotPlacement(note, 4))
+
+  const contentRightBoundaryX = noteStartX + minContentWidth
+  const overflowRightPx = [...trebleVexNotes, ...bassVexNotes].reduce((maxOverflow, note) => {
+    const glyphBounds = getRenderedNoteGlyphBounds(note)
+    if (!glyphBounds || !Number.isFinite(glyphBounds.rightX)) return maxOverflow
+    return Math.max(maxOverflow, glyphBounds.rightX - contentRightBoundaryX)
+  }, 0)
 
   const requiredWidth =
-    leftDecorationWidth + minContentWidth + CONTENT_PADDING_PX + rightDecorationWidth + SAFETY_PADDING_PX
+    leftDecorationWidth +
+    minContentWidth +
+    Math.max(0, overflowRightPx) +
+    CONTENT_PADDING_PX +
+    rightDecorationWidth +
+    SAFETY_PADDING_PX
   return Math.max(1, Math.ceil(requiredWidth))
 }

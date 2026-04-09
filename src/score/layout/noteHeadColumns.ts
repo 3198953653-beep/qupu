@@ -4,6 +4,10 @@ const DEFAULT_NOTE_HEAD_WIDTH_PX = 9
 const MAX_RENDERED_NOTE_HEAD_WIDTH_PX = DEFAULT_NOTE_HEAD_WIDTH_PX * 2.5
 const MAX_NOTE_HEAD_COLUMN_OFFSET_PX = DEFAULT_NOTE_HEAD_WIDTH_PX * 5
 const NOTE_HEAD_COLUMN_COMPARE_EPSILON_PX = 0.01
+const NOTEHEAD_BOUNDS_MIN_WIDTH_PX = 4
+const NOTEHEAD_BOUNDS_MAX_WIDTH_PX = 10
+const NOTEHEAD_BBOX_TO_ABSOLUTE_TOLERANCE_PX = 4
+const NOTEHEAD_DISPLACED_ABSOLUTE_TO_LEFT_OFFSET_PX = 1
 
 export type RenderedNoteHeadBBoxLike = {
   getX?: () => number
@@ -25,6 +29,24 @@ export type RenderedNoteHeadColumnMetrics = {
   rightColumnReservePx: number
   minHeadX: number
   maxHeadX: number
+}
+
+export type RenderedNoteHeadBounds = {
+  leftX: number
+  rightX: number
+  width: number
+  usedFallback: boolean
+}
+
+function getRenderedNoteHeadBoundsWidth(noteHead: RenderedNoteHeadLike | null | undefined): number {
+  const rawWidth = noteHead?.getWidth?.()
+  if (typeof rawWidth === 'number' && Number.isFinite(rawWidth) && rawWidth > 0) {
+    return Math.min(NOTEHEAD_BOUNDS_MAX_WIDTH_PX, Math.max(NOTEHEAD_BOUNDS_MIN_WIDTH_PX, rawWidth))
+  }
+  return Math.min(
+    NOTEHEAD_BOUNDS_MAX_WIDTH_PX,
+    Math.max(NOTEHEAD_BOUNDS_MIN_WIDTH_PX, getRenderedNoteHeadWidth(noteHead)),
+  )
 }
 
 export function getRenderedNoteHeadWidth(noteHead: RenderedNoteHeadLike | null | undefined): number {
@@ -71,6 +93,86 @@ export function getRenderedNoteHeadAbsoluteX(params: {
   const displacementPx = isDisplaced ? (headWidth - Stem.WIDTH / 2) * stemDirection : 0
   const displacementMultiplier = isPreFormatted ? 1 : 2
   return anchorX + displacementPx * displacementMultiplier
+}
+
+export function getRenderedNoteHeadBoundsExact(params: {
+  noteHead: RenderedNoteHeadLike | null | undefined
+  anchorX: number
+  stemDirection: number
+}): RenderedNoteHeadBounds | null {
+  const { noteHead, anchorX, stemDirection } = params
+  if (!noteHead || !Number.isFinite(anchorX)) return null
+
+  const resolvedHeadLeftX = getRenderedNoteHeadAbsoluteX({
+    noteHead,
+    anchorX,
+    stemDirection,
+  })
+  const resolvedWidth = getRenderedNoteHeadBoundsWidth(noteHead)
+
+  const bbox = noteHead.getBoundingBox?.() ?? null
+  const bboxLeftX = bbox?.getX?.()
+  const bboxWidthRaw = bbox?.getW?.()
+  const bboxWidth =
+    typeof bboxWidthRaw === 'number' && Number.isFinite(bboxWidthRaw)
+      ? Math.min(NOTEHEAD_BOUNDS_MAX_WIDTH_PX, Math.max(NOTEHEAD_BOUNDS_MIN_WIDTH_PX, bboxWidthRaw))
+      : null
+  const bboxLooksSane =
+    typeof bboxLeftX === 'number' &&
+    Number.isFinite(bboxLeftX) &&
+    typeof bboxWidth === 'number' &&
+    Number.isFinite(bboxWidth) &&
+    bboxWidth > 0 &&
+    Math.abs(bboxLeftX - anchorX) <= MAX_NOTE_HEAD_COLUMN_OFFSET_PX + MAX_RENDERED_NOTE_HEAD_WIDTH_PX
+  const bboxMatchesResolvedHead =
+    bboxLooksSane &&
+    typeof resolvedHeadLeftX === 'number' &&
+    Number.isFinite(resolvedHeadLeftX) &&
+    Math.abs(bboxLeftX - resolvedHeadLeftX) <= NOTEHEAD_BBOX_TO_ABSOLUTE_TOLERANCE_PX
+  if (bboxMatchesResolvedHead) {
+    return {
+      leftX: bboxLeftX,
+      rightX: bboxLeftX + bboxWidth,
+      width: bboxWidth,
+      usedFallback: false,
+    }
+  }
+
+  if (typeof resolvedHeadLeftX !== 'number' || !Number.isFinite(resolvedHeadLeftX)) {
+    if (!bboxLooksSane) return null
+    return {
+      leftX: bboxLeftX,
+      rightX: bboxLeftX + bboxWidth,
+      width: bboxWidth,
+      usedFallback: true,
+    }
+  }
+
+  const rawAbsoluteX = noteHead.getAbsoluteX?.()
+  const hasReadyAbsoluteX =
+    typeof rawAbsoluteX === 'number' && Number.isFinite(rawAbsoluteX) && Math.abs(rawAbsoluteX) > 0.0001
+  const absoluteDeltaFromBase = resolvedHeadLeftX - anchorX
+  const shouldApplyDisplacedFallback =
+    Math.abs(absoluteDeltaFromBase) >= resolvedWidth + NOTEHEAD_DISPLACED_ABSOLUTE_TO_LEFT_OFFSET_PX
+  const adjustedDisplacedLeftX =
+    shouldApplyDisplacedFallback
+      ? resolvedHeadLeftX + (anchorX - resolvedHeadLeftX) / 2
+      : null
+  const leftX =
+    typeof adjustedDisplacedLeftX === 'number' &&
+    Number.isFinite(adjustedDisplacedLeftX) &&
+    Math.abs(adjustedDisplacedLeftX - anchorX) <=
+      MAX_NOTE_HEAD_COLUMN_OFFSET_PX + NOTEHEAD_BOUNDS_MAX_WIDTH_PX
+      ? adjustedDisplacedLeftX
+      : resolvedHeadLeftX
+  const usedFallback = !hasReadyAbsoluteX || leftX !== resolvedHeadLeftX
+
+  return {
+    leftX,
+    rightX: leftX + resolvedWidth,
+    width: resolvedWidth,
+    usedFallback,
+  }
 }
 
 export function getRenderedNoteHeadColumnMetrics(

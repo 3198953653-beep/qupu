@@ -1,5 +1,12 @@
-import { Accidental, StaveNote } from 'vexflow'
+import { Accidental, Dot, StaveNote } from 'vexflow'
+import {
+  getRenderedNoteHeadBoundsExact,
+  type RenderedNoteHeadLike,
+} from './noteHeadColumns'
 import type { StaffKind } from '../types'
+
+const DEFAULT_DOT_WIDTH_PX = 4
+const DOT_NORMALIZE_EPSILON_PX = 0.001
 
 export function getLayoutNoteKey(staff: StaffKind, noteId: string): string {
   return `${staff}|${noteId}`
@@ -28,15 +35,156 @@ export function getRenderedNoteAnchorX(note: StaveNote): number {
   return Number.isFinite(fallbackX) ? fallbackX : getRenderedNoteVisualX(note)
 }
 
-export function getRenderedNoteGlyphBounds(note: StaveNote): { leftX: number; rightX: number } | null {
+export function getRenderedNoteHeadBounds(note: StaveNote): { leftX: number; rightX: number } | null {
+  const noteHeads = (note.noteHeads ?? []) as RenderedNoteHeadLike[]
+  const anchorX = getRenderedNoteVisualX(note)
+  const stemDirection = note.getStemDirection()
   let minX = Number.POSITIVE_INFINITY
   let maxX = Number.NEGATIVE_INFINITY
+
+  noteHeads.forEach((noteHead) => {
+    const bounds = getRenderedNoteHeadBoundsExact({
+      noteHead,
+      anchorX,
+      stemDirection,
+    })
+    if (!bounds) return
+    minX = Math.min(minX, bounds.leftX)
+    maxX = Math.max(maxX, bounds.rightX)
+  })
+
+  if (Number.isFinite(minX) && Number.isFinite(maxX) && maxX >= minX) {
+    return {
+      leftX: minX,
+      rightX: maxX,
+    }
+  }
 
   const headBeginX = note.getNoteHeadBeginX()
   const headEndX = note.getNoteHeadEndX()
   if (Number.isFinite(headBeginX) && Number.isFinite(headEndX) && headEndX >= headBeginX) {
-    minX = Math.min(minX, headBeginX)
-    maxX = Math.max(maxX, headEndX)
+    return {
+      leftX: headBeginX,
+      rightX: headEndX,
+    }
+  }
+
+  return null
+}
+
+export function getRenderedNoteDotBounds(note: StaveNote): { leftX: number; rightX: number } | null {
+  const dots = Dot.getDots(note)
+  if (dots.length === 0) return null
+
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+
+  dots.forEach((modifier) => {
+    const dot = modifier as Dot
+    const renderedIndex = dot.getIndex()
+    if (typeof renderedIndex !== 'number' || !Number.isFinite(renderedIndex)) return
+
+    let leftX = Number.NaN
+    try {
+      const start = note.getModifierStartXY(dot.getPosition(), renderedIndex, { forceFlagRight: true })
+      const startX = start?.x
+      if (Number.isFinite(startX)) {
+        leftX = startX + dot.getXShift()
+      }
+    } catch {
+      leftX = Number.NaN
+    }
+
+    const bbox = dot.getBoundingBox?.() ?? null
+    const bboxLeftX = bbox?.getX?.()
+    const bboxWidth = bbox?.getW?.()
+    const widthRaw = dot.getWidth?.()
+    const width =
+      typeof widthRaw === 'number' && Number.isFinite(widthRaw) && widthRaw > 0
+        ? widthRaw
+        : typeof bboxWidth === 'number' && Number.isFinite(bboxWidth) && bboxWidth > 0
+          ? bboxWidth
+          : DEFAULT_DOT_WIDTH_PX
+
+    if (!Number.isFinite(leftX) && typeof bboxLeftX === 'number' && Number.isFinite(bboxLeftX)) {
+      leftX = bboxLeftX
+    }
+    if (!Number.isFinite(leftX)) return
+
+    minX = Math.min(minX, leftX)
+    maxX = Math.max(maxX, leftX + width)
+  })
+
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX) || maxX < minX) return null
+  return {
+    leftX: minX,
+    rightX: maxX,
+  }
+}
+
+export function normalizeRenderedNoteDotPlacement(
+  note: StaveNote,
+  minNoteheadGapPx = 4,
+): {
+  appliedDeltaX: number
+  headRightX: number | null
+  dotLeftX: number | null
+  dotRightX: number | null
+} {
+  if (note.isRest()) {
+    const dotBounds = getRenderedNoteDotBounds(note)
+    return {
+      appliedDeltaX: 0,
+      headRightX: null,
+      dotLeftX: dotBounds?.leftX ?? null,
+      dotRightX: dotBounds?.rightX ?? null,
+    }
+  }
+
+  const headBounds = getRenderedNoteHeadBounds(note)
+  const dotBounds = getRenderedNoteDotBounds(note)
+  if (!headBounds || !dotBounds) {
+    return {
+      appliedDeltaX: 0,
+      headRightX: headBounds?.rightX ?? null,
+      dotLeftX: dotBounds?.leftX ?? null,
+      dotRightX: dotBounds?.rightX ?? null,
+    }
+  }
+
+  const rightmostHeadRightX = headBounds.rightX
+  const desiredDotLeftX = rightmostHeadRightX + Math.max(0, minNoteheadGapPx)
+  const deltaX = desiredDotLeftX - dotBounds.leftX
+  if (Math.abs(deltaX) < DOT_NORMALIZE_EPSILON_PX) {
+    return {
+      appliedDeltaX: 0,
+      headRightX: headBounds.rightX,
+      dotLeftX: dotBounds.leftX,
+      dotRightX: dotBounds.rightX,
+    }
+  }
+
+  Dot.getDots(note).forEach((modifier) => {
+    const dot = modifier as Dot
+    dot.setXShift(dot.getXShift() + deltaX)
+  })
+  const adjustedDotBounds = getRenderedNoteDotBounds(note)
+  return {
+    appliedDeltaX: deltaX,
+    headRightX: headBounds.rightX,
+    dotLeftX: adjustedDotBounds?.leftX ?? dotBounds.leftX + deltaX,
+    dotRightX: adjustedDotBounds?.rightX ?? dotBounds.rightX + deltaX,
+  }
+}
+
+export function getRenderedNoteGlyphBounds(note: StaveNote): { leftX: number; rightX: number } | null {
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+
+  const headBounds = getRenderedNoteHeadBounds(note)
+  if (headBounds) {
+    minX = Math.min(minX, headBounds.leftX)
+    maxX = Math.max(maxX, headBounds.rightX)
   }
 
   if (note.hasStem()) {
@@ -68,6 +216,12 @@ export function getRenderedNoteGlyphBounds(note: StaveNote): { leftX: number; ri
     minX = Math.min(minX, accidentalX)
     maxX = Math.max(maxX, accidentalX + (Number.isFinite(accidentalWidth) ? accidentalWidth : 0))
   })
+
+  const dotBounds = getRenderedNoteDotBounds(note)
+  if (dotBounds) {
+    minX = Math.min(minX, dotBounds.leftX)
+    maxX = Math.max(maxX, dotBounds.rightX)
+  }
 
   if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return null
   return {

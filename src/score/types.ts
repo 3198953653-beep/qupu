@@ -214,6 +214,9 @@ export type NoteLayout = {
   anchorX: number
   visualLeftX: number
   visualRightX: number
+  headRightX?: number | null
+  dotLeftX?: number | null
+  dotRightX?: number | null
   visualTopY: number
   visualBottomY: number
   rightX: number

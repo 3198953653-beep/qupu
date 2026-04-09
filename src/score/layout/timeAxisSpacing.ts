@@ -2,6 +2,7 @@ import { Accidental, Stem, type StaveNote } from 'vexflow'
 import { DURATION_TICKS } from '../constants'
 import {
   getAccidentalVisualX,
+  getRenderedNoteDotBounds,
   getRenderedNoteGlyphBounds,
   getRenderedNoteVisualX,
 } from './renderPosition'
@@ -279,6 +280,12 @@ function getRenderedNoteOccupiedBounds(
     minX = Math.min(minX, accidentalX)
     maxX = Math.max(maxX, accidentalX + (Number.isFinite(accidentalWidth) ? accidentalWidth : 0))
   })
+
+  const dotBounds = getRenderedNoteDotBounds(vexNote)
+  if (dotBounds) {
+    minX = Math.min(minX, dotBounds.leftX)
+    maxX = Math.max(maxX, dotBounds.rightX)
+  }
 
   if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return null
   const rightPaddingPx =
@@ -580,6 +587,11 @@ function getNoteRawReserveExtents(vexNote: StaveNote): {
         resolvedAnchorX - accidentalMinX + ACCIDENTAL_PREALLOCATED_CLEARANCE_PX,
       )
     }
+  }
+
+  const dotBounds = getRenderedNoteDotBounds(vexNote)
+  if (typeof dotBounds?.rightX === 'number' && Number.isFinite(dotBounds.rightX) && Number.isFinite(fallbackAnchorX)) {
+    rawRightReservePx = Math.max(rawRightReservePx, Math.max(0, dotBounds.rightX - fallbackAnchorX))
   }
   return { rawLeftReservePx, rawLeftStructuralReservePx, rawRightReservePx }
 }

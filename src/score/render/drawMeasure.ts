@@ -15,10 +15,17 @@ import {
   getAccidentalVisualX,
   getLayoutNoteKey,
   getRenderedNoteAnchorX,
+  getRenderedNoteDotBounds,
   getRenderedNoteGlyphBounds,
+  getRenderedNoteHeadBounds,
   getRenderedNoteVisualX,
+  normalizeRenderedNoteDotPlacement,
 } from '../layout/renderPosition'
-import { getRenderedNoteHeadAbsoluteX, getRenderedNoteHeadColumnMetrics, getRenderedNoteHeadWidth } from '../layout/noteHeadColumns'
+import {
+  getRenderedNoteHeadAbsoluteX,
+  getRenderedNoteHeadBoundsExact,
+  getRenderedNoteHeadColumnMetrics,
+} from '../layout/noteHeadColumns'
 import { applyUnifiedTimeAxisSpacing } from '../layout/timeAxisSpacing'
 import type { AppliedTimeAxisSpacingMetrics, TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
 import { getStepOctaveAlterFromPitch } from '../pitchMath'
@@ -76,11 +83,11 @@ const ACCIDENTAL_FULL_CONFLICT_PATTERNS: Partial<Record<number, readonly number[
   5: [3, 2, 4, 1, 5],
   6: [3, 4, 2, 5, 1, 6],
 }
-const NOTEHEAD_BOUNDS_MIN_WIDTH_PX = 4
 const NOTEHEAD_BOUNDS_MAX_WIDTH_PX = 10
+// Safety floor only. The final dotted-note target gap is normalized from the
+// note's post-beam geometry inside normalizeRenderedNoteDotPlacement().
+const DOT_NOTEHEAD_CLEARANCE_PX = 4
 const NOTEHEAD_MAX_OFFSET_FROM_BASE_PX = 45
-const NOTEHEAD_BBOX_TO_ABSOLUTE_TOLERANCE_PX = 4
-const NOTEHEAD_DISPLACED_ABSOLUTE_TO_LEFT_OFFSET_PX = 1
 const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
 const MIN_FORMAT_WIDTH_PX = 8
 const DEFAULT_NOTE_HEAD_HIT_RADIUS_X = 5.5
@@ -185,89 +192,6 @@ type NoteHeadBoundsResolution = {
   usedFallback: boolean
 }
 
-function resolveRenderedNoteHeadBounds(params: {
-  noteHead: VexNoteHeadLike | null
-  noteBaseX: number
-  stemDirection: number
-}): NoteHeadBoundsResolution | null {
-  const { noteHead, noteBaseX, stemDirection } = params
-  if (!noteHead || !Number.isFinite(noteBaseX)) return null
-
-  const resolvedHeadLeftX = getRenderedNoteHeadAbsoluteX({
-    noteHead,
-    anchorX: noteBaseX,
-    stemDirection,
-  })
-  const widthRaw = noteHead.getWidth?.()
-  const resolvedWidth =
-    typeof widthRaw === 'number' && Number.isFinite(widthRaw) && widthRaw > 0
-      ? Math.min(NOTEHEAD_BOUNDS_MAX_WIDTH_PX, Math.max(NOTEHEAD_BOUNDS_MIN_WIDTH_PX, widthRaw))
-      : getRenderedNoteHeadWidth(noteHead)
-
-  const bbox = noteHead.getBoundingBox?.() ?? null
-  const bboxLeftX = bbox?.getX?.()
-  const bboxWidthRaw = bbox?.getW?.()
-  const bboxWidth =
-    typeof bboxWidthRaw === 'number' && Number.isFinite(bboxWidthRaw)
-      ? Math.min(NOTEHEAD_BOUNDS_MAX_WIDTH_PX, Math.max(NOTEHEAD_BOUNDS_MIN_WIDTH_PX, bboxWidthRaw))
-      : null
-  const bboxLooksSane =
-    typeof bboxLeftX === 'number' &&
-    Number.isFinite(bboxLeftX) &&
-    typeof bboxWidth === 'number' &&
-    Number.isFinite(bboxWidth) &&
-    bboxWidth > 0 &&
-    Math.abs((bboxLeftX as number) - noteBaseX) <= NOTEHEAD_MAX_OFFSET_FROM_BASE_PX + NOTEHEAD_BOUNDS_MAX_WIDTH_PX
-  const bboxMatchesResolvedHead =
-    bboxLooksSane &&
-    typeof resolvedHeadLeftX === 'number' &&
-    Number.isFinite(resolvedHeadLeftX) &&
-    Math.abs((bboxLeftX as number) - (resolvedHeadLeftX as number)) <= NOTEHEAD_BBOX_TO_ABSOLUTE_TOLERANCE_PX
-  if (bboxMatchesResolvedHead) {
-    return {
-      leftX: bboxLeftX as number,
-      rightX: (bboxLeftX as number) + (bboxWidth as number),
-      width: bboxWidth as number,
-      usedFallback: false,
-    }
-  }
-
-  if (typeof resolvedHeadLeftX !== 'number' || !Number.isFinite(resolvedHeadLeftX)) {
-    if (!bboxLooksSane) {
-      return null
-    }
-    return {
-      leftX: bboxLeftX as number,
-      rightX: (bboxLeftX as number) + (bboxWidth as number),
-      width: bboxWidth as number,
-      usedFallback: true,
-    }
-  }
-  const rawAbsoluteX = noteHead.getAbsoluteX?.()
-  const hasReadyAbsoluteX =
-    typeof rawAbsoluteX === 'number' && Number.isFinite(rawAbsoluteX) && Math.abs(rawAbsoluteX) > 0.0001
-  const absoluteDeltaFromBase = resolvedHeadLeftX - noteBaseX
-  const shouldApplyDisplacedFallback =
-    Math.abs(absoluteDeltaFromBase) >= resolvedWidth + NOTEHEAD_DISPLACED_ABSOLUTE_TO_LEFT_OFFSET_PX
-  const adjustedDisplacedLeftX =
-    shouldApplyDisplacedFallback
-      ? resolvedHeadLeftX + (noteBaseX - resolvedHeadLeftX) / 2
-      : null
-  const leftX =
-    typeof adjustedDisplacedLeftX === 'number' &&
-    Number.isFinite(adjustedDisplacedLeftX) &&
-    Math.abs(adjustedDisplacedLeftX - noteBaseX) <= NOTEHEAD_MAX_OFFSET_FROM_BASE_PX + NOTEHEAD_BOUNDS_MAX_WIDTH_PX
-      ? adjustedDisplacedLeftX
-      : resolvedHeadLeftX
-  const usedFallback = !hasReadyAbsoluteX || leftX !== resolvedHeadLeftX
-  return {
-    leftX,
-    rightX: leftX + resolvedWidth,
-    width: resolvedWidth,
-    usedFallback,
-  }
-}
-
 function resolveMeasuredNoteHeadBounds(params: {
   noteHead: VexNoteHeadLike | null
   noteBaseX: number
@@ -276,34 +200,18 @@ function resolveMeasuredNoteHeadBounds(params: {
   const { noteHead, noteBaseX, stemDirection } = params
   if (!noteHead || !Number.isFinite(noteBaseX)) return null
 
-  const bbox = noteHead.getBoundingBox?.() ?? null
-  const bboxLeftX = bbox?.getX?.()
-  const bboxWidthRaw = bbox?.getW?.()
-  const bboxWidth =
-    typeof bboxWidthRaw === 'number' && Number.isFinite(bboxWidthRaw)
-      ? Math.min(NOTEHEAD_BOUNDS_MAX_WIDTH_PX, Math.max(NOTEHEAD_BOUNDS_MIN_WIDTH_PX, bboxWidthRaw))
-      : null
-  const bboxLooksSane =
-    typeof bboxLeftX === 'number' &&
-    Number.isFinite(bboxLeftX) &&
-    typeof bboxWidth === 'number' &&
-    Number.isFinite(bboxWidth) &&
-    bboxWidth > 0 &&
-    Math.abs((bboxLeftX as number) - noteBaseX) <= NOTEHEAD_MAX_OFFSET_FROM_BASE_PX + NOTEHEAD_BOUNDS_MAX_WIDTH_PX
-  if (bboxLooksSane) {
-    return {
-      leftX: bboxLeftX as number,
-      rightX: (bboxLeftX as number) + (bboxWidth as number),
-      width: bboxWidth as number,
-      usedFallback: false,
-    }
-  }
-
-  return resolveRenderedNoteHeadBounds({
+  const bounds = getRenderedNoteHeadBoundsExact({
     noteHead,
-    noteBaseX,
+    anchorX: noteBaseX,
     stemDirection,
   })
+  if (!bounds) return null
+  return {
+    leftX: bounds.leftX,
+    rightX: bounds.rightX,
+    width: bounds.width,
+    usedFallback: bounds.usedFallback,
+  }
 }
 
 function resolveChordHeadLeftX(params: { vexNote: StaveNote; noteBaseX: number }): {
@@ -694,6 +602,11 @@ function resolvePreviousNoteOccupiedRightX(params: {
         occupiedRightXCandidates.push(resolvedBounds.rightX)
       }
     })
+
+    const dotBounds = getRenderedNoteDotBounds(previousVexNote)
+    if (dotBounds && Number.isFinite(dotBounds.rightX)) {
+      occupiedRightXCandidates.push(dotBounds.rightX)
+    }
 
     if (occupiedRightXCandidates.length === 0) {
       const headEndX = previousVexNote.getNoteHeadEndX()
@@ -1337,6 +1250,18 @@ function resolveNoteHeadGeometry(params: {
   let boxWidth = radiusX * 2
   let boxHeight = radiusY * 2
 
+  const measuredBounds = resolveMeasuredNoteHeadBounds({
+    noteHead: getRenderedNoteHead(vexNote, renderedIndex),
+    noteBaseX: getRenderedNoteVisualX(vexNote),
+    stemDirection: vexNote.getStemDirection(),
+  })
+  if (measuredBounds) {
+    centerX = (measuredBounds.leftX + measuredBounds.rightX) / 2
+    radiusX = Math.max(2, measuredBounds.width / 2)
+    boxX = measuredBounds.leftX
+    boxWidth = measuredBounds.width
+  }
+
   const bbox = getRenderedNoteHead(vexNote, renderedIndex)?.getBoundingBox?.() ?? null
   if (bbox) {
     const x = bbox.getX()
@@ -1344,14 +1269,16 @@ function resolveNoteHeadGeometry(params: {
     const w = bbox.getW()
     const h = bbox.getH()
     if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
-      centerX = x + w / 2
       centerY = y + h / 2
-      radiusX = Math.max(2, w / 2)
       radiusY = Math.max(2, h / 2)
-      boxX = x
       boxY = y
-      boxWidth = w
       boxHeight = h
+      if (!measuredBounds) {
+        centerX = x + w / 2
+        radiusX = Math.max(2, w / 2)
+        boxX = x
+        boxWidth = w
+      }
     }
   }
 
@@ -2300,6 +2227,14 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     vexNote.setStave(bassStave)
     vexNote.setContext(context)
   })
+
+  const normalizeRenderedStaffDots = (rendered: RenderedMeasureNote[]) => {
+    rendered.forEach((entry) => {
+      normalizeRenderedNoteDotPlacement(entry.vexNote, DOT_NOTEHEAD_CLEARANCE_PX)
+    })
+  }
+  normalizeRenderedStaffDots(trebleRendered)
+  normalizeRenderedStaffDots(bassRendered)
 
   const resolveBeamHighlightStyle = (params: {
     beam: Beam
@@ -4149,7 +4084,13 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       }
     }
 
-    const computedRightX = Math.max(fallbackRightX, rightFromBBox, rightFromMetrics, rightFromStem)
+    const dotBounds = getRenderedNoteDotBounds(vexNote)
+    const rightFromDots =
+      typeof dotBounds?.rightX === 'number' && Number.isFinite(dotBounds.rightX)
+        ? dotBounds.rightX
+        : Number.NEGATIVE_INFINITY
+
+    const computedRightX = Math.max(fallbackRightX, rightFromBBox, rightFromMetrics, rightFromStem, rightFromDots)
     return Number.isFinite(computedRightX) ? computedRightX : fallbackRightX
   }
 
@@ -4162,7 +4103,12 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       getRenderedNoteVisualX(vexNote) + 9,
     )
     const stemInvariantPadding = vexNote.hasStem() ? STEM_INVARIANT_RIGHT_PADDING_PX : 0
-    const spacingRightX = fallbackHeadRightX + stemInvariantPadding
+    const dotBounds = getRenderedNoteDotBounds(vexNote)
+    const rightFromDots =
+      typeof dotBounds?.rightX === 'number' && Number.isFinite(dotBounds.rightX)
+        ? dotBounds.rightX
+        : Number.NEGATIVE_INFINITY
+    const spacingRightX = Math.max(fallbackHeadRightX + stemInvariantPadding, rightFromDots)
     return Number.isFinite(spacingRightX) ? spacingRightX : getRenderedNoteVisualX(vexNote) + 9
   }
 
@@ -4486,6 +4432,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       const rootHead = noteHeads.find((head) => head.keyIndex === 0) ?? noteHeads[0]
       const noteSpacingRightX = getRenderedNoteSpacingRightX(vexNote, noteHeads)
       const noteRightX = isSpacingOnlyLayout ? noteSpacingRightX : getRenderedNoteRightX(vexNote, noteHeads)
+      const headBounds = getRenderedNoteHeadBounds(vexNote)
+      const dotBounds = getRenderedNoteDotBounds(vexNote)
       const visualBounds = getRenderedNoteGlyphBounds(vexNote)
       const verticalBounds = getRenderedNoteVerticalBounds({
         vexNote,
@@ -4503,6 +4451,9 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         anchorX: getRenderedNoteAnchorX(vexNote),
         visualLeftX: visualBounds?.leftX ?? getRenderedNoteVisualX(vexNote),
         visualRightX: visualBounds?.rightX ?? noteRightX,
+        headRightX: headBounds?.rightX ?? null,
+        dotLeftX: dotBounds?.leftX ?? null,
+        dotRightX: dotBounds?.rightX ?? null,
         visualTopY: verticalBounds.topY,
         visualBottomY: verticalBounds.bottomY,
         rightX: noteRightX,
@@ -4671,6 +4622,8 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       const rootHead = noteHeads.find((head) => head.keyIndex === 0) ?? noteHeads[0]
       const noteSpacingRightX = getRenderedNoteSpacingRightX(vexNote, noteHeads)
       const noteRightX = isSpacingOnlyLayout ? noteSpacingRightX : getRenderedNoteRightX(vexNote, noteHeads)
+      const headBounds = getRenderedNoteHeadBounds(vexNote)
+      const dotBounds = getRenderedNoteDotBounds(vexNote)
       const visualBounds = getRenderedNoteGlyphBounds(vexNote)
       const verticalBounds = getRenderedNoteVerticalBounds({
         vexNote,
@@ -4688,6 +4641,9 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
         anchorX: getRenderedNoteAnchorX(vexNote),
         visualLeftX: visualBounds?.leftX ?? getRenderedNoteVisualX(vexNote),
         visualRightX: visualBounds?.rightX ?? noteRightX,
+        headRightX: headBounds?.rightX ?? null,
+        dotLeftX: dotBounds?.leftX ?? null,
+        dotRightX: dotBounds?.rightX ?? null,
         visualTopY: verticalBounds.topY,
         visualBottomY: verticalBounds.bottomY,
         rightX: noteRightX,

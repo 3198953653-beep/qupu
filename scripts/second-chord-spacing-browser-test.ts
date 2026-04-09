@@ -39,6 +39,9 @@ type DumpNoteRow = {
   isRest?: boolean
   onsetTicksInMeasure: number | null
   x: number
+  headRightX?: number | null
+  dotLeftX?: number | null
+  dotRightX?: number | null
   rightX?: number | null
   spacingRightX?: number | null
   noteHeads: DumpNoteHead[]
@@ -226,6 +229,8 @@ const DEFAULT_NOTE_HEAD_WIDTH_PX = 9
 const APPROX_ACCIDENTAL_WIDTH_PX = 8
 const STEM_INVARIANT_RIGHT_PADDING_PX = 3.5
 const COLLISION_RIGHT_BODY_PADDING_PX = 1.0
+const DOT_NOTEHEAD_CLEARANCE_PX = 4
+const DOT_GAP_PARITY_EPSILON_PX = 0.25
 
 const SCALE_CASES: ScaleCase[] = [
   { key: 'manual-100', autoScaleEnabled: false, manualScalePercent: 100 },
@@ -616,6 +621,234 @@ const TRAILING_BASS_BOUNDARY_COLLISION_FIXTURE_XML = `<?xml version="1.0" encodi
         <pitch><step>E</step><octave>2</octave></pitch>
         <duration>1</duration>
         <type>32nd</type>
+        <staff>2</staff>
+      </note>
+    </measure>
+  </part>
+</score-partwise>
+`
+
+const DOTTED_SECOND_CHORD_FIXTURE_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC
+  "-//Recordare//DTD MusicXML 3.1 Partwise//EN"
+  "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <part-list>
+    <score-part id="P1">
+      <part-name>Piano</part-name>
+    </score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <staves>2</staves>
+        <clef number="1"><sign>G</sign><line>2</line></clef>
+        <clef number="2"><sign>F</sign><line>4</line></clef>
+      </attributes>
+      <note>
+        <pitch><step>C</step><octave>4</octave></pitch>
+        <duration>3</duration>
+        <type>eighth</type>
+        <dot/>
+        <staff>1</staff>
+      </note>
+      <note>
+        <chord/>
+        <pitch><step>D</step><octave>4</octave></pitch>
+        <duration>3</duration>
+        <type>eighth</type>
+        <dot/>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>E</step><octave>4</octave></pitch>
+        <duration>1</duration>
+        <type>16th</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>G</step><octave>4</octave></pitch>
+        <duration>8</duration>
+        <type>half</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <rest/>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+
+      <note>
+        <rest/>
+        <duration>16</duration>
+        <type>whole</type>
+        <staff>2</staff>
+      </note>
+    </measure>
+  </part>
+</score-partwise>
+`
+
+const DOTTED_BASELINE_FIXTURE_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC
+  "-//Recordare//DTD MusicXML 3.1 Partwise//EN"
+  "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <part-list>
+    <score-part id="P1">
+      <part-name>Piano</part-name>
+    </score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <staves>2</staves>
+        <clef number="1"><sign>G</sign><line>2</line></clef>
+        <clef number="2"><sign>F</sign><line>4</line></clef>
+      </attributes>
+      <note>
+        <pitch><step>C</step><octave>4</octave></pitch>
+        <duration>3</duration>
+        <type>eighth</type>
+        <dot/>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>E</step><octave>4</octave></pitch>
+        <duration>1</duration>
+        <type>16th</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>G</step><octave>4</octave></pitch>
+        <duration>8</duration>
+        <type>half</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <rest/>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+
+      <note>
+        <rest/>
+        <duration>16</duration>
+        <type>whole</type>
+        <staff>2</staff>
+      </note>
+    </measure>
+  </part>
+</score-partwise>
+`
+
+const DOTTED_DIRECTION_PARITY_FIXTURE_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC
+  "-//Recordare//DTD MusicXML 3.1 Partwise//EN"
+  "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <part-list>
+    <score-part id="P1">
+      <part-name>Piano</part-name>
+    </score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>256</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <staves>2</staves>
+        <clef number="1"><sign>G</sign><line>2</line></clef>
+        <clef number="2"><sign>F</sign><line>4</line></clef>
+      </attributes>
+      <note>
+        <pitch><step>D</step><octave>4</octave></pitch>
+        <duration>384</duration>
+        <voice>1</voice>
+        <type>quarter</type>
+        <dot/>
+        <stem>up</stem>
+        <staff>1</staff>
+      </note>
+      <note>
+        <chord/>
+        <pitch><step>E</step><octave>4</octave></pitch>
+        <duration>384</duration>
+        <type>quarter</type>
+        <dot/>
+        <staff>1</staff>
+      </note>
+      <note>
+        <chord/>
+        <pitch><step>G</step><octave>4</octave></pitch>
+        <duration>384</duration>
+        <type>quarter</type>
+        <dot/>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>E</step><octave>5</octave></pitch>
+        <duration>128</duration>
+        <voice>1</voice>
+        <type>eighth</type>
+        <stem>down</stem>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>C</step><octave>5</octave></pitch>
+        <duration>384</duration>
+        <voice>1</voice>
+        <type>quarter</type>
+        <dot/>
+        <stem>down</stem>
+        <staff>1</staff>
+      </note>
+      <note>
+        <chord/>
+        <pitch><step>D</step><octave>5</octave></pitch>
+        <duration>384</duration>
+        <type>quarter</type>
+        <dot/>
+        <staff>1</staff>
+      </note>
+      <note>
+        <chord/>
+        <pitch><step>E</step><octave>5</octave></pitch>
+        <duration>384</duration>
+        <type>quarter</type>
+        <dot/>
+        <staff>1</staff>
+      </note>
+      <note>
+        <chord/>
+        <pitch><step>G</step><octave>5</octave></pitch>
+        <duration>384</duration>
+        <type>quarter</type>
+        <dot/>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>C</step><octave>5</octave></pitch>
+        <duration>128</duration>
+        <voice>1</voice>
+        <type>eighth</type>
+        <staff>1</staff>
+      </note>
+
+      <note>
+        <pitch><step>C</step><octave>3</octave></pitch>
+        <duration>1024</duration>
+        <voice>2</voice>
+        <type>whole</type>
         <staff>2</staff>
       </note>
     </measure>
@@ -1146,6 +1379,9 @@ function getNoteRawReserveExtents(note: DumpNoteRow): { rawLeftReservePx: number
     const accidentalLeftX = accidental.rightX - APPROX_ACCIDENTAL_WIDTH_PX
     rawLeftReservePx = Math.max(rawLeftReservePx, note.x - accidentalLeftX)
   })
+  if (typeof note.dotRightX === 'number' && Number.isFinite(note.dotRightX) && note.dotRightX > note.x + HEAD_X_EPSILON_PX) {
+    rawRightReservePx = Math.max(rawRightReservePx, note.dotRightX - note.x)
+  }
 
   return {
     rawLeftReservePx: Number(rawLeftReservePx.toFixed(3)),
@@ -2490,6 +2726,284 @@ function analyzeTrailingCollisionFixture(
   }
 }
 
+function analyzeDottedFixture(params: {
+  row: MergedMeasureDumpRow
+  scale: DebugScaleConfig
+  key: string
+  requireChordHeads: boolean
+}): FixtureResult {
+  const { row, scale, key, requireChordHeads } = params
+  const failures: string[] = []
+  validateNoBarlineOverflow(row, failures)
+
+  const targetNote =
+    row.notes.find(
+      (note) =>
+        note.staff === 'treble' &&
+        note.isRest !== true &&
+        Array.isArray(note.noteHeads) &&
+        (requireChordHeads ? note.noteHeads.length > 1 : note.noteHeads.length === 1) &&
+        typeof note.dotLeftX === 'number' &&
+        Number.isFinite(note.dotLeftX) &&
+        typeof note.dotRightX === 'number' &&
+        Number.isFinite(note.dotRightX),
+    ) ?? null
+  const nextNote =
+    targetNote !== null
+      ? row.notes.find(
+          (note) =>
+            note.staff === 'treble' &&
+            note.isRest !== true &&
+            note.noteIndex > targetNote.noteIndex &&
+            typeof note.onsetTicksInMeasure === 'number' &&
+            Number.isFinite(note.onsetTicksInMeasure),
+        ) ?? null
+      : null
+
+  if (!row.rendered) pushFailure(failures, 'fixture-not-rendered')
+  if (!targetNote) pushFailure(failures, 'dotted-target-note-missing')
+  if (!nextNote) pushFailure(failures, 'dotted-next-note-missing')
+
+  const headRightX = toRoundedFiniteNumber(targetNote?.headRightX)
+  const dotLeftX = toRoundedFiniteNumber(targetNote?.dotLeftX)
+  const dotRightX = toRoundedFiniteNumber(targetNote?.dotRightX)
+  const noteRightX = toRoundedFiniteNumber(targetNote?.rightX)
+  const spacingRightX = toRoundedFiniteNumber(targetNote?.spacingRightX)
+  const nextOccupiedLeftX = nextNote ? getNoteOccupiedLeftX(nextNote) : null
+  const ownGapPx =
+    headRightX !== null && dotLeftX !== null ? Number((dotLeftX - headRightX).toFixed(3)) : null
+  const nextGapPx =
+    nextOccupiedLeftX !== null && dotRightX !== null
+      ? Number((nextOccupiedLeftX - dotRightX).toFixed(3))
+      : null
+
+  if (headRightX === null) pushFailure(failures, 'dotted-head-right-missing')
+  if (dotLeftX === null || dotRightX === null) pushFailure(failures, 'dotted-bounds-missing')
+  if (ownGapPx === null || ownGapPx < DOT_NOTEHEAD_CLEARANCE_PX - GAP_EPSILON_PX) {
+    pushFailure(failures, 'dotted-own-gap-too-small', ownGapPx)
+  }
+  if (nextGapPx === null || nextGapPx < -GAP_EPSILON_PX) {
+    pushFailure(failures, 'dotted-next-gap-overlap', nextGapPx)
+  }
+  if (dotRightX !== null && noteRightX !== null && noteRightX < dotRightX - GAP_EPSILON_PX) {
+    pushFailure(failures, 'dotted-rightx-missing-dot', `${noteRightX}<${dotRightX}`)
+  }
+  if (dotRightX !== null && spacingRightX !== null && spacingRightX < dotRightX - GAP_EPSILON_PX) {
+    pushFailure(failures, 'dotted-spacing-rightx-missing-dot', `${spacingRightX}<${dotRightX}`)
+  }
+
+  const headXs = targetNote ? dedupeSortedNumbers(targetNote.noteHeads.map((head) => head.x), HEAD_X_EPSILON_PX) : []
+  const direction = classifyDirection(
+    targetNote && Number.isFinite(targetNote.x) ? Number(targetNote.x.toFixed(3)) : null,
+    headXs,
+  )
+
+  return {
+    key,
+    scale,
+    measureWidth:
+      typeof row.measureWidth === 'number' && Number.isFinite(row.measureWidth)
+        ? Number(row.measureWidth.toFixed(3))
+        : null,
+    targetOnsetTicks:
+      targetNote && typeof targetNote.onsetTicksInMeasure === 'number' && Number.isFinite(targetNote.onsetTicksInMeasure)
+        ? Math.round(targetNote.onsetTicksInMeasure)
+        : null,
+    direction,
+    headXs,
+    expectedLeftRequestPx: headRightX !== null ? Number((headRightX + DOT_NOTEHEAD_CLEARANCE_PX).toFixed(3)) : null,
+    actualLeftRequestPx: dotLeftX,
+    leftWinningStaff: 'treble',
+    expectedRightRequestPx: dotRightX,
+    actualRightRequestPx: nextOccupiedLeftX,
+    rightWinningStaff: nextNote ? 'treble' : 'none',
+    visibleLeftGapPx: ownGapPx,
+    visibleRightGapPx: nextGapPx,
+    passed: failures.length === 0,
+    failureReasons: failures,
+  }
+}
+
+function analyzeDottedBaselineFixture(
+  row: MergedMeasureDumpRow,
+  scale: DebugScaleConfig,
+): FixtureResult {
+  return analyzeDottedFixture({
+    row,
+    scale,
+    key: 'fixture-dotted-baseline',
+    requireChordHeads: false,
+  })
+}
+
+function analyzeDottedSecondChordFixture(
+  row: MergedMeasureDumpRow,
+  scale: DebugScaleConfig,
+): FixtureResult {
+  return analyzeDottedFixture({
+    row,
+    scale,
+    key: 'fixture-dotted-second-chord',
+    requireChordHeads: true,
+  })
+}
+
+function buildDottedGapParityFixtureResult(params: {
+  baselineFixture: FixtureResult
+  secondChordFixture: FixtureResult
+}): FixtureResult {
+  const { baselineFixture, secondChordFixture } = params
+  const failures: string[] = []
+
+  if (!baselineFixture.passed) pushFailure(failures, 'baseline-fixture-failed', baselineFixture.key)
+  if (!secondChordFixture.passed) pushFailure(failures, 'second-chord-fixture-failed', secondChordFixture.key)
+
+  const baselineGapPx = baselineFixture.visibleLeftGapPx
+  const secondChordGapPx = secondChordFixture.visibleLeftGapPx
+  if (baselineGapPx === null || secondChordGapPx === null) {
+    pushFailure(
+      failures,
+      'dotted-gap-missing',
+      `${baselineGapPx ?? 'null'}!=${secondChordGapPx ?? 'null'}`,
+    )
+  } else if (Math.abs(baselineGapPx - secondChordGapPx) > DOT_GAP_PARITY_EPSILON_PX) {
+    pushFailure(failures, 'dotted-gap-mismatch', `${baselineGapPx}!=${secondChordGapPx}`)
+  }
+
+  return {
+    key: 'fixture-dotted-gap-parity',
+    scale: secondChordFixture.scale,
+    measureWidth: secondChordFixture.measureWidth,
+    targetOnsetTicks: secondChordFixture.targetOnsetTicks,
+    direction: secondChordFixture.direction,
+    headXs: secondChordFixture.headXs,
+    expectedLeftRequestPx: baselineGapPx,
+    actualLeftRequestPx: secondChordGapPx,
+    leftWinningStaff: secondChordFixture.leftWinningStaff,
+    expectedRightRequestPx: baselineFixture.visibleRightGapPx,
+    actualRightRequestPx: secondChordFixture.visibleRightGapPx,
+    rightWinningStaff: secondChordFixture.rightWinningStaff,
+    visibleLeftGapPx: secondChordGapPx,
+    visibleRightGapPx: secondChordFixture.visibleRightGapPx,
+    passed: failures.length === 0,
+    failureReasons: failures,
+  }
+}
+
+function analyzeDottedDirectionParityFixture(
+  row: MergedMeasureDumpRow,
+  scale: DebugScaleConfig,
+): FixtureResult {
+  const failures: string[] = []
+  validateNoBarlineOverflow(row, failures)
+
+  const dottedChords = row.notes
+    .filter(
+      (note) =>
+        note.staff === 'treble' &&
+        note.isRest !== true &&
+        Array.isArray(note.noteHeads) &&
+        note.noteHeads.length > 1 &&
+        typeof note.headRightX === 'number' &&
+        Number.isFinite(note.headRightX) &&
+        typeof note.dotLeftX === 'number' &&
+        Number.isFinite(note.dotLeftX) &&
+        typeof note.dotRightX === 'number' &&
+        Number.isFinite(note.dotRightX),
+    )
+    .sort((left, right) => {
+      const leftOnset = typeof left.onsetTicksInMeasure === 'number' && Number.isFinite(left.onsetTicksInMeasure)
+        ? left.onsetTicksInMeasure
+        : Number.POSITIVE_INFINITY
+      const rightOnset = typeof right.onsetTicksInMeasure === 'number' && Number.isFinite(right.onsetTicksInMeasure)
+        ? right.onsetTicksInMeasure
+        : Number.POSITIVE_INFINITY
+      if (leftOnset !== rightOnset) return leftOnset - rightOnset
+      return left.noteIndex - right.noteIndex
+    })
+
+  const firstChord = dottedChords[0] ?? null
+  const secondChord = dottedChords[1] ?? null
+
+  if (!row.rendered) pushFailure(failures, 'fixture-not-rendered')
+  if (!firstChord) pushFailure(failures, 'direction-first-dotted-chord-missing')
+  if (!secondChord) pushFailure(failures, 'direction-second-dotted-chord-missing')
+
+  const firstGapPx =
+    firstChord &&
+    typeof firstChord.headRightX === 'number' &&
+    typeof firstChord.dotLeftX === 'number'
+      ? Number((firstChord.dotLeftX - firstChord.headRightX).toFixed(3))
+      : null
+  const secondGapPx =
+    secondChord &&
+    typeof secondChord.headRightX === 'number' &&
+    typeof secondChord.dotLeftX === 'number'
+      ? Number((secondChord.dotLeftX - secondChord.headRightX).toFixed(3))
+      : null
+
+  if (firstGapPx === null) pushFailure(failures, 'direction-first-gap-missing')
+  if (secondGapPx === null) pushFailure(failures, 'direction-second-gap-missing')
+  if (
+    firstGapPx !== null &&
+    secondGapPx !== null &&
+    Math.abs(firstGapPx - secondGapPx) > DOT_GAP_PARITY_EPSILON_PX
+  ) {
+    pushFailure(failures, 'direction-gap-mismatch', `${firstGapPx}!=${secondGapPx}`)
+  }
+
+  const secondChordNextNote =
+    secondChord !== null
+      ? row.notes.find(
+          (note) =>
+            note.staff === 'treble' &&
+            note.isRest !== true &&
+            note.noteIndex > secondChord.noteIndex &&
+            typeof note.onsetTicksInMeasure === 'number' &&
+            Number.isFinite(note.onsetTicksInMeasure),
+        ) ?? null
+      : null
+  const nextOccupiedLeftX = secondChordNextNote ? getNoteOccupiedLeftX(secondChordNextNote) : null
+  const secondRightGapPx =
+    secondChord &&
+    typeof secondChord.dotRightX === 'number' &&
+    nextOccupiedLeftX !== null
+      ? Number((nextOccupiedLeftX - secondChord.dotRightX).toFixed(3))
+      : null
+  if (secondRightGapPx === null || secondRightGapPx < -GAP_EPSILON_PX) {
+    pushFailure(failures, 'direction-second-right-overlap', secondRightGapPx)
+  }
+
+  return {
+    key: 'fixture-dotted-direction-parity',
+    scale,
+    measureWidth:
+      typeof row.measureWidth === 'number' && Number.isFinite(row.measureWidth)
+        ? Number(row.measureWidth.toFixed(3))
+        : null,
+    targetOnsetTicks:
+      secondChord && typeof secondChord.onsetTicksInMeasure === 'number' && Number.isFinite(secondChord.onsetTicksInMeasure)
+        ? Math.round(secondChord.onsetTicksInMeasure)
+        : null,
+    direction: 'both',
+    headXs: [
+      ...(firstChord ? dedupeSortedNumbers(firstChord.noteHeads.map((head) => head.x), HEAD_X_EPSILON_PX) : []),
+      ...(secondChord ? dedupeSortedNumbers(secondChord.noteHeads.map((head) => head.x), HEAD_X_EPSILON_PX) : []),
+    ],
+    expectedLeftRequestPx: firstGapPx,
+    actualLeftRequestPx: secondGapPx,
+    leftWinningStaff: 'treble',
+    expectedRightRequestPx:
+      secondChord && typeof secondChord.dotRightX === 'number' ? Number(secondChord.dotRightX.toFixed(3)) : null,
+    actualRightRequestPx: nextOccupiedLeftX,
+    rightWinningStaff: secondChordNextNote ? 'treble' : 'none',
+    visibleLeftGapPx: secondGapPx,
+    visibleRightGapPx: secondRightGapPx,
+    passed: failures.length === 0,
+    failureReasons: failures,
+  }
+}
+
 function createEnharmonicConsistencyAnalyzer(params: {
   key: string
   lowerPitch: 'd#/4' | 'e#/4'
@@ -2848,6 +3362,34 @@ async function main(): Promise<void> {
         page,
         xmlText: TRAILING_BASS_BOUNDARY_COLLISION_FIXTURE_XML,
         analyzer: analyzeTrailingCollisionFixture,
+      }),
+    )
+    console.log('[second-chord-spacing] running dotted baseline fixture')
+    const dottedBaselineFixture = await runFixtureScenario({
+      page,
+      xmlText: DOTTED_BASELINE_FIXTURE_XML,
+      analyzer: analyzeDottedBaselineFixture,
+    })
+    fixtureResults.push(dottedBaselineFixture)
+    console.log('[second-chord-spacing] running dotted second-chord fixture')
+    const dottedSecondChordFixture = await runFixtureScenario({
+      page,
+      xmlText: DOTTED_SECOND_CHORD_FIXTURE_XML,
+      analyzer: analyzeDottedSecondChordFixture,
+    })
+    fixtureResults.push(dottedSecondChordFixture)
+    fixtureResults.push(
+      buildDottedGapParityFixtureResult({
+        baselineFixture: dottedBaselineFixture,
+        secondChordFixture: dottedSecondChordFixture,
+      }),
+    )
+    console.log('[second-chord-spacing] running dotted direction-parity fixture')
+    fixtureResults.push(
+      await runFixtureScenario({
+        page,
+        xmlText: DOTTED_DIRECTION_PARITY_FIXTURE_XML,
+        analyzer: analyzeDottedDirectionParityFixture,
       }),
     )
     console.log('[second-chord-spacing] running enharmonic previous-note fixtures')
