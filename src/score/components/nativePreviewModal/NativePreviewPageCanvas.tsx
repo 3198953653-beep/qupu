@@ -123,6 +123,7 @@ export function NativePreviewPageCanvas(props: NativePreviewPageCanvasProps) {
       showNoteHeadJianpu: showNoteHeadJianpuEnabled,
       dragPreview: null,
       systemTopOverridesPx: currentPage?.systemTopPxBySystemIndex ?? null,
+      repeatTimeSignatureAtSystemStart: false,
     })
     if (currentPage) {
       onNativePreviewPageRenderedDiagnostics(currentPage.pageIndex, renderResult.nextMeasureLayouts)

@@ -35,6 +35,7 @@ type NativePreviewSystemDiagnostics = {
     fixedWidthPx: number
     elasticWidthPx: number
     actualStartDecorationWidthPx: number
+    showTimeSignature: boolean
     timelineStretchScale: number
     previewSpacingAnchorTicks: number[] | null
   }>
@@ -246,6 +247,92 @@ function buildSparseNativePreviewFixtureXml(): string {
         <type>whole</type>
         <staff>2</staff>
       </note>
+    </measure>
+  </part>
+</score-partwise>
+`
+}
+
+function buildTimeSignatureSuppressionFixtureXml(): string {
+  const buildDenseStaffNotes = (
+    staff: 1 | 2,
+    sequence: ReadonlyArray<{ step: string; octave: number; alter?: number }>,
+  ): string =>
+    sequence.map((pitch) => [
+      '      <note>',
+      '        <pitch>',
+      `          <step>${pitch.step}</step>`,
+      typeof pitch.alter === 'number' ? `          <alter>${pitch.alter}</alter>` : '',
+      `          <octave>${pitch.octave}</octave>`,
+      '        </pitch>',
+      '        <duration>2</duration>',
+      '        <type>eighth</type>',
+      `        <staff>${staff}</staff>`,
+      '      </note>',
+    ].filter(Boolean).join('\n')).join('\n')
+
+  const trebleSequence = [
+    { step: 'C', octave: 5, alter: 1 },
+    { step: 'D', octave: 5 },
+    { step: 'E', octave: 5, alter: -1 },
+    { step: 'F', octave: 5 },
+    { step: 'G', octave: 5, alter: 1 },
+    { step: 'A', octave: 5 },
+    { step: 'B', octave: 5, alter: -1 },
+    { step: 'C', octave: 6 },
+  ] as const
+  const bassSequence = [
+    { step: 'C', octave: 3 },
+    { step: 'B', octave: 2, alter: -1 },
+    { step: 'A', octave: 2 },
+    { step: 'G', octave: 2, alter: 1 },
+    { step: 'F', octave: 2 },
+    { step: 'E', octave: 2, alter: -1 },
+    { step: 'D', octave: 2 },
+    { step: 'C', octave: 2, alter: 1 },
+  ] as const
+  const trebleTripleSequence = trebleSequence.slice(0, 6)
+  const bassTripleSequence = bassSequence.slice(0, 6)
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC
+  "-//Recordare//DTD MusicXML 3.1 Partwise//EN"
+  "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <work>
+    <work-title>Native Preview Time Signature Suppression</work-title>
+  </work>
+  <identification>
+    <creator type="composer">Codex Browser Test</creator>
+  </identification>
+  <part-list>
+    <score-part id="P1">
+      <part-name>Piano</part-name>
+    </score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <staves>2</staves>
+        <clef number="1"><sign>G</sign><line>2</line></clef>
+        <clef number="2"><sign>F</sign><line>4</line></clef>
+      </attributes>
+${buildDenseStaffNotes(1, trebleSequence)}
+${buildDenseStaffNotes(2, bassSequence)}
+    </measure>
+    <measure number="2">
+${buildDenseStaffNotes(1, trebleSequence)}
+${buildDenseStaffNotes(2, bassSequence)}
+    </measure>
+    <measure number="3">
+      <attributes>
+        <time><beats>3</beats><beat-type>4</beat-type></time>
+      </attributes>
+${buildDenseStaffNotes(1, trebleTripleSequence)}
+${buildDenseStaffNotes(2, bassTripleSequence)}
     </measure>
   </part>
 </score-partwise>
@@ -469,6 +556,19 @@ function getRenderedMeasureDiagnostics(
   throw new Error(`Could not find rendered diagnostics for pair ${pairIndex}.`)
 }
 
+function getSolvedMeasureDiagnostics(
+  pages: NativePreviewPageDiagnostics[],
+  pairIndex: number,
+): NativePreviewSystemDiagnostics['measures'][number] {
+  for (const page of pages) {
+    for (const system of page.systems) {
+      const found = system.measures.find((measure) => measure.pairIndex === pairIndex)
+      if (found) return found
+    }
+  }
+  throw new Error(`Could not find solved diagnostics for pair ${pairIndex}.`)
+}
+
 async function captureDebugArtifacts(page: Page, name: string): Promise<void> {
   await mkdir(DEBUG_OUTPUT_DIR, { recursive: true })
   await page.screenshot({
@@ -480,6 +580,7 @@ async function captureDebugArtifacts(page: Page, name: string): Promise<void> {
 async function run(): Promise<void> {
   const xmlText = buildNativePreviewFixtureXml(XML_MEASURE_COUNT)
   const sparseXmlText = buildSparseNativePreviewFixtureXml()
+  const timeSignatureSuppressionXmlText = buildTimeSignatureSuppressionFixtureXml()
   const server = startDevServer()
   let browser: import('playwright').Browser | null = null
 
@@ -642,6 +743,63 @@ async function run(): Promise<void> {
       'Sparse single-measure stretch should not leave the rendered content heavily bunched against the left edge.',
     )
 
+    await dialog.getByRole('button', { name: '关闭' }).click()
+    await importMusicXml(page, timeSignatureSuppressionXmlText)
+    await page.getByRole('button', { name: '五线谱预览' }).click()
+    await waitForNativePreviewReady(page)
+    await setNativePreviewZoomValue(page, 160)
+    await setRangeValue(page, '#native-preview-horizontal-margin-range', 120)
+    await setRangeValue(page, '#native-preview-min-eighth-gap-range', 36)
+    await setRangeValue(page, '#native-preview-min-grand-staff-gap-range', 24)
+    await page.waitForFunction(() => {
+      const api = (window as unknown as {
+        __scoreDebug?: {
+          dumpNativePreviewLayoutDiagnostics: () => NativePreviewPageDiagnostics[]
+        }
+      }).__scoreDebug
+      if (!api || typeof api.dumpNativePreviewLayoutDiagnostics !== 'function') return false
+      const pages = api.dumpNativePreviewLayoutDiagnostics()
+      const ranges = pages.flatMap((pageItem) =>
+        pageItem.systemRanges.map((range) => [range.startPairIndex, range.endPairIndexExclusive]),
+      )
+      return JSON.stringify(ranges) === JSON.stringify([[0, 1], [1, 2], [2, 3]])
+    }, { timeout: 30_000 })
+    const timeSignatureSuppressionDiagnostics = await dumpNativePreviewLayoutDiagnostics(page)
+    const timeSignatureSuppressionRanges = timeSignatureSuppressionDiagnostics.flatMap((pageItem) =>
+      pageItem.systemRanges.map((range) => [range.startPairIndex, range.endPairIndexExclusive] as const),
+    )
+    assert.deepEqual(
+      timeSignatureSuppressionRanges,
+      [[0, 1], [1, 2], [2, 3]],
+      'Time-signature suppression fixture should resolve to one measure per system under the forced native preview settings.',
+    )
+    const firstSystemStartMeasure = getSolvedMeasureDiagnostics(timeSignatureSuppressionDiagnostics, 0)
+    const repeatedSystemStartMeasure = getSolvedMeasureDiagnostics(timeSignatureSuppressionDiagnostics, 1)
+    const changedSystemStartMeasure = getSolvedMeasureDiagnostics(timeSignatureSuppressionDiagnostics, 2)
+    assert.equal(
+      firstSystemStartMeasure.showTimeSignature,
+      true,
+      'The first native preview system should keep its starting time signature.',
+    )
+    assert.equal(
+      repeatedSystemStartMeasure.showTimeSignature,
+      false,
+      'The second native preview system should suppress a repeated time signature.',
+    )
+    assert.equal(
+      changedSystemStartMeasure.showTimeSignature,
+      true,
+      'A native preview system that starts at a time-signature change should still show the new time signature.',
+    )
+    assert.ok(
+      repeatedSystemStartMeasure.actualStartDecorationWidthPx < firstSystemStartMeasure.actualStartDecorationWidthPx,
+      'Suppressing a repeated native preview time signature should reduce the starting decoration width.',
+    )
+    assert.ok(
+      changedSystemStartMeasure.actualStartDecorationWidthPx > repeatedSystemStartMeasure.actualStartDecorationWidthPx,
+      'A native preview system that introduces a new time signature should regain the extra start decoration width.',
+    )
+
     await mkdir(DEBUG_OUTPUT_DIR, { recursive: true })
     await writeFile(
       path.join(DEBUG_OUTPUT_DIR, 'native-preview-browser-report.json'),
@@ -664,6 +822,7 @@ async function run(): Promise<void> {
           sparseNarrowMeasure,
           sparseWideDiagnostics,
           sparseWideMeasure,
+          timeSignatureSuppressionDiagnostics,
         },
         null,
         2,

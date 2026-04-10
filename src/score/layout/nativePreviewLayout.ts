@@ -9,6 +9,7 @@ import {
   applyMeasureStartDecorationsToStave,
   measureActualStartDecorationWidthPx,
   resolveMeasureStartDecorationReserve,
+  resolveStartDecorationDisplayMetas,
   toTimeSignatureKey,
 } from './startDecorationReserve'
 import {
@@ -66,6 +67,7 @@ export type NativePreviewSolvedMeasure = {
   fixedWidthPx: number
   elasticWidthPx: number
   actualStartDecorationWidthPx: number
+  showTimeSignature: boolean
   timelineStretchScale: number
   previewSpacingAnchorTicks: number[] | null
 }
@@ -210,18 +212,26 @@ function buildSystemMeasureMeta(params: {
     resolvedTimeSignatures,
     grandStaffLayoutMetrics,
   } = params
+  const displayMetaByPairIndex = new Map(
+    resolveStartDecorationDisplayMetas({
+      measureCount: measurePairs.length,
+      keyFifthsByPair: resolvedKeyFifths,
+      timeSignaturesByPair: resolvedTimeSignatures,
+      systemStartPairIndices: new Set([range.startPairIndex]),
+      repeatTimeSignatureAtSystemStart: false,
+    }).map((meta) => [meta.pairIndex, meta] as const),
+  )
   const metas: FixedWidthMeasureMeta[] = []
   for (let pairIndex = range.startPairIndex; pairIndex < range.endPairIndexExclusive; pairIndex += 1) {
     const measure = measurePairs[pairIndex]
     if (!measure) continue
-    const isSystemStart = pairIndex === range.startPairIndex
-    const previousKeyFifths = pairIndex > 0 ? resolvedKeyFifths[pairIndex - 1] ?? 0 : 0
-    const previousTimeSignature =
-      pairIndex > 0 ? resolvedTimeSignatures[pairIndex - 1] ?? { beats: 4, beatType: 4 } : { beats: 4, beatType: 4 }
-    const keyFifths = resolvedKeyFifths[pairIndex] ?? previousKeyFifths
-    const timeSignature = resolvedTimeSignatures[pairIndex] ?? previousTimeSignature
-    const showKeySignature = isSystemStart || keyFifths !== previousKeyFifths
-    const showTimeSignature = isSystemStart || hasTimeSignatureChanged(timeSignature, previousTimeSignature)
+    const displayMeta = displayMetaByPairIndex.get(pairIndex)
+    if (!displayMeta) continue
+    const isSystemStart = displayMeta.isSystemStart
+    const keyFifths = displayMeta.keyFifths
+    const timeSignature = displayMeta.timeSignature
+    const showKeySignature = displayMeta.showKeySignature
+    const showTimeSignature = displayMeta.showTimeSignature
     const nextTimeSignature =
       pairIndex + 1 < measurePairs.length
         ? resolvedTimeSignatures[pairIndex + 1] ?? timeSignature
@@ -673,6 +683,7 @@ export function solveNativePreviewSystemLayout(params: {
       fixedWidthPx,
       elasticWidthPx,
       actualStartDecorationWidthPx: basis.actualStartDecorationWidthPx,
+      showTimeSignature: basis.meta.showTimeSignature,
       timelineStretchScale: finalTimelineStretchScale,
       previewSpacingAnchorTicks: basis.previewSpacingAnchorTicks.length > 0 ? [...basis.previewSpacingAnchorTicks] : null,
     } satisfies NativePreviewSolvedMeasure

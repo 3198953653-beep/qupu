@@ -352,6 +352,7 @@ export function renderVisibleSystems(params: {
   showNoteHeadJianpu?: boolean
   dragPreview?: DragState | null
   systemTopOverridesPx?: number[] | null
+  repeatTimeSignatureAtSystemStart?: boolean
 }): {
   nextLayouts: NoteLayout[]
   nextLayoutsByPair: Map<number, NoteLayout[]>
@@ -402,6 +403,7 @@ export function renderVisibleSystems(params: {
     showNoteHeadJianpu = false,
     dragPreview = null,
     systemTopOverridesPx = null,
+    repeatTimeSignatureAtSystemStart = true,
   } = params
   const collapseScopeKeySet = new Set(fullMeasureRestCollapseScopeKeys)
   const canCollapseFullMeasureRest = (pairIndex: number, staff: StaffKind): boolean =>
@@ -520,6 +522,7 @@ export function renderVisibleSystems(params: {
     keyFifthsByPair: measureKeyFifthsFromImport,
     timeSignaturesByPair: measureTimeSignaturesFromImport,
     systemStartPairIndices: systemStartPairIndexSet,
+    repeatTimeSignatureAtSystemStart,
   })
   const { actualStartDecorationWidthPxByPair } = resolveActualStartDecorationWidths({
     metas: globalStartDecorationDisplayMetas,

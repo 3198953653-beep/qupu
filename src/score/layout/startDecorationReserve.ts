@@ -67,19 +67,28 @@ export function resolveStartDecorationDisplayMetas(params: {
   keyFifthsByPair: number[] | null
   timeSignaturesByPair: TimeSignature[] | null
   systemStartPairIndices?: ReadonlySet<number> | null
+  repeatTimeSignatureAtSystemStart?: boolean
 }): StartDecorationDisplayMeta[] {
-  const { measureCount, keyFifthsByPair, timeSignaturesByPair, systemStartPairIndices = null } = params
+  const {
+    measureCount,
+    keyFifthsByPair,
+    timeSignaturesByPair,
+    systemStartPairIndices = null,
+    repeatTimeSignatureAtSystemStart = true,
+  } = params
   const metas: StartDecorationDisplayMeta[] = []
   let previousKeyFifths = 0
   let previousTimeSignature: TimeSignature = { beats: 4, beatType: 4 }
 
   for (let pairIndex = 0; pairIndex < measureCount; pairIndex += 1) {
     const isSystemStart = pairIndex === 0 || systemStartPairIndices?.has(pairIndex) === true
+    const isFirstMeasure = pairIndex === 0
     const keyFifths = keyFifthsByPair?.[pairIndex] ?? previousKeyFifths
     const timeSignature = timeSignaturesByPair?.[pairIndex] ?? previousTimeSignature
     const showKeySignature = isSystemStart || keyFifths !== previousKeyFifths
     const showTimeSignature =
-      isSystemStart ||
+      isFirstMeasure ||
+      (isSystemStart && repeatTimeSignatureAtSystemStart) ||
       timeSignature.beats !== previousTimeSignature.beats ||
       timeSignature.beatType !== previousTimeSignature.beatType
 
