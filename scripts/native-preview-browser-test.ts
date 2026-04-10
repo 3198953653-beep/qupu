@@ -502,6 +502,15 @@ async function run(): Promise<void> {
     const dialog = page.getByRole('dialog', { name: '五线谱预览' })
     await expectText(dialog.locator('.native-preview-title'), 'Native Preview Smoke')
     await expectText(dialog.locator('.native-preview-subtitle'), 'Codex Browser Test')
+    await expectChecked(dialog.locator('#native-preview-page-number-toggle'), true, 'Expected page numbers to default to enabled.')
+    await expectInputValue(dialog.locator('#native-preview-zoom-range'), '66', 'Expected native preview zoom default to be 66.')
+    await expectInputValue(dialog.locator('#native-preview-paper-scale-range'), '100', 'Expected native preview paper scale default to be 100.')
+    await expectInputValue(dialog.locator('#native-preview-horizontal-margin-range'), '68', 'Expected native preview horizontal margin default to be 68.')
+    await expectInputValue(dialog.locator('#native-preview-first-top-margin-range'), '132', 'Expected native preview first-page top margin default to be 132.')
+    await expectInputValue(dialog.locator('#native-preview-top-margin-range'), '10', 'Expected native preview following-page top margin default to be 10.')
+    await expectInputValue(dialog.locator('#native-preview-bottom-margin-range'), '86', 'Expected native preview bottom margin default to be 86.')
+    await expectInputValue(dialog.locator('#native-preview-min-eighth-gap-range'), '20', 'Expected native preview minimum eighth gap default to be 20.')
+    await expectInputValue(dialog.locator('#native-preview-min-grand-staff-gap-range'), '44', 'Expected native preview minimum grand-staff gap default to be 44.')
 
     const initialSignature = getSignature(initialDiagnostics)
     const initialPageCount = initialDiagnostics.length
@@ -675,6 +684,22 @@ async function expectText(locator: ReturnType<Page['locator']>, expected: string
   await locator.waitFor({ state: 'visible', timeout: 20_000 })
   const actual = (await locator.textContent())?.trim() ?? ''
   assert.equal(actual, expected)
+}
+
+async function expectInputValue(
+  locator: ReturnType<Page['locator']>,
+  expected: string,
+  message?: string,
+): Promise<void> {
+  await locator.waitFor({ state: 'visible', timeout: 20_000 })
+  const actual = await locator.inputValue()
+  assert.equal(actual, expected, message)
+}
+
+async function expectChecked(locator: ReturnType<Page['locator']>, expected: boolean, message?: string): Promise<void> {
+  await locator.waitFor({ state: 'visible', timeout: 20_000 })
+  const actual = await locator.isChecked()
+  assert.equal(actual, expected, message)
 }
 
 async function assertVisible(locator: ReturnType<Page['locator']>, message: string): Promise<void> {
