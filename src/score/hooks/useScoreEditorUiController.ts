@@ -30,6 +30,7 @@ export function useScoreEditorUiController(params: {
   midiInputController: Parameters<typeof useMidiInputController>[0]
   osmdPreviewController: Parameters<typeof useOsmdPreviewController>[0]
   nativePreviewController: Parameters<typeof useNativePreviewController>[0]
+  isWorkspaceBlocked?: boolean
   isOsmdPreviewOpenRef: MutableRefObject<boolean>
   isAnyPreviewOpenRef: MutableRefObject<boolean>
   notationPaletteController: NotationPaletteControllerBaseParams
@@ -44,6 +45,7 @@ export function useScoreEditorUiController(params: {
     midiInputController,
     osmdPreviewController,
     nativePreviewController,
+    isWorkspaceBlocked = false,
     isOsmdPreviewOpenRef,
     isAnyPreviewOpenRef,
     notationPaletteController,
@@ -73,8 +75,8 @@ export function useScoreEditorUiController(params: {
   }, [isOsmdPreviewOpenRef, osmd.isOsmdPreviewOpen])
 
   useEffect(() => {
-    isAnyPreviewOpenRef.current = osmd.isOsmdPreviewOpen || nativePreview.isNativePreviewOpen
-  }, [isAnyPreviewOpenRef, nativePreview.isNativePreviewOpen, osmd.isOsmdPreviewOpen])
+    isAnyPreviewOpenRef.current = isWorkspaceBlocked || osmd.isOsmdPreviewOpen || nativePreview.isNativePreviewOpen
+  }, [isAnyPreviewOpenRef, isWorkspaceBlocked, nativePreview.isNativePreviewOpen, osmd.isOsmdPreviewOpen])
 
   const notation = useNotationPaletteController({
     ...notationPaletteController,
@@ -83,7 +85,7 @@ export function useScoreEditorUiController(params: {
 
   useKeyboardCommandController({
     ...keyboardCommandController,
-    isAnyPreviewOpen: osmd.isOsmdPreviewOpen || nativePreview.isNativePreviewOpen,
+    isAnyPreviewOpen: isWorkspaceBlocked || osmd.isOsmdPreviewOpen || nativePreview.isNativePreviewOpen,
   })
 
   return {

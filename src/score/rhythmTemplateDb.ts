@@ -1,4 +1,8 @@
-import initSqlJs from 'sql.js'
+import {
+  createBundledDatabaseInstance,
+  queryRows,
+  type SqlJsDatabase,
+} from '../database/sqliteRuntime'
 
 export type RhythmTemplateRow = {
   id: string
@@ -17,13 +21,6 @@ export type AccompanimentOptionRow = {
   specialTags: string
 }
 
-const RHYTHM_DB_ASSET_PATH = `${import.meta.env.BASE_URL}rhythm-db/app_data.db`
-const RHYTHM_DB_WASM_PATH = `${import.meta.env.BASE_URL}rhythm-db/sql-wasm.wasm`
-
-type SqlJsModule = Awaited<ReturnType<typeof initSqlJs>>
-type SqlJsDatabase = InstanceType<SqlJsModule['Database']>
-
-let sqlJsPromise: Promise<SqlJsModule> | null = null
 let databasePromise: Promise<SqlJsDatabase> | null = null
 
 function splitTags(value: string | number | null | undefined): string[] {
@@ -34,25 +31,9 @@ function splitTags(value: string | number | null | undefined): string[] {
     .filter((entry) => entry.length > 0)
 }
 
-async function loadSqlJs(): Promise<SqlJsModule> {
-  if (sqlJsPromise) return sqlJsPromise
-  sqlJsPromise = initSqlJs({
-    locateFile: () => RHYTHM_DB_WASM_PATH,
-  })
-  return sqlJsPromise
-}
-
 async function loadDatabase(): Promise<SqlJsDatabase> {
   if (databasePromise) return databasePromise
-  databasePromise = (async () => {
-    const SQL = await loadSqlJs()
-    const response = await fetch(RHYTHM_DB_ASSET_PATH)
-    if (!response.ok) {
-      throw new Error(`无法加载律动数据库：${response.status}`)
-    }
-    const bytes = new Uint8Array(await response.arrayBuffer())
-    return new SQL.Database(bytes)
-  })()
+  databasePromise = createBundledDatabaseInstance()
   return databasePromise
 }
 
@@ -89,30 +70,29 @@ export function collectRhythmTemplateTagSets(rows: RhythmTemplateRow[]): {
 
 export async function queryRhythmTemplateRowsByDurationCombo(durationCombo: string): Promise<RhythmTemplateRow[]> {
   const database = await loadDatabase()
-  const result = database.exec(
+  const values = queryRows(
+    database,
     `SELECT id, name, difficulty_tags, style_tags, pattern_data, total_duration, duration_combo
      FROM "律动模板"
      WHERE duration_combo = ?
      ORDER BY created_at DESC`,
     [durationCombo],
   )
-  const values = result[0]?.values ?? []
 
-  return values.map((rowValues) => {
-    const row = rowValues as Array<string | number | Uint8Array | null>
+  return values.map((row) => {
     return {
-      id: String(row[0] ?? ''),
-      name: String(row[1] ?? ''),
-      difficultyTags: splitTags((row[2] as string | null | undefined) ?? null),
-      styleTags: splitTags((row[3] as string | null | undefined) ?? null),
-      patternData: String(row[4] ?? ''),
+      id: String(row.id ?? ''),
+      name: String(row.name ?? ''),
+      difficultyTags: splitTags((row.difficulty_tags as string | null | undefined) ?? null),
+      styleTags: splitTags((row.style_tags as string | null | undefined) ?? null),
+      patternData: String(row.pattern_data ?? ''),
       totalDuration:
-        typeof row[5] === 'number'
-          ? row[5]
-          : row[5] === null || row[5] === undefined || row[5] === ''
+        typeof row.total_duration === 'number'
+          ? row.total_duration
+          : row.total_duration === null || row.total_duration === undefined || row.total_duration === ''
             ? null
-            : Number(row[5]),
-      durationCombo: row[6] === null || row[6] === undefined ? null : String(row[6]),
+            : Number(row.total_duration),
+      durationCombo: row.duration_combo === null || row.duration_combo === undefined ? null : String(row.duration_combo),
     }
   })
 }
@@ -182,8 +162,8 @@ export async function fetchNotesFromRhythmLibrary(params: {
     }
 
     sql += 'ORDER BY created_at DESC LIMIT 1'
-    const result = database.exec(sql, sqlParams)
-    const matched = result[0]?.values?.[0]?.[0]
+    const result = queryRows(database, sql, sqlParams)
+    const matched = result[0]?.notes
     if (typeof matched === 'string' && matched.trim().length > 0) {
       return matched.trim()
     }
@@ -225,18 +205,16 @@ export async function queryAccompanimentOptionRows(params: {
     sql += 'ORDER BY created_at DESC LIMIT ?'
     sqlParams.push(Math.max(1, Math.round(limit)))
 
-    const result = database.exec(sql, sqlParams)
-    const matchedRows = result[0]?.values ?? []
-    matchedRows.forEach((rawRow) => {
-      const row = rawRow as Array<string | number | Uint8Array | null>
-      const notes = String(row[0] ?? '').trim()
+    const matchedRows = queryRows(database, sql, sqlParams)
+    matchedRows.forEach((row) => {
+      const notes = String(row.notes ?? '').trim()
       if (!notes || seenNotes.has(notes)) return
       seenNotes.add(notes)
       rows.push({
         notes,
-        chordType: String(row[1] ?? chordType),
+        chordType: String(row.chord_type ?? chordType),
         sourceChordType: chordType,
-        specialTags: String(row[2] ?? ''),
+        specialTags: String(row.special_tags ?? ''),
       })
     })
 

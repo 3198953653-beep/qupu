@@ -13,8 +13,9 @@ export function useScoreEditorUiRuntime(params: {
   coreEditing: ReturnType<typeof useScoreCoreEditingController>
   audioPreview: ReturnType<typeof useScoreAudioPreviewController>
   initialTrebleNotes: ScoreNote[]
+  isWorkspaceBlocked?: boolean
 }) {
-  const { appState, editorRefs, layout, coreEditing, audioPreview, initialTrebleNotes } = params
+  const { appState, editorRefs, layout, coreEditing, audioPreview, initialTrebleNotes, isWorkspaceBlocked = false } = params
 
   return useScoreEditorUiController({
     notes: appState.notes,
@@ -110,6 +111,7 @@ export function useScoreEditorUiRuntime(params: {
       showNoteHeadJianpuEnabled: appState.showNoteHeadJianpuEnabled,
       widthProbeRendererRef: editorRefs.widthProbeRendererRef,
     },
+    isWorkspaceBlocked,
     isOsmdPreviewOpenRef: editorRefs.isOsmdPreviewOpenRef,
     isAnyPreviewOpenRef: editorRefs.isAnyPreviewOpenRef,
     notationPaletteController: {

@@ -34,6 +34,7 @@ export function useScoreInteractionRuntimeController(params: {
   backend: number
   previewDefaultAccidentalOffsetPx: number
   previewStartThresholdPx: number
+  isWorkspaceBlocked?: boolean
 }) {
   const {
     appState,
@@ -47,6 +48,7 @@ export function useScoreInteractionRuntimeController(params: {
     backend,
     previewDefaultAccidentalOffsetPx,
     previewStartThresholdPx,
+    isWorkspaceBlocked = false,
   } = params
 
   const audioPreview = useScoreAudioPreviewController({
@@ -117,6 +119,7 @@ export function useScoreInteractionRuntimeController(params: {
     coreEditing,
     audioPreview,
     initialTrebleNotes,
+    isWorkspaceBlocked,
   })
 
   const playbackBridge = useScorePlaybackRuntimeBridge({

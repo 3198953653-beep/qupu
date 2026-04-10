@@ -6,6 +6,43 @@
   gap: 1rem;
 }
 
+.workspace-switcher {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.9rem 0.95rem;
+  border: 1px solid #d6e3ea;
+  border-radius: 18px;
+  background: rgba(252, 254, 255, 0.94);
+  box-shadow: 0 18px 40px -34px rgba(14, 42, 63, 0.66);
+  backdrop-filter: blur(12px);
+}
+
+.workspace-switcher button {
+  border: 1px solid #c6d4dd;
+  background: #fcfdff;
+  color: #123246;
+  border-radius: 999px;
+  font-weight: 700;
+  padding: 0.58rem 1.15rem;
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.workspace-switcher button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 16px -8px rgba(18, 50, 70, 0.45);
+  background: #f4fbff;
+}
+
+.workspace-switcher button.is-active {
+  border-color: #2f89ba;
+  background: #e8f5fc;
+  color: #0f5f88;
+}
+
 .selection-highlight-opacity-row {
   padding: 0.7rem 0.8rem;
   border: 1px solid #d6e0e5;
@@ -2466,5 +2503,587 @@
   .rhythm-template-panel-title {
     display: grid;
     gap: 0.35rem;
+  }
+}
+
+.app-shell--database {
+  max-width: min(1600px, calc(100vw - 20px));
+  padding: 0 10px 24px;
+}
+
+.editor-workspace {
+  display: grid;
+  gap: 1rem;
+}
+
+.editor-workspace[hidden],
+.database-workspace[hidden] {
+  display: none !important;
+}
+
+.database-workspace {
+  display: grid;
+  gap: 1rem;
+  width: 100%;
+}
+
+.database-workspace-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.05rem;
+  border: 1px solid #d7e4ec;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #fbfdff 0%, #f5fbff 100%);
+  box-shadow: 0 18px 38px -32px rgba(13, 46, 71, 0.62);
+}
+
+.database-workspace-title {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.database-workspace-title h2 {
+  margin: 0;
+  color: #16384b;
+  font-size: 1.2rem;
+}
+
+.database-workspace-title p {
+  margin: 0;
+  color: #5f7788;
+  font-size: 0.88rem;
+}
+
+.database-inline-hint {
+  color: #8a5b19;
+}
+
+.database-workspace-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.database-source-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.28rem 0.7rem;
+  border-radius: 999px;
+  background: #e9f4ff;
+  color: #154a73;
+  border: 1px solid #bed7ec;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.database-workspace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.database-workspace-actions button,
+.database-toolbar button,
+.database-pagination-actions button,
+.database-modal-card button,
+.database-top-tabs button,
+.database-mode-toggle button {
+  border: 1px solid #c6d6e1;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #16384b;
+  font-weight: 700;
+  padding: 0.52rem 0.92rem;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+
+.database-workspace-actions button:hover,
+.database-toolbar button:hover,
+.database-pagination-actions button:hover,
+.database-modal-card button:hover,
+.database-top-tabs button:hover,
+.database-mode-toggle button:hover {
+  background: #f5fbff;
+  border-color: #9fc2d8;
+  transform: translateY(-1px);
+}
+
+.database-workspace-actions button:disabled,
+.database-toolbar button:disabled,
+.database-pagination-actions button:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.database-primary-button {
+  background: #1d6ac7 !important;
+  border-color: #1556a6 !important;
+  color: #ffffff !important;
+}
+
+.database-primary-button:hover:not(:disabled) {
+  background: #195daf !important;
+  border-color: #124982 !important;
+}
+
+.database-top-tabs,
+.database-mode-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.database-top-tabs button.is-active,
+.database-mode-toggle button.is-active,
+.database-toolbar button.is-active {
+  background: #e8f4ff;
+  border-color: #95c0e2;
+  color: #16507b;
+  box-shadow: inset 0 0 0 1px rgba(22, 80, 123, 0.12);
+}
+
+.database-message {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 16px;
+  border: 1px solid #d7e4ec;
+  background: #f7fbff;
+  color: #21495f;
+}
+
+.database-message button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.database-message--success {
+  border-color: #c7e8d7;
+  background: #f3fff8;
+  color: #0f6a41;
+}
+
+.database-message--error {
+  border-color: #f0c5c5;
+  background: #fff6f6;
+  color: #8a3641;
+}
+
+.database-view-panel,
+.database-entry-panel {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  border: 1px solid #d9e6ef;
+  border-radius: 20px;
+  background: #fbfdff;
+}
+
+.database-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.database-filter-grid--notes {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.database-filter-grid label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.database-filter-grid span,
+.database-entry-status,
+.database-pagination-status,
+.database-multi-select-label {
+  color: #466174;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.database-filter-grid input,
+.database-filter-grid select,
+.database-entry-toolbar input,
+.database-table input,
+.database-table select,
+.database-table textarea {
+  width: 100%;
+  border: 1px solid #ccdbe5;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #16384b;
+  font-size: 0.84rem;
+  padding: 0.5rem 0.6rem;
+  box-sizing: border-box;
+}
+
+.database-table textarea {
+  resize: vertical;
+  min-height: 60px;
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+
+.database-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.database-toolbar .is-danger,
+.database-context-menu .is-danger {
+  color: #8a3641;
+  border-color: #e7b9c0;
+  background: #fff6f8;
+}
+
+.database-table-wrap {
+  overflow: auto;
+  border: 1px solid #dbe7ef;
+  border-radius: 16px;
+  background: #ffffff;
+}
+
+.database-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 1120px;
+}
+
+.database-table th,
+.database-table td {
+  border-bottom: 1px solid #ecf2f7;
+  padding: 0.65rem;
+  vertical-align: top;
+  text-align: left;
+}
+
+.database-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f6fafc;
+  color: #24465a;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.database-table tbody tr:hover {
+  background: #f7fbff;
+}
+
+.database-table tbody tr.is-selected {
+  background: #eef6ff;
+}
+
+.database-header-filter-row th {
+  top: 40px;
+  background: #fbfdff;
+}
+
+.database-sort-indicator {
+  margin-left: 0.28rem;
+  color: #1c6ca8;
+}
+
+.database-inline-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding-top: 0.3rem;
+}
+
+.database-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.database-pagination-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.database-pagination-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.database-empty-state,
+.database-loading-state {
+  padding: 1rem;
+  border: 1px dashed #cad9e4;
+  border-radius: 16px;
+  background: #f7fbff;
+  color: #486173;
+}
+
+.database-entry-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(5, auto);
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.database-entry-file-path {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #ccdbe5;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #315468;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 0.82rem;
+}
+
+.database-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 0.9rem;
+}
+
+.database-preview-card {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border: 1px solid #d9e6ef;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+  cursor: pointer;
+}
+
+.database-preview-card.is-selected {
+  border-color: #8fbce1;
+  box-shadow: inset 0 0 0 1px rgba(22, 80, 123, 0.12);
+}
+
+.database-preview-card-header,
+.database-preview-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.55rem;
+}
+
+.database-preview-card-header strong {
+  color: #16384b;
+}
+
+.database-preview-card-header span,
+.database-preview-card-meta span,
+.database-preview-card-notes {
+  color: #5f7788;
+  font-size: 0.82rem;
+}
+
+.database-note-preview-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid #dbe7ef;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.database-note-preview-canvas {
+  display: block;
+}
+
+.database-multi-select {
+  position: relative;
+}
+
+.database-multi-select summary {
+  list-style: none;
+  cursor: pointer;
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #ccdbe5;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.database-multi-select summary::-webkit-details-marker {
+  display: none;
+}
+
+.database-multi-select-value {
+  color: #16384b;
+  font-size: 0.84rem;
+  min-height: 1.25rem;
+}
+
+.database-multi-select-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 12;
+  display: grid;
+  gap: 0.4rem;
+  max-height: 220px;
+  overflow: auto;
+  padding: 0.65rem;
+  border: 1px solid #d7e4ec;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 18px 36px -28px rgba(9, 38, 62, 0.72);
+}
+
+.database-multi-select-option {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #23475d;
+  font-size: 0.83rem;
+}
+
+.database-context-menu {
+  position: fixed;
+  z-index: 120;
+  display: grid;
+  gap: 0.25rem;
+  min-width: 160px;
+  padding: 0.4rem;
+  border: 1px solid #d7e4ec;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 20px 40px -30px rgba(9, 38, 62, 0.78);
+}
+
+.database-context-menu button {
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #23475d;
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  cursor: pointer;
+}
+
+.database-context-menu button:hover {
+  background: #f4f9fd;
+}
+
+.database-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: grid;
+  place-items: center;
+  background: rgba(10, 18, 28, 0.34);
+  backdrop-filter: blur(3px);
+  padding: 1rem;
+}
+
+.database-modal-card {
+  width: min(920px, calc(100vw - 1rem));
+  max-height: min(720px, calc(100vh - 1rem));
+  overflow: auto;
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  border: 1px solid #d9e6ef;
+  border-radius: 20px;
+  background: #ffffff;
+}
+
+.database-modal-header,
+.database-modal-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.database-modal-header h3 {
+  margin: 0;
+  color: #16384b;
+}
+
+.database-modal-header p {
+  margin: 0.24rem 0 0;
+  color: #5f7788;
+  font-size: 0.84rem;
+}
+
+.database-tag-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.database-tag-column {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.9rem;
+  border: 1px solid #d9e6ef;
+  border-radius: 16px;
+  background: #fbfdff;
+}
+
+.database-tag-column-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.database-tag-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.database-tag-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid #dbe7ef;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.database-tag-item-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+@media (max-width: 1080px) {
+  .database-workspace-header,
+  .database-modal-header,
+  .database-modal-footer {
+    display: grid;
+  }
+
+  .database-entry-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .database-filter-grid,
+  .database-filter-grid--notes,
+  .database-tag-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
