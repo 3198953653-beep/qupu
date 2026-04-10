@@ -150,6 +150,7 @@ type ApplyUnifiedTimeAxisSpacingParams = {
   measureEndBarX?: number
   publicAxisLayout?: PublicAxisLayout | null
   spacingAnchorTicks?: number[] | null
+  segmentStretchScaleOverride?: number | null
   preferMeasureBarlineAxis?: boolean
   preferMeasureEndBarlineAxis?: boolean
   enableEdgeGapCap?: boolean
@@ -2112,6 +2113,7 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     measureEndBarX,
     publicAxisLayout = null,
     spacingAnchorTicks = null,
+    segmentStretchScaleOverride = null,
     preferMeasureBarlineAxis = false,
     preferMeasureEndBarlineAxis = false,
   } = params
@@ -2228,11 +2230,15 @@ export function applyUnifiedTimeAxisSpacing(params: ApplyUnifiedTimeAxisSpacingP
     anchorSpanPx: intrinsicSpacingWeights.anchorSpanWeight,
     trailingGapPx: intrinsicSpacingWeights.trailingTailWeight,
   })
+  const resolvedSegmentStretchScale =
+    typeof segmentStretchScaleOverride === 'number' && Number.isFinite(segmentStretchScaleOverride)
+      ? Math.max(0, segmentStretchScaleOverride)
+      : minWidthStretchPlan.segmentStretchScale
   const spacingWeights = buildMeasureSpacingWeights({
     spacingTicks: onsetTicks,
     measureTicks: measureTotalTicks,
     spacingConfig,
-    segmentStretchScale: minWidthStretchPlan.segmentStretchScale,
+    segmentStretchScale: resolvedSegmentStretchScale,
   })
   const axisStart = axisBoundaryStart + Math.max(0, spacingWeights.leadingGapPx)
   const baseTargetXByOnset = buildBaseTargetXByOnset({

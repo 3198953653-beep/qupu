@@ -17,6 +17,7 @@ type NativePreviewPageCanvasProps = Pick<
   | 'grandStaffLayoutMetrics'
   | 'showInScoreMeasureNumbers'
   | 'showNoteHeadJianpuEnabled'
+  | 'onNativePreviewPageRenderedDiagnostics'
 >
 
 export function NativePreviewPageCanvas(props: NativePreviewPageCanvasProps) {
@@ -32,6 +33,7 @@ export function NativePreviewPageCanvas(props: NativePreviewPageCanvasProps) {
     grandStaffLayoutMetrics,
     showInScoreMeasureNumbers,
     showNoteHeadJianpuEnabled,
+    onNativePreviewPageRenderedDiagnostics,
   } = props
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -63,22 +65,28 @@ export function NativePreviewPageCanvas(props: NativePreviewPageCanvasProps) {
     canvas.style.height = `${A4_PAGE_HEIGHT}px`
 
     const rawContext = canvas.getContext('2d')
+    const notationScale =
+      currentPage && Number.isFinite(currentPage.notationScale) && currentPage.notationScale > 0
+        ? currentPage.notationScale
+        : 1
     if (rawContext) {
-      rawContext.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0)
+      rawContext.setTransform(devicePixelRatio * notationScale, 0, 0, devicePixelRatio * notationScale, 0, 0)
     }
     const context = renderer.getContext()
     const context2D = (context as unknown as { context2D?: CanvasRenderingContext2D }).context2D
     if (context2D && context2D !== rawContext) {
-      context2D.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0)
+      context2D.setTransform(devicePixelRatio * notationScale, 0, 0, devicePixelRatio * notationScale, 0, 0)
     }
 
-    renderVisibleSystems({
+    const pageWidthNotationPx = notationScale > 0 ? A4_PAGE_WIDTH / notationScale : A4_PAGE_WIDTH
+    const pageHeightNotationPx = notationScale > 0 ? A4_PAGE_HEIGHT / notationScale : A4_PAGE_HEIGHT
+    const renderResult = renderVisibleSystems({
       context,
       measurePairs,
       pedalSpans,
       chordRulerEntriesByPair,
-      scoreWidth: A4_PAGE_WIDTH,
-      scoreHeight: A4_PAGE_HEIGHT,
+      scoreWidth: pageWidthNotationPx,
+      scoreHeight: pageHeightNotationPx,
       systemRanges: currentPage?.systemRanges ?? [],
       visibleSystemRange: currentPage && currentPage.systemRanges.length > 0
         ? { start: 0, end: currentPage.systemRanges.length - 1 }
@@ -116,6 +124,9 @@ export function NativePreviewPageCanvas(props: NativePreviewPageCanvasProps) {
       dragPreview: null,
       systemTopOverridesPx: currentPage?.systemTopPxBySystemIndex ?? null,
     })
+    if (currentPage) {
+      onNativePreviewPageRenderedDiagnostics(currentPage.pageIndex, renderResult.nextMeasureLayouts)
+    }
   }, [
     chordRulerEntriesByPair,
     currentPage,
@@ -128,6 +139,7 @@ export function NativePreviewPageCanvas(props: NativePreviewPageCanvasProps) {
     showNoteHeadJianpuEnabled,
     supplementalSpacingTicksByPair,
     timeAxisSpacingConfig,
+    onNativePreviewPageRenderedDiagnostics,
   ])
 
   return <canvas ref={canvasRef} className="native-preview-page-canvas" />

@@ -395,6 +395,8 @@ export type MeasureLayout = {
   spacingOccupiedLeftX?: number
   spacingOccupiedRightX?: number
   spacingAnchorGapFirstToLastPx?: number
+  timelineStretchScale?: number
+  previewSpacingAnchorTicks?: number[] | null
   spacingOnsetReserves?: Array<{
     onsetTicks: number
     baseX: number
@@ -440,6 +442,8 @@ export type MeasureFrame = {
   contentMeasureWidth?: number
   renderedMeasureWidth?: number
   actualStartDecorationWidthPx?: number
+  timelineStretchScale?: number
+  previewSpacingAnchorTicks?: number[] | null
 }
 
 export type EffectiveMeasureBoundary = {

@@ -1,12 +1,24 @@
-import { useCallback, useEffect, useMemo, type MutableRefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, type MutableRefObject } from 'react'
 import { Renderer } from 'vexflow'
 import type { ChordRulerEntry } from '../chordRuler'
 import type { GrandStaffLayoutMetrics } from '../grandStaffLayout'
 import { buildNativePreviewLayout, type NativePreviewPageLayout } from '../layout/nativePreviewLayout'
 import type { TimeAxisSpacingConfig } from '../layout/timeAxisSpacing'
-import type { MeasurePair, MusicXmlMetadata, PedalSpan, TimeSignature } from '../types'
+import type { MeasureLayout, MeasurePair, MusicXmlMetadata, PedalSpan, TimeSignature } from '../types'
 import { SCORE_RENDER_BACKEND } from './horizontalScoreLayoutShared'
 import { useNativePreviewSettings } from './useNativePreviewSettings'
+
+type NativePreviewRenderedMeasureDiagnostics = {
+  pairIndex: number
+  renderedMeasureWidthPx: number
+  contentMeasureWidthPx: number
+  effectiveLeftGapPx: number | null
+  effectiveRightGapPx: number | null
+  trailingGapPx: number | null
+  spacingAnchorGapFirstToLastPx: number | null
+  timelineStretchScale: number | null
+  previewSpacingAnchorTicks: number[] | null
+}
 
 export function useNativePreviewController(params: {
   measurePairs: MeasurePair[]
@@ -28,6 +40,8 @@ export function useNativePreviewController(params: {
   nativePreviewPageIndex: number
   nativePreviewPageCount: number
   nativePreviewShowPageNumbers: boolean
+  nativePreviewZoomDraftPercent: number
+  safeNativePreviewZoomPercent: number
   safeNativePreviewPaperScalePercent: number
   safeNativePreviewHorizontalMarginPx: number
   safeNativePreviewFirstPageTopMarginPx: number
@@ -35,6 +49,7 @@ export function useNativePreviewController(params: {
   safeNativePreviewBottomMarginPx: number
   safeNativePreviewMinEighthGapPx: number
   safeNativePreviewMinGrandStaffGapPx: number
+  nativePreviewNotationScale: number
   nativePreviewPaperScale: number
   nativePreviewPaperWidthPx: number
   nativePreviewPaperHeightPx: number
@@ -50,10 +65,13 @@ export function useNativePreviewController(params: {
   nativePreviewGrandStaffLayoutMetrics: GrandStaffLayoutMetrics
   nativePreviewShowInScoreMeasureNumbers: boolean
   nativePreviewShowNoteHeadJianpuEnabled: boolean
+  onNativePreviewPageRenderedDiagnostics: (pageIndex: number, measureLayouts: Map<number, MeasureLayout>) => void
   openNativePreview: () => void
   closeNativePreview: () => void
   goToPrevNativePreviewPage: () => void
   goToNextNativePreviewPage: () => void
+  commitNativePreviewZoomPercent: (nextValue: number) => void
+  scheduleNativePreviewZoomPercentCommit: (nextValue: number) => void
   onNativePreviewPaperScalePercentChange: (nextValue: number) => void
   onNativePreviewHorizontalMarginPxChange: (nextValue: number) => void
   onNativePreviewFirstPageTopMarginPxChange: (nextValue: number) => void
@@ -80,6 +98,8 @@ export function useNativePreviewController(params: {
   } = params
 
   const settings = useNativePreviewSettings()
+  const nativePreviewRenderedDiagnosticsByPageRef = useRef<Map<number, NativePreviewRenderedMeasureDiagnostics[]>>(new Map())
+  const lastNativePreviewPagesRef = useRef<NativePreviewPageLayout[] | null>(null)
 
   const getWidthProbeContext = useCallback((): ReturnType<Renderer['getContext']> | null => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return null
@@ -115,6 +135,7 @@ export function useNativePreviewController(params: {
           supplementalSpacingTicksByPair,
           spacingConfig: timeAxisSpacingConfig,
           grandStaffLayoutMetrics,
+          notationScale: settings.safeNativePreviewZoomPercent / 100,
           horizontalMarginPx: settings.safeNativePreviewHorizontalMarginPx,
           firstPageTopMarginPx: settings.safeNativePreviewFirstPageTopMarginPx,
           topMarginPx: settings.safeNativePreviewTopMarginPx,
@@ -144,10 +165,16 @@ export function useNativePreviewController(params: {
     settings.safeNativePreviewMinEighthGapPx,
     settings.safeNativePreviewMinGrandStaffGapPx,
     settings.safeNativePreviewTopMarginPx,
+    settings.safeNativePreviewZoomPercent,
     showNoteHeadJianpuEnabled,
     supplementalSpacingTicksByPair,
     timeAxisSpacingConfig,
   ])
+
+  if (lastNativePreviewPagesRef.current !== nativePreviewLayout.pages) {
+    nativePreviewRenderedDiagnosticsByPageRef.current = new Map()
+    lastNativePreviewPagesRef.current = nativePreviewLayout.pages
+  }
 
   useEffect(() => {
     settings.setNativePreviewError(nativePreviewLayout.error)
@@ -185,23 +212,74 @@ export function useNativePreviewController(params: {
     settings.setIsNativePreviewOpen(false)
   }, [settings.setIsNativePreviewOpen])
 
+  const onNativePreviewPageRenderedDiagnostics = useCallback((
+    pageIndex: number,
+    measureLayouts: Map<number, MeasureLayout>,
+  ) => {
+    const notationScale = settings.safeNativePreviewZoomPercent / 100
+    const nextDiagnostics: NativePreviewRenderedMeasureDiagnostics[] = []
+    measureLayouts.forEach((layout, pairIndex) => {
+      nextDiagnostics.push({
+        pairIndex,
+        renderedMeasureWidthPx: layout.renderedMeasureWidth * notationScale,
+        contentMeasureWidthPx: layout.contentMeasureWidth * notationScale,
+        effectiveLeftGapPx:
+          typeof layout.effectiveLeftGapPx === 'number' && Number.isFinite(layout.effectiveLeftGapPx)
+            ? layout.effectiveLeftGapPx * notationScale
+            : null,
+        effectiveRightGapPx:
+          typeof layout.effectiveRightGapPx === 'number' && Number.isFinite(layout.effectiveRightGapPx)
+            ? layout.effectiveRightGapPx * notationScale
+            : null,
+        trailingGapPx:
+          typeof layout.trailingGapPx === 'number' && Number.isFinite(layout.trailingGapPx)
+            ? layout.trailingGapPx * notationScale
+            : null,
+        spacingAnchorGapFirstToLastPx:
+          typeof layout.spacingAnchorGapFirstToLastPx === 'number' &&
+          Number.isFinite(layout.spacingAnchorGapFirstToLastPx)
+            ? layout.spacingAnchorGapFirstToLastPx * notationScale
+            : null,
+        timelineStretchScale:
+          typeof layout.timelineStretchScale === 'number' && Number.isFinite(layout.timelineStretchScale)
+            ? layout.timelineStretchScale
+            : null,
+        previewSpacingAnchorTicks:
+          layout.previewSpacingAnchorTicks && layout.previewSpacingAnchorTicks.length > 0
+            ? [...layout.previewSpacingAnchorTicks]
+            : null,
+      })
+    })
+    nativePreviewRenderedDiagnosticsByPageRef.current.set(pageIndex, nextDiagnostics)
+  }, [settings.safeNativePreviewZoomPercent])
+
   const dumpNativePreviewLayoutDiagnostics = useCallback(() => {
     return nativePreviewLayout.pages.map((page) => ({
       pageIndex: page.pageIndex,
       pageNumber: page.pageNumber,
+      notationScale: page.notationScale,
       actualSystemGapPx: page.actualSystemGapPx,
+      actualSystemGapNotationPx: page.actualSystemGapNotationPx,
       minEquivalentEighthGapPx: page.minEquivalentEighthGapPx,
+      minEquivalentEighthGapNotationPx: page.minEquivalentEighthGapNotationPx,
       systemRanges: page.systemRanges.map((range) => ({ ...range })),
       systems: page.systemLayouts.map((system) => ({
         range: { ...system.range },
         equivalentEighthGapPx: system.equivalentEighthGapPx,
+        equivalentEighthGapNotationPx: system.equivalentEighthGapNotationPx,
         elasticScale: system.elasticScale,
         usableWidthPx: system.usableWidthPx,
+        usableWidthNotationPx: system.usableWidthNotationPx,
         fixedWidthTotalPx: system.fixedWidthTotalPx,
+        fixedWidthTotalNotationPx: system.fixedWidthTotalNotationPx,
         elasticWidthTotalPx: system.elasticWidthTotalPx,
+        elasticWidthTotalNotationPx: system.elasticWidthTotalNotationPx,
         totalWidthPx: system.totalWidthPx,
+        totalWidthNotationPx: system.totalWidthNotationPx,
         measures: system.measures.map((measure) => ({ ...measure })),
       })),
+      renderedMeasures:
+        nativePreviewRenderedDiagnosticsByPageRef.current.get(page.pageIndex)?.map((measure) => ({ ...measure })) ?? [],
     }))
   }, [nativePreviewLayout.pages])
 
@@ -212,6 +290,8 @@ export function useNativePreviewController(params: {
     nativePreviewPageIndex: settings.nativePreviewPageIndex,
     nativePreviewPageCount: Math.max(1, nativePreviewLayout.pages.length),
     nativePreviewShowPageNumbers: settings.nativePreviewShowPageNumbers,
+    nativePreviewZoomDraftPercent: settings.nativePreviewZoomDraftPercent,
+    safeNativePreviewZoomPercent: settings.safeNativePreviewZoomPercent,
     safeNativePreviewPaperScalePercent: settings.safeNativePreviewPaperScalePercent,
     safeNativePreviewHorizontalMarginPx: settings.safeNativePreviewHorizontalMarginPx,
     safeNativePreviewFirstPageTopMarginPx: settings.safeNativePreviewFirstPageTopMarginPx,
@@ -219,6 +299,7 @@ export function useNativePreviewController(params: {
     safeNativePreviewBottomMarginPx: settings.safeNativePreviewBottomMarginPx,
     safeNativePreviewMinEighthGapPx: settings.safeNativePreviewMinEighthGapPx,
     safeNativePreviewMinGrandStaffGapPx: settings.safeNativePreviewMinGrandStaffGapPx,
+    nativePreviewNotationScale: settings.safeNativePreviewZoomPercent / 100,
     nativePreviewPaperScale: settings.nativePreviewPaperScale,
     nativePreviewPaperWidthPx: settings.nativePreviewPaperWidthPx,
     nativePreviewPaperHeightPx: settings.nativePreviewPaperHeightPx,
@@ -238,6 +319,8 @@ export function useNativePreviewController(params: {
     closeNativePreview,
     goToPrevNativePreviewPage: settings.goToPrevNativePreviewPage,
     goToNextNativePreviewPage: settings.goToNextNativePreviewPage,
+    commitNativePreviewZoomPercent: settings.commitNativePreviewZoomPercent,
+    scheduleNativePreviewZoomPercentCommit: settings.scheduleNativePreviewZoomPercentCommit,
     onNativePreviewPaperScalePercentChange: settings.onNativePreviewPaperScalePercentChange,
     onNativePreviewHorizontalMarginPxChange: settings.onNativePreviewHorizontalMarginPxChange,
     onNativePreviewFirstPageTopMarginPxChange: settings.onNativePreviewFirstPageTopMarginPxChange,
@@ -246,6 +329,7 @@ export function useNativePreviewController(params: {
     onNativePreviewMinEighthGapPxChange: settings.onNativePreviewMinEighthGapPxChange,
     onNativePreviewMinGrandStaffGapPxChange: settings.onNativePreviewMinGrandStaffGapPxChange,
     onNativePreviewShowPageNumbersChange: settings.onNativePreviewShowPageNumbersChange,
+    onNativePreviewPageRenderedDiagnostics,
     dumpNativePreviewLayoutDiagnostics,
   }
 }

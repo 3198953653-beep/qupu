@@ -18,20 +18,51 @@ type NativePreviewSystemRange = {
 type NativePreviewSystemDiagnostics = {
   range: NativePreviewSystemRange
   equivalentEighthGapPx: number
+  equivalentEighthGapNotationPx: number
   elasticScale: number
   usableWidthPx: number
+  usableWidthNotationPx: number
   fixedWidthTotalPx: number
+  fixedWidthTotalNotationPx: number
   elasticWidthTotalPx: number
+  elasticWidthTotalNotationPx: number
   totalWidthPx: number
+  totalWidthNotationPx: number
+  measures: Array<{
+    pairIndex: number
+    measureWidth: number
+    contentMeasureWidth: number
+    fixedWidthPx: number
+    elasticWidthPx: number
+    actualStartDecorationWidthPx: number
+    timelineStretchScale: number
+    previewSpacingAnchorTicks: number[] | null
+  }>
+}
+
+type NativePreviewRenderedMeasureDiagnostics = {
+  pairIndex: number
+  renderedMeasureWidthPx: number
+  contentMeasureWidthPx: number
+  effectiveLeftGapPx: number | null
+  effectiveRightGapPx: number | null
+  trailingGapPx: number | null
+  spacingAnchorGapFirstToLastPx: number | null
+  timelineStretchScale: number | null
+  previewSpacingAnchorTicks: number[] | null
 }
 
 type NativePreviewPageDiagnostics = {
   pageIndex: number
   pageNumber: number
+  notationScale: number
   actualSystemGapPx: number
+  actualSystemGapNotationPx: number
   minEquivalentEighthGapPx: number
+  minEquivalentEighthGapNotationPx: number
   systemRanges: NativePreviewSystemRange[]
   systems: NativePreviewSystemDiagnostics[]
+  renderedMeasures: NativePreviewRenderedMeasureDiagnostics[]
 }
 
 const DEV_HOST = '127.0.0.1'
@@ -164,6 +195,63 @@ ${measures}
 `
 }
 
+function buildSparseNativePreviewFixtureXml(): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC
+  "-//Recordare//DTD MusicXML 3.1 Partwise//EN"
+  "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <work>
+    <work-title>Native Preview Sparse Stretch</work-title>
+  </work>
+  <identification>
+    <creator type="composer">Codex Browser Test</creator>
+  </identification>
+  <part-list>
+    <score-part id="P1">
+      <part-name>Piano</part-name>
+    </score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <staves>2</staves>
+        <clef number="1"><sign>G</sign><line>2</line></clef>
+        <clef number="2"><sign>F</sign><line>4</line></clef>
+      </attributes>
+      <note>
+        <pitch><step>C</step><octave>5</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <rest/>
+        <duration>8</duration>
+        <type>half</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>G</step><octave>5</octave></pitch>
+        <duration>4</duration>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <rest/>
+        <duration>16</duration>
+        <type>whole</type>
+        <staff>2</staff>
+      </note>
+    </measure>
+  </part>
+</score-partwise>
+`
+}
+
 async function waitForDebugApi(page: Page): Promise<void> {
   await page.waitForFunction(() => {
     const api = (window as unknown as { __scoreDebug?: Record<string, unknown> }).__scoreDebug
@@ -230,11 +318,26 @@ function getSignature(pages: NativePreviewPageDiagnostics[]): string {
   return JSON.stringify(
     pages.map((page) => ({
       pageIndex: page.pageIndex,
+      notationScale: Number(page.notationScale.toFixed(3)),
       actualSystemGapPx: Number(page.actualSystemGapPx.toFixed(3)),
       ranges: page.systemRanges.map((range) => [range.startPairIndex, range.endPairIndexExclusive]),
       systems: page.systems.map((system) => ({
         range: [system.range.startPairIndex, system.range.endPairIndexExclusive],
         equivalentEighthGapPx: Number(system.equivalentEighthGapPx.toFixed(3)),
+        usableWidthPx: Number(system.usableWidthPx.toFixed(3)),
+        totalWidthPx: Number(system.totalWidthPx.toFixed(3)),
+      })),
+      renderedMeasures: page.renderedMeasures.map((measure) => ({
+        pairIndex: measure.pairIndex,
+        renderedMeasureWidthPx: Number(measure.renderedMeasureWidthPx.toFixed(3)),
+        spacingAnchorGapFirstToLastPx:
+          typeof measure.spacingAnchorGapFirstToLastPx === 'number'
+            ? Number(measure.spacingAnchorGapFirstToLastPx.toFixed(3))
+            : null,
+        timelineStretchScale:
+          typeof measure.timelineStretchScale === 'number'
+            ? Number(measure.timelineStretchScale.toFixed(5))
+            : null,
       })),
     })),
   )
@@ -249,12 +352,22 @@ async function waitForNativePreviewReady(page: Page): Promise<NativePreviewPageD
       }
     }).__scoreDebug
     if (!api || typeof api.dumpNativePreviewLayoutDiagnostics !== 'function') return false
-    const pages = api.dumpNativePreviewLayoutDiagnostics()
-    return Array.isArray(pages) && pages.length > 0 && pages.some((page) => page.systems.length > 0)
+      const pages = api.dumpNativePreviewLayoutDiagnostics()
+      return Array.isArray(pages) && pages.length > 0 && pages.some((page) => page.systems.length > 0)
   }, { timeout: 30_000 })
   await page.waitForFunction(() => {
     const canvas = document.querySelector('.native-preview-page-canvas') as HTMLCanvasElement | null
     return !!canvas && canvas.width > 0 && canvas.height > 0
+  }, { timeout: 20_000 })
+  await page.waitForFunction(() => {
+    const api = (window as unknown as {
+      __scoreDebug?: {
+        dumpNativePreviewLayoutDiagnostics: () => NativePreviewPageDiagnostics[]
+      }
+    }).__scoreDebug
+    if (!api || typeof api.dumpNativePreviewLayoutDiagnostics !== 'function') return false
+    const pages = api.dumpNativePreviewLayoutDiagnostics()
+    return Array.isArray(pages) && pages.some((page) => page.renderedMeasures.length > 0)
   }, { timeout: 20_000 })
   return dumpNativePreviewLayoutDiagnostics(page)
 }
@@ -264,6 +377,16 @@ async function setRangeValue(page: Page, selector: string, value: number): Promi
     const input = element as HTMLInputElement
     input.value = String(nextValue)
     input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  }, value)
+}
+
+async function setNativePreviewZoomValue(page: Page, value: number): Promise<void> {
+  await page.locator('#native-preview-zoom-range').evaluate((element, nextValue) => {
+    const input = element as HTMLInputElement
+    input.value = String(nextValue)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
     input.dispatchEvent(new Event('change', { bubbles: true }))
   }, value)
 }
@@ -285,11 +408,26 @@ async function waitForDiagnosticsChange(
       const nextSignature = JSON.stringify(
         pages.map((page) => ({
           pageIndex: page.pageIndex,
+          notationScale: Number(page.notationScale.toFixed(3)),
           actualSystemGapPx: Number(page.actualSystemGapPx.toFixed(3)),
           ranges: page.systemRanges.map((range) => [range.startPairIndex, range.endPairIndexExclusive]),
           systems: page.systems.map((system) => ({
             range: [system.range.startPairIndex, system.range.endPairIndexExclusive],
             equivalentEighthGapPx: Number(system.equivalentEighthGapPx.toFixed(3)),
+            usableWidthPx: Number(system.usableWidthPx.toFixed(3)),
+            totalWidthPx: Number(system.totalWidthPx.toFixed(3)),
+          })),
+          renderedMeasures: page.renderedMeasures.map((measure) => ({
+            pairIndex: measure.pairIndex,
+            renderedMeasureWidthPx: Number(measure.renderedMeasureWidthPx.toFixed(3)),
+            spacingAnchorGapFirstToLastPx:
+              typeof measure.spacingAnchorGapFirstToLastPx === 'number'
+                ? Number(measure.spacingAnchorGapFirstToLastPx.toFixed(3))
+                : null,
+            timelineStretchScale:
+              typeof measure.timelineStretchScale === 'number'
+                ? Number(measure.timelineStretchScale.toFixed(5))
+                : null,
           })),
         })),
       )
@@ -299,6 +437,36 @@ async function waitForDiagnosticsChange(
     { timeout: 30_000 },
   )
   return dumpNativePreviewLayoutDiagnostics(page)
+}
+
+async function waitForRenderedMeasure(page: Page, pairIndex: number): Promise<void> {
+  await page.waitForFunction(
+    (targetPairIndex) => {
+      const api = (window as unknown as {
+        __scoreDebug?: {
+          dumpNativePreviewLayoutDiagnostics: () => NativePreviewPageDiagnostics[]
+        }
+      }).__scoreDebug
+      if (!api || typeof api.dumpNativePreviewLayoutDiagnostics !== 'function') return false
+      const pages = api.dumpNativePreviewLayoutDiagnostics()
+      return Array.isArray(pages) && pages.some((pageItem) =>
+        pageItem.renderedMeasures.some((measure) => measure.pairIndex === targetPairIndex),
+      )
+    },
+    pairIndex,
+    { timeout: 20_000 },
+  )
+}
+
+function getRenderedMeasureDiagnostics(
+  pages: NativePreviewPageDiagnostics[],
+  pairIndex: number,
+): NativePreviewRenderedMeasureDiagnostics {
+  for (const page of pages) {
+    const found = page.renderedMeasures.find((measure) => measure.pairIndex === pairIndex)
+    if (found) return found
+  }
+  throw new Error(`Could not find rendered diagnostics for pair ${pairIndex}.`)
 }
 
 async function captureDebugArtifacts(page: Page, name: string): Promise<void> {
@@ -311,6 +479,7 @@ async function captureDebugArtifacts(page: Page, name: string): Promise<void> {
 
 async function run(): Promise<void> {
   const xmlText = buildNativePreviewFixtureXml(XML_MEASURE_COUNT)
+  const sparseXmlText = buildSparseNativePreviewFixtureXml()
   const server = startDevServer()
   let browser: import('playwright').Browser | null = null
 
@@ -338,8 +507,34 @@ async function run(): Promise<void> {
     const initialPageCount = initialDiagnostics.length
     const initialSystemCount = countSystems(initialDiagnostics)
 
+    await setNativePreviewZoomValue(page, 140)
+    const highZoomDiagnostics = await waitForDiagnosticsChange(page, initialSignature)
+    const highZoomSignature = getSignature(highZoomDiagnostics)
+
+    await setNativePreviewZoomValue(page, 70)
+    const lowZoomDiagnostics = await waitForDiagnosticsChange(page, highZoomSignature)
+    const lowZoomSignature = getSignature(lowZoomDiagnostics)
+
+    assert.ok(
+      highZoomDiagnostics.length > lowZoomDiagnostics.length ||
+      countSystems(highZoomDiagnostics) > countSystems(lowZoomDiagnostics),
+      'Higher notation zoom should increase page count or system count in native preview.',
+    )
+    assert.ok(
+      highZoomDiagnostics.every((pageItem) => Math.abs(pageItem.notationScale - 1.4) <= 0.001),
+      'High zoom diagnostics should report the expected notation scale.',
+    )
+    assert.ok(
+      lowZoomDiagnostics.every((pageItem) => Math.abs(pageItem.notationScale - 0.7) <= 0.001),
+      'Low zoom diagnostics should report the expected notation scale.',
+    )
+
+    await setNativePreviewZoomValue(page, 100)
+    const restoredZoomDiagnostics = await waitForDiagnosticsChange(page, lowZoomSignature)
+    const restoredZoomSignature = getSignature(restoredZoomDiagnostics)
+
     await setRangeValue(page, '#native-preview-min-eighth-gap-range', 36)
-    const highEighthDiagnostics = await waitForDiagnosticsChange(page, initialSignature)
+    const highEighthDiagnostics = await waitForDiagnosticsChange(page, restoredZoomSignature)
     const highEighthSignature = getSignature(highEighthDiagnostics)
 
     await setRangeValue(page, '#native-preview-min-eighth-gap-range', 14)
@@ -391,6 +586,52 @@ async function run(): Promise<void> {
     await assertHidden(pageNumber, 'Expected native preview page number overlay to hide when the toggle is disabled.')
     await dialog.locator('#native-preview-page-number-toggle').check()
     await assertVisible(pageNumber, 'Expected native preview page number overlay to reappear after re-enabling the toggle.')
+    if (highGrandStaffGapDiagnostics.length > 1) {
+      await dialog.getByRole('button', { name: '上一页' }).click()
+      await expectText(paginationLabel, `1 / ${highGrandStaffGapDiagnostics.length}`)
+    }
+
+    await dialog.getByRole('button', { name: '关闭' }).click()
+    await importMusicXml(page, sparseXmlText)
+    await page.getByRole('button', { name: '五线谱预览' }).click()
+    await waitForRenderedMeasure(page, 0)
+    const sparseInitialDiagnostics = await waitForNativePreviewReady(page)
+    assert.equal(sparseInitialDiagnostics.length, 1, 'Sparse fixture should fit on a single preview page.')
+    const sparseInitialMeasure = getRenderedMeasureDiagnostics(sparseInitialDiagnostics, 0)
+
+    await setRangeValue(page, '#native-preview-horizontal-margin-range', 120)
+    await waitForDiagnosticsChange(page, getSignature(sparseInitialDiagnostics))
+    await waitForRenderedMeasure(page, 0)
+    const sparseNarrowDiagnostics = await dumpNativePreviewLayoutDiagnostics(page)
+    const sparseNarrowMeasure = getRenderedMeasureDiagnostics(sparseNarrowDiagnostics, 0)
+    const sparseNarrowSignature = getSignature(sparseNarrowDiagnostics)
+
+    await setRangeValue(page, '#native-preview-horizontal-margin-range', 0)
+    await waitForDiagnosticsChange(page, sparseNarrowSignature)
+    await waitForRenderedMeasure(page, 0)
+    const sparseWideDiagnostics = await dumpNativePreviewLayoutDiagnostics(page)
+    const sparseWideMeasure = getRenderedMeasureDiagnostics(sparseWideDiagnostics, 0)
+
+    assert.ok(
+      sparseWideMeasure.timelineStretchScale !== null &&
+      sparseNarrowMeasure.timelineStretchScale !== null &&
+      sparseWideMeasure.timelineStretchScale > sparseNarrowMeasure.timelineStretchScale,
+      'Wider usable width should increase native preview timeline stretch for a sparse single-measure system.',
+    )
+    assert.ok(
+      sparseWideMeasure.spacingAnchorGapFirstToLastPx !== null &&
+      sparseNarrowMeasure.spacingAnchorGapFirstToLastPx !== null &&
+      sparseWideMeasure.spacingAnchorGapFirstToLastPx > sparseNarrowMeasure.spacingAnchorGapFirstToLastPx,
+      'Sparse single-measure systems should expand anchor-to-anchor spacing when the system gets wider.',
+    )
+    assert.ok(
+      (sparseWideMeasure.previewSpacingAnchorTicks?.length ?? 0) > 2,
+      'Sparse stretch mode should inject preview spacing anchors beyond the original note onsets.',
+    )
+    assert.ok(
+      sparseWideMeasure.effectiveRightGapPx === null || sparseWideMeasure.effectiveRightGapPx < sparseWideMeasure.renderedMeasureWidthPx * 0.3,
+      'Sparse single-measure stretch should not leave the rendered content heavily bunched against the left edge.',
+    )
 
     await mkdir(DEBUG_OUTPUT_DIR, { recursive: true })
     await writeFile(
@@ -401,10 +642,19 @@ async function run(): Promise<void> {
           initialPageCount,
           initialSystemCount,
           initialDiagnostics,
+          highZoomDiagnostics,
+          lowZoomDiagnostics,
+          restoredZoomDiagnostics,
           highEighthDiagnostics,
           lowEighthDiagnostics,
           restoredHighEighthDiagnostics,
           highGrandStaffGapDiagnostics,
+          sparseInitialDiagnostics,
+          sparseInitialMeasure,
+          sparseNarrowDiagnostics,
+          sparseNarrowMeasure,
+          sparseWideDiagnostics,
+          sparseWideMeasure,
         },
         null,
         2,

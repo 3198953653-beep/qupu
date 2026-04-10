@@ -15,6 +15,8 @@ export function NativePreviewModal(props: NativePreviewModalProps) {
     pageIndex,
     pageCount,
     showPageNumbers,
+    zoomDraftPercent,
+    safeZoomPercent,
     safePaperScalePercent,
     safeHorizontalMarginPx,
     safeFirstPageTopMarginPx,
@@ -37,9 +39,12 @@ export function NativePreviewModal(props: NativePreviewModalProps) {
     grandStaffLayoutMetrics,
     showInScoreMeasureNumbers,
     showNoteHeadJianpuEnabled,
+    onNativePreviewPageRenderedDiagnostics,
     closeNativePreview,
     goToPrevNativePreviewPage,
     goToNextNativePreviewPage,
+    commitNativePreviewZoomPercent,
+    scheduleNativePreviewZoomPercentCommit,
     onNativePreviewPaperScalePercentChange,
     onNativePreviewHorizontalMarginPxChange,
     onNativePreviewFirstPageTopMarginPxChange,
@@ -96,6 +101,46 @@ export function NativePreviewModal(props: NativePreviewModalProps) {
               onChange={(event) => onNativePreviewShowPageNumbersChange(event.target.checked)}
             />
             <span>{showPageNumbers ? '显示' : '隐藏'}</span>
+          </div>
+
+          <div className="osmd-preview-zoom">
+            <label htmlFor="native-preview-zoom-range">音符缩放</label>
+            <input
+              id="native-preview-zoom-range"
+              type="range"
+              min={35}
+              max={160}
+              step={1}
+              value={zoomDraftPercent}
+              onInput={(event) =>
+                scheduleNativePreviewZoomPercentCommit(Number((event.target as HTMLInputElement).value))
+              }
+              onPointerUp={(event) =>
+                commitNativePreviewZoomPercent(Number((event.target as HTMLInputElement).value))
+              }
+              onKeyUp={(event) => {
+                if (event.key !== 'Enter') return
+                commitNativePreviewZoomPercent(Number((event.target as HTMLInputElement).value))
+              }}
+            />
+            <input
+              type="number"
+              min={35}
+              max={160}
+              step={1}
+              value={safeZoomPercent}
+              onInput={(event) =>
+                scheduleNativePreviewZoomPercentCommit(Number((event.target as HTMLInputElement).value))
+              }
+              onBlur={(event) =>
+                commitNativePreviewZoomPercent(Number((event.target as HTMLInputElement).value))
+              }
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return
+                commitNativePreviewZoomPercent(Number((event.target as HTMLInputElement).value))
+              }}
+            />
+            <span>%</span>
           </div>
 
           <div className="osmd-preview-zoom">
@@ -326,6 +371,7 @@ export function NativePreviewModal(props: NativePreviewModalProps) {
                 grandStaffLayoutMetrics={grandStaffLayoutMetrics}
                 showInScoreMeasureNumbers={showInScoreMeasureNumbers}
                 showNoteHeadJianpuEnabled={showNoteHeadJianpuEnabled}
+                onNativePreviewPageRenderedDiagnostics={onNativePreviewPageRenderedDiagnostics}
               />
               {showTitleBlock && (
                 <div className="native-preview-title-block">

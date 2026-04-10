@@ -196,6 +196,8 @@ type StableMeasureFrame = {
   noteStartX: number
   noteEndX: number
   formatWidth: number
+  timelineStretchScale?: number
+  previewSpacingAnchorTicks?: number[] | null
 }
 
 function isFrameAlignedWithPreviousLayout(params: {
@@ -228,6 +230,14 @@ function collectStableSystemMeasureFrames(
       noteStartX: previousLayout.noteStartX,
       noteEndX: previousLayout.noteEndX,
       formatWidth: previousLayout.formatWidth,
+      timelineStretchScale:
+        typeof previousLayout.timelineStretchScale === 'number' && Number.isFinite(previousLayout.timelineStretchScale)
+          ? previousLayout.timelineStretchScale
+          : undefined,
+      previewSpacingAnchorTicks:
+        previousLayout.previewSpacingAnchorTicks && previousLayout.previewSpacingAnchorTicks.length > 0
+          ? [...previousLayout.previewSpacingAnchorTicks]
+          : null,
     })
   }
   return frames
@@ -680,15 +690,24 @@ export function renderVisibleSystems(params: {
       widthPx: number
       spacingAnchorTicks?: number[] | null
       spacingTickToX?: Map<number, number> | null
+      timelineStretchScale?: number | null
     }) => {
       const baseBundle = systemTimelineBundles.get(params.pairIndex)
       if (!baseBundle) return
+      const bundleForMeasure =
+        params.spacingAnchorTicks && params.spacingAnchorTicks.length > 0
+          ? {
+              ...baseBundle,
+              spacingAnchorTicks: [...params.spacingAnchorTicks],
+            }
+          : baseBundle
       const nextBundle = attachMeasureTimelineAxisLayout({
-        bundle: baseBundle,
+        bundle: bundleForMeasure,
         effectiveBoundaryStartX: params.effectiveBoundaryStartX,
         effectiveBoundaryEndX: params.effectiveBoundaryEndX,
         widthPx: params.widthPx,
         spacingConfig,
+        timelineScaleOverride: params.timelineStretchScale ?? null,
       })
       nextTimelineBundlesByPair.set(params.pairIndex, {
         ...nextBundle,
@@ -702,10 +721,27 @@ export function renderVisibleSystems(params: {
       measureWidth: number
       noteStartX: number
       noteEndX: number
+      spacingAnchorTicks?: number[] | null
+      timelineStretchScale?: number | null
     }): MeasureTimelineBundle | null => {
-      const { entry, measureX, measureWidth, noteStartX, noteEndX } = params
+      const {
+        entry,
+        measureX,
+        measureWidth,
+        noteStartX,
+        noteEndX,
+        spacingAnchorTicks = null,
+        timelineStretchScale = null,
+      } = params
       const baseBundle = systemTimelineBundles.get(entry.pairIndex)
       if (!baseBundle) return null
+      const bundleForRender =
+        spacingAnchorTicks && spacingAnchorTicks.length > 0
+          ? {
+              ...baseBundle,
+              spacingAnchorTicks: [...spacingAnchorTicks],
+            }
+          : baseBundle
       const effectiveBoundary = resolveEffectiveBoundary({
         measureX,
         measureWidth,
@@ -715,11 +751,12 @@ export function renderVisibleSystems(params: {
         showEndDecorations: !entry.preferMeasureEndBarlineAxis,
       })
       const timelineBundle = attachMeasureTimelineAxisLayout({
-        bundle: baseBundle,
+        bundle: bundleForRender,
         effectiveBoundaryStartX: effectiveBoundary.effectiveStartX,
         effectiveBoundaryEndX: effectiveBoundary.effectiveEndX,
         widthPx: measureWidth,
         spacingConfig,
+        timelineScaleOverride: timelineStretchScale,
       })
       nextTimelineBundlesByPair.set(entry.pairIndex, timelineBundle)
       return timelineBundle
@@ -818,6 +855,8 @@ export function renderVisibleSystems(params: {
                 previousMeasureLayout.effectiveBoundaryEndX ??
                 previousMeasureLayout.measureX + previousMeasureLayout.measureWidth,
               widthPx: previousMeasureLayout.measureWidth,
+              spacingAnchorTicks: previousMeasureLayout.previewSpacingAnchorTicks ?? null,
+              timelineStretchScale: previousMeasureLayout.timelineStretchScale ?? null,
             })
             return
           }
@@ -837,6 +876,8 @@ export function renderVisibleSystems(params: {
           measureWidth,
           noteStartX,
           noteEndX,
+          spacingAnchorTicks: frame.previewSpacingAnchorTicks ?? null,
+          timelineStretchScale: frame.timelineStretchScale ?? null,
         })
         const frozenSpacing = frozenSpacingByPairIndex.get(entry.pairIndex) ?? null
         const translatedFrozenSpacing =
@@ -893,7 +934,8 @@ export function renderVisibleSystems(params: {
           spacingLayoutMode,
           timelineBundle,
           publicAxisLayout: resolvePublicAxisLayoutForConsumption(timelineBundle),
-          spacingAnchorTicks: timelineBundle?.spacingAnchorTicks ?? null,
+          spacingAnchorTicks: frame.previewSpacingAnchorTicks ?? timelineBundle?.spacingAnchorTicks ?? null,
+          timelineStretchScaleOverride: frame.timelineStretchScale ?? null,
           staticAnchorXById: previewStaticAnchorXById ?? translatedFrozenSpacing?.staticAnchorXById ?? null,
           staticAccidentalRightXById:
             previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
@@ -993,6 +1035,14 @@ export function renderVisibleSystems(params: {
           spacingOccupiedLeftX: currentSpacingMetrics?.spacingOccupiedLeftX,
           spacingOccupiedRightX: currentSpacingMetrics?.spacingOccupiedRightX,
           spacingAnchorGapFirstToLastPx: currentSpacingMetrics?.spacingAnchorGapFirstToLastPx,
+          timelineStretchScale:
+            typeof frame.timelineStretchScale === 'number' && Number.isFinite(frame.timelineStretchScale)
+              ? frame.timelineStretchScale
+              : undefined,
+          previewSpacingAnchorTicks:
+            frame.previewSpacingAnchorTicks && frame.previewSpacingAnchorTicks.length > 0
+              ? [...frame.previewSpacingAnchorTicks]
+              : null,
           spacingOnsetReserves: currentSpacingMetrics?.spacingOnsetReserves,
           spacingSegments: currentSpacingMetrics?.spacingSegments,
           overlayRect,
@@ -1004,6 +1054,7 @@ export function renderVisibleSystems(params: {
           widthPx: measureWidth,
           spacingAnchorTicks: currentSpacingMetrics ? currentSpacingMetrics.spacingAnchorTicks : null,
           spacingTickToX: currentSpacingMetrics ? currentSpacingMetrics.spacingTickToX : null,
+          timelineStretchScale: frame.timelineStretchScale ?? null,
         })
       })
       drawCrossMeasureTiesForSystem()
@@ -1048,6 +1099,8 @@ export function renderVisibleSystems(params: {
                 previousMeasureLayout.effectiveBoundaryEndX ??
                 previousMeasureLayout.measureX + previousMeasureLayout.measureWidth,
               widthPx: previousMeasureLayout.measureWidth,
+              spacingAnchorTicks: previousMeasureLayout.previewSpacingAnchorTicks ?? null,
+              timelineStretchScale: previousMeasureLayout.timelineStretchScale ?? null,
             })
             return
           }
@@ -1066,6 +1119,8 @@ export function renderVisibleSystems(params: {
           measureWidth,
           noteStartX,
           noteEndX,
+          spacingAnchorTicks: stableFrame.previewSpacingAnchorTicks ?? null,
+          timelineStretchScale: stableFrame.timelineStretchScale ?? null,
         })
         const frozenSpacing = tryBuildFrozenMeasureSpacing({
           pairIndex: entry.pairIndex,
@@ -1126,7 +1181,8 @@ export function renderVisibleSystems(params: {
           spacingLayoutMode,
           timelineBundle,
           publicAxisLayout: resolvePublicAxisLayoutForConsumption(timelineBundle),
-          spacingAnchorTicks: timelineBundle?.spacingAnchorTicks ?? null,
+          spacingAnchorTicks: stableFrame.previewSpacingAnchorTicks ?? timelineBundle?.spacingAnchorTicks ?? null,
+          timelineStretchScaleOverride: stableFrame.timelineStretchScale ?? null,
           staticAnchorXById: previewStaticAnchorXById ?? translatedFrozenSpacing?.staticAnchorXById ?? null,
           staticAccidentalRightXById:
             previewStaticAccidentalRightXById ?? translatedFrozenSpacing?.staticAccidentalRightXById ?? null,
@@ -1226,6 +1282,14 @@ export function renderVisibleSystems(params: {
           spacingOccupiedLeftX: currentSpacingMetrics?.spacingOccupiedLeftX,
           spacingOccupiedRightX: currentSpacingMetrics?.spacingOccupiedRightX,
           spacingAnchorGapFirstToLastPx: currentSpacingMetrics?.spacingAnchorGapFirstToLastPx,
+          timelineStretchScale:
+            typeof stableFrame.timelineStretchScale === 'number' && Number.isFinite(stableFrame.timelineStretchScale)
+              ? stableFrame.timelineStretchScale
+              : undefined,
+          previewSpacingAnchorTicks:
+            stableFrame.previewSpacingAnchorTicks && stableFrame.previewSpacingAnchorTicks.length > 0
+              ? [...stableFrame.previewSpacingAnchorTicks]
+              : null,
           spacingOnsetReserves: currentSpacingMetrics?.spacingOnsetReserves,
           spacingSegments: currentSpacingMetrics?.spacingSegments,
           overlayRect,
@@ -1237,6 +1301,7 @@ export function renderVisibleSystems(params: {
           widthPx: measureWidth,
           spacingAnchorTicks: currentSpacingMetrics ? currentSpacingMetrics.spacingAnchorTicks : null,
           spacingTickToX: currentSpacingMetrics ? currentSpacingMetrics.spacingTickToX : null,
+          timelineStretchScale: stableFrame.timelineStretchScale ?? null,
         })
       })
       drawCrossMeasureTiesForSystem()

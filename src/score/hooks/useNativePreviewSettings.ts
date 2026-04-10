@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { A4_PAGE_HEIGHT, A4_PAGE_WIDTH } from '../constants'
 import {
   DEFAULT_NATIVE_PREVIEW_BOTTOM_MARGIN_PX,
@@ -9,6 +9,8 @@ import {
   DEFAULT_NATIVE_PREVIEW_MIN_GRAND_STAFF_GAP_PX,
   DEFAULT_NATIVE_PREVIEW_PAPER_SCALE_PERCENT,
   DEFAULT_NATIVE_PREVIEW_SHOW_PAGE_NUMBERS,
+  DEFAULT_NATIVE_PREVIEW_ZOOM_PERCENT,
+  NATIVE_PREVIEW_ZOOM_DEBOUNCE_MS,
 } from './nativePreviewConstants'
 import {
   clampNativePreviewBottomMarginPx,
@@ -17,6 +19,7 @@ import {
   clampNativePreviewMinGrandStaffGapPx,
   clampNativePreviewPaperScalePercent,
   clampNativePreviewTopMarginPx,
+  clampNativePreviewZoomPercent,
 } from './nativePreviewUtils'
 
 export function useNativePreviewSettings() {
@@ -26,6 +29,12 @@ export function useNativePreviewSettings() {
   const [nativePreviewPageCount, setNativePreviewPageCount] = useState(1)
   const [nativePreviewShowPageNumbers, setNativePreviewShowPageNumbers] = useState(
     DEFAULT_NATIVE_PREVIEW_SHOW_PAGE_NUMBERS,
+  )
+  const [nativePreviewZoomPercent, setNativePreviewZoomPercent] = useState(
+    DEFAULT_NATIVE_PREVIEW_ZOOM_PERCENT,
+  )
+  const [nativePreviewZoomDraftPercent, setNativePreviewZoomDraftPercent] = useState(
+    DEFAULT_NATIVE_PREVIEW_ZOOM_PERCENT,
   )
   const [nativePreviewPaperScalePercent, setNativePreviewPaperScalePercent] = useState(
     DEFAULT_NATIVE_PREVIEW_PAPER_SCALE_PERCENT,
@@ -48,6 +57,7 @@ export function useNativePreviewSettings() {
   const [nativePreviewMinGrandStaffGapPx, setNativePreviewMinGrandStaffGapPx] = useState(
     DEFAULT_NATIVE_PREVIEW_MIN_GRAND_STAFF_GAP_PX,
   )
+  const nativePreviewZoomCommitTimerRef = useRef<number | null>(null)
 
   const goToPrevNativePreviewPage = useCallback(() => {
     setNativePreviewPageIndex((current) => Math.max(0, current - 1))
@@ -56,6 +66,28 @@ export function useNativePreviewSettings() {
   const goToNextNativePreviewPage = useCallback(() => {
     setNativePreviewPageIndex((current) => Math.min(Math.max(0, nativePreviewPageCount - 1), current + 1))
   }, [nativePreviewPageCount])
+
+  const commitNativePreviewZoomPercent = useCallback((nextValue: number) => {
+    const clamped = clampNativePreviewZoomPercent(nextValue)
+    if (nativePreviewZoomCommitTimerRef.current !== null) {
+      window.clearTimeout(nativePreviewZoomCommitTimerRef.current)
+      nativePreviewZoomCommitTimerRef.current = null
+    }
+    setNativePreviewZoomDraftPercent(clamped)
+    setNativePreviewZoomPercent((current) => (current === clamped ? current : clamped))
+  }, [])
+
+  const scheduleNativePreviewZoomPercentCommit = useCallback((nextValue: number) => {
+    const clamped = clampNativePreviewZoomPercent(nextValue)
+    setNativePreviewZoomDraftPercent(clamped)
+    if (nativePreviewZoomCommitTimerRef.current !== null) {
+      window.clearTimeout(nativePreviewZoomCommitTimerRef.current)
+    }
+    nativePreviewZoomCommitTimerRef.current = window.setTimeout(() => {
+      nativePreviewZoomCommitTimerRef.current = null
+      setNativePreviewZoomPercent((current) => (current === clamped ? current : clamped))
+    }, NATIVE_PREVIEW_ZOOM_DEBOUNCE_MS)
+  }, [])
 
   const onNativePreviewPaperScalePercentChange = useCallback((nextValue: number) => {
     setNativePreviewPaperScalePercent(clampNativePreviewPaperScalePercent(nextValue))
@@ -93,6 +125,23 @@ export function useNativePreviewSettings() {
     setNativePreviewPageIndex((current) => Math.max(0, Math.min(current, Math.max(0, nativePreviewPageCount - 1))))
   }, [nativePreviewPageCount])
 
+  useEffect(() => {
+    setNativePreviewZoomDraftPercent((current) => {
+      const clamped = clampNativePreviewZoomPercent(nativePreviewZoomPercent)
+      return current === clamped ? current : clamped
+    })
+  }, [nativePreviewZoomPercent])
+
+  useEffect(() => {
+    return () => {
+      if (nativePreviewZoomCommitTimerRef.current !== null) {
+        window.clearTimeout(nativePreviewZoomCommitTimerRef.current)
+        nativePreviewZoomCommitTimerRef.current = null
+      }
+    }
+  }, [])
+
+  const safeNativePreviewZoomPercent = clampNativePreviewZoomPercent(nativePreviewZoomPercent)
   const safeNativePreviewPaperScalePercent = clampNativePreviewPaperScalePercent(nativePreviewPaperScalePercent)
   const safeNativePreviewHorizontalMarginPx = clampNativePreviewHorizontalMarginPx(nativePreviewHorizontalMarginPx)
   const safeNativePreviewFirstPageTopMarginPx = clampNativePreviewTopMarginPx(nativePreviewFirstPageTopMarginPx)
@@ -116,6 +165,8 @@ export function useNativePreviewSettings() {
     nativePreviewPageCount,
     setNativePreviewPageCount,
     nativePreviewShowPageNumbers,
+    nativePreviewZoomPercent,
+    nativePreviewZoomDraftPercent,
     nativePreviewPaperScalePercent,
     nativePreviewHorizontalMarginPx,
     nativePreviewFirstPageTopMarginPx,
@@ -125,6 +176,8 @@ export function useNativePreviewSettings() {
     nativePreviewMinGrandStaffGapPx,
     goToPrevNativePreviewPage,
     goToNextNativePreviewPage,
+    commitNativePreviewZoomPercent,
+    scheduleNativePreviewZoomPercentCommit,
     onNativePreviewPaperScalePercentChange,
     onNativePreviewHorizontalMarginPxChange,
     onNativePreviewFirstPageTopMarginPxChange,
@@ -133,6 +186,7 @@ export function useNativePreviewSettings() {
     onNativePreviewMinEighthGapPxChange,
     onNativePreviewMinGrandStaffGapPxChange,
     onNativePreviewShowPageNumbersChange,
+    safeNativePreviewZoomPercent,
     safeNativePreviewPaperScalePercent,
     safeNativePreviewHorizontalMarginPx,
     safeNativePreviewFirstPageTopMarginPx,

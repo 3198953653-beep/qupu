@@ -1630,6 +1630,7 @@ export type DrawMeasureParams = {
   publicAxisLayout?: PublicAxisLayout | null
   timelineBundle?: MeasureTimelineBundle | null
   spacingAnchorTicks?: number[] | null
+  timelineStretchScaleOverride?: number | null
   preferMeasureBarlineAxis?: boolean
   preferMeasureEndBarlineAxis?: boolean
   enableEdgeGapCap?: boolean
@@ -1700,6 +1701,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
     publicAxisLayout = null,
     timelineBundle = null,
     spacingAnchorTicks = null,
+    timelineStretchScaleOverride = null,
     preferMeasureBarlineAxis = !isSystemStart && !showKeySignature && !showTimeSignature,
     preferMeasureEndBarlineAxis = !showEndTimeSignature,
     enableEdgeGapCap = true,
@@ -2302,6 +2304,7 @@ export const drawMeasureToContext = (params: DrawMeasureParams): NoteLayout[] =>
       measureEndBarX: measureX + measureWidth,
       publicAxisLayout,
       spacingAnchorTicks,
+      segmentStretchScaleOverride: timelineStretchScaleOverride,
       preferMeasureBarlineAxis,
       preferMeasureEndBarlineAxis,
       enableEdgeGapCap,

@@ -217,6 +217,8 @@ function App() {
         pageIndex={editorUi.nativePreviewPageIndex}
         pageCount={editorUi.nativePreviewPageCount}
         showPageNumbers={editorUi.nativePreviewShowPageNumbers}
+        zoomDraftPercent={editorUi.nativePreviewZoomDraftPercent}
+        safeZoomPercent={editorUi.safeNativePreviewZoomPercent}
         safePaperScalePercent={editorUi.safeNativePreviewPaperScalePercent}
         safeHorizontalMarginPx={editorUi.safeNativePreviewHorizontalMarginPx}
         safeFirstPageTopMarginPx={editorUi.safeNativePreviewFirstPageTopMarginPx}
@@ -239,9 +241,12 @@ function App() {
         grandStaffLayoutMetrics={editorUi.nativePreviewGrandStaffLayoutMetrics}
         showInScoreMeasureNumbers={editorUi.nativePreviewShowInScoreMeasureNumbers}
         showNoteHeadJianpuEnabled={editorUi.nativePreviewShowNoteHeadJianpuEnabled}
+        onNativePreviewPageRenderedDiagnostics={editorUi.onNativePreviewPageRenderedDiagnostics}
         closeNativePreview={editorUi.closeNativePreview}
         goToPrevNativePreviewPage={editorUi.goToPrevNativePreviewPage}
         goToNextNativePreviewPage={editorUi.goToNextNativePreviewPage}
+        commitNativePreviewZoomPercent={editorUi.commitNativePreviewZoomPercent}
+        scheduleNativePreviewZoomPercentCommit={editorUi.scheduleNativePreviewZoomPercentCommit}
         onNativePreviewPaperScalePercentChange={editorUi.onNativePreviewPaperScalePercentChange}
         onNativePreviewHorizontalMarginPxChange={editorUi.onNativePreviewHorizontalMarginPxChange}
         onNativePreviewFirstPageTopMarginPxChange={editorUi.onNativePreviewFirstPageTopMarginPxChange}

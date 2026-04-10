@@ -2,7 +2,7 @@ import type { ChordRulerEntry } from '../../chordRuler'
 import type { GrandStaffLayoutMetrics } from '../../grandStaffLayout'
 import type { NativePreviewPageLayout } from '../../layout/nativePreviewLayout'
 import type { TimeAxisSpacingConfig } from '../../layout/timeAxisSpacing'
-import type { MeasurePair, MusicXmlMetadata, PedalSpan, TimeSignature } from '../../types'
+import type { MeasureLayout, MeasurePair, MusicXmlMetadata, PedalSpan, TimeSignature } from '../../types'
 
 export type NativePreviewModalProps = {
   isOpen: boolean
@@ -11,6 +11,8 @@ export type NativePreviewModalProps = {
   pageIndex: number
   pageCount: number
   showPageNumbers: boolean
+  zoomDraftPercent: number
+  safeZoomPercent: number
   safePaperScalePercent: number
   safeHorizontalMarginPx: number
   safeFirstPageTopMarginPx: number
@@ -33,9 +35,12 @@ export type NativePreviewModalProps = {
   grandStaffLayoutMetrics: GrandStaffLayoutMetrics
   showInScoreMeasureNumbers: boolean
   showNoteHeadJianpuEnabled: boolean
+  onNativePreviewPageRenderedDiagnostics: (pageIndex: number, measureLayouts: Map<number, MeasureLayout>) => void
   closeNativePreview: () => void
   goToPrevNativePreviewPage: () => void
   goToNextNativePreviewPage: () => void
+  commitNativePreviewZoomPercent: (nextValue: number) => void
+  scheduleNativePreviewZoomPercentCommit: (nextValue: number) => void
   onNativePreviewPaperScalePercentChange: (nextValue: number) => void
   onNativePreviewHorizontalMarginPxChange: (nextValue: number) => void
   onNativePreviewFirstPageTopMarginPxChange: (nextValue: number) => void

@@ -12,10 +12,12 @@ import {
   toTimeSignatureKey,
 } from './startDecorationReserve'
 import {
+  buildEffectiveSpacingTicks,
   attachMeasureTimelineAxisLayout,
   buildMeasureTimelineBundle,
   getMeasureUniformTimelineWeightMetrics,
   getTimeAxisGapWeightPx,
+  resolveMeasureMinWidthStretchPlan,
   resolvePublicAxisLayoutForConsumption,
   type TimeAxisSpacingConfig,
 } from './timeAxisSpacing'
@@ -46,11 +48,15 @@ type FixedWidthMeasureMeta = {
 
 type FixedWidthMeasureBasis = {
   meta: FixedWidthMeasureMeta
+  measureTicks: number
   timelineBundle: MeasureTimelineBundle
+  baseSpacingAnchorCount: number
+  previewSpacingAnchorTicks: number[]
   leadingGapPx: number
   elasticBasisPx: number
   actualStartDecorationWidthPx: number
   fixedWidthBasePx: number
+  baseTimelineStretchScale: number
 }
 
 export type NativePreviewSolvedMeasure = {
@@ -60,28 +66,38 @@ export type NativePreviewSolvedMeasure = {
   fixedWidthPx: number
   elasticWidthPx: number
   actualStartDecorationWidthPx: number
+  timelineStretchScale: number
+  previewSpacingAnchorTicks: number[] | null
 }
 
 export type NativePreviewSystemLayout = {
   range: SystemMeasureRange
   measures: NativePreviewSolvedMeasure[]
   equivalentEighthGapPx: number
+  equivalentEighthGapNotationPx: number
   elasticScale: number
   fixedWidthTotalPx: number
+  fixedWidthTotalNotationPx: number
   elasticWidthTotalPx: number
+  elasticWidthTotalNotationPx: number
   usableWidthPx: number
+  usableWidthNotationPx: number
   totalWidthPx: number
+  totalWidthNotationPx: number
 }
 
 export type NativePreviewPageLayout = {
   pageIndex: number
   pageNumber: number
+  notationScale: number
   systemLayouts: NativePreviewSystemLayout[]
   systemRanges: SystemMeasureRange[]
   systemTopPxBySystemIndex: number[]
   measureFramesByPair: MeasureFrame[]
   actualSystemGapPx: number
+  actualSystemGapNotationPx: number
   minEquivalentEighthGapPx: number
+  minEquivalentEighthGapNotationPx: number
 }
 
 export type NativePreviewLayoutResult = {
@@ -119,6 +135,43 @@ function hasTimeSignatureChanged(current: TimeSignature, previous: TimeSignature
 
 function getMeasureTicks(timeSignature: TimeSignature): number {
   return Math.max(1, Math.round(timeSignature.beats * TICKS_PER_BEAT * (4 / timeSignature.beatType)))
+}
+
+function getBeatTickStep(timeSignature: TimeSignature): number {
+  return Math.max(1, Math.round(TICKS_PER_BEAT * (4 / timeSignature.beatType)))
+}
+
+function buildPreviewSpacingAnchorTicks(params: {
+  measure: MeasurePair
+  measureTicks: number
+  timeSignature: TimeSignature
+  supplementalSpacingTicks?: readonly number[] | null
+  enableSparseExpansion: boolean
+}): number[] {
+  const {
+    measure,
+    measureTicks,
+    timeSignature,
+    supplementalSpacingTicks = null,
+    enableSparseExpansion,
+  } = params
+  const baseTicks = buildEffectiveSpacingTicks({
+    measure,
+    measureTicks,
+    supplementalTicks: supplementalSpacingTicks,
+  })
+  if (!enableSparseExpansion || baseTicks.length > 2) {
+    return baseTicks
+  }
+  const tickSet = new Set<number>(baseTicks)
+  const beatTickStep = getBeatTickStep(timeSignature)
+  for (let tick = 0; tick <= measureTicks; tick += beatTickStep) {
+    tickSet.add(Math.max(0, Math.min(measureTicks, tick)))
+  }
+  tickSet.add(measureTicks)
+  return [...tickSet]
+    .filter((tick) => Number.isFinite(tick))
+    .sort((left, right) => left - right)
 }
 
 function getLayoutSpacingRightX(layout: { spacingRightX: number; rightX: number; x: number }): number {
@@ -235,23 +288,55 @@ function buildMeasureBasis(params: {
   supplementalSpacingTicksByPair?: number[][] | null
   spacingConfig: TimeAxisSpacingConfig
   grandStaffLayoutMetrics: GrandStaffLayoutMetrics
+  sparseExpansionPairIndexSet?: ReadonlySet<number>
 }): FixedWidthMeasureBasis[] {
-  const { metas, supplementalSpacingTicksByPair = null, spacingConfig, grandStaffLayoutMetrics } = params
+  const {
+    metas,
+    supplementalSpacingTicksByPair = null,
+    spacingConfig,
+    grandStaffLayoutMetrics,
+    sparseExpansionPairIndexSet = new Set<number>(),
+  } = params
   return metas.map((meta) => {
     const measureTicks = getMeasureTicks(meta.timeSignature)
-    const timelineBundle = buildMeasureTimelineBundle({
+    const baseSpacingAnchorTicks = buildEffectiveSpacingTicks({
       measure: meta.measure,
-      measureIndex: meta.pairIndex,
-      timeSignature: meta.timeSignature,
-      spacingConfig,
-      timelineMode: 'dual',
-      supplementalSpacingTicks: supplementalSpacingTicksByPair?.[meta.pairIndex] ?? null,
+      measureTicks,
+      supplementalTicks: supplementalSpacingTicksByPair?.[meta.pairIndex] ?? null,
     })
+    const previewSpacingAnchorTicks = buildPreviewSpacingAnchorTicks({
+      measure: meta.measure,
+      measureTicks,
+      timeSignature: meta.timeSignature,
+      supplementalSpacingTicks: supplementalSpacingTicksByPair?.[meta.pairIndex] ?? null,
+      enableSparseExpansion: sparseExpansionPairIndexSet.has(meta.pairIndex),
+    })
+    const timelineBundle = {
+      ...buildMeasureTimelineBundle({
+        measure: meta.measure,
+        measureIndex: meta.pairIndex,
+        timeSignature: meta.timeSignature,
+        spacingConfig,
+        timelineMode: 'dual',
+        supplementalSpacingTicks: supplementalSpacingTicksByPair?.[meta.pairIndex] ?? null,
+      }),
+      spacingAnchorTicks: previewSpacingAnchorTicks,
+    }
     const timelineMetrics = getMeasureUniformTimelineWeightMetrics(
       meta.measure,
       measureTicks,
       spacingConfig,
       timelineBundle,
+    )
+    const baseStretchPlan = resolveMeasureMinWidthStretchPlan({
+      spacingConfig,
+      leadingGapPx: timelineMetrics.leadingGapPx,
+      anchorSpanPx: timelineMetrics.anchorSpanPx,
+      trailingGapPx: timelineMetrics.trailingGapPx,
+    })
+    const elasticBasisPx = Math.max(
+      0,
+      (timelineMetrics.anchorSpanPx + timelineMetrics.trailingGapPx) * baseStretchPlan.segmentStretchScale,
     )
     const probeGeometry = getMeasureProbeGeometry(meta, grandStaffLayoutMetrics.trebleOffsetY)
     const endDecorationReservePx = meta.preferMeasureEndBarlineAxis
@@ -259,36 +344,40 @@ function buildMeasureBasis(params: {
       : Math.max(0, PROBE_MEASURE_WIDTH_PX - probeGeometry.noteEndOffset)
     return {
       meta,
+      measureTicks,
       timelineBundle,
+      baseSpacingAnchorCount: baseSpacingAnchorTicks.length,
+      previewSpacingAnchorTicks,
       leadingGapPx: timelineMetrics.leadingGapPx,
-      elasticBasisPx: Math.max(0, timelineMetrics.anchorSpanPx + timelineMetrics.trailingGapPx),
+      elasticBasisPx,
       actualStartDecorationWidthPx: meta.actualStartDecorationWidthPx,
       fixedWidthBasePx: meta.actualStartDecorationWidthPx + endDecorationReservePx + timelineMetrics.leadingGapPx,
+      baseTimelineStretchScale: baseStretchPlan.segmentStretchScale,
     }
   })
 }
 
 function solveSystemWidths(params: {
   bases: FixedWidthMeasureBasis[]
-  usableWidthPx: number
+  usableWidthNotationPx: number
   fixedWidthBonuses?: number[]
 }): {
   elasticScale: number
   fixedWidthTotalPx: number
-  elasticWidthTotalPx: number
+  elasticBasisTotalPx: number
   measureWidths: number[]
   totalWidthPx: number
 } {
-  const { bases, usableWidthPx, fixedWidthBonuses = [] } = params
+  const { bases, usableWidthNotationPx, fixedWidthBonuses = [] } = params
   const fixedWidthTotalPx = bases.reduce(
     (sum, basis, index) => sum + basis.fixedWidthBasePx + (fixedWidthBonuses[index] ?? 0),
     0,
   )
-  const elasticWidthTotalPx = bases.reduce((sum, basis) => sum + basis.elasticBasisPx, 0)
-  const safeUsableWidthPx = Math.max(1, usableWidthPx)
+  const elasticBasisTotalPx = bases.reduce((sum, basis) => sum + basis.elasticBasisPx, 0)
+  const safeUsableWidthPx = Math.max(1, usableWidthNotationPx)
   const elasticScale =
-    elasticWidthTotalPx > FIT_EPS
-      ? Math.max(0, (safeUsableWidthPx - fixedWidthTotalPx) / elasticWidthTotalPx)
+    elasticBasisTotalPx > FIT_EPS
+      ? Math.max(FIT_EPS, (safeUsableWidthPx - fixedWidthTotalPx) / elasticBasisTotalPx)
       : 0
   const measureWidths = bases.map((basis, index) =>
     Math.max(1, basis.fixedWidthBasePx + (fixedWidthBonuses[index] ?? 0) + basis.elasticBasisPx * elasticScale),
@@ -301,10 +390,18 @@ function solveSystemWidths(params: {
   return {
     elasticScale,
     fixedWidthTotalPx,
-    elasticWidthTotalPx,
+    elasticBasisTotalPx,
     measureWidths,
     totalWidthPx: measureWidths.reduce((sum, width) => sum + width, 0),
   }
+}
+
+function arePairIndexSetsEqual(left: ReadonlySet<number>, right: ReadonlySet<number>): boolean {
+  if (left.size !== right.size) return false
+  for (const value of left) {
+    if (!right.has(value)) return false
+  }
+  return true
 }
 
 function probeMeasureOverflow(params: {
@@ -314,8 +411,17 @@ function probeMeasureOverflow(params: {
   spacingConfig: TimeAxisSpacingConfig
   grandStaffLayoutMetrics: GrandStaffLayoutMetrics
   showNoteHeadJianpu: boolean
+  timelineStretchScale?: number | null
 }): number {
-  const { context, basis, measureWidth, spacingConfig, grandStaffLayoutMetrics, showNoteHeadJianpu } = params
+  const {
+    context,
+    basis,
+    measureWidth,
+    spacingConfig,
+    grandStaffLayoutMetrics,
+    showNoteHeadJianpu,
+    timelineStretchScale = null,
+  } = params
   const probeGeometry = getMeasureProbeGeometry(basis.meta, grandStaffLayoutMetrics.trebleOffsetY, measureWidth)
   const measureX = PROBE_MEASURE_X
   const noteStartX = measureX + probeGeometry.noteStartOffset
@@ -335,6 +441,7 @@ function probeMeasureOverflow(params: {
     effectiveBoundaryEndX: effectiveBoundary.effectiveEndX,
     widthPx: measureWidth,
     spacingConfig,
+    timelineScaleOverride: timelineStretchScale,
   })
   let spacingMetrics: { spacingOccupiedRightX?: number } | null = null
   const layouts = drawMeasureToContext({
@@ -366,7 +473,8 @@ function probeMeasureOverflow(params: {
     spacingLayoutMode: 'custom',
     timelineBundle,
     publicAxisLayout: resolvePublicAxisLayoutForConsumption(timelineBundle),
-    spacingAnchorTicks: timelineBundle.spacingAnchorTicks ?? null,
+    spacingAnchorTicks: basis.previewSpacingAnchorTicks.length > 0 ? basis.previewSpacingAnchorTicks : timelineBundle.spacingAnchorTicks ?? null,
+    timelineStretchScaleOverride: timelineStretchScale,
     staticAnchorXById: null,
     staticAccidentalRightXById: null,
     layoutDetail: 'full',
@@ -389,7 +497,7 @@ function probeMeasureOverflow(params: {
   return Math.max(0, spacingRightEdge - spacingRightLimitX)
 }
 
-export function solveNativePreviewSystemLayout(params: {
+function solveNativePreviewSystemPass(params: {
   context: ReturnType<Renderer['getContext']>
   measurePairs: MeasurePair[]
   range: SystemMeasureRange
@@ -398,9 +506,14 @@ export function solveNativePreviewSystemLayout(params: {
   supplementalSpacingTicksByPair?: number[][] | null
   spacingConfig: TimeAxisSpacingConfig
   grandStaffLayoutMetrics: GrandStaffLayoutMetrics
-  usableWidthPx: number
+  usableWidthNotationPx: number
   showNoteHeadJianpu: boolean
-}): NativePreviewSystemLayout {
+  sparseExpansionPairIndexSet?: ReadonlySet<number>
+}): {
+  bases: FixedWidthMeasureBasis[]
+  fixedWidthBonuses: number[]
+  solved: ReturnType<typeof solveSystemWidths>
+} {
   const {
     context,
     measurePairs,
@@ -410,8 +523,9 @@ export function solveNativePreviewSystemLayout(params: {
     supplementalSpacingTicksByPair = null,
     spacingConfig,
     grandStaffLayoutMetrics,
-    usableWidthPx,
+    usableWidthNotationPx,
     showNoteHeadJianpu,
+    sparseExpansionPairIndexSet = new Set<number>(),
   } = params
 
   const resolvedKeyFifths = resolveKeyFifthsSeries(measurePairs.length, measureKeyFifthsFromImport)
@@ -428,17 +542,22 @@ export function solveNativePreviewSystemLayout(params: {
     supplementalSpacingTicksByPair,
     spacingConfig,
     grandStaffLayoutMetrics,
+    sparseExpansionPairIndexSet,
   })
   const fixedWidthBonuses = new Array<number>(bases.length).fill(0)
   let solved = solveSystemWidths({
     bases,
-    usableWidthPx,
+    usableWidthNotationPx,
     fixedWidthBonuses,
   })
 
   for (let pass = 0; pass < FIXED_WIDTH_OVERFLOW_MAX_PASSES; pass += 1) {
     let changed = false
     bases.forEach((basis, index) => {
+      const finalTimelineStretchScale =
+        basis.elasticBasisPx > FIT_EPS
+          ? basis.baseTimelineStretchScale * solved.elasticScale
+          : basis.baseTimelineStretchScale
       const overflowPx = probeMeasureOverflow({
         context,
         basis,
@@ -446,6 +565,7 @@ export function solveNativePreviewSystemLayout(params: {
         spacingConfig,
         grandStaffLayoutMetrics,
         showNoteHeadJianpu,
+        timelineStretchScale: finalTimelineStretchScale,
       })
       if (overflowPx <= FIT_EPS) return
       fixedWidthBonuses[index] = (fixedWidthBonuses[index] ?? 0) + overflowPx + FIXED_WIDTH_OVERFLOW_PAD_PX
@@ -454,15 +574,98 @@ export function solveNativePreviewSystemLayout(params: {
     if (!changed) break
     solved = solveSystemWidths({
       bases,
-      usableWidthPx,
+      usableWidthNotationPx,
       fixedWidthBonuses,
     })
   }
 
-  const measures = bases.map((basis, index) => {
-    const measureWidth = solved.measureWidths[index] ?? Math.max(1, basis.fixedWidthBasePx)
-    const fixedWidthPx = basis.fixedWidthBasePx + (fixedWidthBonuses[index] ?? 0)
+  return {
+    bases,
+    fixedWidthBonuses,
+    solved,
+  }
+}
+
+export function solveNativePreviewSystemLayout(params: {
+  context: ReturnType<Renderer['getContext']>
+  measurePairs: MeasurePair[]
+  range: SystemMeasureRange
+  measureKeyFifthsFromImport: number[] | null
+  measureTimeSignaturesFromImport: TimeSignature[] | null
+  supplementalSpacingTicksByPair?: number[][] | null
+  spacingConfig: TimeAxisSpacingConfig
+  grandStaffLayoutMetrics: GrandStaffLayoutMetrics
+  usableWidthNotationPx: number
+  notationScale: number
+  showNoteHeadJianpu: boolean
+}): NativePreviewSystemLayout {
+  const {
+    context,
+    measurePairs,
+    range,
+    measureKeyFifthsFromImport,
+    measureTimeSignaturesFromImport,
+    supplementalSpacingTicksByPair = null,
+    spacingConfig,
+    grandStaffLayoutMetrics,
+    usableWidthNotationPx,
+    notationScale,
+    showNoteHeadJianpu,
+  } = params
+  const safeNotationScale = Number.isFinite(notationScale) && notationScale > 0 ? notationScale : 1
+  let sparseExpansionPairIndexSet = new Set<number>()
+  let solvePass = solveNativePreviewSystemPass({
+    context,
+    measurePairs,
+    range,
+    measureKeyFifthsFromImport,
+    measureTimeSignaturesFromImport,
+    supplementalSpacingTicksByPair,
+    spacingConfig,
+    grandStaffLayoutMetrics,
+    usableWidthNotationPx,
+    showNoteHeadJianpu,
+    sparseExpansionPairIndexSet,
+  })
+
+  for (let pass = 0; pass < 2; pass += 1) {
+    const nextSparseExpansionPairIndexSet = new Set<number>(sparseExpansionPairIndexSet)
+    solvePass.bases.forEach((basis) => {
+      const finalTimelineStretchScale =
+        basis.elasticBasisPx > FIT_EPS
+          ? basis.baseTimelineStretchScale * solvePass.solved.elasticScale
+          : basis.baseTimelineStretchScale
+      if (basis.baseSpacingAnchorCount <= 2 && finalTimelineStretchScale > 1 + FIT_EPS) {
+        nextSparseExpansionPairIndexSet.add(basis.meta.pairIndex)
+      }
+    })
+    if (arePairIndexSetsEqual(nextSparseExpansionPairIndexSet, sparseExpansionPairIndexSet)) {
+      break
+    }
+    sparseExpansionPairIndexSet = nextSparseExpansionPairIndexSet
+    solvePass = solveNativePreviewSystemPass({
+      context,
+      measurePairs,
+      range,
+      measureKeyFifthsFromImport,
+      measureTimeSignaturesFromImport,
+      supplementalSpacingTicksByPair,
+      spacingConfig,
+      grandStaffLayoutMetrics,
+      usableWidthNotationPx,
+      showNoteHeadJianpu,
+      sparseExpansionPairIndexSet,
+    })
+  }
+
+  const measures = solvePass.bases.map((basis, index) => {
+    const measureWidth = solvePass.solved.measureWidths[index] ?? Math.max(1, basis.fixedWidthBasePx)
+    const fixedWidthPx = basis.fixedWidthBasePx + (solvePass.fixedWidthBonuses[index] ?? 0)
     const elasticWidthPx = Math.max(0, measureWidth - fixedWidthPx)
+    const finalTimelineStretchScale =
+      basis.elasticBasisPx > FIT_EPS
+        ? basis.baseTimelineStretchScale * solvePass.solved.elasticScale
+        : basis.baseTimelineStretchScale
     return {
       pairIndex: basis.meta.pairIndex,
       measureWidth,
@@ -470,23 +673,42 @@ export function solveNativePreviewSystemLayout(params: {
       fixedWidthPx,
       elasticWidthPx,
       actualStartDecorationWidthPx: basis.actualStartDecorationWidthPx,
+      timelineStretchScale: finalTimelineStretchScale,
+      previewSpacingAnchorTicks: basis.previewSpacingAnchorTicks.length > 0 ? [...basis.previewSpacingAnchorTicks] : null,
     } satisfies NativePreviewSolvedMeasure
   })
+  const minTimelineStretchScale = measures.reduce(
+    (minValue, measure) =>
+      Number.isFinite(measure.timelineStretchScale)
+        ? Math.min(minValue, measure.timelineStretchScale)
+        : minValue,
+    Number.POSITIVE_INFINITY,
+  )
+  const equivalentEighthGapNotationPx = Number.isFinite(minTimelineStretchScale)
+    ? getTimeAxisGapWeightPx(8, spacingConfig) * Math.max(0, minTimelineStretchScale)
+    : 0
+  const elasticWidthTotalNotationPx = solvePass.solved.elasticBasisTotalPx * solvePass.solved.elasticScale
 
   return {
     range,
     measures,
-    equivalentEighthGapPx: getTimeAxisGapWeightPx(8, spacingConfig) * solved.elasticScale,
-    elasticScale: solved.elasticScale,
-    fixedWidthTotalPx: solved.fixedWidthTotalPx,
-    elasticWidthTotalPx: solved.elasticWidthTotalPx * solved.elasticScale,
-    usableWidthPx,
-    totalWidthPx: solved.totalWidthPx,
+    equivalentEighthGapPx: equivalentEighthGapNotationPx * safeNotationScale,
+    equivalentEighthGapNotationPx,
+    elasticScale: solvePass.solved.elasticScale,
+    fixedWidthTotalPx: solvePass.solved.fixedWidthTotalPx * safeNotationScale,
+    fixedWidthTotalNotationPx: solvePass.solved.fixedWidthTotalPx,
+    elasticWidthTotalPx: elasticWidthTotalNotationPx * safeNotationScale,
+    elasticWidthTotalNotationPx,
+    usableWidthPx: usableWidthNotationPx * safeNotationScale,
+    usableWidthNotationPx,
+    totalWidthPx: solvePass.solved.totalWidthPx * safeNotationScale,
+    totalWidthNotationPx: solvePass.solved.totalWidthPx,
   }
 }
 
 function paginateNativePreviewSystems(params: {
   systemLayouts: NativePreviewSystemLayout[]
+  notationScale: number
   horizontalMarginPx: number
   firstPageTopMarginPx: number
   topMarginPx: number
@@ -496,6 +718,7 @@ function paginateNativePreviewSystems(params: {
 }): NativePreviewPageLayout[] {
   const {
     systemLayouts,
+    notationScale,
     horizontalMarginPx,
     firstPageTopMarginPx,
     topMarginPx,
@@ -503,16 +726,22 @@ function paginateNativePreviewSystems(params: {
     minGrandStaffGapPx,
     grandStaffLayoutMetrics,
   } = params
+  const safeNotationScale = Number.isFinite(notationScale) && notationScale > 0 ? notationScale : 1
+  const horizontalMarginNotationPx = horizontalMarginPx / safeNotationScale
+  const systemHeightNotationPx = grandStaffLayoutMetrics.systemHeightPx
   if (systemLayouts.length === 0) {
     return [{
       pageIndex: 0,
       pageNumber: 1,
+      notationScale: safeNotationScale,
       systemLayouts: [],
       systemRanges: [],
       systemTopPxBySystemIndex: [],
       measureFramesByPair: [],
       actualSystemGapPx: 0,
+      actualSystemGapNotationPx: 0,
       minEquivalentEighthGapPx: 0,
+      minEquivalentEighthGapNotationPx: 0,
     }]
   }
 
@@ -520,19 +749,24 @@ function paginateNativePreviewSystems(params: {
   let systemIndex = 0
   while (systemIndex < systemLayouts.length) {
     const isFirstPage = pages.length === 0
-    const topMarginForPage = isFirstPage ? firstPageTopMarginPx : topMarginPx
-    const usableHeightPx = A4_PAGE_HEIGHT - bottomMarginPx - topMarginForPage
+    const topMarginForPagePx = isFirstPage ? firstPageTopMarginPx : topMarginPx
+    const topMarginForPageNotationPx = topMarginForPagePx / safeNotationScale
+    const usableHeightNotationPx = Math.max(
+      1,
+      (A4_PAGE_HEIGHT - bottomMarginPx - topMarginForPagePx) / safeNotationScale,
+    )
     let endExclusive = systemIndex
 
     while (endExclusive < systemLayouts.length) {
       const candidateCount = endExclusive - systemIndex + 1
-      const remainingHeightPx = usableHeightPx - candidateCount * grandStaffLayoutMetrics.systemHeightPx
+      const remainingHeightNotationPx = usableHeightNotationPx - candidateCount * systemHeightNotationPx
       if (candidateCount === 1) {
         endExclusive += 1
         continue
       }
-      const actualGapPx = remainingHeightPx / (candidateCount - 1)
-      if (remainingHeightPx >= -FIT_EPS && actualGapPx + FIT_EPS >= minGrandStaffGapPx) {
+      const actualGapNotationPx = remainingHeightNotationPx / (candidateCount - 1)
+      const actualGapPx = actualGapNotationPx * safeNotationScale
+      if (remainingHeightNotationPx >= -FIT_EPS && actualGapPx + FIT_EPS >= minGrandStaffGapPx) {
         endExclusive += 1
         continue
       }
@@ -545,15 +779,17 @@ function paginateNativePreviewSystems(params: {
 
     const pageSystems = systemLayouts.slice(systemIndex, endExclusive)
     const count = pageSystems.length
-    const remainingHeightPx = usableHeightPx - count * grandStaffLayoutMetrics.systemHeightPx
-    const actualSystemGapPx =
-      count > 1 ? Math.max(0, remainingHeightPx / Math.max(1, count - 1)) : 0
+    const remainingHeightNotationPx = usableHeightNotationPx - count * systemHeightNotationPx
+    const actualSystemGapNotationPx =
+      count > 1 ? Math.max(0, remainingHeightNotationPx / Math.max(1, count - 1)) : 0
+    const actualSystemGapPx = actualSystemGapNotationPx * safeNotationScale
     const systemTopPxBySystemIndex = pageSystems.map(
-      (_layout, index) => topMarginForPage + index * (grandStaffLayoutMetrics.systemHeightPx + actualSystemGapPx),
+      (_layout, index) =>
+        topMarginForPageNotationPx + index * (systemHeightNotationPx + actualSystemGapNotationPx),
     )
     const measureFramesByPair: MeasureFrame[] = []
     pageSystems.forEach((systemLayout) => {
-      let cursorX = horizontalMarginPx
+      let cursorX = horizontalMarginNotationPx
       systemLayout.measures.forEach((measure) => {
         measureFramesByPair[measure.pairIndex] = {
           measureX: cursorX,
@@ -561,22 +797,35 @@ function paginateNativePreviewSystems(params: {
           contentMeasureWidth: measure.contentMeasureWidth,
           renderedMeasureWidth: measure.measureWidth,
           actualStartDecorationWidthPx: measure.actualStartDecorationWidthPx,
+          timelineStretchScale: measure.timelineStretchScale,
+          previewSpacingAnchorTicks:
+            measure.previewSpacingAnchorTicks && measure.previewSpacingAnchorTicks.length > 0
+              ? [...measure.previewSpacingAnchorTicks]
+              : null,
         }
         cursorX += measure.measureWidth
       })
     })
+    const minEquivalentEighthGapNotationPx = pageSystems.reduce(
+      (minGap, system) => Math.min(minGap, system.equivalentEighthGapNotationPx),
+      Number.POSITIVE_INFINITY,
+    )
     pages.push({
       pageIndex: pages.length,
       pageNumber: pages.length + 1,
+      notationScale: safeNotationScale,
       systemLayouts: pageSystems,
       systemRanges: pageSystems.map((system) => system.range),
       systemTopPxBySystemIndex,
       measureFramesByPair,
       actualSystemGapPx,
-      minEquivalentEighthGapPx: pageSystems.reduce(
-        (minGap, system) => Math.min(minGap, system.equivalentEighthGapPx),
-        Number.POSITIVE_INFINITY,
-      ),
+      actualSystemGapNotationPx,
+      minEquivalentEighthGapPx: Number.isFinite(minEquivalentEighthGapNotationPx)
+        ? minEquivalentEighthGapNotationPx * safeNotationScale
+        : 0,
+      minEquivalentEighthGapNotationPx: Number.isFinite(minEquivalentEighthGapNotationPx)
+        ? minEquivalentEighthGapNotationPx
+        : 0,
     })
     systemIndex = endExclusive
   }
@@ -592,6 +841,7 @@ export function buildNativePreviewLayout(params: {
   supplementalSpacingTicksByPair?: number[][] | null
   spacingConfig: TimeAxisSpacingConfig
   grandStaffLayoutMetrics: GrandStaffLayoutMetrics
+  notationScale: number
   horizontalMarginPx: number
   firstPageTopMarginPx: number
   topMarginPx: number
@@ -608,6 +858,7 @@ export function buildNativePreviewLayout(params: {
     supplementalSpacingTicksByPair = null,
     spacingConfig,
     grandStaffLayoutMetrics,
+    notationScale,
     horizontalMarginPx,
     firstPageTopMarginPx,
     topMarginPx,
@@ -616,23 +867,27 @@ export function buildNativePreviewLayout(params: {
     minGrandStaffGapPx,
     showNoteHeadJianpu,
   } = params
+  const safeNotationScale = Number.isFinite(notationScale) && notationScale > 0 ? notationScale : 1
 
   if (measurePairs.length === 0) {
     return {
       pages: [{
         pageIndex: 0,
         pageNumber: 1,
+        notationScale: safeNotationScale,
         systemLayouts: [],
         systemRanges: [],
         systemTopPxBySystemIndex: [],
         measureFramesByPair: [],
         actualSystemGapPx: 0,
+        actualSystemGapNotationPx: 0,
         minEquivalentEighthGapPx: 0,
+        minEquivalentEighthGapNotationPx: 0,
       }],
     }
   }
 
-  const usableWidthPx = Math.max(1, A4_PAGE_WIDTH - horizontalMarginPx * 2)
+  const usableWidthNotationPx = Math.max(1, (A4_PAGE_WIDTH - horizontalMarginPx * 2) / safeNotationScale)
   const solvedSystemCache = new Map<string, NativePreviewSystemLayout>()
   const getSolvedSystem = (range: SystemMeasureRange): NativePreviewSystemLayout => {
     const key = `${range.startPairIndex}:${range.endPairIndexExclusive}`
@@ -647,7 +902,8 @@ export function buildNativePreviewLayout(params: {
       supplementalSpacingTicksByPair,
       spacingConfig,
       grandStaffLayoutMetrics,
-      usableWidthPx,
+      usableWidthNotationPx,
+      notationScale: safeNotationScale,
       showNoteHeadJianpu,
     })
     solvedSystemCache.set(key, solved)
@@ -669,7 +925,7 @@ export function buildNativePreviewLayout(params: {
       })
       const canFitByGap =
         candidateLayout.equivalentEighthGapPx + FIT_EPS >= minEighthGapPx &&
-        candidateLayout.totalWidthPx <= usableWidthPx + FIT_EPS
+        candidateLayout.totalWidthNotationPx <= usableWidthNotationPx + FIT_EPS
       if (canFitByGap) {
         bestLayout = candidateLayout
         endPairIndexExclusive += 1
@@ -687,6 +943,7 @@ export function buildNativePreviewLayout(params: {
   return {
     pages: paginateNativePreviewSystems({
       systemLayouts,
+      notationScale: safeNotationScale,
       horizontalMarginPx,
       firstPageTopMarginPx,
       topMarginPx,
