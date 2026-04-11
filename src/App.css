@@ -2589,23 +2589,23 @@
 
 .database-workspace-actions button,
 .database-toolbar button,
-.database-pagination-actions button,
+.database-pagination-controls button,
 .database-modal-card button,
 .database-top-tabs button,
 .database-mode-toggle button {
   border: 1px solid #c6d6e1;
-  border-radius: 12px;
+  border-radius: 10px;
   background: #ffffff;
   color: #16384b;
   font-weight: 700;
-  padding: 0.52rem 0.92rem;
+  padding: 0.44rem 0.8rem;
   cursor: pointer;
   transition: background 140ms ease, border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
 }
 
 .database-workspace-actions button:hover,
 .database-toolbar button:hover,
-.database-pagination-actions button:hover,
+.database-pagination-controls button:hover,
 .database-modal-card button:hover,
 .database-top-tabs button:hover,
 .database-mode-toggle button:hover {
@@ -2616,7 +2616,7 @@
 
 .database-workspace-actions button:disabled,
 .database-toolbar button:disabled,
-.database-pagination-actions button:disabled {
+.database-pagination-controls button:disabled {
   opacity: 0.52;
   cursor: not-allowed;
   transform: none;
@@ -2674,94 +2674,57 @@
   color: #8a3641;
 }
 
-.database-navigation-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.9fr);
-  gap: 1rem;
-}
-
+.database-shell-bar,
 .database-view-panel,
-.database-entry-panel,
-.database-mode-layout {
+.database-entry-panel {
   display: grid;
-  gap: 1rem;
+  gap: 0.7rem;
 }
 
-.database-section-card {
-  border: 1px solid #d9e6ef;
-  border-radius: 22px;
-  background: linear-gradient(180deg, #fcfeff 0%, #f7fbfe 100%);
-  box-shadow: 0 20px 40px -34px rgba(13, 46, 71, 0.55);
-  overflow: hidden;
-}
-
-.database-section-card-header {
-  display: grid;
-  gap: 0.28rem;
-  padding: 1rem 1.1rem 0.85rem;
-  border-bottom: 1px solid #e5eef4;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(243, 249, 252, 0.95) 100%);
-}
-
-.database-section-card-header h3 {
-  margin: 0;
-  color: #16384b;
-  font-size: 1rem;
-}
-
-.database-section-card-header p {
-  margin: 0;
-  color: #5f7788;
-  font-size: 0.84rem;
-  line-height: 1.45;
-}
-
-.database-section-card-eyebrow {
-  color: #2d6d96;
-  font-size: 0.76rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.database-section-card-content {
-  display: grid;
-  gap: 0.9rem;
-  padding: 1rem 1.1rem 1.1rem;
-}
-
-.database-section-card-content--footer,
-.database-section-card-content--status {
-  gap: 0.65rem;
-}
-
-.database-section-card--navigation .database-section-card-content {
-  gap: 0.75rem;
+.database-shell-bar {
+  grid-template-columns: minmax(0, 1.8fr) minmax(260px, 0.9fr);
+  align-items: end;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid #d7e4ec;
+  border-radius: 16px;
+  background: #fbfdff;
 }
 
 .database-top-tabs {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.6rem;
+  gap: 0.45rem;
 }
 
 .database-top-tabs button {
   width: 100%;
-  min-height: 48px;
+  min-height: 42px;
+}
+
+.database-mode-shell {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.database-strip-label {
+  color: #4a6678;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
 }
 
 .database-mode-toggle {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.35rem;
-  padding: 0.35rem;
+  padding: 0.26rem;
   border: 1px solid #d3e1ea;
-  border-radius: 16px;
+  border-radius: 12px;
   background: #edf4f8;
 }
 
 .database-mode-toggle button {
-  min-height: 44px;
+  min-height: 38px;
   border-color: transparent;
   background: transparent;
   box-shadow: none;
@@ -2779,43 +2742,69 @@
   border-color: #9fc2d8;
 }
 
-.database-filter-grid {
+.database-filter-strip {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0.75rem;
+  gap: 0.45rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid #d7e4ec;
+  border-radius: 14px;
+  background: #fbfdff;
 }
 
-.database-filter-grid--notes {
+.database-filter-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.6rem;
+  align-items: start;
+}
+
+.database-filter-fields {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.database-filter-fields--notes {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.database-filter-grid label {
-  display: grid;
-  gap: 0.35rem;
+.database-filter-fields--template {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.database-filter-grid span,
+.database-filter-fields--template-secondary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 720px;
+}
+
+.database-filter-field {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.database-filter-field > span,
 .database-entry-status,
-.database-pagination-status,
+.database-pagination-summary,
 .database-multi-select-label {
   color: #466174;
   font-size: 0.8rem;
   font-weight: 700;
 }
 
-.database-filter-grid input,
-.database-filter-grid select,
+.database-filter-field input,
+.database-filter-field select,
 .database-entry-toolbar input,
+.database-pagination-jump input,
+.database-entry-mirror-field input,
 .database-table input,
 .database-table select,
 .database-table textarea {
   width: 100%;
   border: 1px solid #ccdbe5;
-  border-radius: 10px;
+  border-radius: 8px;
   background: #ffffff;
   color: #16384b;
   font-size: 0.84rem;
-  padding: 0.5rem 0.6rem;
+  padding: 0.42rem 0.56rem;
   box-sizing: border-box;
 }
 
@@ -2825,10 +2814,17 @@
   font-family: 'Consolas', 'Courier New', monospace;
 }
 
-.database-toolbar {
+.database-filter-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.55rem;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 260px;
+}
+
+.database-filter-actions--secondary {
+  align-self: end;
 }
 
 .database-toolbar .is-danger,
@@ -2841,7 +2837,7 @@
 .database-table-wrap {
   overflow: auto;
   border: 1px solid #dbe7ef;
-  border-radius: 16px;
+  border-radius: 12px;
   background: #ffffff;
 }
 
@@ -2895,24 +2891,43 @@
   padding-top: 0.3rem;
 }
 
-.database-pagination {
+.database-pagination-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.8rem;
+  gap: 0.7rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid #d7e4ec;
+  border-radius: 14px;
+  background: #fbfdff;
 }
 
-.database-pagination-status {
+.database-pagination-controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
-}
-
-.database-pagination-actions {
-  display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 0.45rem;
+}
+
+.database-pagination-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #466174;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.database-pagination-jump input {
+  width: 82px;
+}
+
+.database-pagination-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.75rem;
 }
 
 .database-empty-state,
@@ -2927,34 +2942,86 @@
 .database-entry-toolbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) repeat(5, auto);
-  gap: 0.55rem;
+  gap: 0.45rem;
   align-items: center;
 }
 
+.database-entry-toolbar-strip,
+.database-entry-mirror-shell,
+.database-main-stack {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.72rem 0.9rem;
+  border: 1px solid #d7e4ec;
+  border-radius: 14px;
+  background: #fbfdff;
+}
+
 .database-entry-file-path {
-  min-height: 42px;
+  min-height: 38px;
   display: flex;
   align-items: center;
-  padding: 0.55rem 0.7rem;
+  padding: 0.48rem 0.62rem;
   border: 1px solid #ccdbe5;
-  border-radius: 12px;
+  border-radius: 10px;
   background: #ffffff;
   color: #315468;
   font-family: 'Consolas', 'Courier New', monospace;
   font-size: 0.82rem;
 }
 
-.database-entry-status-bar {
+.database-entry-mirror-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.database-entry-mirror-field {
+  display: grid;
+  gap: 0.24rem;
+}
+
+.database-entry-mirror-field span {
+  color: #496576;
+  font-size: 0.79rem;
+  font-weight: 700;
+}
+
+.database-entry-mirror-field input:disabled {
+  background: #f2f6f9;
+  color: #7e95a6;
+}
+
+.database-content-shell {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.database-content-shell-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: #5f7788;
+  font-size: 0.84rem;
+}
+
+.database-content-shell-header strong {
+  color: #16384b;
+  font-size: 0.94rem;
+}
+
+.database-status-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  min-height: 42px;
-  padding: 0.75rem 0.85rem;
+  gap: 0.65rem;
+  min-height: 38px;
+  padding: 0.7rem 0.85rem;
   border: 1px solid #dbe7ef;
-  border-radius: 14px;
-  background: #ffffff;
+  border-radius: 12px;
+  background: #fbfdff;
 }
 
 .database-status-pill {
@@ -2970,56 +3037,52 @@
   font-weight: 700;
 }
 
-.database-preview-grid {
+.database-preview-stack {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
-  gap: 0.9rem;
-}
-
-.database-preview-card {
-  display: grid;
-  gap: 0.75rem;
-  padding: 0.9rem;
-  border: 1px solid #d9e6ef;
-  border-radius: 18px;
-  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
-  cursor: pointer;
-}
-
-.database-preview-card.is-selected {
-  border-color: #8fbce1;
-  box-shadow: inset 0 0 0 1px rgba(22, 80, 123, 0.12);
-}
-
-.database-preview-card-header,
-.database-preview-card-meta {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
   gap: 0.55rem;
 }
 
-.database-preview-card-header strong {
-  color: #16384b;
+.database-note-preview-summary,
+.database-note-preview-surface-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.45rem;
 }
 
-.database-preview-card-header span,
-.database-preview-card-meta span,
-.database-preview-card-notes {
+.database-note-preview-summary,
+.database-note-preview-surface-header span {
   color: #5f7788;
   font-size: 0.82rem;
+}
+
+.database-note-preview-surface {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.8rem;
+  border: 1px solid #dbe7ef;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.database-note-preview-surface-header strong {
+  color: #16384b;
 }
 
 .database-note-preview-scroll {
   overflow-x: auto;
   overflow-y: hidden;
   border: 1px solid #dbe7ef;
-  border-radius: 14px;
+  border-radius: 12px;
   background: #ffffff;
 }
 
 .database-note-preview-canvas {
   display: block;
+}
+
+.database-table tbody tr.is-entry-focus {
+  background: #f0f7ff;
 }
 
 .database-multi-select {
@@ -3185,7 +3248,7 @@
 }
 
 @media (max-width: 1080px) {
-  .database-navigation-grid,
+  .database-shell-bar,
   .database-workspace-header,
   .database-modal-header,
   .database-modal-footer {
@@ -3201,9 +3264,23 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .database-filter-grid,
-  .database-filter-grid--notes,
+  .database-filter-row,
+  .database-filter-fields--notes,
+  .database-filter-fields--template,
+  .database-filter-fields--template-secondary,
+  .database-entry-mirror-grid,
   .database-tag-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .database-filter-actions {
+    justify-content: flex-start;
+    min-width: 0;
+  }
+
+  .database-pagination-row,
+  .database-status-row,
+  .database-content-shell-header {
+    display: grid;
   }
 }

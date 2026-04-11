@@ -8,7 +8,6 @@ import {
   type ChangeEvent,
   type Dispatch,
   type MouseEvent as ReactMouseEvent,
-  type ReactNode,
   type SetStateAction,
 } from 'react'
 import { Renderer } from 'vexflow'
@@ -140,6 +139,7 @@ type EntryFileState = {
 const PAGE_SIZE = 50
 const NOTE_PREVIEW_HEIGHT_PX = 160
 const NOTE_PREVIEW_PADDING_X = 18
+const NOTE_PREVIEW_BEATS_PER_MEASURE = 8
 
 const DEFAULT_SESSION_INFO: DatabaseSessionInfo = {
   sourceKind: 'bundled',
@@ -359,7 +359,7 @@ function toPreviewPitch(token: string): string | null {
   return `${step.toLowerCase()}${accidental}/${octave}`
 }
 
-function buildPreviewMeasures(notesText: string): Array<{
+type PreviewMeasureDefinition = {
   pairIndex: number
   notes: ScoreNote[]
   clef: 'bass'
@@ -367,7 +367,41 @@ function buildPreviewMeasures(notesText: string): Array<{
   timeSignature: TimeSignature
   showKeySignature: boolean
   showTimeSignature: boolean
-}> {
+}
+
+type PreviewRowBuildResult = {
+  definitions: PreviewMeasureDefinition[]
+  hadValidOnsets: boolean
+}
+
+type PreviewRowsBuildResult = {
+  definitions: PreviewMeasureDefinition[]
+  invalidRowCount: number
+}
+
+function createPreviewRestNote(): ScoreNote {
+  return {
+    id: createNoteId(),
+    pitch: 'd/3',
+    duration: '8',
+    isRest: true,
+  }
+}
+
+function createPreviewNote(pitches: string[] | null): ScoreNote {
+  if (!pitches || pitches.length === 0) {
+    return createPreviewRestNote()
+  }
+  const [pitch, ...chordPitches] = pitches
+  return {
+    id: createNoteId(),
+    pitch: pitch ?? 'c/3',
+    duration: '8',
+    chordPitches: chordPitches.length > 0 ? chordPitches : undefined,
+  }
+}
+
+function buildPreviewMeasures(notesText: string): PreviewRowBuildResult {
   const onsetTokens = notesText
     .split('_')
     .map((entry) => entry.trim())
@@ -381,28 +415,71 @@ function buildPreviewMeasures(notesText: string): Array<{
     )
     .filter((group) => group.length > 0)
 
-  return chunkArray(noteGroups, 8).map((groupChunk, pairIndex) => ({
-    pairIndex,
-    notes: groupChunk.map((pitches) => {
-      const [pitch, ...chordPitches] = pitches
-      return {
-        id: createNoteId(),
-        pitch: pitch ?? 'c/3',
-        duration: '8',
-        chordPitches: chordPitches.length > 0 ? chordPitches : undefined,
-      }
-    }),
-    clef: 'bass',
-    keyFifths: 0,
-    timeSignature: { beats: 4, beatType: 4 },
-    showKeySignature: false,
-    showTimeSignature: pairIndex === 0,
-  }))
+  if (noteGroups.length === 0) {
+    return {
+      definitions: [],
+      hadValidOnsets: false,
+    }
+  }
+
+  const paddedGroups: Array<string[] | null> = [...noteGroups]
+  while (paddedGroups.length % NOTE_PREVIEW_BEATS_PER_MEASURE !== 0) {
+    paddedGroups.push(null)
+  }
+
+  return {
+    hadValidOnsets: true,
+    definitions: chunkArray(paddedGroups, NOTE_PREVIEW_BEATS_PER_MEASURE).map((groupChunk, pairIndex) => ({
+      pairIndex,
+      notes: groupChunk.map((pitches) => createPreviewNote(pitches)),
+      clef: 'bass',
+      keyFifths: 0,
+      timeSignature: { beats: 4, beatType: 4 },
+      showKeySignature: false,
+      showTimeSignature: pairIndex === 0,
+    })),
+  }
+}
+
+function buildPreviewMeasuresForRows(rows: AccompanimentNoteDbRow[]): PreviewRowsBuildResult {
+  const definitions: PreviewMeasureDefinition[] = []
+  let invalidRowCount = 0
+  let pairIndex = 0
+  rows.forEach((row) => {
+    const rowResult = buildPreviewMeasures(row.notes)
+    if (!rowResult.hadValidOnsets) {
+      invalidRowCount += 1
+      return
+    }
+    rowResult.definitions.forEach((definition) => {
+      definitions.push({
+        ...definition,
+        pairIndex,
+        showTimeSignature: pairIndex === 0,
+      })
+      pairIndex += 1
+    })
+  })
+  return {
+    definitions,
+    invalidRowCount,
+  }
 }
 
 function joinFileNames(fileNames: string[]): string {
   if (fileNames.length === 0) return '未选择文件'
   return fileNames.join('，')
+}
+
+function resolveTemplateEntryMirrorRow(
+  drafts: TemplateEntryDraftRow[],
+  focusedIndex: number | null,
+): TemplateEntryDraftRow | null {
+  if (drafts.length === 0) return null
+  if (focusedIndex !== null && focusedIndex >= 0 && focusedIndex < drafts.length) {
+    return drafts[focusedIndex] ?? null
+  }
+  return drafts[0] ?? null
 }
 
 function renderDirtyLabel(sessionInfo: DatabaseSessionInfo): string {
@@ -617,19 +694,24 @@ function ContextMenu(props: {
   )
 }
 
-function DatabaseNotePreviewCanvas(props: {
-  notesText: string
+function DatabaseNotePreviewSurface(props: {
+  rows: AccompanimentNoteDbRow[]
   timeAxisSpacingConfig: TimeAxisSpacingConfig
   spacingLayoutMode: SpacingLayoutMode
   grandStaffLayoutMetrics: GrandStaffLayoutMetrics
 }) {
-  const { notesText, timeAxisSpacingConfig, spacingLayoutMode, grandStaffLayoutMetrics } = props
+  const { rows, timeAxisSpacingConfig, spacingLayoutMode, grandStaffLayoutMetrics } = props
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const measures = useMemo(() => buildPreviewMeasures(notesText), [notesText])
+  const previewBuild = useMemo(() => buildPreviewMeasuresForRows(rows), [rows])
+  const { definitions, invalidRowCount } = previewBuild
+  const [renderError, setRenderError] = useState<string | null>(null)
 
   useLayoutEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas) return undefined
+    if (!canvas || definitions.length === 0) {
+      setRenderError(null)
+      return undefined
+    }
     const renderer = new Renderer(canvas, Renderer.Backends.CANVAS)
     renderer.resize(1, NOTE_PREVIEW_HEIGHT_PX)
     const context = renderer.getContext()
@@ -638,12 +720,21 @@ function DatabaseNotePreviewCanvas(props: {
     const result = renderPreviewWithMainLayout({
       context,
       renderHeight: NOTE_PREVIEW_HEIGHT_PX,
-      definitions: measures,
+      definitions,
       paddingX: NOTE_PREVIEW_PADDING_X,
       timeAxisSpacingConfig,
       spacingLayoutMode,
       grandStaffLayoutMetrics,
     })
+
+    const fallbackWidth = Math.max(1, NOTE_PREVIEW_PADDING_X * 2)
+    if (result.totalWidth <= fallbackWidth) {
+      renderer.resize(fallbackWidth, NOTE_PREVIEW_HEIGHT_PX)
+      const fallbackContext = renderer.getContext()
+      fallbackContext.clearRect(0, 0, fallbackWidth, NOTE_PREVIEW_HEIGHT_PX)
+      setRenderError('当前页伴奏音符暂时无法生成可视谱面。')
+      return undefined
+    }
 
     renderer.resize(result.totalWidth, NOTE_PREVIEW_HEIGHT_PX)
     const nextContext = renderer.getContext()
@@ -651,19 +742,46 @@ function DatabaseNotePreviewCanvas(props: {
     renderPreviewWithMainLayout({
       context: nextContext,
       renderHeight: NOTE_PREVIEW_HEIGHT_PX,
-      definitions: measures,
+      definitions,
       paddingX: NOTE_PREVIEW_PADDING_X,
       timeAxisSpacingConfig,
       spacingLayoutMode,
       grandStaffLayoutMetrics,
     })
+    setRenderError(null)
 
     return undefined
-  }, [grandStaffLayoutMetrics, measures, spacingLayoutMode, timeAxisSpacingConfig])
+  }, [definitions, grandStaffLayoutMetrics, spacingLayoutMode, timeAxisSpacingConfig])
+
+  if (rows.length === 0) {
+    return <div className="database-empty-state">当前页没有可预览的伴奏音符。</div>
+  }
+
+  if (definitions.length === 0) {
+    return (
+      <div className="database-empty-state">
+        {invalidRowCount > 0 ? '当前页结果没有可解析的伴奏音符，无法生成曲谱预览。' : '当前页没有可预览的伴奏音符。'}
+      </div>
+    )
+  }
 
   return (
-    <div className="database-note-preview-scroll">
-      <canvas ref={canvasRef} className="database-note-preview-canvas" />
+    <div className="database-note-preview-surface">
+      <div className="database-note-preview-surface-header">
+        <strong>当前页曲谱预览</strong>
+        <span>
+          {invalidRowCount > 0
+            ? `共 ${rows.length} 条，已跳过 ${invalidRowCount} 条无法解析的记录。`
+            : `共 ${rows.length} 条，按当前页顺序连续展示。`}
+        </span>
+      </div>
+      {renderError
+        ? <div className="database-empty-state">{renderError}</div>
+        : (
+          <div className="database-note-preview-scroll">
+            <canvas ref={canvasRef} className="database-note-preview-canvas" />
+          </div>
+        )}
     </div>
   )
 }
@@ -676,52 +794,46 @@ function PaginationBar(props: {
   onPageChange: (nextPage: number) => void
 }) {
   const { page, totalPages, totalRows, selectedCount, onPageChange } = props
+  const [pageDraft, setPageDraft] = useState(String(page))
+
+  useEffect(() => {
+    setPageDraft(String(page))
+  }, [page, totalPages])
+
+  const commitPageDraft = useCallback(() => {
+    const parsed = Number(pageDraft)
+    const nextPage = clampPage(Number.isFinite(parsed) && parsed > 0 ? parsed : 1, totalPages)
+    setPageDraft(String(nextPage))
+    onPageChange(nextPage)
+  }, [onPageChange, pageDraft, totalPages])
 
   return (
-    <div className="database-pagination">
-      <div className="database-pagination-status">
-        <span>{`共 ${totalRows} 条`}</span>
-        <span>{`已选 ${selectedCount} 条`}</span>
-        <span>{`第 ${page} / ${totalPages} 页`}</span>
-      </div>
-      <div className="database-pagination-actions">
-        <button type="button" onClick={() => onPageChange(1)} disabled={page <= 1}>首页</button>
+    <div className="database-pagination-row">
+      <div className="database-pagination-controls">
         <button type="button" onClick={() => onPageChange(page - 1)} disabled={page <= 1}>上一页</button>
         <button type="button" onClick={() => onPageChange(page + 1)} disabled={page >= totalPages}>下一页</button>
-        <button type="button" onClick={() => onPageChange(totalPages)} disabled={page >= totalPages}>末页</button>
+        <label className="database-pagination-jump">
+          <span>页码</span>
+          <input
+            value={pageDraft}
+            onChange={(event) => setPageDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                commitPageDraft()
+              }
+            }}
+            inputMode="numeric"
+          />
+        </label>
+        <button type="button" onClick={commitPageDraft}>跳转</button>
+      </div>
+      <div className="database-pagination-summary">
+        <span>{`第 ${page} / ${totalPages} 页`}</span>
+        <span>{`共 ${totalRows} 条`}</span>
+        <span>{`已选 ${selectedCount} 条`}</span>
       </div>
     </div>
-  )
-}
-
-function DatabaseSectionCard(props: {
-  eyebrow?: string
-  title: string
-  description?: string
-  className?: string
-  contentClassName?: string
-  children: ReactNode
-}) {
-  const {
-    eyebrow,
-    title,
-    description,
-    className = '',
-    contentClassName = '',
-    children,
-  } = props
-
-  return (
-    <section className={['database-section-card', className].filter(Boolean).join(' ')}>
-      <header className="database-section-card-header">
-        {eyebrow && <span className="database-section-card-eyebrow">{eyebrow}</span>}
-        <h3>{title}</h3>
-        {description && <p>{description}</p>}
-      </header>
-      <div className={['database-section-card-content', contentClassName].filter(Boolean).join(' ')}>
-        {children}
-      </div>
-    </section>
   )
 }
 
@@ -791,6 +903,10 @@ export function DatabaseWorkspacePage(props: DatabaseWorkspacePageProps) {
   const [noteEntryDrafts, setNoteEntryDrafts] = useState<NoteEntryDraftRow[]>([])
   const [templateEntryDrafts, setTemplateEntryDrafts] = useState<TemplateEntryDraftRow[]>([])
   const [rhythmEntryDrafts, setRhythmEntryDrafts] = useState<TemplateEntryDraftRow[]>([])
+  const [templateEntryFocusByTab, setTemplateEntryFocusByTab] = useState<Record<'accompaniment-template' | 'rhythm-template', number | null>>({
+    'accompaniment-template': null,
+    'rhythm-template': null,
+  })
 
   const markDirty = useCallback((saveError: string | null = null) => {
     setSessionInfo((current) => ({
@@ -1001,6 +1117,28 @@ export function DatabaseWorkspacePage(props: DatabaseWorkspacePageProps) {
       'rhythm-template': clampPage(current['rhythm-template'], rhythmTemplatePagination.totalPages),
     }))
   }, [rhythmTemplatePagination.totalPages])
+
+  useEffect(() => {
+    setTemplateEntryFocusByTab((current) => ({
+      ...current,
+      'accompaniment-template':
+        current['accompaniment-template'] !== null
+        && current['accompaniment-template'] >= templateEntryDrafts.length
+          ? (templateEntryDrafts.length > 0 ? 0 : null)
+          : current['accompaniment-template'],
+    }))
+  }, [templateEntryDrafts.length])
+
+  useEffect(() => {
+    setTemplateEntryFocusByTab((current) => ({
+      ...current,
+      'rhythm-template':
+        current['rhythm-template'] !== null
+        && current['rhythm-template'] >= rhythmEntryDrafts.length
+          ? (rhythmEntryDrafts.length > 0 ? 0 : null)
+          : current['rhythm-template'],
+    }))
+  }, [rhythmEntryDrafts.length])
 
   const openTagManager = useCallback(() => {
     if (activeTab === 'notes') {
@@ -1387,21 +1525,59 @@ export function DatabaseWorkspacePage(props: DatabaseWorkspacePageProps) {
     return <span className="database-sort-indicator">{currentSort.direction === 'asc' ? '↑' : '↓'}</span>
   }, [sortByTab])
 
-  const renderDatabaseToolbar = useCallback(() => {
-    if (activeTab === 'notes') {
-      return (
-        <div className="database-toolbar">
-          <button type="button" onClick={() => refreshRows(database as SqlJsDatabase)} disabled={!database}>刷新</button>
-          <button
-            type="button"
-            onClick={() => {
-              setNoteFilters(DEFAULT_NOTE_FILTERS)
-              setNoteHeaderFilters(DEFAULT_NOTE_HEADER_FILTERS)
+  const clearNoteFilters = useCallback(() => {
+    setNoteFilters(DEFAULT_NOTE_FILTERS)
+    setNoteHeaderFilters(DEFAULT_NOTE_HEADER_FILTERS)
+    setPageByTab((current) => ({ ...current, notes: 1 }))
+  }, [])
+
+  const clearTemplateFilters = useCallback((tab: 'accompaniment-template' | 'rhythm-template') => {
+    if (tab === 'accompaniment-template') {
+      setAccompanimentTemplateFilters(DEFAULT_TEMPLATE_FILTERS)
+      setAccompanimentTemplateHeaderFilters(DEFAULT_TEMPLATE_HEADER_FILTERS)
+      setPageByTab((current) => ({ ...current, 'accompaniment-template': 1 }))
+      return
+    }
+    setRhythmTemplateFilters(DEFAULT_TEMPLATE_FILTERS)
+    setRhythmTemplateHeaderFilters(DEFAULT_TEMPLATE_HEADER_FILTERS)
+    setPageByTab((current) => ({ ...current, 'rhythm-template': 1 }))
+  }, [])
+
+  const renderNotesFilterBar = () => (
+    <div className="database-filter-strip database-filter-strip--notes">
+      <div className="database-filter-row">
+        <div className="database-filter-fields database-filter-fields--notes">
+          <label className="database-filter-field">
+            <span>伴奏音符</span>
+            <input value={noteFilters.notesQuery} onChange={(event) => {
+              setNoteFilters((current) => ({ ...current, notesQuery: event.target.value }))
               setPageByTab((current) => ({ ...current, notes: 1 }))
-            }}
-          >
-            清空筛选
-          </button>
+            }} placeholder="筛选 notes" />
+          </label>
+          <label className="database-filter-field">
+            <span>和弦类型</span>
+            <input value={noteFilters.chordTypeQuery} onChange={(event) => {
+              setNoteFilters((current) => ({ ...current, chordTypeQuery: event.target.value }))
+              setPageByTab((current) => ({ ...current, notes: 1 }))
+            }} placeholder="例如 C / Amadd9" />
+          </label>
+          <div className="database-filter-field">
+            <CheckboxDropdown label="音符方向" options={noteDirectionOptions} selectedValues={noteFilters.directions} onChange={(nextValues) => {
+              setNoteFilters((current) => ({ ...current, directions: nextValues }))
+              setPageByTab((current) => ({ ...current, notes: 1 }))
+            }} />
+          </div>
+          <label className="database-filter-field">
+            <span>伴奏结构</span>
+            <input value={noteFilters.structureQuery} onChange={(event) => {
+              setNoteFilters((current) => ({ ...current, structureQuery: event.target.value }))
+              setPageByTab((current) => ({ ...current, notes: 1 }))
+            }} placeholder="例如 单音＋和弦" />
+          </label>
+        </div>
+        <div className="database-filter-actions">
+          <button type="button" onClick={clearNoteFilters}>清空筛选</button>
+          <button type="button" onClick={() => refreshRows(database as SqlJsDatabase)} disabled={!database}>刷新</button>
           <button
             type="button"
             className={headerFilterEnabledByTab.notes ? 'is-active' : ''}
@@ -1416,145 +1592,114 @@ export function DatabaseWorkspacePage(props: DatabaseWorkspacePageProps) {
           >
             曲谱预览
           </button>
+        </div>
+      </div>
+      <div className="database-filter-row">
+        <div className="database-filter-fields database-filter-fields--notes">
+          <div className="database-filter-field">
+            <CheckboxDropdown label="音的数量" options={noteCountOptions} selectedValues={noteFilters.noteCounts} onChange={(nextValues) => {
+              setNoteFilters((current) => ({ ...current, noteCounts: nextValues }))
+              setPageByTab((current) => ({ ...current, notes: 1 }))
+            }} />
+          </div>
+          <label className="database-filter-field">
+            <span>常用</span>
+            <select value={noteFilters.commonState} onChange={(event) => {
+              setNoteFilters((current) => ({ ...current, commonState: event.target.value as NoteFilters['commonState'] }))
+              setPageByTab((current) => ({ ...current, notes: 1 }))
+            }}>
+              <option value="all">全部</option>
+              <option value="yes">是</option>
+              <option value="no">否</option>
+            </select>
+          </label>
+          <div className="database-filter-field">
+            <CheckboxDropdown label="风格标签" options={noteStyleOptions} selectedValues={noteFilters.styleTags} onChange={(nextValues) => {
+              setNoteFilters((current) => ({ ...current, styleTags: nextValues }))
+              setPageByTab((current) => ({ ...current, notes: 1 }))
+            }} />
+          </div>
+          <div className="database-filter-field">
+            <CheckboxDropdown label="特殊标签" options={noteSpecialOptions} selectedValues={noteFilters.specialTags} onChange={(nextValues) => {
+              setNoteFilters((current) => ({ ...current, specialTags: nextValues }))
+              setPageByTab((current) => ({ ...current, notes: 1 }))
+            }} />
+          </div>
+        </div>
+        <div className="database-filter-actions database-filter-actions--secondary">
           <button type="button" onClick={handleFillChordIndices} disabled={!database}>补充和弦序号</button>
           <button type="button" onClick={openTagManager}>标签管理</button>
           <button type="button" className="is-danger" disabled={selectionByTab.notes.length === 0} onClick={() => deleteRowsByTab('notes', selectionByTab.notes)}>
             删除选中
           </button>
         </div>
-      )
-    }
-
-    const tab = activeTab
-    return (
-      <div className="database-toolbar">
-        <button type="button" onClick={() => refreshRows(database as SqlJsDatabase)} disabled={!database}>刷新</button>
-        <button
-          type="button"
-          onClick={() => {
-            if (tab === 'accompaniment-template') {
-              setAccompanimentTemplateFilters(DEFAULT_TEMPLATE_FILTERS)
-              setAccompanimentTemplateHeaderFilters(DEFAULT_TEMPLATE_HEADER_FILTERS)
-              setPageByTab((current) => ({ ...current, 'accompaniment-template': 1 }))
-            } else {
-              setRhythmTemplateFilters(DEFAULT_TEMPLATE_FILTERS)
-              setRhythmTemplateHeaderFilters(DEFAULT_TEMPLATE_HEADER_FILTERS)
-              setPageByTab((current) => ({ ...current, 'rhythm-template': 1 }))
-            }
-          }}
-        >
-          清空筛选
-        </button>
-        <button
-          type="button"
-          className={headerFilterEnabledByTab[tab] ? 'is-active' : ''}
-          onClick={() => setHeaderFilterEnabledByTab((current) => ({ ...current, [tab]: !current[tab] }))}
-        >
-          表头筛选
-        </button>
-        <button type="button" onClick={openTagManager}>标签管理</button>
-        <button type="button" className="is-danger" disabled={selectionByTab[tab].length === 0} onClick={() => deleteRowsByTab(tab, selectionByTab[tab])}>
-          删除选中
-        </button>
       </div>
-    )
-  }, [
-    activeTab,
-    database,
-    deleteRowsByTab,
-    handleFillChordIndices,
-    headerFilterEnabledByTab,
-    notePreviewEnabled,
-    openTagManager,
-    refreshRows,
-    selectionByTab,
-  ])
-
-  const renderNotesFilterBar = () => (
-    <div className="database-filter-grid database-filter-grid--notes">
-      <label>
-        <span>伴奏音符</span>
-        <input value={noteFilters.notesQuery} onChange={(event) => {
-          setNoteFilters((current) => ({ ...current, notesQuery: event.target.value }))
-          setPageByTab((current) => ({ ...current, notes: 1 }))
-        }} placeholder="筛选 notes" />
-      </label>
-      <label>
-        <span>和弦类型</span>
-        <input value={noteFilters.chordTypeQuery} onChange={(event) => {
-          setNoteFilters((current) => ({ ...current, chordTypeQuery: event.target.value }))
-          setPageByTab((current) => ({ ...current, notes: 1 }))
-        }} placeholder="例如 C / Amadd9" />
-      </label>
-      <label>
-        <span>伴奏结构</span>
-        <input value={noteFilters.structureQuery} onChange={(event) => {
-          setNoteFilters((current) => ({ ...current, structureQuery: event.target.value }))
-          setPageByTab((current) => ({ ...current, notes: 1 }))
-        }} placeholder="例如 单音＋和弦" />
-      </label>
-      <CheckboxDropdown label="音的数量" options={noteCountOptions} selectedValues={noteFilters.noteCounts} onChange={(nextValues) => {
-        setNoteFilters((current) => ({ ...current, noteCounts: nextValues }))
-        setPageByTab((current) => ({ ...current, notes: 1 }))
-      }} />
-      <CheckboxDropdown label="音符方向" options={noteDirectionOptions} selectedValues={noteFilters.directions} onChange={(nextValues) => {
-        setNoteFilters((current) => ({ ...current, directions: nextValues }))
-        setPageByTab((current) => ({ ...current, notes: 1 }))
-      }} />
-      <label>
-        <span>常用</span>
-        <select value={noteFilters.commonState} onChange={(event) => {
-          setNoteFilters((current) => ({ ...current, commonState: event.target.value as NoteFilters['commonState'] }))
-          setPageByTab((current) => ({ ...current, notes: 1 }))
-        }}>
-          <option value="all">全部</option>
-          <option value="yes">是</option>
-          <option value="no">否</option>
-        </select>
-      </label>
-      <CheckboxDropdown label="风格标签" options={noteStyleOptions} selectedValues={noteFilters.styleTags} onChange={(nextValues) => {
-        setNoteFilters((current) => ({ ...current, styleTags: nextValues }))
-        setPageByTab((current) => ({ ...current, notes: 1 }))
-      }} />
-      <CheckboxDropdown label="特殊标签" options={noteSpecialOptions} selectedValues={noteFilters.specialTags} onChange={(nextValues) => {
-        setNoteFilters((current) => ({ ...current, specialTags: nextValues }))
-        setPageByTab((current) => ({ ...current, notes: 1 }))
-      }} />
     </div>
   )
 
   const renderTemplateFilterBar = (
-    tab: WorkspaceTab,
+    tab: 'accompaniment-template' | 'rhythm-template',
     filters: TemplateFilters,
     setFilters: Dispatch<SetStateAction<TemplateFilters>>,
   ) => (
-    <div className="database-filter-grid">
-      <label>
-        <span>模板名</span>
-        <input value={filters.nameQuery} onChange={(event) => {
-          setFilters((current) => ({ ...current, nameQuery: event.target.value }))
-          setPageByTab((current) => ({ ...current, [tab]: 1 }))
-        }} placeholder="按名称筛选" />
-      </label>
-      <label>
-        <span>时值组合</span>
-        <input value={filters.durationComboQuery} onChange={(event) => {
-          setFilters((current) => ({ ...current, durationComboQuery: event.target.value }))
-          setPageByTab((current) => ({ ...current, [tab]: 1 }))
-        }} placeholder="例如 4_4" />
-      </label>
-      <CheckboxDropdown label="总时值" options={templateDurationOptions} selectedValues={filters.totalDurations} onChange={(nextValues) => {
-        setFilters((current) => ({ ...current, totalDurations: nextValues }))
-        setPageByTab((current) => ({ ...current, [tab]: 1 }))
-      }} />
-      <CheckboxDropdown label="难度标签" options={tagLibrary.difficultyTags.filter((entry) => entry !== '无')} selectedValues={filters.difficultyTags} onChange={(nextValues) => {
-        setFilters((current) => ({ ...current, difficultyTags: nextValues }))
-        setPageByTab((current) => ({ ...current, [tab]: 1 }))
-      }} />
-      <CheckboxDropdown label="风格标签" options={tagLibrary.styleTags.filter((entry) => entry !== '无')} selectedValues={filters.styleTags} onChange={(nextValues) => {
-        setFilters((current) => ({ ...current, styleTags: nextValues }))
-        setPageByTab((current) => ({ ...current, [tab]: 1 }))
-      }} />
+    <div className="database-filter-strip">
+      <div className="database-filter-row">
+        <div className="database-filter-fields database-filter-fields--template">
+          <label className="database-filter-field">
+            <span>模板名</span>
+            <input value={filters.nameQuery} onChange={(event) => {
+              setFilters((current) => ({ ...current, nameQuery: event.target.value }))
+              setPageByTab((current) => ({ ...current, [tab]: 1 }))
+            }} placeholder="按名称筛选" />
+          </label>
+          <div className="database-filter-field">
+            <CheckboxDropdown label="总时值" options={templateDurationOptions} selectedValues={filters.totalDurations} onChange={(nextValues) => {
+              setFilters((current) => ({ ...current, totalDurations: nextValues }))
+              setPageByTab((current) => ({ ...current, [tab]: 1 }))
+            }} />
+          </div>
+          <label className="database-filter-field">
+            <span>时值组合</span>
+            <input value={filters.durationComboQuery} onChange={(event) => {
+              setFilters((current) => ({ ...current, durationComboQuery: event.target.value }))
+              setPageByTab((current) => ({ ...current, [tab]: 1 }))
+            }} placeholder="例如 4_4" />
+          </label>
+        </div>
+        <div className="database-filter-actions">
+          <button type="button" onClick={() => refreshRows(database as SqlJsDatabase)} disabled={!database}>刷新</button>
+          <button type="button" onClick={() => clearTemplateFilters(tab)}>清空筛选</button>
+          <button
+            type="button"
+            className={headerFilterEnabledByTab[tab] ? 'is-active' : ''}
+            onClick={() => setHeaderFilterEnabledByTab((current) => ({ ...current, [tab]: !current[tab] }))}
+          >
+            表头筛选
+          </button>
+        </div>
+      </div>
+      <div className="database-filter-row">
+        <div className="database-filter-fields database-filter-fields--template database-filter-fields--template-secondary">
+          <div className="database-filter-field">
+            <CheckboxDropdown label="难易程度" options={tagLibrary.difficultyTags.filter((entry) => entry !== '无')} selectedValues={filters.difficultyTags} onChange={(nextValues) => {
+              setFilters((current) => ({ ...current, difficultyTags: nextValues }))
+              setPageByTab((current) => ({ ...current, [tab]: 1 }))
+            }} />
+          </div>
+          <div className="database-filter-field">
+            <CheckboxDropdown label="风格" options={tagLibrary.styleTags.filter((entry) => entry !== '无')} selectedValues={filters.styleTags} onChange={(nextValues) => {
+              setFilters((current) => ({ ...current, styleTags: nextValues }))
+              setPageByTab((current) => ({ ...current, [tab]: 1 }))
+            }} />
+          </div>
+        </div>
+        <div className="database-filter-actions database-filter-actions--secondary">
+          <button type="button" onClick={openTagManager}>标签管理</button>
+          <button type="button" className="is-danger" disabled={selectionByTab[tab].length === 0} onClick={() => deleteRowsByTab(tab, selectionByTab[tab])}>
+            删除选中
+          </button>
+        </div>
+      </div>
     </div>
   )
 
@@ -1729,38 +1874,18 @@ export function DatabaseWorkspacePage(props: DatabaseWorkspacePageProps) {
     </div>
   )
 
-  const renderNotePreviewGrid = () => (
-    <div className="database-preview-grid">
-      {notePagination.pageRows.map((row) => (
-        <article
-          key={row.id}
-          className={`database-preview-card${selectionByTab.notes.includes(row.id) ? ' is-selected' : ''}`}
-          onClick={(event) => updateSelection('notes', row.id, event as unknown as ReactMouseEvent<HTMLElement>)}
-          onContextMenu={(event) => {
-            event.preventDefault()
-            setContextMenuState({ x: event.clientX, y: event.clientY, rowId: row.id, tab: 'notes' })
-          }}
-        >
-          <header className="database-preview-card-header">
-            <strong>{`${row.chordType || '未识别和弦'} · #${row.id}`}</strong>
-            <span>{`${row.noteCount ?? 0} 音 / ${row.noteDirection || '-'}`}</span>
-          </header>
-          <DatabaseNotePreviewCanvas
-            notesText={row.notes}
-            timeAxisSpacingConfig={timeAxisSpacingConfig}
-            spacingLayoutMode={spacingLayoutMode}
-            grandStaffLayoutMetrics={grandStaffLayoutMetrics}
-          />
-          <div className="database-preview-card-meta">
-            <span>{`结构：${row.structure || '-'}`}</span>
-            <span>{`常用：${row.isCommon ? '是' : '否'}`}</span>
-            <span>{`风格：${row.styleTags || '无'}`}</span>
-            <span>{`特殊：${row.specialTags || '无'}`}</span>
-          </div>
-          <p className="database-preview-card-notes">{row.notes}</p>
-        </article>
-      ))}
-      {notePagination.pageRows.length === 0 && <div className="database-empty-state">当前筛选结果没有可预览的伴奏音符。</div>}
+  const renderNotePreviewSurface = () => (
+    <div className="database-preview-stack">
+      <div className="database-note-preview-summary">
+        <span>{`当前页 ${notePagination.pageRows.length} 条结果`}</span>
+        <span>预览始终按当前页筛选结果顺序连续拼接，不依赖单行选择。</span>
+      </div>
+      <DatabaseNotePreviewSurface
+        rows={notePagination.pageRows}
+        timeAxisSpacingConfig={timeAxisSpacingConfig}
+        spacingLayoutMode={spacingLayoutMode}
+        grandStaffLayoutMetrics={grandStaffLayoutMetrics}
+      />
     </div>
   )
 
@@ -1795,40 +1920,70 @@ export function DatabaseWorkspacePage(props: DatabaseWorkspacePageProps) {
         : activeTab === 'accompaniment-template'
           ? '伴奏模板解析结果'
           : '律动模板解析结果'
+    const templateMirrorRow =
+      activeTab === 'accompaniment-template'
+        ? resolveTemplateEntryMirrorRow(templateEntryDrafts, templateEntryFocusByTab['accompaniment-template'])
+        : activeTab === 'rhythm-template'
+          ? resolveTemplateEntryMirrorRow(rhythmEntryDrafts, templateEntryFocusByTab['rhythm-template'])
+          : null
+    const templateMirrorDisabled = templateMirrorRow === null
 
     return (
       <section className="database-entry-panel">
-        <div className="database-mode-layout">
-          <DatabaseSectionCard
-            eyebrow={TAB_LABELS[activeTab]}
-            title="文件操作"
-            description={`继续沿用当前多文件解析与暂存入库流程，直接整理 ${entryTypeLabel} 数据。`}
-            className="database-section-card--file"
-          >
-            <div className="database-entry-toolbar">
-              <div className="database-entry-file-path">{joinFileNames(currentState.fileNames)}</div>
-              <button type="button" onClick={() => fileInputRef.current?.click()}>选择文件</button>
-              <button type="button" onClick={() => void parseFiles(activeTab)} disabled={currentState.isParsing}>文件解析</button>
-              <button type="button" onClick={() => clearEntryDrafts(activeTab)}>清空列表</button>
-              <button type="button" onClick={openTagManager}>标签管理</button>
-              <button type="button" className="database-primary-button" onClick={() => saveEntryDrafts(activeTab)} disabled={currentDrafts.length === 0}>保存到数据库</button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                hidden
-                multiple
-                accept=".musicxml,.xml,text/xml,application/xml"
-                onChange={(event) => handleSelectEntryFiles(activeTab, event)}
-              />
-            </div>
-          </DatabaseSectionCard>
+        <div className="database-entry-toolbar-strip">
+          <span className="database-strip-label">文件操作</span>
+          <div className="database-entry-toolbar">
+            <div className="database-entry-file-path">{joinFileNames(currentState.fileNames)}</div>
+            <button type="button" onClick={() => fileInputRef.current?.click()}>选择文件</button>
+            <button type="button" onClick={() => void parseFiles(activeTab)} disabled={currentState.isParsing}>文件解析</button>
+            <button type="button" onClick={() => clearEntryDrafts(activeTab)}>清空列表</button>
+            <button type="button" onClick={openTagManager}>标签管理</button>
+            <button type="button" className="database-primary-button" onClick={() => saveEntryDrafts(activeTab)} disabled={currentDrafts.length === 0}>保存到数据库</button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              hidden
+              multiple
+              accept=".musicxml,.xml,text/xml,application/xml"
+              onChange={(event) => handleSelectEntryFiles(activeTab, event)}
+            />
+          </div>
+        </div>
 
-          <DatabaseSectionCard
-            eyebrow={tabModes[activeTab] === 'entry' ? '录入数据' : TAB_LABELS[activeTab]}
-            title={entryContentTitle}
-            description={currentDrafts.length > 0 ? `当前暂存 ${currentDrafts.length} 条待入库记录。` : `当前还没有可入库的 ${entryTypeLabel} 解析结果。`}
-            className="database-section-card--content"
-          >
+        {activeTab !== 'notes' && (
+          <div className="database-entry-mirror-shell">
+            <span className="database-strip-label">模板信息</span>
+            <div className="database-entry-mirror-grid">
+              <label className="database-entry-mirror-field">
+                <span>模板名</span>
+                <input value={templateMirrorRow?.name ?? ''} readOnly disabled={templateMirrorDisabled} />
+              </label>
+              <label className="database-entry-mirror-field">
+                <span>总时值</span>
+                <input value={templateMirrorRow?.totalDuration ?? ''} readOnly disabled={templateMirrorDisabled} />
+              </label>
+              <label className="database-entry-mirror-field">
+                <span>时值组合</span>
+                <input value={templateMirrorRow?.durationCombo ?? ''} readOnly disabled={templateMirrorDisabled} />
+              </label>
+              <label className="database-entry-mirror-field">
+                <span>难易程度</span>
+                <input value={templateMirrorRow ? (templateMirrorRow.difficultyTags || '无') : ''} readOnly disabled={templateMirrorDisabled} />
+              </label>
+              <label className="database-entry-mirror-field">
+                <span>风格</span>
+                <input value={templateMirrorRow ? (templateMirrorRow.styleTags || '无') : ''} readOnly disabled={templateMirrorDisabled} />
+              </label>
+            </div>
+          </div>
+        )}
+
+        <div className="database-main-stack">
+          <div className="database-content-shell">
+            <div className="database-content-shell-header">
+              <strong>{entryContentTitle}</strong>
+              <span>{currentDrafts.length > 0 ? `当前暂存 ${currentDrafts.length} 条待入库记录。` : `当前还没有可入库的 ${entryTypeLabel} 解析结果。`}</span>
+            </div>
             {activeTab === 'notes' ? (
               <div className="database-table-wrap">
                 <table className="database-table">
@@ -1870,7 +2025,16 @@ export function DatabaseWorkspacePage(props: DatabaseWorkspacePageProps) {
                   </thead>
                   <tbody>
                     {(activeTab === 'accompaniment-template' ? templateEntryDrafts : rhythmEntryDrafts).map((row, index) => (
-                      <tr key={`${activeTab}-entry-${index + 1}`}>
+                      <tr
+                        key={`${activeTab}-entry-${index + 1}`}
+                        className={templateEntryFocusByTab[activeTab] === index ? 'is-entry-focus' : ''}
+                        onClick={() => {
+                          setTemplateEntryFocusByTab((current) => ({ ...current, [activeTab]: index }))
+                        }}
+                        onFocusCapture={() => {
+                          setTemplateEntryFocusByTab((current) => ({ ...current, [activeTab]: index }))
+                        }}
+                      >
                         <td>{index + 1}</td>
                         <td><input value={row.name} onChange={(event) => {
                           const setter = activeTab === 'accompaniment-template' ? setTemplateEntryDrafts : setRhythmEntryDrafts
@@ -1905,20 +2069,12 @@ export function DatabaseWorkspacePage(props: DatabaseWorkspacePageProps) {
                 {(activeTab === 'accompaniment-template' ? templateEntryDrafts : rhythmEntryDrafts).length === 0 && <div className="database-empty-state">当前没有待入库的模板解析结果。</div>}
               </div>
             )}
-          </DatabaseSectionCard>
+          </div>
+        </div>
 
-          <DatabaseSectionCard
-            eyebrow="当前状态"
-            title="解析与入库进度"
-            description={`当前模式保留现有表格内编辑模型，${entryTypeLabel} 数据可直接在结果表里整理。`}
-            className="database-section-card--status"
-            contentClassName="database-section-card-content--status"
-          >
-            <div className="database-entry-status-bar">
-              <span className="database-entry-status">{currentState.statusText}</span>
-              <span className="database-status-pill">{`暂存 ${currentDrafts.length} 条`}</span>
-            </div>
-          </DatabaseSectionCard>
+        <div className="database-status-row">
+          <span className="database-entry-status">{currentState.statusText}</span>
+          <span className="database-status-pill">{`暂存 ${currentDrafts.length} 条`}</span>
         </div>
       </section>
     )
@@ -1934,7 +2090,7 @@ export function DatabaseWorkspacePage(props: DatabaseWorkspacePageProps) {
           : renderTemplateFilterBar(activeTab, rhythmTemplateFilters, setRhythmTemplateFilters)
     const contentSection =
       activeTab === 'notes'
-        ? notePreviewEnabled ? renderNotePreviewGrid() : renderNotesTable()
+        ? notePreviewEnabled ? renderNotePreviewSurface() : renderNotesTable()
         : activeTab === 'accompaniment-template'
           ? renderTemplateTable(activeTab, accompanimentTemplatePagination.pageRows, accompanimentTemplateHeaderFilters)
           : renderTemplateTable(activeTab, rhythmTemplatePagination.pageRows, rhythmTemplateHeaderFilters)
@@ -1977,43 +2133,20 @@ export function DatabaseWorkspacePage(props: DatabaseWorkspacePageProps) {
 
     return (
       <section className="database-view-panel">
-        <div className="database-mode-layout">
-          <DatabaseSectionCard
-            eyebrow={currentTabLabel}
-            title="筛选条件"
-            description="筛选区固定放在内容最上方，集中控制当前数据库结果。"
-            className="database-section-card--filters"
-          >
-            {filterSection}
-          </DatabaseSectionCard>
-
-          <DatabaseSectionCard
-            eyebrow={currentTabLabel}
-            title="常用操作"
-            description="保留当前刷新、清空筛选、表头筛选、标签管理和删除逻辑。"
-            className="database-section-card--tools"
-          >
-            {renderDatabaseToolbar()}
-          </DatabaseSectionCard>
-
-          <DatabaseSectionCard
-            eyebrow={currentTabLabel}
-            title={contentTitle}
-            description={activeTab === 'notes' && notePreviewEnabled ? '当前页结果以曲谱预览方式展示，但仍共用同一套筛选、选择与分页状态。' : '主内容区统一承载表格或预览内容，不再与筛选和工具平铺在同一层。'}
-            className="database-section-card--content"
-          >
+        {filterSection}
+        <PaginationBar page={page} totalPages={totalPages} totalRows={totalRows} selectedCount={selectedCount} onPageChange={handlePageChange} />
+        <div className="database-main-stack">
+          <div className="database-content-shell">
+            <div className="database-content-shell-header">
+              <strong>{contentTitle}</strong>
+              <span>{activeTab === 'notes' && notePreviewEnabled ? '当前页结果会按页内顺序进入同一个大预览区。' : '筛选、选择、表头筛选与分页继续共用同一套状态。'}</span>
+            </div>
             {contentSection}
-          </DatabaseSectionCard>
-
-          <DatabaseSectionCard
-            eyebrow="结果统计"
-            title="分页与状态"
-            description={`当前筛选结果 ${totalRows} 条，已选 ${selectedCount} 条。`}
-            className="database-section-card--footer"
-            contentClassName="database-section-card-content--footer"
-          >
-            <PaginationBar page={page} totalPages={totalPages} totalRows={totalRows} selectedCount={selectedCount} onPageChange={handlePageChange} />
-          </DatabaseSectionCard>
+          </div>
+        </div>
+        <div className="database-status-row">
+          <span>{`${currentTabLabel} · 当前筛选结果 ${totalRows} 条，已选 ${selectedCount} 条。`}</span>
+          <span className="database-status-pill">{notePreviewEnabled && activeTab === 'notes' ? '大预览模式' : '表格模式'}</span>
         </div>
       </section>
     )
@@ -2041,33 +2174,21 @@ export function DatabaseWorkspacePage(props: DatabaseWorkspacePageProps) {
       {workspaceMessage && <div className={`database-message database-message--${workspaceMessage.kind}`}><span>{workspaceMessage.text}</span><button type="button" onClick={() => setWorkspaceMessage(null)}>关闭</button></div>}
       {sessionInfo.saveError && <div className="database-message database-message--error"><span>{sessionInfo.saveError}</span><button type="button" onClick={() => setSessionInfo((current) => ({ ...current, saveError: null }))}>关闭</button></div>}
 
-      <div className="database-navigation-grid">
-        <DatabaseSectionCard
-          eyebrow="页面结构"
-          title="数据库模块"
-          description="三个主 tab 共享同一套页面骨架与布局节奏。"
-          className="database-section-card--navigation"
-        >
-          <div className="database-top-tabs" role="tablist" aria-label="数据库工作区模块">
-            {(Object.keys(TAB_LABELS) as WorkspaceTab[]).map((tab) => (
-              <button key={tab} type="button" className={activeTab === tab ? 'is-active' : ''} onClick={() => setActiveTab(tab)}>
-                {TAB_LABELS[tab]}
-              </button>
-            ))}
-          </div>
-        </DatabaseSectionCard>
-
-        <DatabaseSectionCard
-          eyebrow={TAB_LABELS[activeTab]}
-          title="当前模式"
-          description="录入数据与查看数据库继续共用当前状态，不切断筛选和暂存上下文。"
-          className="database-section-card--navigation"
-        >
+      <div className="database-shell-bar">
+        <div className="database-top-tabs" role="tablist" aria-label="数据库工作区模块">
+          {(Object.keys(TAB_LABELS) as WorkspaceTab[]).map((tab) => (
+            <button key={tab} type="button" className={activeTab === tab ? 'is-active' : ''} onClick={() => setActiveTab(tab)}>
+              {TAB_LABELS[tab]}
+            </button>
+          ))}
+        </div>
+        <div className="database-mode-shell">
+          <span className="database-strip-label">当前模式</span>
           <div className="database-mode-toggle">
             <button type="button" className={tabModes[activeTab] === 'entry' ? 'is-active' : ''} onClick={() => setTabModes((current) => ({ ...current, [activeTab]: 'entry' }))}>录入数据</button>
             <button type="button" className={tabModes[activeTab] === 'database' ? 'is-active' : ''} onClick={() => setTabModes((current) => ({ ...current, [activeTab]: 'database' }))}>查看数据库</button>
           </div>
-        </DatabaseSectionCard>
+        </div>
       </div>
 
       {isLoadingDatabase ? <div className="database-loading-state">正在加载数据库...</div> : tabModes[activeTab] === 'entry' ? renderEntryMode() : renderDatabaseMode()}

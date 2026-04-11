@@ -86,6 +86,19 @@ async function run(): Promise<void> {
     await waitForServer(DEV_URL, 60_000)
     const browser = await chromium.launch({ headless: true })
     const page = await browser.newPage({ viewport: { width: 1600, height: 1200 } })
+    const previewErrors: string[] = []
+    page.on('console', (message) => {
+      const text = message.text()
+      if (message.type() === 'error' && /preview rendering failed|IncompleteVoice/i.test(text)) {
+        previewErrors.push(text)
+      }
+    })
+    page.on('pageerror', (error) => {
+      const text = error.message ?? String(error)
+      if (/preview rendering failed|IncompleteVoice/i.test(text)) {
+        previewErrors.push(text)
+      }
+    })
     console.log('[database-workspace-test] opening app')
     await page.goto(DEV_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 })
 
@@ -100,8 +113,7 @@ async function run(): Promise<void> {
     await page.getByRole('heading', { name: '数据库工作区' }).waitFor({ state: 'visible', timeout: 20_000 })
     await page.getByText('当前数据库：app_data.db').waitFor({ state: 'visible', timeout: 20_000 })
     assert.equal(await page.getByRole('button', { name: '返回乐谱编辑', exact: true }).count(), 0, 'database page should not contain return button')
-    await page.locator('.database-navigation-grid').waitFor({ state: 'visible', timeout: 20_000 })
-    assert.equal(await page.locator('.database-navigation-grid .database-section-card--navigation').count(), 2, 'expected navigation cards for tabs and mode switch')
+    await page.locator('.database-shell-bar').waitFor({ state: 'visible', timeout: 20_000 })
 
     const topTabs = page.locator('.database-top-tabs button')
     await assert.doesNotReject(async () => topTabs.nth(0).waitFor({ state: 'visible', timeout: 20_000 }))
@@ -110,35 +122,54 @@ async function run(): Promise<void> {
     console.log('[database-workspace-test] waiting for built-in rows')
     const noteTableRows = page.locator('.database-table tbody tr')
     await noteTableRows.first().waitFor({ state: 'visible', timeout: 20_000 })
-    await page.locator('.database-view-panel .database-section-card--filters').waitFor({ state: 'visible', timeout: 20_000 })
-    await page.locator('.database-view-panel .database-section-card--tools').waitFor({ state: 'visible', timeout: 20_000 })
-    await page.locator('.database-view-panel .database-section-card--content').waitFor({ state: 'visible', timeout: 20_000 })
-    await page.locator('.database-view-panel .database-section-card--footer .database-pagination').waitFor({ state: 'visible', timeout: 20_000 })
+    await page.locator('.database-view-panel .database-filter-strip').waitFor({ state: 'visible', timeout: 20_000 })
+    await page.locator('.database-view-panel .database-pagination-row').waitFor({ state: 'visible', timeout: 20_000 })
+    await page.locator('.database-view-panel .database-main-stack .database-content-shell').waitFor({ state: 'visible', timeout: 20_000 })
+    await page.locator('.database-view-panel .database-status-row').waitFor({ state: 'visible', timeout: 20_000 })
 
     console.log('[database-workspace-test] toggling note preview')
     await page.getByRole('button', { name: '曲谱预览' }).click()
-    await page.locator('.database-preview-card').first().waitFor({ state: 'visible', timeout: 20_000 })
-    await page.locator('.database-preview-card canvas').first().waitFor({ state: 'visible', timeout: 20_000 })
-    await page.locator('.database-view-panel .database-section-card--footer .database-pagination').waitFor({ state: 'visible', timeout: 20_000 })
+    await page.locator('.database-note-preview-surface').waitFor({ state: 'visible', timeout: 20_000 })
+    await page.locator('.database-note-preview-surface canvas').waitFor({ state: 'visible', timeout: 20_000 })
+    await page.locator('.database-view-panel .database-pagination-row').waitFor({ state: 'visible', timeout: 20_000 })
+    const previewCanvasMetrics = await page.locator('.database-note-preview-surface canvas').evaluate((canvas) => {
+      const context = canvas.getContext('2d')
+      const data = context?.getImageData(0, 0, Math.min(canvas.width, 400), Math.min(canvas.height, 160)).data ?? null
+      let opaque = 0
+      if (data) {
+        for (let index = 3; index < data.length; index += 4) {
+          if (data[index] > 0) opaque += 1
+        }
+      }
+      return {
+        width: canvas.width,
+        height: canvas.height,
+        opaque,
+      }
+    })
+    assert.ok(previewCanvasMetrics.width > 36, `preview canvas width should exceed fallback width, got ${previewCanvasMetrics.width}`)
+    assert.ok(previewCanvasMetrics.opaque > 0, 'preview canvas should contain non-transparent pixels')
+    assert.equal(await page.locator('.database-preview-card').count(), 0, 'note preview should no longer use preview cards')
+    assert.equal(previewErrors.length, 0, `preview should not log rendering errors: ${previewErrors.join(' | ')}`)
 
     console.log('[database-workspace-test] switching template tab')
     await page.getByRole('button', { name: '伴奏模板录入', exact: true }).click()
-    await page.locator('.database-view-panel .database-section-card--filters').waitFor({ state: 'visible', timeout: 20_000 })
-    await page.locator('.database-view-panel .database-section-card--tools').waitFor({ state: 'visible', timeout: 20_000 })
-    await page.locator('.database-view-panel .database-section-card--content').waitFor({ state: 'visible', timeout: 20_000 })
-    await page.locator('.database-view-panel .database-section-card--footer .database-pagination').waitFor({ state: 'visible', timeout: 20_000 })
+    await page.locator('.database-view-panel .database-filter-strip').waitFor({ state: 'visible', timeout: 20_000 })
+    await page.locator('.database-view-panel .database-pagination-row').waitFor({ state: 'visible', timeout: 20_000 })
+    await page.locator('.database-view-panel .database-main-stack .database-content-shell').waitFor({ state: 'visible', timeout: 20_000 })
 
     console.log('[database-workspace-test] switching rhythm tab')
     await page.getByRole('button', { name: '律动模板录入', exact: true }).click()
-    await page.locator('.database-view-panel .database-section-card--filters').waitFor({ state: 'visible', timeout: 20_000 })
-    await page.locator('.database-view-panel .database-section-card--content').waitFor({ state: 'visible', timeout: 20_000 })
-    await page.locator('.database-view-panel .database-section-card--footer .database-pagination').waitFor({ state: 'visible', timeout: 20_000 })
+    await page.locator('.database-view-panel .database-filter-strip').waitFor({ state: 'visible', timeout: 20_000 })
+    await page.locator('.database-view-panel .database-main-stack .database-content-shell').waitFor({ state: 'visible', timeout: 20_000 })
+    await page.locator('.database-view-panel .database-pagination-row').waitFor({ state: 'visible', timeout: 20_000 })
 
     console.log('[database-workspace-test] switching to entry mode')
     await page.locator('.database-mode-toggle').getByRole('button', { name: '录入数据', exact: true }).click()
-    await page.locator('.database-entry-panel .database-section-card--file').waitFor({ state: 'visible', timeout: 20_000 })
-    await page.locator('.database-entry-panel .database-section-card--content').waitFor({ state: 'visible', timeout: 20_000 })
-    await page.locator('.database-entry-panel .database-section-card--status').waitFor({ state: 'visible', timeout: 20_000 })
+    await page.locator('.database-entry-panel .database-entry-toolbar-strip').waitFor({ state: 'visible', timeout: 20_000 })
+    await page.locator('.database-entry-panel .database-entry-mirror-grid').waitFor({ state: 'visible', timeout: 20_000 })
+    await page.locator('.database-entry-panel .database-main-stack .database-content-shell').waitFor({ state: 'visible', timeout: 20_000 })
+    await page.locator('.database-entry-panel .database-status-row').waitFor({ state: 'visible', timeout: 20_000 })
     await page.getByRole('button', { name: '选择文件' }).waitFor({ state: 'visible', timeout: 20_000 })
     await page.getByText('尚未解析文件。').waitFor({ state: 'visible', timeout: 20_000 })
 
