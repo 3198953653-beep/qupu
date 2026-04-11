@@ -8,6 +8,7 @@ import {
   type ChangeEvent,
   type Dispatch,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
   type SetStateAction,
 } from 'react'
 import { Renderer } from 'vexflow'
@@ -690,6 +691,37 @@ function PaginationBar(props: {
         <button type="button" onClick={() => onPageChange(totalPages)} disabled={page >= totalPages}>末页</button>
       </div>
     </div>
+  )
+}
+
+function DatabaseSectionCard(props: {
+  eyebrow?: string
+  title: string
+  description?: string
+  className?: string
+  contentClassName?: string
+  children: ReactNode
+}) {
+  const {
+    eyebrow,
+    title,
+    description,
+    className = '',
+    contentClassName = '',
+    children,
+  } = props
+
+  return (
+    <section className={['database-section-card', className].filter(Boolean).join(' ')}>
+      <header className="database-section-card-header">
+        {eyebrow && <span className="database-section-card-eyebrow">{eyebrow}</span>}
+        <h3>{title}</h3>
+        {description && <p>{description}</p>}
+      </header>
+      <div className={['database-section-card-content', contentClassName].filter(Boolean).join(' ')}>
+        {children}
+      </div>
+    </section>
   )
 }
 
@@ -1751,133 +1783,238 @@ export function DatabaseWorkspacePage(props: DatabaseWorkspacePageProps) {
         : activeTab === 'accompaniment-template'
           ? accompanimentTemplateEntryInputRef
           : rhythmTemplateEntryInputRef
+    const entryTypeLabel =
+      activeTab === 'notes'
+        ? '伴奏音符'
+        : activeTab === 'accompaniment-template'
+          ? '伴奏模板'
+          : '律动模板'
+    const entryContentTitle =
+      activeTab === 'notes'
+        ? '伴奏音符解析结果'
+        : activeTab === 'accompaniment-template'
+          ? '伴奏模板解析结果'
+          : '律动模板解析结果'
 
     return (
       <section className="database-entry-panel">
-        <div className="database-entry-toolbar">
-          <div className="database-entry-file-path">{joinFileNames(currentState.fileNames)}</div>
-          <button type="button" onClick={() => fileInputRef.current?.click()}>选择文件</button>
-          <button type="button" onClick={() => void parseFiles(activeTab)} disabled={currentState.isParsing}>文件解析</button>
-          <button type="button" onClick={() => clearEntryDrafts(activeTab)}>清空列表</button>
-          <button type="button" onClick={openTagManager}>标签管理</button>
-          <button type="button" className="database-primary-button" onClick={() => saveEntryDrafts(activeTab)} disabled={currentDrafts.length === 0}>保存到数据库</button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            hidden
-            multiple
-            accept=".musicxml,.xml,text/xml,application/xml"
-            onChange={(event) => handleSelectEntryFiles(activeTab, event)}
-          />
+        <div className="database-mode-layout">
+          <DatabaseSectionCard
+            eyebrow={TAB_LABELS[activeTab]}
+            title="文件操作"
+            description={`继续沿用当前多文件解析与暂存入库流程，直接整理 ${entryTypeLabel} 数据。`}
+            className="database-section-card--file"
+          >
+            <div className="database-entry-toolbar">
+              <div className="database-entry-file-path">{joinFileNames(currentState.fileNames)}</div>
+              <button type="button" onClick={() => fileInputRef.current?.click()}>选择文件</button>
+              <button type="button" onClick={() => void parseFiles(activeTab)} disabled={currentState.isParsing}>文件解析</button>
+              <button type="button" onClick={() => clearEntryDrafts(activeTab)}>清空列表</button>
+              <button type="button" onClick={openTagManager}>标签管理</button>
+              <button type="button" className="database-primary-button" onClick={() => saveEntryDrafts(activeTab)} disabled={currentDrafts.length === 0}>保存到数据库</button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                hidden
+                multiple
+                accept=".musicxml,.xml,text/xml,application/xml"
+                onChange={(event) => handleSelectEntryFiles(activeTab, event)}
+              />
+            </div>
+          </DatabaseSectionCard>
+
+          <DatabaseSectionCard
+            eyebrow={tabModes[activeTab] === 'entry' ? '录入数据' : TAB_LABELS[activeTab]}
+            title={entryContentTitle}
+            description={currentDrafts.length > 0 ? `当前暂存 ${currentDrafts.length} 条待入库记录。` : `当前还没有可入库的 ${entryTypeLabel} 解析结果。`}
+            className="database-section-card--content"
+          >
+            {activeTab === 'notes' ? (
+              <div className="database-table-wrap">
+                <table className="database-table">
+                  <thead>
+                    <tr>
+                      <th>#</th><th>伴奏音符</th><th>音的数量</th><th>和弦类型</th><th>和弦序号</th>
+                      <th>音符方向</th><th>伴奏结构</th><th>常用</th><th>风格标签</th><th>特殊标签</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {noteEntryDrafts.map((row, index) => (
+                      <tr key={`note-entry-${index + 1}`}>
+                        <td>{index + 1}</td>
+                        <td><textarea value={row.notes} rows={3} onChange={(event) => setNoteEntryDrafts((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, notes: event.target.value } : entry))} /></td>
+                        <td><input type="number" value={row.noteCount ?? ''} onChange={(event) => {
+                          const raw = normalizeText(event.target.value)
+                          setNoteEntryDrafts((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, noteCount: raw ? Number(raw) : null } : entry))
+                        }} /></td>
+                        <td><input value={row.chordType} onChange={(event) => setNoteEntryDrafts((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, chordType: event.target.value } : entry))} /></td>
+                        <td><input value={row.chordIndex} onChange={(event) => setNoteEntryDrafts((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, chordIndex: event.target.value } : entry))} /></td>
+                        <td><input value={row.noteDirection} onChange={(event) => setNoteEntryDrafts((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, noteDirection: event.target.value } : entry))} /></td>
+                        <td><input value={row.structure} onChange={(event) => setNoteEntryDrafts((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, structure: event.target.value } : entry))} /></td>
+                        <td><label className="database-inline-checkbox"><input type="checkbox" checked={row.isCommon} onChange={(event) => setNoteEntryDrafts((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, isCommon: event.target.checked } : entry))} /><span>{row.isCommon ? '是' : '否'}</span></label></td>
+                        <td><InlineTagSelector value={row.styleTags} options={tagLibrary.styleTags} placeholder="风格" onChange={(nextValue) => setNoteEntryDrafts((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, styleTags: nextValue } : entry))} /></td>
+                        <td><InlineTagSelector value={row.specialTags} options={tagLibrary.specialTags} placeholder="特殊" onChange={(nextValue) => setNoteEntryDrafts((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, specialTags: nextValue } : entry))} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {noteEntryDrafts.length === 0 && <div className="database-empty-state">当前没有待入库的伴奏音符解析结果。</div>}
+              </div>
+            ) : (
+              <div className="database-table-wrap">
+                <table className="database-table">
+                  <thead>
+                    <tr>
+                      <th>#</th><th>模板名</th><th>模板详细内容</th><th>总时值</th><th>时值组合</th><th>难易程度</th><th>风格</th><th>来源文件</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(activeTab === 'accompaniment-template' ? templateEntryDrafts : rhythmEntryDrafts).map((row, index) => (
+                      <tr key={`${activeTab}-entry-${index + 1}`}>
+                        <td>{index + 1}</td>
+                        <td><input value={row.name} onChange={(event) => {
+                          const setter = activeTab === 'accompaniment-template' ? setTemplateEntryDrafts : setRhythmEntryDrafts
+                          setter((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, name: event.target.value } : entry))
+                        }} /></td>
+                        <td><textarea value={row.patternData} rows={4} onChange={(event) => {
+                          const setter = activeTab === 'accompaniment-template' ? setTemplateEntryDrafts : setRhythmEntryDrafts
+                          setter((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, patternData: event.target.value } : entry))
+                        }} /></td>
+                        <td><input type="number" value={row.totalDuration ?? ''} onChange={(event) => {
+                          const raw = normalizeText(event.target.value)
+                          const setter = activeTab === 'accompaniment-template' ? setTemplateEntryDrafts : setRhythmEntryDrafts
+                          setter((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, totalDuration: raw ? Number(raw) : null } : entry))
+                        }} /></td>
+                        <td><input value={row.durationCombo} onChange={(event) => {
+                          const setter = activeTab === 'accompaniment-template' ? setTemplateEntryDrafts : setRhythmEntryDrafts
+                          setter((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, durationCombo: event.target.value } : entry))
+                        }} /></td>
+                        <td><select value={row.difficultyTags || '无'} onChange={(event) => {
+                          const setter = activeTab === 'accompaniment-template' ? setTemplateEntryDrafts : setRhythmEntryDrafts
+                          setter((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, difficultyTags: event.target.value === '无' ? '' : event.target.value } : entry))
+                        }}>{tagLibrary.difficultyTags.map((tag) => <option key={`${activeTab}-difficulty-${index}-${tag}`} value={tag}>{tag}</option>)}</select></td>
+                        <td><InlineTagSelector value={row.styleTags} options={tagLibrary.styleTags} placeholder="风格" onChange={(nextValue) => {
+                          const setter = activeTab === 'accompaniment-template' ? setTemplateEntryDrafts : setRhythmEntryDrafts
+                          setter((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, styleTags: nextValue } : entry))
+                        }} /></td>
+                        <td>{row.filePath}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {(activeTab === 'accompaniment-template' ? templateEntryDrafts : rhythmEntryDrafts).length === 0 && <div className="database-empty-state">当前没有待入库的模板解析结果。</div>}
+              </div>
+            )}
+          </DatabaseSectionCard>
+
+          <DatabaseSectionCard
+            eyebrow="当前状态"
+            title="解析与入库进度"
+            description={`当前模式保留现有表格内编辑模型，${entryTypeLabel} 数据可直接在结果表里整理。`}
+            className="database-section-card--status"
+            contentClassName="database-section-card-content--status"
+          >
+            <div className="database-entry-status-bar">
+              <span className="database-entry-status">{currentState.statusText}</span>
+              <span className="database-status-pill">{`暂存 ${currentDrafts.length} 条`}</span>
+            </div>
+          </DatabaseSectionCard>
         </div>
-        <p className="database-entry-status">{currentState.statusText}</p>
-        {activeTab === 'notes' ? (
-          <div className="database-table-wrap">
-            <table className="database-table">
-              <thead>
-                <tr>
-                  <th>#</th><th>伴奏音符</th><th>音的数量</th><th>和弦类型</th><th>和弦序号</th>
-                  <th>音符方向</th><th>伴奏结构</th><th>常用</th><th>风格标签</th><th>特殊标签</th>
-                </tr>
-              </thead>
-              <tbody>
-                {noteEntryDrafts.map((row, index) => (
-                  <tr key={`note-entry-${index + 1}`}>
-                    <td>{index + 1}</td>
-                    <td><textarea value={row.notes} rows={3} onChange={(event) => setNoteEntryDrafts((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, notes: event.target.value } : entry))} /></td>
-                    <td><input type="number" value={row.noteCount ?? ''} onChange={(event) => {
-                      const raw = normalizeText(event.target.value)
-                      setNoteEntryDrafts((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, noteCount: raw ? Number(raw) : null } : entry))
-                    }} /></td>
-                    <td><input value={row.chordType} onChange={(event) => setNoteEntryDrafts((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, chordType: event.target.value } : entry))} /></td>
-                    <td><input value={row.chordIndex} onChange={(event) => setNoteEntryDrafts((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, chordIndex: event.target.value } : entry))} /></td>
-                    <td><input value={row.noteDirection} onChange={(event) => setNoteEntryDrafts((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, noteDirection: event.target.value } : entry))} /></td>
-                    <td><input value={row.structure} onChange={(event) => setNoteEntryDrafts((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, structure: event.target.value } : entry))} /></td>
-                    <td><label className="database-inline-checkbox"><input type="checkbox" checked={row.isCommon} onChange={(event) => setNoteEntryDrafts((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, isCommon: event.target.checked } : entry))} /><span>{row.isCommon ? '是' : '否'}</span></label></td>
-                    <td><InlineTagSelector value={row.styleTags} options={tagLibrary.styleTags} placeholder="风格" onChange={(nextValue) => setNoteEntryDrafts((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, styleTags: nextValue } : entry))} /></td>
-                    <td><InlineTagSelector value={row.specialTags} options={tagLibrary.specialTags} placeholder="特殊" onChange={(nextValue) => setNoteEntryDrafts((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, specialTags: nextValue } : entry))} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {noteEntryDrafts.length === 0 && <div className="database-empty-state">当前没有待入库的伴奏音符解析结果。</div>}
-          </div>
-        ) : (
-          <div className="database-table-wrap">
-            <table className="database-table">
-              <thead>
-                <tr>
-                  <th>#</th><th>模板名</th><th>模板详细内容</th><th>总时值</th><th>时值组合</th><th>难易程度</th><th>风格</th><th>来源文件</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(activeTab === 'accompaniment-template' ? templateEntryDrafts : rhythmEntryDrafts).map((row, index) => (
-                  <tr key={`${activeTab}-entry-${index + 1}`}>
-                    <td>{index + 1}</td>
-                    <td><input value={row.name} onChange={(event) => {
-                      const setter = activeTab === 'accompaniment-template' ? setTemplateEntryDrafts : setRhythmEntryDrafts
-                      setter((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, name: event.target.value } : entry))
-                    }} /></td>
-                    <td><textarea value={row.patternData} rows={4} onChange={(event) => {
-                      const setter = activeTab === 'accompaniment-template' ? setTemplateEntryDrafts : setRhythmEntryDrafts
-                      setter((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, patternData: event.target.value } : entry))
-                    }} /></td>
-                    <td><input type="number" value={row.totalDuration ?? ''} onChange={(event) => {
-                      const raw = normalizeText(event.target.value)
-                      const setter = activeTab === 'accompaniment-template' ? setTemplateEntryDrafts : setRhythmEntryDrafts
-                      setter((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, totalDuration: raw ? Number(raw) : null } : entry))
-                    }} /></td>
-                    <td><input value={row.durationCombo} onChange={(event) => {
-                      const setter = activeTab === 'accompaniment-template' ? setTemplateEntryDrafts : setRhythmEntryDrafts
-                      setter((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, durationCombo: event.target.value } : entry))
-                    }} /></td>
-                    <td><select value={row.difficultyTags || '无'} onChange={(event) => {
-                      const setter = activeTab === 'accompaniment-template' ? setTemplateEntryDrafts : setRhythmEntryDrafts
-                      setter((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, difficultyTags: event.target.value === '无' ? '' : event.target.value } : entry))
-                    }}>{tagLibrary.difficultyTags.map((tag) => <option key={`${activeTab}-difficulty-${index}-${tag}`} value={tag}>{tag}</option>)}</select></td>
-                    <td><InlineTagSelector value={row.styleTags} options={tagLibrary.styleTags} placeholder="风格" onChange={(nextValue) => {
-                      const setter = activeTab === 'accompaniment-template' ? setTemplateEntryDrafts : setRhythmEntryDrafts
-                      setter((current) => current.map((entry, rowIndex) => rowIndex === index ? { ...entry, styleTags: nextValue } : entry))
-                    }} /></td>
-                    <td>{row.filePath}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {(activeTab === 'accompaniment-template' ? templateEntryDrafts : rhythmEntryDrafts).length === 0 && <div className="database-empty-state">当前没有待入库的模板解析结果。</div>}
-          </div>
-        )}
       </section>
     )
   }
 
   const renderDatabaseMode = () => {
-    if (activeTab === 'notes') {
-      return (
-        <section className="database-view-panel">
-          {renderNotesFilterBar()}
-          {renderDatabaseToolbar()}
-          {notePreviewEnabled ? renderNotePreviewGrid() : renderNotesTable()}
-          <PaginationBar page={clampPage(pageByTab.notes, notePagination.totalPages)} totalPages={notePagination.totalPages} totalRows={filteredNoteRows.length} selectedCount={selectionByTab.notes.length} onPageChange={(nextPage) => setPageByTab((current) => ({ ...current, notes: clampPage(nextPage, notePagination.totalPages) }))} />
-        </section>
-      )
+    const currentTabLabel = TAB_LABELS[activeTab]
+    const filterSection =
+      activeTab === 'notes'
+        ? renderNotesFilterBar()
+        : activeTab === 'accompaniment-template'
+          ? renderTemplateFilterBar(activeTab, accompanimentTemplateFilters, setAccompanimentTemplateFilters)
+          : renderTemplateFilterBar(activeTab, rhythmTemplateFilters, setRhythmTemplateFilters)
+    const contentSection =
+      activeTab === 'notes'
+        ? notePreviewEnabled ? renderNotePreviewGrid() : renderNotesTable()
+        : activeTab === 'accompaniment-template'
+          ? renderTemplateTable(activeTab, accompanimentTemplatePagination.pageRows, accompanimentTemplateHeaderFilters)
+          : renderTemplateTable(activeTab, rhythmTemplatePagination.pageRows, rhythmTemplateHeaderFilters)
+    const totalRows =
+      activeTab === 'notes'
+        ? filteredNoteRows.length
+        : activeTab === 'accompaniment-template'
+          ? filteredAccompanimentTemplateRows.length
+          : filteredRhythmTemplateRows.length
+    const selectedCount = selectionByTab[activeTab].length
+    const page =
+      activeTab === 'notes'
+        ? clampPage(pageByTab.notes, notePagination.totalPages)
+        : activeTab === 'accompaniment-template'
+          ? clampPage(pageByTab['accompaniment-template'], accompanimentTemplatePagination.totalPages)
+          : clampPage(pageByTab['rhythm-template'], rhythmTemplatePagination.totalPages)
+    const totalPages =
+      activeTab === 'notes'
+        ? notePagination.totalPages
+        : activeTab === 'accompaniment-template'
+          ? accompanimentTemplatePagination.totalPages
+          : rhythmTemplatePagination.totalPages
+    const handlePageChange = (nextPage: number) => {
+      if (activeTab === 'notes') {
+        setPageByTab((current) => ({ ...current, notes: clampPage(nextPage, notePagination.totalPages) }))
+        return
+      }
+      if (activeTab === 'accompaniment-template') {
+        setPageByTab((current) => ({ ...current, 'accompaniment-template': clampPage(nextPage, accompanimentTemplatePagination.totalPages) }))
+        return
+      }
+      setPageByTab((current) => ({ ...current, 'rhythm-template': clampPage(nextPage, rhythmTemplatePagination.totalPages) }))
     }
-    if (activeTab === 'accompaniment-template') {
-      return (
-        <section className="database-view-panel">
-          {renderTemplateFilterBar(activeTab, accompanimentTemplateFilters, setAccompanimentTemplateFilters)}
-          {renderDatabaseToolbar()}
-          {renderTemplateTable(activeTab, accompanimentTemplatePagination.pageRows, accompanimentTemplateHeaderFilters)}
-          <PaginationBar page={clampPage(pageByTab['accompaniment-template'], accompanimentTemplatePagination.totalPages)} totalPages={accompanimentTemplatePagination.totalPages} totalRows={filteredAccompanimentTemplateRows.length} selectedCount={selectionByTab['accompaniment-template'].length} onPageChange={(nextPage) => setPageByTab((current) => ({ ...current, 'accompaniment-template': clampPage(nextPage, accompanimentTemplatePagination.totalPages) }))} />
-        </section>
-      )
-    }
+    const contentTitle =
+      activeTab === 'notes'
+        ? notePreviewEnabled ? '伴奏音符曲谱预览' : '伴奏音符数据库表格'
+        : activeTab === 'accompaniment-template'
+          ? '伴奏模板数据库表格'
+          : '律动模板数据库表格'
+
     return (
       <section className="database-view-panel">
-        {renderTemplateFilterBar(activeTab, rhythmTemplateFilters, setRhythmTemplateFilters)}
-        {renderDatabaseToolbar()}
-        {renderTemplateTable(activeTab, rhythmTemplatePagination.pageRows, rhythmTemplateHeaderFilters)}
-        <PaginationBar page={clampPage(pageByTab['rhythm-template'], rhythmTemplatePagination.totalPages)} totalPages={rhythmTemplatePagination.totalPages} totalRows={filteredRhythmTemplateRows.length} selectedCount={selectionByTab['rhythm-template'].length} onPageChange={(nextPage) => setPageByTab((current) => ({ ...current, 'rhythm-template': clampPage(nextPage, rhythmTemplatePagination.totalPages) }))} />
+        <div className="database-mode-layout">
+          <DatabaseSectionCard
+            eyebrow={currentTabLabel}
+            title="筛选条件"
+            description="筛选区固定放在内容最上方，集中控制当前数据库结果。"
+            className="database-section-card--filters"
+          >
+            {filterSection}
+          </DatabaseSectionCard>
+
+          <DatabaseSectionCard
+            eyebrow={currentTabLabel}
+            title="常用操作"
+            description="保留当前刷新、清空筛选、表头筛选、标签管理和删除逻辑。"
+            className="database-section-card--tools"
+          >
+            {renderDatabaseToolbar()}
+          </DatabaseSectionCard>
+
+          <DatabaseSectionCard
+            eyebrow={currentTabLabel}
+            title={contentTitle}
+            description={activeTab === 'notes' && notePreviewEnabled ? '当前页结果以曲谱预览方式展示，但仍共用同一套筛选、选择与分页状态。' : '主内容区统一承载表格或预览内容，不再与筛选和工具平铺在同一层。'}
+            className="database-section-card--content"
+          >
+            {contentSection}
+          </DatabaseSectionCard>
+
+          <DatabaseSectionCard
+            eyebrow="结果统计"
+            title="分页与状态"
+            description={`当前筛选结果 ${totalRows} 条，已选 ${selectedCount} 条。`}
+            className="database-section-card--footer"
+            contentClassName="database-section-card-content--footer"
+          >
+            <PaginationBar page={page} totalPages={totalPages} totalRows={totalRows} selectedCount={selectedCount} onPageChange={handlePageChange} />
+          </DatabaseSectionCard>
+        </div>
       </section>
     )
   }
@@ -1904,17 +2041,33 @@ export function DatabaseWorkspacePage(props: DatabaseWorkspacePageProps) {
       {workspaceMessage && <div className={`database-message database-message--${workspaceMessage.kind}`}><span>{workspaceMessage.text}</span><button type="button" onClick={() => setWorkspaceMessage(null)}>关闭</button></div>}
       {sessionInfo.saveError && <div className="database-message database-message--error"><span>{sessionInfo.saveError}</span><button type="button" onClick={() => setSessionInfo((current) => ({ ...current, saveError: null }))}>关闭</button></div>}
 
-      <div className="database-top-tabs" role="tablist" aria-label="数据库工作区模块">
-        {(Object.keys(TAB_LABELS) as WorkspaceTab[]).map((tab) => (
-          <button key={tab} type="button" className={activeTab === tab ? 'is-active' : ''} onClick={() => setActiveTab(tab)}>
-            {TAB_LABELS[tab]}
-          </button>
-        ))}
-      </div>
+      <div className="database-navigation-grid">
+        <DatabaseSectionCard
+          eyebrow="页面结构"
+          title="数据库模块"
+          description="三个主 tab 共享同一套页面骨架与布局节奏。"
+          className="database-section-card--navigation"
+        >
+          <div className="database-top-tabs" role="tablist" aria-label="数据库工作区模块">
+            {(Object.keys(TAB_LABELS) as WorkspaceTab[]).map((tab) => (
+              <button key={tab} type="button" className={activeTab === tab ? 'is-active' : ''} onClick={() => setActiveTab(tab)}>
+                {TAB_LABELS[tab]}
+              </button>
+            ))}
+          </div>
+        </DatabaseSectionCard>
 
-      <div className="database-mode-toggle">
-        <button type="button" className={tabModes[activeTab] === 'entry' ? 'is-active' : ''} onClick={() => setTabModes((current) => ({ ...current, [activeTab]: 'entry' }))}>录入数据</button>
-        <button type="button" className={tabModes[activeTab] === 'database' ? 'is-active' : ''} onClick={() => setTabModes((current) => ({ ...current, [activeTab]: 'database' }))}>查看数据库</button>
+        <DatabaseSectionCard
+          eyebrow={TAB_LABELS[activeTab]}
+          title="当前模式"
+          description="录入数据与查看数据库继续共用当前状态，不切断筛选和暂存上下文。"
+          className="database-section-card--navigation"
+        >
+          <div className="database-mode-toggle">
+            <button type="button" className={tabModes[activeTab] === 'entry' ? 'is-active' : ''} onClick={() => setTabModes((current) => ({ ...current, [activeTab]: 'entry' }))}>录入数据</button>
+            <button type="button" className={tabModes[activeTab] === 'database' ? 'is-active' : ''} onClick={() => setTabModes((current) => ({ ...current, [activeTab]: 'database' }))}>查看数据库</button>
+          </div>
+        </DatabaseSectionCard>
       </div>
 
       {isLoadingDatabase ? <div className="database-loading-state">正在加载数据库...</div> : tabModes[activeTab] === 'entry' ? renderEntryMode() : renderDatabaseMode()}
